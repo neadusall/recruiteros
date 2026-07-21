@@ -308,7 +308,10 @@ export function buildAssistantInstructions(desk: VettingDesk): string {
 export function buildGreeting(desk: VettingDesk): string {
   const name = "{{first_name}}";
   const who = `${desk.persona.agentName} with ${desk.persona.agentCompany}`;
-  return `Hey ${name}, this is ${who}. Glad you called in. How've you been?`;
+  // {{call_opening}} makes the same greeting work both directions: "Glad you
+  // called in." on inbound, "Thanks for making time, calling like we set up."
+  // when the engine dials OUT for a scheduled screen (see buildCallContext).
+  return `Hey ${name}, this is ${who}. {{call_opening}} How've you been?`;
 }
 
 /**
@@ -319,7 +322,7 @@ export function buildGreeting(desk: VettingDesk): string {
 export function buildCallContext(
   desk: VettingDesk,
   candidate?: CandidateProfile,
-  extras?: { resumeEmail?: string; resumeGaps?: string },
+  extras?: { resumeEmail?: string; resumeGaps?: string; callOpening?: string },
 ): Record<string, string> {
   const e = candidate?.enrichment;
   const experience =
@@ -345,5 +348,8 @@ export function buildCallContext(
     // resume doesn't clearly show. The agent's discovery plan + the tailoring
     // ammunition for the updated-resume ask. Kept short (latency guard).
     resume_gaps: (extras?.resumeGaps || "").slice(0, 1500),
+    // Direction-aware first line: inbound default, outbound when the engine
+    // dials a scheduled screen (the scheduling loop overrides this).
+    call_opening: extras?.callOpening || "Glad you called in.",
   };
 }

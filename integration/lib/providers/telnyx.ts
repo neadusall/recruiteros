@@ -426,6 +426,46 @@ export class TelnyxClient extends ProviderClient {
       body: { phone_number: phoneNumber },
     });
   }
+
+  /**
+   * Schedule the assistant to place a phone call (or send an opening SMS) to
+   * someone at a fixed moment — Telnyx fires the event on time, so the app
+   * needs no cron precision of its own. `scheduledAt` is ISO 8601 UTC.
+   * Verified against the assistants scheduled_events surface (telnyx-node SDK,
+   * 2026-07-21): agent target = the desk's own number, end-user target = the
+   * candidate. Returns the created event (incl. scheduled_event_id).
+   */
+  createAssistantScheduledEvent(assistantId: string, opts: {
+    agentNumber: string;
+    endUserNumber: string;
+    scheduledAt: string;
+    channel?: "phone_call" | "sms_chat";
+    /** Substituted into the assistant's {{...}} slots for this conversation. */
+    dynamicVariables?: Record<string, string>;
+    /** Opening text — required by Telnyx for sms_chat events only. */
+    text?: string;
+  }) {
+    return this.request({
+      method: "POST",
+      path: `/ai/assistants/${encodeURIComponent(assistantId)}/scheduled_events`,
+      body: {
+        telnyx_agent_target: opts.agentNumber,
+        telnyx_end_user_target: opts.endUserNumber,
+        telnyx_conversation_channel: opts.channel ?? "phone_call",
+        scheduled_at_fixed_datetime: opts.scheduledAt,
+        dynamic_variables: opts.dynamicVariables,
+        text: opts.text,
+      },
+    });
+  }
+
+  /** Cancel a scheduled assistant event (reschedules delete + recreate). */
+  deleteAssistantScheduledEvent(assistantId: string, eventId: string) {
+    return this.request({
+      method: "DELETE",
+      path: `/ai/assistants/${encodeURIComponent(assistantId)}/scheduled_events/${encodeURIComponent(eventId)}`,
+    });
+  }
 }
 
 /** Shape of the Telnyx AI Assistant config we push (the fields we use). */

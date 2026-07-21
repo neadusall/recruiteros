@@ -14,7 +14,7 @@ export * from "./autofill";
 export * from "./inbox";
 export * from "./scoring";
 export * from "./resumeCoach";
-export * from "./tidycal";
+export * from "./scheduling";
 export * from "./assistant";
 export * from "./optimizer";
 export * from "./simulator";

@@ -919,6 +919,7 @@
     email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd", cap: "outreach:send" },
     pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting", cap: "voice:dial" },
+    joblibrary: { title: "Job Library", crumb: "Build", action: null, render: renderJobLibrary, motionOnly: "recruiting", cap: "prospects:view" },
     calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting", cap: "voice:dial" },
     bdphone: { title: "BD Phone", crumb: "Tools", action: null, render: renderBdPhone, motionOnly: "bd", cap: "voice:dial" },
     // LinkedIn OS: ONE unified LinkedIn tool (shared engine, accounts, ledger,
@@ -7832,7 +7833,9 @@
         '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + li + expToggle + commChip +
           (r.seqName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(r.seqName) + "</span>" : "") +
           '<span class="cn-sub">' + (r.title && !pending ? esc(r.title) + " · " : "") +
-            '<span class="cn-src' + (r.kind === "data" ? " ats" : "") + '" title="' + (r.kind === "data" ? "From the ATS people database" : "Pipeline") + ': ' + esc(r.source) + '">' + esc(r.source) + "</span></span></span></td>" +
+            '<span class="cn-src' + (r.kind === "data" ? " ats" : "") + '" title="' + (r.kind === "data" ? "From the ATS people database" : "Pipeline") + ': ' + esc(r.source) + '">' + esc(r.source) + "</span>" +
+            (r.pairedJobs && r.pairedJobs.length ? ' <span class="cn-src" style="background:#eef7f0;border-color:#cfe8d7;color:#1c7c3c" title="Paired job (Job Library). This match follows them across Candidates, AI Vetting, JD Sourcing, and OS Text.">' + esc(r.pairedJobs[0].title) + (r.pairedJobs.length > 1 ? " +" + (r.pairedJobs.length - 1) : "") + "</span>" : "") +
+            "</span></span></td>" +
         '<td class="cn-co">' + cell(r.company) + (r.location ? '<span class="cn-sub">' + esc(r.location) + "</span>" : "") + "</td>" +
         '<td class="pr-c-email">' + (r.email ? '<a class="cn-email" href="mailto:' + esc(r.email) + '" title="' + esc(r.email) + '">' + esc(r.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
         "<td>" + (r.phone ? '<a href="tel:' + esc(r.phone) + '" style="color:inherit;text-decoration:none">' + esc(r.phone) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
@@ -8317,6 +8320,27 @@
       try { sessionStorage.removeItem("ros_open_list"); } catch (e) {}
     }
 
+    /* Paired jobs (Job Library): one batched lookup by email/phone, then the
+       job chip paints on re-render. Pipeline people first; the ATS warehouse
+       rows join within the cap. Best-effort; the tab never waits on it. */
+    function loadPairedJobs() {
+      var withContact = rowsAll.filter(function (r) { return r.email || r.phone; });
+      withContact.sort(function (a, b) { return (a.kind === "data" ? 1 : 0) - (b.kind === "data" ? 1 : 0); });
+      var contacts = withContact.slice(0, 1000).map(function (r) { return { key: r.id, email: r.email || "", phone: r.phone || "" }; });
+      if (!contacts.length) return;
+      var chunks = [];
+      for (var i = 0; i < contacts.length; i += 500) chunks.push(contacts.slice(i, i + 500));
+      var found = 0;
+      (function next(ci) {
+        if (ci >= chunks.length) { if (found) renderAll(); return; }
+        send("/jobs", "POST", { action: "lookup", contacts: chunks[ci] }).then(function (r) {
+          var map = (r.ok && r.data && r.data.jobs) || {};
+          Object.keys(map).forEach(function (k) { if (byId[k]) { byId[k].pairedJobs = map[k]; found++; } });
+          next(ci + 1);
+        }).catch(function () { next(ci + 1); });
+      })(0);
+    }
+
     /* ---- data load: both stores in parallel ---- */
     function load() {
       var pDone = api("/prospects").catch(function () { return null; });
@@ -8340,6 +8364,7 @@
         byId = {};
         rowsAll.forEach(function (r) { byId[r.id] = r; if (r.altDataId) byId[r.altDataId] = r; });
         renderAll();
+        loadPairedJobs();
       });
       refreshSavedDropdown();
       openPendingList();
@@ -14410,14 +14435,194 @@
      LinkedIn experience, asks the top 3-4 qualifiers, and tells them the next
      step. Every call is recorded, transcribed, summarized, and scored 1-100 on
      the recruiter rubric. Talks to /api/vetting. */
+  /* ================================================================
+     JOB LIBRARY  (#joblibrary)
+     The single home for EVERY job description, and the "which job is this
+     person for?" ledger. Upload or paste JDs once; AI Vetting desks, JD
+     Sourcing pushes, and OS Text sends all register their JDs here
+     automatically and pair every candidate contact (email/phone) to the
+     right job, so nobody floats through the pipeline with no job attached.
+     Talks to /api/jobs. */
+  function renderJobLibrary(el) {
+    el.innerHTML = head("Job Library",
+      "Every job description in one place. Upload or paste a JD once and reuse it everywhere; desks you build in AI Vetting and searches you push from JD Sourcing register their JDs here automatically, and every candidate touched (opt-in, resume, sourcing push, OS Text) is paired to their job by email and phone, so no one falls through the cracks.") +
+      '<div class="vt-view"><div id="jlBody">' + loading() + "</div></div>";
+    var body = $("#jlBody", el);
+    var pasting = false;
+
+    function fmtWhen(s) {
+      if (!s) return "";
+      try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+      catch (e) { return esc(s); }
+    }
+    var JL_SRC = { upload: "Uploaded", paste: "Pasted", vetting: "From AI Vetting", sourcing: "From JD Sourcing" };
+    var JL_PAIR_SRC = { vetting: "Vetting opt-in", resume_inbox: "Resume inbox", jdsourcing: "JD Sourcing", ostext: "OS Text push", manual: "Added by you" };
+
+    function paint() {
+      body.innerHTML = loading();
+      api("/jobs").then(function (d) {
+        var jds = (d && d.jds) || [];
+        var headCard = '<div class="vt-card"><div class="vt-toolbar" style="margin:0">' +
+          '<span class="vt-count">' + jds.length + " job description" + (jds.length === 1 ? "" : "s") +
+          " · " + jds.reduce(function (n, j) { return n + (j.candidates || 0); }, 0) + " paired candidates</span>" +
+          '<span style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button class="vt-btn" id="jlPasteBtn">' + (pasting ? "Hide paste box" : "Paste a JD") + "</button>" +
+          '<button class="vt-btn vt-btn-primary" id="jlUploadBtn">Upload JDs</button>' +
+          '<input type="file" id="jlFile" accept=".pdf,.docx,.doc,.txt,.md" multiple style="display:none" aria-label="Upload job description files" /></span></div>' +
+          '<div class="vt-hint" style="margin-top:8px">Upload as many JD files as you like (PDF, Word, or text) in one go; duplicates are folded automatically. Copy any JD from here into a new AI Vetting desk or a JD Sourcing search and everything that touches it pairs back to this record.</div>' +
+          (pasting
+            ? '<div style="margin-top:12px"><div class="vt-form-grid">' +
+              '<div class="vt-field"><label>Title</label><input id="jlNewTitle" placeholder="e.g. Senior Healthcare Recruiter" /></div>' +
+              '<div class="vt-field"><label>Company (optional)</label><input id="jlNewCo" placeholder="Client name, or leave blank" /></div></div>' +
+              '<div class="vt-field vt-field-full" style="margin-top:10px"><label>Job description</label>' +
+              '<textarea id="jlNewText" rows="7" placeholder="Paste the full job description here."></textarea></div>' +
+              '<div style="margin-top:10px"><button class="vt-btn vt-btn-primary" id="jlCreate">Save to library</button></div></div>'
+            : "") +
+          '<div class="vt-hint" id="jlMsg" style="margin-top:8px"></div></div>';
+        var list = jds.length ? jds.map(jdCard).join("") :
+          '<div class="vt-empty">No job descriptions yet. Upload your JDs (or paste one) and this becomes the master list every candidate gets paired against.</div>';
+        body.innerHTML = headCard + list;
+        wire(jds);
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+
+    function jdCard(j) {
+      var pill = j.status === "open" ? '<span class="vt-pill live">Open</span>' : '<span class="vt-pill paused">Closed</span>';
+      return '<div class="vt-desk" data-jd="' + esc(j.id) + '">' +
+        '<div class="vt-desk-head"><h3 class="vt-desk-title">' + esc(j.title) + (j.company ? ' <span>· ' + esc(j.company) + "</span>" : "") + "</h3>" + pill + "</div>" +
+        '<div class="vt-meta">' +
+        '<span class="vt-chip"><b>' + (j.candidates || 0) + "</b> paired candidate" + (j.candidates === 1 ? "" : "s") + "</span>" +
+        '<span class="vt-chip">' + esc(JL_SRC[j.source] || j.source) + (j.fileName ? " · " + esc(j.fileName) : "") + "</span>" +
+        '<span class="vt-chip">updated ' + esc(fmtWhen(j.updatedAt)) + "</span></div>" +
+        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="vt-btn" data-jlopen="' + esc(j.id) + '">Candidates & JD</button>' +
+        '<button class="vt-btn" data-jlstatus="' + esc(j.id) + '" data-next="' + (j.status === "open" ? "close" : "reopen") + '">' + (j.status === "open" ? "Close role" : "Reopen role") + "</button>" +
+        '<button class="vt-btn vt-btn-ghost" data-jldel="' + esc(j.id) + '">Delete</button></div>' +
+        '<div class="vt-detail" data-jldetail="' + esc(j.id) + '" style="display:none;margin-top:12px"></div></div>';
+    }
+
+    function detailHtml(jd, pairings) {
+      var rows = pairings.length ? pairings.map(function (p) {
+        return '<div class="vt-verdict"><svg class="isvg" aria-hidden="true"><use href="#i-user"/></svg> ' +
+          '<span class="vt-q-ans">' + esc(p.name || "(no name)") + "</span> " +
+          '<span class="vt-q-rat">' + esc(p.email || "") + (p.email && p.phone ? " · " : "") + esc(p.phone || "") +
+          " · " + esc(JL_PAIR_SRC[p.source] || p.source) + (p.note ? " · " + esc(p.note) : "") + " · " + esc(fmtWhen(p.updatedAt)) + "</span>" +
+          '<button class="vt-btn vt-btn-ghost" data-jlunpair="' + esc(p.id) + '" style="margin-left:auto;padding:2px 8px;font-size:11px">Unpair</button></div>';
+      }).join("") : '<div class="vt-hint">No candidates paired to this job yet. They pair automatically the moment someone opts in to its vetting desk, emails a resume, or gets pushed from a JD Sourcing list; you can also add one by hand below.</div>';
+      return '<div class="vt-tr-h">Paired candidates</div><div style="margin-top:6px">' + rows + "</div>" +
+        '<div class="vt-form-grid" style="margin-top:10px">' +
+        '<div class="vt-field"><label>Name</label><input id="jlPairName" placeholder="Jane Doe" /></div>' +
+        '<div class="vt-field"><label>Email</label><input id="jlPairEmail" placeholder="jane@example.com" /></div>' +
+        '<div class="vt-field"><label>Phone</label><input id="jlPairPhone" placeholder="+1 555 000 1111" /></div></div>' +
+        '<div style="margin-top:8px"><button class="vt-btn" data-jlpair="' + esc(jd.id) + '">Pair candidate to this job</button></div>' +
+        '<div class="vt-tr-h" style="margin-top:14px">Job description <button class="vt-btn vt-btn-ghost" data-jlcopy="' + esc(jd.id) + '" style="margin-left:8px;padding:2px 8px;font-size:11px">Copy JD text</button></div>' +
+        '<div class="vt-tr-body" style="white-space:pre-wrap;max-height:320px;overflow:auto">' + esc(jd.text || "") + "</div>";
+    }
+
+    function openDetail(id) {
+      var det = body.querySelector('[data-jldetail="' + id + '"]');
+      if (!det) return;
+      if (det.style.display !== "none") { det.style.display = "none"; det.innerHTML = ""; return; }
+      det.style.display = "block"; det.innerHTML = loading();
+      api("/jobs?id=" + encodeURIComponent(id)).then(function (d) {
+        if (!d || !d.jd) { det.innerHTML = '<p class="muted">Not found.</p>'; return; }
+        det.innerHTML = detailHtml(d.jd, d.pairings || []);
+        var copyBtn = det.querySelector("[data-jlcopy]");
+        if (copyBtn) copyBtn.addEventListener("click", function () {
+          try { navigator.clipboard.writeText(d.jd.text || "").then(function () { toast("JD copied"); }); } catch (e) { toast("Copy failed"); }
+        });
+        var pairBtn = det.querySelector("[data-jlpair]");
+        if (pairBtn) pairBtn.addEventListener("click", function () {
+          var nm = (det.querySelector("#jlPairName") || {}).value || "";
+          var em = (det.querySelector("#jlPairEmail") || {}).value || "";
+          var ph = (det.querySelector("#jlPairPhone") || {}).value || "";
+          if (!em.trim() && !ph.trim()) { toast("Need an email or a phone"); return; }
+          send("/jobs", "POST", { action: "pair", jdId: id, name: nm, email: em, phone: ph }).then(function (r) {
+            if (!r.ok) { toast("Pairing failed"); return; }
+            toast("Paired"); det.style.display = "none"; openDetail(id);
+          });
+        });
+        Array.prototype.forEach.call(det.querySelectorAll("[data-jlunpair]"), function (b) {
+          b.addEventListener("click", function () {
+            send("/jobs", "POST", { action: "unpair", pairingId: b.getAttribute("data-jlunpair") }).then(function () {
+              det.style.display = "none"; openDetail(id);
+            });
+          });
+        });
+      }).catch(function () { det.innerHTML = '<p class="muted">Could not load.</p>'; });
+    }
+
+    function wire(jds) {
+      var pasteBtn = $("#jlPasteBtn");
+      if (pasteBtn) pasteBtn.addEventListener("click", function () { pasting = !pasting; paint(); });
+      var createBtn = $("#jlCreate");
+      if (createBtn) createBtn.addEventListener("click", function () {
+        var text = ($("#jlNewText") || {}).value || "";
+        if (text.trim().length < 40) { toast("Paste the full JD first"); return; }
+        createBtn.disabled = true; createBtn.textContent = "Saving…";
+        send("/jobs", "POST", { action: "create", title: ($("#jlNewTitle") || {}).value || "", company: ($("#jlNewCo") || {}).value || "", text: text }).then(function (r) {
+          if (!r.ok) { toast("Save failed"); createBtn.disabled = false; createBtn.textContent = "Save to library"; return; }
+          toast("Saved to the library"); pasting = false; paint();
+        }).catch(function () { createBtn.disabled = false; createBtn.textContent = "Save to library"; toast("Couldn’t reach the server."); });
+      });
+      var upBtn = $("#jlUploadBtn"), file = $("#jlFile");
+      if (upBtn && file) {
+        upBtn.addEventListener("click", function () { file.click(); });
+        file.addEventListener("change", function () {
+          var files = Array.prototype.slice.call(file.files || []);
+          if (!files.length) return;
+          var msg = $("#jlMsg");
+          var done = 0, saved = 0;
+          upBtn.disabled = true;
+          (function next(i) {
+            if (i >= files.length) {
+              upBtn.disabled = false;
+              toast(saved + " of " + files.length + " JD" + (files.length === 1 ? "" : "s") + " saved");
+              paint(); return;
+            }
+            var f = files[i];
+            if (msg) msg.textContent = "Reading " + f.name + " (" + (i + 1) + "/" + files.length + ")…";
+            var rd = new FileReader();
+            rd.onload = function () {
+              var b64 = String(rd.result || "").split(",")[1] || "";
+              send("/jobs", "POST", { action: "upload", filename: f.name, contentType: f.type, dataBase64: b64 }).then(function (r) {
+                done++; if (r.ok) saved++;
+                else if (msg) msg.textContent = f.name + ": " + ((r.data && r.data.detail) || r.error || "couldn’t read");
+                next(i + 1);
+              }).catch(function () { done++; next(i + 1); });
+            };
+            rd.onerror = function () { next(i + 1); };
+            rd.readAsDataURL(f);
+          })(0);
+        });
+      }
+      Array.prototype.forEach.call(body.querySelectorAll("[data-jlopen]"), function (b) {
+        b.addEventListener("click", function () { openDetail(b.getAttribute("data-jlopen")); });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-jlstatus]"), function (b) {
+        b.addEventListener("click", function () {
+          send("/jobs", "POST", { action: b.getAttribute("data-next"), id: b.getAttribute("data-jlstatus") }).then(function () { paint(); });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-jldel]"), function (b) {
+        b.addEventListener("click", function () {
+          if (!confirm("Delete this job description? Its candidate pairings are removed too.")) return;
+          send("/jobs?id=" + encodeURIComponent(b.getAttribute("data-jldel")), "DELETE").then(function () { toast("Deleted"); paint(); });
+        });
+      });
+    }
+
+    paint();
+  }
+
   function renderVetting(el) {
     var vt = { tab: "desks", deskId: null, editing: null, creating: false };
     el.innerHTML = head("AI Vetting",
-      "Bind a job description to a phone number and your cloned voice. Candidates opt in, then call in and talk to an AI recruiter that sounds like you, it greets them by name, references their LinkedIn experience, asks your top 3-4 qualifiers, and tells them the next step. Each call is recorded, transcribed, summarized, and scored 1-100.") +
+      "Bind a job description to a phone number and your cloned voice. Candidates opt in and email their resume; the AI texts them to ask what time works, then calls them at exactly that time (they can also call in any time) and talks to them like a recruiter who sounds like you: greets them by name, works their background, asks your top 3-4 qualifiers, and tells them the next step. Each call is recorded, transcribed, summarized, and scored 1-100.") +
       '<div class="vt-view"><div class="vt-tabs"></div><div id="vtBody">' + loading() + "</div></div>";
 
     function tabBar() {
-      var tabs = [["desks", "Vetting Desks"], ["calls", "Calls & Scores"], ["optimizer", "Optimizer"], ["bookings", "Bookings"]];
+      var tabs = [["desks", "Vetting Desks"], ["calls", "Calls & Scores"], ["optimizer", "Optimizer"], ["bookings", "Scheduled Calls"]];
       $(".vt-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vt-tab' + (vt.tab === t[0] ? " active" : "") + '" data-vttab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -14603,7 +14808,7 @@
         '<div class="vt-section">Mid-call abilities <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- real actions the agent can take, both optional</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">With a scheduling link set, the agent can text it to a strong candidate DURING the call and lock the next step on the spot. With a transfer number set, it can hand an exceptional candidate (or anyone who asks for a human) straight to you, live.</div>' +
         '<div class="vt-form-grid">' +
-        '<div class="vt-field"><label>Scheduling link (texted mid-call)</label><input id="vtfBooking" placeholder="https://tidycal.com/you/next-step" value="' + esc(d.bookingUrl || "") + '" /></div>' +
+        '<div class="vt-field"><label>Scheduling link (texted mid-call)</label><input id="vtfBooking" placeholder="https://your-booking-page.com/next-step" value="' + esc(d.bookingUrl || "") + '" /></div>' +
         '<div class="vt-field"><label>Live transfer number</label><input id="vtfTransfer" placeholder="+13105551234" value="' + esc(d.transferNumber || "") + '" /></div>' +
         "</div>" +
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
@@ -15289,63 +15494,93 @@
       return html || '<p style="color:var(--text-muted)">Call recorded; analysis pending.</p>';
     }
 
-    /* ============ Bookings tab (TidyCal) ============ */
-    function bkWhen(s) {
+    /* ============ Scheduled Calls tab (the native booking loop) ============
+       No booking page: the resume inbox opens the loop, the candidate texts
+       back a time in their own words ("today at 4pm"), their timezone comes
+       from what they said or their area code, and the agent calls them at
+       exactly that moment. This tab is the recruiter's window into that loop.
+       Talks to /api/vetting/schedule. */
+    function schWhen(s) {
       if (!s) return "";
       try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
       catch (e) { return esc(s); }
     }
-    function bookingCard(b) {
-      var pill = b.status === "ready" ? ["live", "Ready"]
-        : b.status === "no_phone" ? ["paused", "Needs phone #"]
-        : b.status === "no_linkedin" ? ["paused", "Needs LinkedIn"]
-        : ["paused", "No matching desk"];
-      var deskChip = b.deskName
-        ? '<span class="vt-chip">→ <b>' + esc(b.deskName) + "</b></span>"
-        : '<span class="vt-chip">no desk matches “' + esc(b.jobTitle || "-") + "”</span>";
-      var phoneChip = b.phone ? '<span class="vt-chip"><b>' + esc(b.phone) + "</b></span>" : '<span class="vt-chip">none on booking</span>';
-      var liChip = b.linkedinUrl ? '<span class="vt-chip">LinkedIn</span>' : '<span class="vt-chip">no LinkedIn</span>';
-      return '<div class="vt-desk">' +
-        '<div class="vt-desk-head"><h3 class="vt-desk-title">' + esc(b.name || "Unknown") + ' <span>· ' + esc(b.jobTitle || "no role title") + "</span></h3>" +
-        '<span class="vt-pill ' + pill[0] + '">' + pill[1] + "</span></div>" +
-        '<div class="vt-meta">' + deskChip + phoneChip + liChip +
-        (b.startsAt ? '<span class="vt-chip">' + esc(bkWhen(b.startsAt)) + "</span>" : "") + "</div></div>";
+    function schPill(status) {
+      if (status === "booked") return ["live", "Call booked"];
+      if (status === "awaiting_reply") return ["paused", "Waiting for a reply"];
+      if (status === "clarify") return ["paused", "Clarifying the time"];
+      if (status === "completed") return ["live", "Call done"];
+      if (status === "declined") return ["paused", "Candidate passed"];
+      if (status === "canceled") return ["paused", "Canceled"];
+      return ["paused", "Went quiet"];
     }
-    function bookingsView(r) {
-      r = r || {};
-      if (!r.configured) {
-        return '<div class="vt-card"><h3>Connect TidyCal</h3>' +
-          '<div class="vt-hint" style="margin-top:8px">Add your TidyCal token on the server (<code>TIDYCAL_API_TOKEN</code>) and bookings will appear here. Each is routed to the matching vetting desk, the candidate\'s LinkedIn is researched before they call, and their phone is matched when they dial in. Add three questions to your TidyCal booking type so we can route and prep: <b>Job title</b> (matched to a desk), <b>LinkedIn URL</b>, and <b>phone number</b>.</div></div>';
+    function schCard(row) {
+      var pill = schPill(row.status);
+      var chips = '<span class="vt-chip">→ <b>' + esc(row.deskName || row.roleTitle || "desk") + "</b></span>" +
+        (row.phone ? '<span class="vt-chip"><b>' + esc(row.phone) + "</b></span>" : "") +
+        (row.status === "booked" && row.scheduledForLabel
+          ? '<span class="vt-chip"><b>' + esc(row.scheduledForLabel) + "</b>" +
+            (row.tzSource === "area_code" ? " (timezone from their number)" : "") + "</span>"
+          : '<span class="vt-chip">asked ' + esc(schWhen(row.askedAt)) + " by " + (row.askChannel === "email" ? "email" : "text") + "</span>");
+      var reply = row.lastReply
+        ? '<div class="vt-hint" style="margin-top:6px">They said: “' + esc(row.lastReply) + "”</div>"
+        : "";
+      var note = row.note ? '<div class="vt-hint" style="margin-top:4px">' + esc(row.note) + "</div>" : "";
+      var actions = "";
+      if (row.status === "booked") {
+        actions = '<button class="vt-btn" data-sch-cancel="' + esc(row.candidateId) + '">Cancel the call</button>';
+      } else if (row.status === "declined" || row.status === "canceled" || row.status === "expired" || row.status === "completed") {
+        actions = '<button class="vt-btn" data-sch-ask="' + esc(row.candidateId) + '">Ask for a time again</button>';
       }
-      var head = '<div class="vt-card"><div class="vt-toolbar" style="margin:0">' +
-        '<span class="vt-count">' + (r.pulled || 0) + " upcoming booking" + ((r.pulled === 1) ? "" : "s") +
-        " · <span style=\"color:var(--vt-good)\">" + (r.ready || 0) + " ready</span>" +
-        (r.unmatched ? " · <span style=\"color:var(--vt-warn)\">" + r.unmatched + " no desk</span>" : "") +
-        (r.noPhone ? " · <span style=\"color:var(--vt-warn)\">" + r.noPhone + " need phone</span>" : "") +
-        (r.noLinkedin ? " · <span style=\"color:var(--vt-warn)\">" + r.noLinkedin + " need LinkedIn</span>" : "") + "</span>" +
-        '<button class="vt-btn vt-btn-primary" id="vtBkSync">↻ Sync now</button></div>' +
-        (r.error ? '<div class="vt-warn" style="margin-top:10px">TidyCal said: ' + esc(r.error) + ', an MCP-scoped token may be rejected by the REST API; generate a personal access token at tidycal.com/integrations/oauth.</div>' : "") +
-        '<div class="vt-hint" style="margin-top:8px">“Sync now” pulls upcoming bookings, files each candidate under the matching desk, and researches their LinkedIn so the agent is ready when they call. Wire it to a schedule to run automatically.</div></div>';
-      var list = (r.bookings || []).map(bookingCard).join("") ||
-        '<div class="vt-empty">No upcoming bookings. New TidyCal bookings show up here on the next sync.</div>';
-      return head + list;
+      return '<div class="vt-desk">' +
+        '<div class="vt-desk-head"><h3 class="vt-desk-title">' + esc(row.name || "Unknown") + ' <span>· ' + esc(row.roleTitle || "role") + "</span></h3>" +
+        '<span class="vt-pill ' + pill[0] + '">' + pill[1] + "</span></div>" +
+        '<div class="vt-meta">' + chips + (actions ? '<span style="margin-left:auto">' + actions + "</span>" : "") + "</div>" +
+        reply + note + "</div>";
     }
-    function wireBookings(body) {
-      var sync = $("#vtBkSync");
-      if (sync) sync.addEventListener("click", function () {
-        sync.disabled = true; sync.textContent = "↻ Syncing…";
-        send("/vetting/tidycal", "POST", { action: "sync" }).then(function (r) {
-          if (!r.ok) { sync.disabled = false; sync.textContent = "↻ Sync now"; toast("Sync failed"); return; }
-          var d = r.data || {};
-          toast("Synced, " + (d.ready || 0) + " ready, " + (d.pulled || 0) + " pulled");
-          body.innerHTML = bookingsView(d); wireBookings(body);
-        }).catch(function () { sync.disabled = false; sync.textContent = "↻ Sync now"; toast("Couldn’t reach the server."); });
+    function scheduleView(r) {
+      r = r || {}; var rows = r.rows || []; var counts = r.counts || {};
+      var head = '<div class="vt-card"><div class="vt-toolbar" style="margin:0">' +
+        '<span class="vt-count"><span style="color:var(--vt-good)">' + (counts.booked || 0) + " booked</span> · " +
+        (counts.waiting || 0) + " waiting on a time · " + (counts.completed || 0) + " done</span></div>" +
+        '<div class="vt-hint" style="margin-top:8px">The moment a resume is filed from the inbox, the candidate gets one text from the desk’s own number: “what day and time works for a quick call?” They answer in their own words, like “today at 4pm EST” or “tomorrow morning”, the timezone comes from what they say (or their area code), and the agent calls them at exactly that time. Reschedules and cancellations are just another text.</div>' +
+        '<div class="vt-hint" style="margin-top:4px">Candidate texts flow in automatically once your desk number’s inbound message webhook points at <code>/api/vetting/sms</code>.</div></div>';
+      var upcoming = rows.filter(function (x) { return x.status === "booked"; });
+      var waiting = rows.filter(function (x) { return x.status === "awaiting_reply" || x.status === "clarify"; });
+      var done = rows.filter(function (x) { return ["completed", "declined", "canceled", "expired"].indexOf(x.status) >= 0; }).slice(0, 20);
+      var html = head;
+      if (upcoming.length) html += '<h3 class="vt-sub" style="margin:14px 0 8px">On the calendar</h3>' + upcoming.map(schCard).join("");
+      if (waiting.length) html += '<h3 class="vt-sub" style="margin:14px 0 8px">Waiting on a time</h3>' + waiting.map(schCard).join("");
+      if (done.length) html += '<h3 class="vt-sub" style="margin:14px 0 8px">Recent</h3>' + done.map(schCard).join("");
+      if (!rows.length) {
+        html += '<div class="vt-empty">Nobody is in the scheduling loop yet. When a candidate’s resume lands in the inbox, the availability ask goes out on its own and they show up here.</div>';
+      }
+      return html;
+    }
+    function wireSchedule(body) {
+      body.querySelectorAll("[data-sch-cancel]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          send("/vetting/schedule", "POST", { action: "cancel", candidateId: btn.getAttribute("data-sch-cancel") }).then(function (r) {
+            if (!r.ok) { btn.disabled = false; toast("Couldn’t cancel"); return; }
+            toast("Call canceled"); paintBookings(body);
+          }).catch(function () { btn.disabled = false; toast("Couldn’t reach the server."); });
+        });
+      });
+      body.querySelectorAll("[data-sch-ask]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          send("/vetting/schedule", "POST", { action: "ask", candidateId: btn.getAttribute("data-sch-ask") }).then(function (r) {
+            if (!r.ok) { btn.disabled = false; toast("Couldn’t send the ask"); return; }
+            toast("Asked them for a time"); paintBookings(body);
+          }).catch(function () { btn.disabled = false; toast("Couldn’t reach the server."); });
+        });
       });
     }
     function paintBookings(body) {
       body.innerHTML = loading();
-      api("/vetting/tidycal").then(function (r) {
-        body.innerHTML = bookingsView(r); wireBookings(body);
+      api("/vetting/schedule").then(function (r) {
+        body.innerHTML = scheduleView(r.data || r); wireSchedule(body);
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
 

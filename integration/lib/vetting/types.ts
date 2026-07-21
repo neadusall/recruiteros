@@ -437,6 +437,7 @@ export type ScreenScheduleStatus =
   | "booked"         // a call is on the books (engine fires it at the time)
   | "completed"      // the scheduled call happened (or the window passed)
   | "declined"       // the candidate said no / not interested
+  | "canceled"       // the recruiter called it off by hand
   | "expired";       // no reply after the ladder; gone quiet
 
 export type ScheduleStepKind =

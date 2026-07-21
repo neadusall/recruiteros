@@ -25,17 +25,22 @@
  */
 
 import { ImapFlow } from "imapflow";
-import { simpleParser, type Attachment } from "mailparser";
+import { simpleParser, type Attachment, type ParsedMail } from "mailparser";
 import { cred } from "../providers/http";
-import { telnyx } from "../providers";
 import { withWorkspaceCreds } from "../connected";
-import type { CandidateProfile, InboxLogEntry, VettingDesk } from "./types";
+import type { CandidateProfile, InboxLogEntry } from "./types";
 import {
-  listCandidates, getDeskById, setCandidateResume, markScreenInviteSent,
+  listCandidates, getDeskById, setCandidateResume,
   addResumeReview, inboxState, recordInboxSweep, listVettingWorkspaceIds,
   ensureVettingReady,
 } from "./store";
 import { reviewResume } from "./resumeCoach";
+
+/** The candidate's OWN words from a reply, with quoted chains stripped. */
+function replyBody(parsed: ParsedMail): string {
+  const t = (parsed.text || "").trim();
+  return t.split(/\r?\n\s*(?:On .{0,120}wrote:|-{2,}\s*Original Message|From: )/)[0].trim().slice(0, 1200);
+}
 
 /* ---------------- config ---------------- */
 
@@ -125,44 +130,63 @@ export async function extractResumeText(a: Attachment): Promise<string> {
   return "";
 }
 
-/* ---------------- candidate matching ---------------- */
+/* ---------------- candidate matching (the identity verification) ---------------- */
 
-/** Match a sender address to the workspace's opted-in candidates (most recent wins). */
-function matchCandidate(workspaceId: string, fromEmail: string): CandidateProfile | undefined {
-  const from = fromEmail.trim().toLowerCase();
-  if (!from) return undefined;
-  return listCandidates(workspaceId).find((c) => (c.email || "").trim().toLowerCase() === from);
+/** Lowercase, collapse to letters+spaces, for tolerant name/title matching. */
+function norm(s?: string): string {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-/* ---------------- the screening invite (the gate opening) ---------------- */
+/** Every phone-shaped token in a text, normalized to its last 10 digits. */
+function phoneTokens(s: string): Set<string> {
+  const out = new Set<string>();
+  const re = /\+?1?[\s.(-]{0,2}(\d{3})[\s.)-]{0,2}(\d{3})[\s.-]{0,2}(\d{4})(?!\d)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) out.add(`${m[1]}${m[2]}${m[3]}`);
+  return out;
+}
 
 /**
- * The resume is in: tell the candidate the screening call is the next step.
- * SMS from the desk's own inbound number (Telnyx, same stack) so replying or
- * calling back lands on the agent. Best-effort: an invite failure never undoes
- * the filed resume. Sent ONCE per candidate — an updated resume refreshes the
- * profile without re-texting them.
+ * Verify WHO sent this resume against the workspace's opted-in candidates.
+ * People routinely email from an address we've never seen (personal vs work),
+ * so the match ladder runs strongest-signal first:
+ *   1. sender email  = the candidate's email on file (business or personal),
+ *   2. phone number  = a phone in the message/signature/resume matches theirs,
+ *   3. name + title  = their full name appears (sender name or top of the
+ *      resume) AND their desk's role title appears in the message, and the
+ *      match is UNIQUE across the workspace.
+ * Anything weaker stays unmatched and the mail is left in the inbox.
  */
-async function sendScreenInvite(desk: VettingDesk, candidate: CandidateProfile): Promise<boolean> {
-  if (candidate.screenInviteSentAt) return false;
-  if (!desk.phoneNumber || desk.status !== "live") return false;
-  if (!candidate.phone) return false;
-  const first = candidate.firstName || "";
-  const booking = (desk.bookingUrl || "").trim();
-  const text =
-    `${first ? `Hi ${first}, ` : "Hi, "}it's ${desk.persona.agentName} with ${desk.persona.agentCompany}. ` +
-    `Got your resume, thank you. Next step is a quick screening call about the ${desk.roleTitle || "role"}: ` +
-    `call me at ${desk.phoneNumber} whenever you have a few minutes.` +
-    (booking ? ` Prefer to lock a time instead? Grab one here: ${booking}` : "");
-  try {
-    const res: any = await telnyx.sendSms(candidate.phone, text, desk.phoneNumber);
-    if (res?.error) throw new Error(String(res.error));
-    markScreenInviteSent(candidate.id);
-    return true;
-  } catch (e: any) {
-    console.error("[vetting] screen invite SMS failed:", e?.message || e);
-    return false;
+function matchCandidate(
+  workspaceId: string,
+  fromEmail: string,
+  extras?: { fromName?: string; subject?: string; bodyText?: string; resumeText?: string },
+): CandidateProfile | undefined {
+  const candidates = listCandidates(workspaceId);
+  const from = fromEmail.trim().toLowerCase();
+  if (from) {
+    const byEmail = candidates.find((c) => (c.email || "").trim().toLowerCase() === from);
+    if (byEmail) return byEmail;
   }
+  if (!extras) return undefined;
+
+  const hay = `${extras.subject || ""}\n${extras.bodyText || ""}\n${(extras.resumeText || "").slice(0, 4000)}`;
+  const phones = phoneTokens(hay);
+  if (phones.size) {
+    const byPhone = candidates.filter((c) => c.phoneDigits && phones.has(c.phoneDigits.slice(-10)));
+    if (byPhone.length === 1) return byPhone[0];
+  }
+
+  const nameHay = norm(`${extras.fromName || ""} ${(extras.resumeText || "").slice(0, 400)} ${(extras.bodyText || "").slice(0, 400)}`);
+  const titleHay = norm(`${extras.subject || ""} ${extras.bodyText || ""} ${(extras.resumeText || "").slice(0, 1500)}`);
+  const byName = candidates.filter((c) => {
+    const full = norm(`${c.firstName} ${c.lastName}`);
+    if (full.length < 5 || !nameHay.includes(full)) return false;
+    const desk = getDeskById(c.deskId);
+    const role = norm(desk?.roleTitle);
+    return Boolean(role && titleHay.includes(role));
+  });
+  return byName.length === 1 ? byName[0] : undefined;
 }
 
 /* ---------------- the sweep ---------------- */
@@ -231,26 +255,49 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
           if (!source) continue;
           const parsed = await simpleParser(source);
           const fromEmail = parsed.from?.value?.[0]?.address || "";
+          const fromName = parsed.from?.value?.[0]?.name || "";
           const attachments = (parsed.attachments || []).filter(isResumeAttachment);
 
           if (!attachments.length) {
-            entry = { at: new Date().toISOString(), from: fromEmail, file: "", outcome: "no_attachment", note: "No resume attachment; left in the inbox." };
-          } else {
+            // No resume attached: this may be a SCHEDULING reply ("tomorrow at
+            // 2pm works") from a candidate we asked for availability. Known
+            // sender with a live loop -> parse it, act, and remove the mail;
+            // everything else stays in the inbox as before.
             const candidate = matchCandidate(workspaceId, fromEmail);
+            const screenActive = candidate?.screen && ["awaiting_reply", "clarify", "booked"].includes(candidate.screen.status);
+            if (candidate && screenActive) {
+              const { handleScheduleReply } = await import("./scheduling");
+              const res = await handleScheduleReply(candidate.id, replyBody(parsed), "email");
+              entry = {
+                at: new Date().toISOString(), from: fromEmail, file: "",
+                outcome: "schedule_reply", candidateId: candidate.id, deskId: candidate.deskId,
+                note: `Availability reply from ${candidate.firstName} ${candidate.lastName}: ${res.outcome.replace(/_/g, " ")}.`,
+              };
+              if (trashPath) await client.messageMove(String(uid), trashPath, { uid: true });
+              else await client.messageDelete(String(uid), { uid: true });
+              removed = true;
+            } else {
+              entry = { at: new Date().toISOString(), from: fromEmail, file: "", outcome: "no_attachment", note: "No resume attachment; left in the inbox." };
+            }
+          } else {
+            // Read the resume FIRST: its text doubles as identity evidence
+            // (phone in the header, name at the top) for the match ladder.
+            let text = "";
+            let file = "";
+            for (const a of attachments) {
+              text = await extractResumeText(a);
+              file = a.filename || "";
+              if (text.length >= 80) break;
+            }
+            const candidate = matchCandidate(workspaceId, fromEmail, {
+              fromName, subject: parsed.subject || "", bodyText: replyBody(parsed), resumeText: text,
+            });
             if (!candidate) {
               entry = {
                 at: new Date().toISOString(), from: fromEmail, file: attachments[0].filename || "",
-                outcome: "unmatched", note: "Sender doesn't match an opted-in candidate; left in the inbox.",
+                outcome: "unmatched", note: "Sender doesn't match an opted-in candidate by email, phone, or name and role; left in the inbox.",
               };
             } else {
-              // First readable attachment wins.
-              let text = "";
-              let file = "";
-              for (const a of attachments) {
-                text = await extractResumeText(a);
-                file = a.filename || "";
-                if (text.length >= 80) break;
-              }
               if (text.length < 80) {
                 entry = {
                   at: new Date().toISOString(), from: fromEmail, file,
@@ -284,17 +331,18 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
                   } catch { /* no LLM key: resume still filed */ }
                 }
 
-                // The gate opens: invite them to the screening call (once per
+                // The gate opens: ask WHEN we should call them (once per
                 // candidate — a resume UPDATE refreshes the file quietly).
-                const alreadyInvited = Boolean(candidate.screenInviteSentAt);
-                const invited = desk ? await sendScreenInvite(desk, candidate) : false;
+                const alreadyAsked = Boolean(candidate.screenInviteSentAt || candidate.screen);
+                const { sendAvailabilityAsk } = await import("./scheduling");
+                const asked = desk ? await sendAvailabilityAsk(desk, candidate) : false;
 
                 entry = {
                   at: new Date().toISOString(), from: fromEmail, file,
                   outcome: "saved", candidateId: candidate.id, deskId: candidate.deskId,
                   note: `Filed to ${candidate.firstName} ${candidate.lastName}`.trim() +
                     (desk ? ` on ${desk.name}` : "") +
-                    (invited ? "; screening invite texted." : alreadyInvited ? "; resume updated (already invited)." : "; ready to screen."),
+                    (asked ? "; asked them when to call." : alreadyAsked ? "; resume updated (already in the scheduling loop)." : "; ready to screen."),
                 };
 
                 // Saved -> the portal owns it now; remove it from the mailbox
@@ -374,6 +422,12 @@ export async function sweepAllResumeInboxes(): Promise<void> {
     const { runChaseTick } = await import("./chase");
     await runChaseTick();
   } catch { /* chase never blocks the inbox */ }
+  // The scheduling loop's clock (reminders + settling booked calls) rides the
+  // same cadence; the CALL itself fires from the engine's scheduled event.
+  try {
+    const { runScheduleTick } = await import("./scheduling");
+    await runScheduleTick();
+  } catch { /* scheduling never blocks the inbox */ }
 }
 
 /**

@@ -17,7 +17,7 @@
 import { NextResponse } from "next/server";
 import {
   findDeskByNumber, findCandidate, createCall, buildCallContext, inboxConfig,
-  latestResumeReview,
+  latestResumeReview, setCandidateScreen,
 } from "../../../../lib/vetting";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 
@@ -63,12 +63,21 @@ export async function POST(req: Request) {
   // Telnyx wraps as { data: { payload: {...} } }; also accept a flat body.
   const ev = payload?.data?.payload ?? payload?.payload ?? payload ?? {};
 
-  const dialed = firstPhone(ev, ["to", "telnyx_end_user_target", "called_number", "destination", "did"]);
-  const caller = firstPhone(ev, ["from", "telnyx_agent_target", "caller_number", "origin", "ani"]);
+  const numA = firstPhone(ev, ["to", "telnyx_agent_target", "called_number", "destination", "did"]);
+  const numB = firstPhone(ev, ["from", "telnyx_end_user_target", "caller_number", "origin", "ani"]);
   const engineCallId =
     ev?.call_control_id || ev?.conversation_id || ev?.call_id || ev?.telnyx_call_control_id || undefined;
 
-  const desk = dialed ? findDeskByNumber(dialed) : undefined;
+  // Direction-agnostic: on an INBOUND screen the desk is the dialed number; on
+  // a scheduled OUTBOUND screen the desk is the calling number and the
+  // candidate is the one dialed. Whichever number matches a desk IS the desk;
+  // the other one is the candidate.
+  let desk = numA ? findDeskByNumber(numA) : undefined;
+  let caller = numB;
+  if (!desk && numB) {
+    desk = findDeskByNumber(numB);
+    if (desk) caller = numA;
+  }
   if (!desk) {
     // No desk for this number — hand back neutral defaults so the call survives.
     // Same variable SET as the real branch so the engine's substitution never
@@ -77,12 +86,24 @@ export async function POST(req: Request) {
       dynamic_variables: {
         agent_name: "the recruiter", agent_company: "our firm",
         first_name: "there", current_title: "", current_company: "", experience: "",
-        resume: "", resume_email: "", resume_gaps: "",
+        resume: "", resume_email: "", resume_gaps: "", call_opening: "Glad you called in.",
       },
     });
   }
 
   const candidate = caller ? findCandidate(desk.id, caller) : undefined;
+
+  // A scheduled screen connecting NOW: settle the scheduling loop and open
+  // with the outbound line instead of "glad you called in".
+  const screen = candidate?.screen;
+  const isScheduled = Boolean(
+    screen?.status === "booked" && screen.scheduledFor &&
+    Math.abs(Date.now() - Date.parse(screen.scheduledFor)) < 3 * 60 * 60 * 1000,
+  );
+  if (candidate && screen && isScheduled) {
+    screen.status = "completed";
+    setCandidateScreen(candidate.id, screen);
+  }
 
   // Open the call record now so the post-call webhook can attach the transcript.
   createCall({
@@ -102,7 +123,10 @@ export async function POST(req: Request) {
   } catch { /* blank is handled by the prompt */ }
 
   const resumeGaps = candidate ? resumeGapLines(candidate.id) : "";
-  const vars = buildCallContext(desk, candidate, { resumeEmail, resumeGaps });
+  const vars = buildCallContext(desk, candidate, {
+    resumeEmail, resumeGaps,
+    callOpening: isScheduled ? "Thanks for making time, calling like we set up." : undefined,
+  });
   // Return both the canonical Telnyx key and a flat copy for forward-compat.
   return NextResponse.json({ dynamic_variables: vars, ...vars });
 }

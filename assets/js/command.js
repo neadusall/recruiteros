@@ -14618,11 +14618,11 @@
   function renderVetting(el) {
     var vt = { tab: "desks", deskId: null, editing: null, creating: false };
     el.innerHTML = head("AI Vetting",
-      "Bind a job description to a phone number and your cloned voice. Candidates opt in, then call in and talk to an AI recruiter that sounds like you, it greets them by name, references their LinkedIn experience, asks your top 3-4 qualifiers, and tells them the next step. Each call is recorded, transcribed, summarized, and scored 1-100.") +
+      "Bind a job description to a phone number and your cloned voice. Candidates opt in and email their resume; the AI texts them to ask what time works, then calls them at exactly that time (they can also call in any time) and talks to them like a recruiter who sounds like you: greets them by name, works their background, asks your top 3-4 qualifiers, and tells them the next step. Each call is recorded, transcribed, summarized, and scored 1-100.") +
       '<div class="vt-view"><div class="vt-tabs"></div><div id="vtBody">' + loading() + "</div></div>";
 
     function tabBar() {
-      var tabs = [["desks", "Vetting Desks"], ["calls", "Calls & Scores"], ["optimizer", "Optimizer"], ["bookings", "Bookings"]];
+      var tabs = [["desks", "Vetting Desks"], ["calls", "Calls & Scores"], ["optimizer", "Optimizer"], ["bookings", "Scheduled Calls"]];
       $(".vt-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vt-tab' + (vt.tab === t[0] ? " active" : "") + '" data-vttab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -14808,7 +14808,7 @@
         '<div class="vt-section">Mid-call abilities <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- real actions the agent can take, both optional</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">With a scheduling link set, the agent can text it to a strong candidate DURING the call and lock the next step on the spot. With a transfer number set, it can hand an exceptional candidate (or anyone who asks for a human) straight to you, live.</div>' +
         '<div class="vt-form-grid">' +
-        '<div class="vt-field"><label>Scheduling link (texted mid-call)</label><input id="vtfBooking" placeholder="https://tidycal.com/you/next-step" value="' + esc(d.bookingUrl || "") + '" /></div>' +
+        '<div class="vt-field"><label>Scheduling link (texted mid-call)</label><input id="vtfBooking" placeholder="https://your-booking-page.com/next-step" value="' + esc(d.bookingUrl || "") + '" /></div>' +
         '<div class="vt-field"><label>Live transfer number</label><input id="vtfTransfer" placeholder="+13105551234" value="' + esc(d.transferNumber || "") + '" /></div>' +
         "</div>" +
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
@@ -15494,63 +15494,93 @@
       return html || '<p style="color:var(--text-muted)">Call recorded; analysis pending.</p>';
     }
 
-    /* ============ Bookings tab (TidyCal) ============ */
-    function bkWhen(s) {
+    /* ============ Scheduled Calls tab (the native booking loop) ============
+       No booking page: the resume inbox opens the loop, the candidate texts
+       back a time in their own words ("today at 4pm"), their timezone comes
+       from what they said or their area code, and the agent calls them at
+       exactly that moment. This tab is the recruiter's window into that loop.
+       Talks to /api/vetting/schedule. */
+    function schWhen(s) {
       if (!s) return "";
       try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
       catch (e) { return esc(s); }
     }
-    function bookingCard(b) {
-      var pill = b.status === "ready" ? ["live", "Ready"]
-        : b.status === "no_phone" ? ["paused", "Needs phone #"]
-        : b.status === "no_linkedin" ? ["paused", "Needs LinkedIn"]
-        : ["paused", "No matching desk"];
-      var deskChip = b.deskName
-        ? '<span class="vt-chip">→ <b>' + esc(b.deskName) + "</b></span>"
-        : '<span class="vt-chip">no desk matches “' + esc(b.jobTitle || "-") + "”</span>";
-      var phoneChip = b.phone ? '<span class="vt-chip"><b>' + esc(b.phone) + "</b></span>" : '<span class="vt-chip">none on booking</span>';
-      var liChip = b.linkedinUrl ? '<span class="vt-chip">LinkedIn</span>' : '<span class="vt-chip">no LinkedIn</span>';
-      return '<div class="vt-desk">' +
-        '<div class="vt-desk-head"><h3 class="vt-desk-title">' + esc(b.name || "Unknown") + ' <span>· ' + esc(b.jobTitle || "no role title") + "</span></h3>" +
-        '<span class="vt-pill ' + pill[0] + '">' + pill[1] + "</span></div>" +
-        '<div class="vt-meta">' + deskChip + phoneChip + liChip +
-        (b.startsAt ? '<span class="vt-chip">' + esc(bkWhen(b.startsAt)) + "</span>" : "") + "</div></div>";
+    function schPill(status) {
+      if (status === "booked") return ["live", "Call booked"];
+      if (status === "awaiting_reply") return ["paused", "Waiting for a reply"];
+      if (status === "clarify") return ["paused", "Clarifying the time"];
+      if (status === "completed") return ["live", "Call done"];
+      if (status === "declined") return ["paused", "Candidate passed"];
+      if (status === "canceled") return ["paused", "Canceled"];
+      return ["paused", "Went quiet"];
     }
-    function bookingsView(r) {
-      r = r || {};
-      if (!r.configured) {
-        return '<div class="vt-card"><h3>Connect TidyCal</h3>' +
-          '<div class="vt-hint" style="margin-top:8px">Add your TidyCal token on the server (<code>TIDYCAL_API_TOKEN</code>) and bookings will appear here. Each is routed to the matching vetting desk, the candidate\'s LinkedIn is researched before they call, and their phone is matched when they dial in. Add three questions to your TidyCal booking type so we can route and prep: <b>Job title</b> (matched to a desk), <b>LinkedIn URL</b>, and <b>phone number</b>.</div></div>';
+    function schCard(row) {
+      var pill = schPill(row.status);
+      var chips = '<span class="vt-chip">→ <b>' + esc(row.deskName || row.roleTitle || "desk") + "</b></span>" +
+        (row.phone ? '<span class="vt-chip"><b>' + esc(row.phone) + "</b></span>" : "") +
+        (row.status === "booked" && row.scheduledForLabel
+          ? '<span class="vt-chip"><b>' + esc(row.scheduledForLabel) + "</b>" +
+            (row.tzSource === "area_code" ? " (timezone from their number)" : "") + "</span>"
+          : '<span class="vt-chip">asked ' + esc(schWhen(row.askedAt)) + " by " + (row.askChannel === "email" ? "email" : "text") + "</span>");
+      var reply = row.lastReply
+        ? '<div class="vt-hint" style="margin-top:6px">They said: “' + esc(row.lastReply) + "”</div>"
+        : "";
+      var note = row.note ? '<div class="vt-hint" style="margin-top:4px">' + esc(row.note) + "</div>" : "";
+      var actions = "";
+      if (row.status === "booked") {
+        actions = '<button class="vt-btn" data-sch-cancel="' + esc(row.candidateId) + '">Cancel the call</button>';
+      } else if (row.status === "declined" || row.status === "canceled" || row.status === "expired" || row.status === "completed") {
+        actions = '<button class="vt-btn" data-sch-ask="' + esc(row.candidateId) + '">Ask for a time again</button>';
       }
-      var head = '<div class="vt-card"><div class="vt-toolbar" style="margin:0">' +
-        '<span class="vt-count">' + (r.pulled || 0) + " upcoming booking" + ((r.pulled === 1) ? "" : "s") +
-        " · <span style=\"color:var(--vt-good)\">" + (r.ready || 0) + " ready</span>" +
-        (r.unmatched ? " · <span style=\"color:var(--vt-warn)\">" + r.unmatched + " no desk</span>" : "") +
-        (r.noPhone ? " · <span style=\"color:var(--vt-warn)\">" + r.noPhone + " need phone</span>" : "") +
-        (r.noLinkedin ? " · <span style=\"color:var(--vt-warn)\">" + r.noLinkedin + " need LinkedIn</span>" : "") + "</span>" +
-        '<button class="vt-btn vt-btn-primary" id="vtBkSync">↻ Sync now</button></div>' +
-        (r.error ? '<div class="vt-warn" style="margin-top:10px">TidyCal said: ' + esc(r.error) + ', an MCP-scoped token may be rejected by the REST API; generate a personal access token at tidycal.com/integrations/oauth.</div>' : "") +
-        '<div class="vt-hint" style="margin-top:8px">“Sync now” pulls upcoming bookings, files each candidate under the matching desk, and researches their LinkedIn so the agent is ready when they call. Wire it to a schedule to run automatically.</div></div>';
-      var list = (r.bookings || []).map(bookingCard).join("") ||
-        '<div class="vt-empty">No upcoming bookings. New TidyCal bookings show up here on the next sync.</div>';
-      return head + list;
+      return '<div class="vt-desk">' +
+        '<div class="vt-desk-head"><h3 class="vt-desk-title">' + esc(row.name || "Unknown") + ' <span>· ' + esc(row.roleTitle || "role") + "</span></h3>" +
+        '<span class="vt-pill ' + pill[0] + '">' + pill[1] + "</span></div>" +
+        '<div class="vt-meta">' + chips + (actions ? '<span style="margin-left:auto">' + actions + "</span>" : "") + "</div>" +
+        reply + note + "</div>";
     }
-    function wireBookings(body) {
-      var sync = $("#vtBkSync");
-      if (sync) sync.addEventListener("click", function () {
-        sync.disabled = true; sync.textContent = "↻ Syncing…";
-        send("/vetting/tidycal", "POST", { action: "sync" }).then(function (r) {
-          if (!r.ok) { sync.disabled = false; sync.textContent = "↻ Sync now"; toast("Sync failed"); return; }
-          var d = r.data || {};
-          toast("Synced, " + (d.ready || 0) + " ready, " + (d.pulled || 0) + " pulled");
-          body.innerHTML = bookingsView(d); wireBookings(body);
-        }).catch(function () { sync.disabled = false; sync.textContent = "↻ Sync now"; toast("Couldn’t reach the server."); });
+    function scheduleView(r) {
+      r = r || {}; var rows = r.rows || []; var counts = r.counts || {};
+      var head = '<div class="vt-card"><div class="vt-toolbar" style="margin:0">' +
+        '<span class="vt-count"><span style="color:var(--vt-good)">' + (counts.booked || 0) + " booked</span> · " +
+        (counts.waiting || 0) + " waiting on a time · " + (counts.completed || 0) + " done</span></div>" +
+        '<div class="vt-hint" style="margin-top:8px">The moment a resume is filed from the inbox, the candidate gets one text from the desk’s own number: “what day and time works for a quick call?” They answer in their own words, like “today at 4pm EST” or “tomorrow morning”, the timezone comes from what they say (or their area code), and the agent calls them at exactly that time. Reschedules and cancellations are just another text.</div>' +
+        '<div class="vt-hint" style="margin-top:4px">Candidate texts flow in automatically once your desk number’s inbound message webhook points at <code>/api/vetting/sms</code>.</div></div>';
+      var upcoming = rows.filter(function (x) { return x.status === "booked"; });
+      var waiting = rows.filter(function (x) { return x.status === "awaiting_reply" || x.status === "clarify"; });
+      var done = rows.filter(function (x) { return ["completed", "declined", "canceled", "expired"].indexOf(x.status) >= 0; }).slice(0, 20);
+      var html = head;
+      if (upcoming.length) html += '<h3 class="vt-sub" style="margin:14px 0 8px">On the calendar</h3>' + upcoming.map(schCard).join("");
+      if (waiting.length) html += '<h3 class="vt-sub" style="margin:14px 0 8px">Waiting on a time</h3>' + waiting.map(schCard).join("");
+      if (done.length) html += '<h3 class="vt-sub" style="margin:14px 0 8px">Recent</h3>' + done.map(schCard).join("");
+      if (!rows.length) {
+        html += '<div class="vt-empty">Nobody is in the scheduling loop yet. When a candidate’s resume lands in the inbox, the availability ask goes out on its own and they show up here.</div>';
+      }
+      return html;
+    }
+    function wireSchedule(body) {
+      body.querySelectorAll("[data-sch-cancel]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          send("/vetting/schedule", "POST", { action: "cancel", candidateId: btn.getAttribute("data-sch-cancel") }).then(function (r) {
+            if (!r.ok) { btn.disabled = false; toast("Couldn’t cancel"); return; }
+            toast("Call canceled"); paintBookings(body);
+          }).catch(function () { btn.disabled = false; toast("Couldn’t reach the server."); });
+        });
+      });
+      body.querySelectorAll("[data-sch-ask]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          send("/vetting/schedule", "POST", { action: "ask", candidateId: btn.getAttribute("data-sch-ask") }).then(function (r) {
+            if (!r.ok) { btn.disabled = false; toast("Couldn’t send the ask"); return; }
+            toast("Asked them for a time"); paintBookings(body);
+          }).catch(function () { btn.disabled = false; toast("Couldn’t reach the server."); });
+        });
       });
     }
     function paintBookings(body) {
       body.innerHTML = loading();
-      api("/vetting/tidycal").then(function (r) {
-        body.innerHTML = bookingsView(r); wireBookings(body);
+      api("/vetting/schedule").then(function (r) {
+        body.innerHTML = scheduleView(r.data || r); wireSchedule(body);
       }).catch(function () { body.innerHTML = needsSetup(); });
     }
 
