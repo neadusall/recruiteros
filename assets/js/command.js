@@ -924,6 +924,10 @@
     // Outbound Performance: the admin utilization + accountability command
     // center (capacity engine, scores, heatmap, triggers, goals, reports).
     outbound: { title: "Outbound Performance", crumb: "Admin", action: null, render: renderOutbound, cap: "team:manage" },
+    // OS Text Performance: the enrichment-to-SMS KPI tracker. Pairs the JD
+    // Sourcing scraping/enriching supply with the OS Text engine's Telnyx
+    // send-and-response outcomes over one shared window.
+    ostextkpi: { title: "OS Text Performance", crumb: "Admin", action: null, render: renderOstextKpi, cap: "team:manage" },
     // My Outbound: the personal performance view + the 10-15 minute Daily
     // Checklist worksheet. Self-scoped; available in both portals.
     myoutbound: { title: "My Outbound", crumb: "Operate", action: null, render: renderMyOutbound },
@@ -1147,6 +1151,451 @@
      /api/outbound (self-scoped for members, team-wide for admins). */
 
   var obState = { range: 30, sort: "score", dir: -1, filter: "" };
+
+  /* ============================================================
+     OS Text Performance (admin): the enrichment-to-text KPI tracker.
+     Pairs JD Sourcing's scraping + enriching supply with the OS Text
+     engine's Telnyx send-and-response outcomes over ONE shared window,
+     so cell rate, delivery, replies, opt-outs and spend all read
+     against the same period. Data: GET /api/ostext/kpi?days=N.
+     ============================================================ */
+  var otkWindow = 30;
+
+  function otkNum(x) { return Number(x || 0).toLocaleString(); }
+  function otkUsd(x) { return "$" + Number(x || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function otkRate(n, d) { return d > 0 ? (100 * n) / d : -1; }
+  function otkRateTxt(n, d, dp) {
+    var p = otkRate(n, d);
+    if (p < 0) return "n/a";
+    var f = Math.pow(10, dp || 0);
+    return (Math.round(p * f) / f) + "%";
+  }
+  function otkShort(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+
+  // Last N local days as YYYY-MM-DD keys, oldest first (zero-fills quiet days
+  // so a day with no sends reads as a real gap, not a skipped x-step).
+  function otkDayKeys(n) {
+    var out = [];
+    for (var i = n - 1; i >= 0; i--) {
+      var d = new Date(Date.now() - i * 86400000);
+      out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"));
+    }
+    return out;
+  }
+  function otkDayLabel(key) {
+    return new Date(key + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  /* One trend chart: a 2px line (or day columns), an optional threshold
+     hairline, an end-dot with a surface ring, and a native tooltip per day.
+     Null points (no denominator that day) break the line honestly. */
+  function otkTrend(opts) {
+    var series = opts.series || [], titles = opts.titles || [];
+    var w = 300, h = 84, padT = 8, padB = 10, padX = 4;
+    var innerH = h - padT - padB;
+    var max = opts.max;
+    if (max == null) {
+      max = 1;
+      series.forEach(function (v) { if (v != null && v > max) max = v; });
+      max = max * 1.15;
+    }
+    var n = series.length, step = n > 1 ? (w - padX * 2) / (n - 1) : 0;
+    function sx(i) { return padX + i * step; }
+    function sy(v) { return padT + innerH - (Math.max(0, Math.min(v, max)) / max) * innerH; }
+    var svg = '<svg width="100%" viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" style="display:block;height:84px">';
+    if (opts.threshold != null && opts.threshold <= max) {
+      var ty = sy(opts.threshold).toFixed(1);
+      svg += '<line x1="0" y1="' + ty + '" x2="' + w + '" y2="' + ty + '" stroke="var(--border-strong,var(--border))" stroke-width="1"/>';
+    }
+    if (opts.kind === "cols") {
+      var bw = Math.max(2, Math.min(14, (n > 0 ? (w - padX * 2) / n : w) * 0.55));
+      series.forEach(function (v, i) {
+        if (v == null || v <= 0) return;
+        var y = sy(v);
+        svg += '<rect x="' + (sx(i) - bw / 2).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + (padT + innerH - y).toFixed(1) + '" rx="2" fill="var(--brand)"/>';
+      });
+    } else {
+      var d = "", started = false, last = null;
+      series.forEach(function (v, i) {
+        if (v == null) { started = false; return; }
+        d += (started ? " L" : " M") + sx(i).toFixed(1) + " " + sy(v).toFixed(1);
+        started = true; last = { x: sx(i), y: sy(v) };
+      });
+      if (d) svg += '<path d="' + d + '" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+      if (last) svg += '<circle cx="' + last.x.toFixed(1) + '" cy="' + last.y.toFixed(1) + '" r="4" fill="var(--brand)" stroke="var(--surface)" stroke-width="2"/>';
+    }
+    // Per-day hover targets; every value is also in the cards and tables, so
+    // the tooltip enhances rather than gates.
+    if (titles.length) {
+      var hitW = n > 0 ? (w - padX * 2) / n : w;
+      titles.forEach(function (t, i) {
+        if (!t) return;
+        svg += '<rect x="' + (padX + i * hitW).toFixed(1) + '" y="0" width="' + hitW.toFixed(1) + '" height="' + h + '" fill="transparent"><title>' + esc(t) + "</title></rect>";
+      });
+    }
+    return svg + "</svg>";
+  }
+  function otkTrendTile(label, valueTxt, sub, chart) {
+    return '<div class="otk-tile"><div class="otk-tile-top"><span class="sl">' + esc(label) + "</span><b>" + valueTxt + "</b></div>" + chart +
+      (sub ? '<div class="otk-tile-sub">' + esc(sub) + "</div>" : "") + "</div>";
+  }
+
+  /* Funnel rows: bar length carries the magnitude, the right column carries the
+     stage-to-stage conversion, and the single worst conversion is called out as
+     the biggest leak (the cheapest place to improve). */
+  function otkFunnelHtml(stages) {
+    var max = 0;
+    stages.forEach(function (s) { if (s.v > max) max = s.v; });
+    if (!max) return '<div class="muted" style="font-size:12.5px">Nothing in this window yet. Numbers appear as lists are enriched and texts go out.</div>';
+    var worstIdx = -1, worstPct = 1e9;
+    stages.forEach(function (s, i) {
+      if (!i) return;
+      var prev = stages[i - 1].v;
+      var p = prev > 0 ? (100 * s.v) / prev : -1;
+      if (p >= 0 && p < worstPct) { worstPct = p; worstIdx = i; }
+    });
+    return stages.map(function (s, i) {
+      var conv = "";
+      if (i > 0) {
+        var prev = stages[i - 1].v;
+        var p = prev > 0 ? Math.round((100 * s.v) / prev) : -1;
+        if (p >= 0) {
+          conv = Math.min(p, 999) + "% of previous";
+          if (i === worstIdx && p < 100) conv = '<span style="color:var(--danger);font-weight:600">' + conv + " · biggest leak</span>";
+        }
+      }
+      return '<div class="otk-frow"><div class="otk-flabel" title="' + esc(s.sub || "") + '">' + esc(s.label) + "</div>" +
+        '<div class="otk-fbar"><span style="width:' + Math.max(1.5, (100 * s.v) / max).toFixed(1) + '%"></span></div>' +
+        '<div class="otk-fval">' + otkNum(s.v) + "</div>" +
+        '<div class="otk-fconv">' + conv + "</div></div>";
+    }).join("");
+  }
+
+  function otkLine(label, valueHtml, labelTitle) {
+    return '<div class="otk-line"><span' + (labelTitle ? ' title="' + esc(labelTitle) + '"' : "") + ">" + esc(label) + '</span><span class="otk-line-r">' + valueHtml + "</span></div>";
+  }
+  function otkMiniBar(p, fg) {
+    return '<span style="display:inline-block;width:90px;vertical-align:middle">' + obBar(p, fg) + "</span>";
+  }
+
+  var OTK_CLASS_LABELS = {
+    positive: "Interested", curious: "Curious", referral: "Referral",
+    asked_email: "Asked for email", asked_compensation: "Asked about pay",
+    asked_remote: "Asked about remote", asked_client: "Asked about the client",
+    already_employed: "Already employed", later: "Follow up later",
+    negative: "Negative", not_interested: "Not interested",
+    wrong_person: "Wrong number", stop: "Opted out (STOP)", other: "Other"
+  };
+
+  function renderOstextKpi(view) {
+    view.innerHTML = head("OS Text Performance",
+      "The enrichment-to-text scoreboard: what JD Sourcing scraped and enriched, what Telnyx confirmed as textable, and what those texts produced. Every rate below reads against the same window.") +
+      '<div class="ob-toolbar"><div class="ob-tabs" style="margin:0" id="otkRange">' +
+      [7, 14, 30, 90].map(function (dd) {
+        return '<a href="javascript:void(0)" class="chip' + (dd === otkWindow ? " ob-tab-on" : "") + '" data-otk-days="' + dd + '">' + dd + " days</a>";
+      }).join("") + "</div>" +
+      '<span class="muted" id="otkStamp" style="font-size:12px;margin-left:auto"></span></div>' +
+      '<div id="otkBody">' + loading() + "</div>";
+
+    function load() {
+      api("/ostext/kpi?days=" + otkWindow).catch(function () { return null; }).then(function (d) {
+        var body = $("#otkBody"); if (!body) return;
+        if (!d) { body.innerHTML = '<div class="empty">Could not load OS Text KPIs (admin only, or a brief blip right after a deploy).</div>'; return; }
+        body.innerHTML = otkBodyHtml(d);
+        var st = $("#otkStamp");
+        if (st) st.textContent = "Live · updated " + new Date().toLocaleTimeString() + " · refreshes every 60s";
+      });
+    }
+    var range = $("#otkRange");
+    if (range) range.addEventListener("click", function (e) {
+      var chip = e.target && e.target.closest ? e.target.closest("[data-otk-days]") : null;
+      if (!chip) return;
+      otkWindow = Number(chip.getAttribute("data-otk-days")) || 30;
+      Array.prototype.forEach.call(range.querySelectorAll(".chip"), function (c) { c.classList.toggle("ob-tab-on", c === chip); });
+      var body = $("#otkBody"); if (body) body.innerHTML = loading();
+      load();
+    });
+    load();
+    viewTimers.push(setInterval(load, 60000));
+  }
+
+  function otkBodyHtml(d) {
+    var sup = d.supply || null;
+    var eng = d.engine || null;
+    var fun = eng && eng.funnel ? eng.funnel : null;
+    var msg = eng && eng.messages ? eng.messages : null;
+    var html = otkHealthHtml(d, sup, eng && eng.engine);
+    if (fun && msg) html += otkTilesHtml(d, fun, msg, sup);
+
+    var stages = [];
+    if (sup) {
+      stages.push({ label: "Leads on lists", v: sup.candidates, sub: "Rows on the recruiting lists JD Sourcing touched in this window" });
+      stages.push({ label: "With a phone", v: sup.withPhone, sub: "Rows the enrichment chain filled with any phone number" });
+    }
+    if (fun) {
+      stages.push({ label: "Cell-verified", v: fun.cellConfirmed, sub: "Telnyx line-type checks that confirmed a textable mobile" });
+      stages.push({ label: "Texted", v: fun.texted, sub: "Contacts sent at least one text" });
+      stages.push({ label: "Delivered", v: fun.delivered, sub: "Contacts with a carrier-confirmed delivery" });
+      stages.push({ label: "Replied", v: fun.replied, sub: "Contacts who texted back" });
+      stages.push({ label: "Positive", v: fun.positive, sub: "Replies triaged as interested, curious, a referral, or asking for details" });
+    }
+    if (stages.length) {
+      html += '<div class="panel-card ob-card"><div class="ob-card-head" style="flex-wrap:wrap"><b>The funnel · supply to conversations</b>' +
+        '<span class="muted" style="font-size:12px;flex:1 1 100%">Supply stages count lists touched in the window; engine stages count texting activity inside it. Hover a stage name for its exact definition.</span></div>' +
+        otkFunnelHtml(stages) +
+        '<div class="ob-note">The marked leak is the cheapest place to win: more confirmed cells means leaning on the sources that supply real mobiles, more deliveries means healthier numbers and content, more positive replies means better scripts and timing.</div></div>';
+    }
+
+    if (eng) html += otkTrendsHtml(eng);
+    html += otkSourceTableHtml(d, sup);
+    if (sup) html += otkSupplyHtml(sup);
+    if (eng) html += otkOutcomeCardsHtml(eng);
+    if (eng || (sup && sup.boost)) html += otkSpendHtml(d);
+
+    if (d.engineError === "ostext_engine_outdated") {
+      html += '<div class="ob-note">The OS Text engine behind this workspace has not picked up the KPI endpoint yet (deploy in progress). Supply-side numbers are live; texting outcomes fill in as soon as the engine updates.</div>';
+    } else if (d.engineError === "ostext_not_connected") {
+      html += '<div class="ob-note">OS Text is not connected for this workspace, so only the JD Sourcing supply side is shown. Connect the engine under Setup to complete the funnel.</div>';
+    }
+    return html;
+  }
+
+  function otkPill(tone, txt) {
+    var m = tone === "ok" ? ["var(--ok)", "var(--ok-bg)"]
+      : tone === "warn" ? ["var(--warn)", "var(--warn-bg)"]
+      : tone === "bad" ? ["var(--danger)", "var(--danger-bg)"]
+      : ["var(--text-dim)", "var(--surface-2)"];
+    return '<span class="ob-pill" style="color:' + m[0] + ";background:" + m[1] + '">' + esc(txt) + "</span>";
+  }
+
+  function otkHealthHtml(d, sup, g) {
+    var pills = [];
+    if (d.engine) pills.push(otkPill("ok", "Engine connected"));
+    else if (d.engineError === "ostext_not_connected") pills.push(otkPill("bad", "OS Text not connected"));
+    else if (d.engineError === "ostext_engine_outdated") pills.push(otkPill("warn", "Engine update pending"));
+    else if (d.engineError) pills.push(otkPill("bad", "Engine unreachable"));
+    if (g) {
+      pills.push(otkPill("none", "Last text " + obWhen(g.lastOutboundAt)));
+      pills.push(otkPill("none", "Last reply " + obWhen(g.lastInboundAt)));
+      pills.push(otkPill("none", "Last cell check " + obWhen(g.lastCheckAt)));
+      var cbs = g.contactsByStatus || {};
+      if ((cbs.validating || 0) > 0) pills.push(otkPill("warn", otkNum(cbs.validating) + " held in validation"));
+      pills.push(otkPill("none", otkNum(cbs.pending || 0) + " ready to text"));
+      pills.push(otkPill("none", otkNum(g.activeCampaigns || 0) + " active campaign" + (g.activeCampaigns === 1 ? "" : "s")));
+    }
+    if (sup) {
+      pills.push(otkPill("none", "Lists updated " + obWhen(sup.lastListUpdateAt)));
+      pills.push(otkPill("none", "Last push " + obWhen(sup.lastPushAt)));
+      if (sup.pushErrors > 0) pills.push(otkPill("bad", sup.pushErrors + " push error" + (sup.pushErrors === 1 ? "" : "s")));
+    }
+    return '<div class="panel-card ob-card"><div class="ob-card-head" style="margin-bottom:8px"><b>Pipeline health</b>' +
+      '<span class="muted" style="font-size:12px;margin-left:10px">Freshness first: a quiet dashboard should read as "pipeline idle", never as a mystery.</span></div>' +
+      '<div class="otk-pills">' + pills.join(" ") + "</div></div>";
+  }
+
+  function otkTilesHtml(d, fun, msg, sup) {
+    // Color only where a real benchmark exists, and only past a minimum sample
+    // (25) so three texts on a Sunday never paint the tab red.
+    function tone(p, okAt, warnAt, denom, invert) {
+      if (p < 0 || denom < 25) return "";
+      if (invert) return p <= okAt ? "var(--ok)" : p <= warnAt ? "var(--warn)" : "var(--danger)";
+      return p >= okAt ? "var(--ok)" : p >= warnAt ? "var(--warn)" : "var(--danger)";
+    }
+    var cellP = otkRate(fun.cellConfirmed, fun.checked);
+    var delP = otkRate(msg.deliveredMsgs, msg.sentMsgs);
+    var repP = otkRate(fun.replied, fun.delivered);
+    var posP = otkRate(fun.positive, fun.delivered);
+    var optP = otkRate(fun.optedOut, fun.delivered);
+    var costs = (d.engine && d.engine.costs) || {};
+    var boostUsd = sup && sup.boost ? (sup.boost.windowUsd || 0) : 0;
+    var windowUsd = (costs.smsUsd || 0) + (costs.llmUsd || 0) + (costs.lookupUsd || 0) + boostUsd;
+    var cpr = fun.replied > 0 ? windowUsd / fun.replied : -1;
+    var cpp = fun.positive > 0 ? windowUsd / fun.positive : -1;
+    return '<div class="stat-grid" style="margin:0 0 14px">' +
+      obStat(cellP < 0 ? "n/a" : Math.round(cellP) + "%", "Cell rate", otkNum(fun.checked) + " numbers checked by Telnyx") +
+      obStat(delP < 0 ? "n/a" : Math.round(delP) + "%", "Delivery rate", otkNum(msg.sentMsgs) + " texts sent · target 95%+", tone(delP, 95, 90, msg.sentMsgs)) +
+      obStat(repP < 0 ? "n/a" : Math.round(repP) + "%", "Reply rate", otkNum(fun.replied) + " replied · cold SMS norm 20-30%", tone(repP, 20, 10, fun.delivered)) +
+      obStat(posP < 0 ? "n/a" : Math.round(posP) + "%", "Positive reply rate", otkNum(fun.positive) + " interested or asking for details") +
+      obStat(optP < 0 ? "n/a" : (Math.round(optP * 10) / 10) + "%", "Opt-out rate", "carrier scrutiny starts near 2%", tone(optP, 1, 2, fun.delivered, true)) +
+      obStat(cpr < 0 ? "n/a" : otkUsd(cpr), "Cost per reply", cpp < 0 ? "window spend ÷ replies" : otkUsd(cpp) + " per positive reply") +
+      "</div>";
+  }
+
+  function otkTrendsHtml(eng) {
+    var keys = otkDayKeys(Math.min(eng.days || otkWindow, 90));
+    var byDay = {};
+    (eng.daily || []).forEach(function (r) { byDay[r.day] = r; });
+    var totSent = 0, totDel = 0, totIn = 0, totOpt = 0;
+    keys.forEach(function (k) {
+      var r = byDay[k]; if (!r) return;
+      totSent += r.sentMsgs || 0; totDel += r.deliveredMsgs || 0; totIn += r.inboundMsgs || 0; totOpt += r.optOuts || 0;
+    });
+    var del = keys.map(function (k) { var r = byDay[k]; return r && r.sentMsgs > 0 ? Math.round((100 * r.deliveredMsgs) / r.sentMsgs) : null; });
+    var sent = keys.map(function (k) { var r = byDay[k]; return r ? (r.sentMsgs || 0) : 0; });
+    var inb = keys.map(function (k) { var r = byDay[k]; return r ? (r.inboundMsgs || 0) : 0; });
+    var opt = keys.map(function (k) { var r = byDay[k]; return r && r.deliveredMsgs > 0 ? Math.round((1000 * (r.optOuts || 0)) / r.deliveredMsgs) / 10 : null; });
+    var optMax = 5;
+    opt.forEach(function (v) { if (v != null && v * 1.25 > optMax) optMax = v * 1.25; });
+
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head"><b>Trends · day by day</b>' +
+      '<span class="muted" style="font-size:12px;margin-left:10px">Hover any day. The thin gray line is the health threshold.</span></div><div class="otk-charts">';
+    html += otkTrendTile("Delivery rate", otkRateTxt(totDel, totSent), "of texts sent · threshold 95%",
+      otkTrend({ series: del, max: 100, threshold: 95, titles: keys.map(function (k) {
+        var r = byDay[k];
+        return r && r.sentMsgs > 0
+          ? otkDayLabel(k) + ": " + Math.round((100 * r.deliveredMsgs) / r.sentMsgs) + "% delivered (" + r.deliveredMsgs + " of " + r.sentMsgs + ")"
+          : otkDayLabel(k) + ": no sends";
+      }) }));
+    html += otkTrendTile("Texts sent", otkNum(totSent), "outbound texts in this window",
+      otkTrend({ kind: "cols", series: sent, titles: keys.map(function (k) { var r = byDay[k]; return otkDayLabel(k) + ": " + ((r && r.sentMsgs) || 0) + " sent"; }) }));
+    html += otkTrendTile("Replies", otkNum(totIn), "inbound texts in this window",
+      otkTrend({ kind: "cols", series: inb, titles: keys.map(function (k) {
+        var r = byDay[k];
+        return otkDayLabel(k) + ": " + ((r && r.inboundMsgs) || 0) + " repl" + (r && r.inboundMsgs === 1 ? "y" : "ies") + (r && r.positiveMsgs ? " · " + r.positiveMsgs + " positive" : "");
+      }) }));
+    html += otkTrendTile("Opt-out rate", otkRateTxt(totOpt, totDel, 1), "of delivered · carrier line at 2%",
+      otkTrend({ series: opt, max: optMax, threshold: 2, titles: keys.map(function (k) {
+        var r = byDay[k];
+        return r && r.deliveredMsgs > 0
+          ? otkDayLabel(k) + ": " + (Math.round((1000 * (r.optOuts || 0)) / r.deliveredMsgs) / 10) + "% opted out (" + (r.optOuts || 0) + ")"
+          : otkDayLabel(k) + ": no deliveries";
+      }) }));
+    return html + "</div></div>";
+  }
+
+  function otkSourceTableHtml(d, sup) {
+    var rows = (d.accuracy && d.accuracy.sources) || [];
+    var supBySrc = (sup && sup.byPhoneSource) || {};
+    var hasSupply = Object.keys(supBySrc).some(function (k) { return supBySrc[k] > 0; });
+    if (!rows.length && !hasSupply) return "";
+    var accBySrc = {}, order = [], seen = {};
+    rows.forEach(function (s) { accBySrc[s.source] = s; if (!seen[s.source]) { seen[s.source] = 1; order.push(s.source); } });
+    Object.keys(supBySrc).forEach(function (k) { if (supBySrc[k] > 0 && !seen[k]) { seen[k] = 1; order.push(k); } });
+
+    var days = obAccDays();
+    var trendBySource = {};
+    ((d.accuracy && d.accuracy.trend) || []).forEach(function (r) { (trendBySource[r.source] = trendBySource[r.source] || {})[r.day] = r; });
+    function sparkCell(source) {
+      var byDay = trendBySource[source];
+      if (!byDay) return '<span class="muted">·</span>';
+      var series = days.map(function (dd) { return (byDay[dd] && byDay[dd].texted) || 0; });
+      var total = series.reduce(function (a, b) { return a + b; }, 0);
+      if (!total) return '<span class="muted">·</span>';
+      return '<div style="width:110px;margin:0 auto" title="Contacts texted per day, last 14 days (' + total + ' total)">' + obSpark(series, "var(--brand)") + "</div>";
+    }
+
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head" style="flex-wrap:wrap"><b>Source scoreboard · which rung earns its keep</b>' +
+      '<span class="muted" style="font-size:12px;flex:1 1 100%">"On lists" counts this window\'s supply; the outcome columns are the engine\'s lifetime ledger for every number that source ever pushed.</span></div>' +
+      '<div style="overflow-x:auto"><table class="ob-heat"><thead><tr>' +
+      '<th style="text-align:left">Source</th><th>On lists</th><th>Checked</th><th>Confirmed cells</th><th>Texted</th><th>Delivered</th><th>Replied</th><th>Wrong number</th><th>Opt-outs</th><th>Texted / day · 14d</th></tr></thead><tbody>';
+    order.forEach(function (src) {
+      var s = accBySrc[src] || { checked: 0, cellConfirmed: 0, texted: 0, delivered: 0, replied: 0, wrongNumber: 0, optedOut: 0 };
+      var label = OB_PHONE_SOURCE_LABELS[src] || src;
+      var wrongPct = s.replied > 0 ? Math.round((100 * s.wrongNumber) / s.replied) : 0;
+      html += '<tr><td style="text-align:left">' + esc(label) + "</td>" +
+        '<td style="text-align:center">' + otkNum(supBySrc[src] || 0) + "</td>" +
+        '<td style="text-align:center">' + otkNum(s.checked) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.cellConfirmed, s.checked) + "</td>" +
+        '<td style="text-align:center">' + otkNum(s.texted) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.delivered, s.texted) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.replied, s.delivered) + "</td>" +
+        '<td style="text-align:center"' + (s.wrongNumber > 0 ? ' title="' + wrongPct + '% of replies"' : "") + ">" +
+          (s.wrongNumber > 0 ? '<span style="color:var(--danger);font-weight:600">' + s.wrongNumber + "</span>" : "0") + "</td>" +
+        '<td style="text-align:center">' + otkNum(s.optedOut) + "</td>" +
+        '<td style="text-align:center">' + sparkCell(src) + "</td></tr>";
+    });
+    return html + "</tbody></table></div>" +
+      '<div class="ob-note">Read it left to right: how many numbers each rung supplied, how many were real cells, and what those cells did. A rung with a high cell rate and low wrong-number count deserves more of the budget; the reverse deserves less.</div></div>';
+  }
+
+  function otkSupplyHtml(sup) {
+    var b = sup.boost || { windowUsd: 0, windowLookups: 0, windowFound: 0, allTime: { calls: 0, hits: 0, spentUsd: 0 } };
+    var u = sup.apiUsage || {};
+    var html = '<div class="otk-cols">';
+    html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>JD Sourcing supply · this window</b></div>' +
+      '<div class="stat-grid" style="margin:2px 0 10px">' +
+      obStat(otkNum(sup.lists), "Lists worked", "of " + otkNum(sup.listsTotal) + " saved recruiting lists") +
+      obStat(otkNum(sup.candidates), "Leads on those lists") +
+      obStat(otkRateTxt(sup.withEmail, sup.candidates), "Email fill rate", otkNum(sup.withEmail) + " with an email") +
+      obStat(otkRateTxt(sup.withPhone, sup.candidates), "Phone fill rate", otkNum(sup.withPhone) + " with a phone") +
+      "</div>" +
+      otkLine("Discovery requests spent", "<b>" + otkNum((u.rapidapi || 0) + (u.serper || 0) + (u.google || 0)) + "</b>", "People search " + otkNum(u.rapidapi || 0) + ", Serper " + otkNum(u.serper || 0) + ", Google " + otkNum(u.google || 0)) +
+      otkLine("Boost paid lookups", "<b>" + otkNum(b.windowLookups) + "</b> <span class=\"muted\" style=\"font-size:11.5px\">" + otkNum(b.windowFound) + " phones found · " + otkUsd(b.windowUsd) + "</span>") +
+      otkLine("Boost hit rate", (b.windowLookups > 0 ? "<b>" + otkRateTxt(b.windowFound, b.windowLookups) + "</b> " + otkMiniBar(otkRate(b.windowFound, b.windowLookups)) : '<span class="muted">no paid lookups this window</span>')) +
+      otkLine("Boost all-time", '<span class="muted" style="font-size:12px">' + otkNum(b.allTime.calls) + " lookups · " + otkNum(b.allTime.hits) + " hits · " + otkUsd(b.allTime.spentUsd) + "</span>") +
+      "</div>";
+    html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Push parity · lists into OS Text</b></div>' +
+      '<div class="stat-grid" style="margin:2px 0 10px">' +
+      obStat(otkNum(sup.pushed.lists), "Lists pushed", "counting each list's latest push") +
+      obStat(otkNum(sup.pushed.added), "Contacts accepted") +
+      obStat(otkNum(sup.pushed.confirmedCell), "Known cells", "skipped the check, straight to textable", sup.pushed.confirmedCell > 0 ? "var(--ok)" : "") +
+      obStat(otkNum(sup.pushed.knownNonMobile), "Rejected non-cells", "landlines and VoIP, never inserted", sup.pushed.knownNonMobile > 0 ? "var(--warn)" : "") +
+      "</div>" +
+      (sup.pendingPush > 0 ? '<div class="ob-note">' + otkNum(sup.pendingPush) + " phone-holding list" + (sup.pendingPush === 1 ? "" : "s") + " awaiting first push; the sweeper sends them automatically within minutes of the chain finishing.</div>" : "") +
+      '<div class="ob-note">A campaign holding fewer people than its list has phones is the Telnyx cell-only gate doing its job: landlines, VoIP and toll-free numbers are dropped so texts only ever go to real mobiles.</div></div>';
+    return html + "</div>";
+  }
+
+  function otkOutcomeCardsHtml(eng) {
+    var msg = eng.messages || {};
+    var cls = eng.classifications || [];
+    var html = '<div class="otk-cols">';
+    html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Reply mix · AI triage</b>' +
+      '<span class="muted" style="font-size:12px;margin-left:10px">Conversations classified in this window.</span></div>';
+    if (!cls.length) {
+      html += '<div class="muted" style="font-size:12.5px">No classified replies in this window yet.</div>';
+    } else {
+      var tot = 0;
+      cls.forEach(function (c) { tot += c.count; });
+      cls.forEach(function (c) {
+        var label = OTK_CLASS_LABELS[c.label] || c.label;
+        var p = tot > 0 ? Math.round((100 * c.count) / tot) : 0;
+        var fg = (c.label === "positive" || c.label === "curious" || c.label === "referral") ? "var(--ok)"
+          : (c.label === "stop" || c.label === "wrong_person") ? "var(--danger)" : "var(--brand)";
+        html += otkLine(label, '<span class="muted" style="font-size:11.5px">' + p + "%</span> <b>" + otkNum(c.count) + "</b> " + otkMiniBar(p, fg));
+      });
+    }
+    html += "</div>";
+    html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Delivery failures</b><span style="flex:1"></span><b>' + otkNum(msg.failedMsgs || 0) + "</b></div>";
+    if (!msg.failedMsgs) {
+      html += '<div class="muted" style="font-size:12.5px">No failed sends in this window.</div>';
+    } else {
+      (msg.failureReasons || []).forEach(function (r) {
+        var p = Math.round((100 * r.count) / msg.failedMsgs);
+        html += otkLine(otkShort(r.reason, 56), "<b>" + otkNum(r.count) + "</b> " + otkMiniBar(p, "var(--danger)"), r.reason);
+      });
+    }
+    if (msg.unconfirmedMsgs > 0) {
+      html += '<div class="ob-note">' + otkNum(msg.unconfirmedMsgs) + " text" + (msg.unconfirmedMsgs === 1 ? "" : "s") + " sent but not yet carrier-confirmed; they usually confirm within minutes.</div>";
+    }
+    html += "</div>";
+    return html + "</div>";
+  }
+
+  function otkSpendHtml(d) {
+    var costs = (d.engine && d.engine.costs) || {};
+    var fun = d.engine && d.engine.funnel;
+    var b = (d.supply && d.supply.boost) || { windowUsd: 0 };
+    var items = [
+      ["Text messages (Telnyx, by segment)", costs.smsUsd || 0],
+      ["Cell-line checks (" + otkNum(costs.lookups || 0) + " lookups)", costs.lookupUsd || 0],
+      ["AI triage, scoring and drafting", costs.llmUsd || 0],
+      ["Boost skip trace (paid phones)", b.windowUsd || 0],
+      ["Profile enrichment (" + otkNum(costs.profilesEnriched || 0) + " profiles)", costs.enrichUsd || 0]
+    ];
+    var total = 0;
+    items.forEach(function (it) { total += it[1]; });
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head"><b>What this window cost</b><span style="flex:1"></span><b>' + otkUsd(total) + "</b></div>";
+    items.forEach(function (it) { html += otkLine(it[0], "<b>" + otkUsd(it[1]) + "</b>"); });
+    if (fun) {
+      html += '<div class="ob-note">Unit economics: ' +
+        (fun.delivered > 0 ? otkUsd(total / fun.delivered) + " per delivered contact" : "no deliveries yet") +
+        (fun.replied > 0 ? " · " + otkUsd(total / fun.replied) + " per reply" : "") +
+        (fun.positive > 0 ? " · " + otkUsd(total / fun.positive) + " per positive reply" : "") +
+        ". SMS is estimated by billable segment, AI is metered exactly per call, Boost comes from the billing ledger.</div>";
+    }
+    return html + "</div>";
+  }
 
   var OB_STATE_META = {
     strong:             { label: "Strong",              fg: "var(--ok)",       bg: "var(--ok-bg)" },

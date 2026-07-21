@@ -2450,3 +2450,32 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
 .ob-step-nums b { color: var(--text-dim); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 3px; }
 .ob-step-action { font-size: 12.5px; line-height: 1.5; color: var(--text); }
 .ob-unread .lr-main { color: var(--brand); }
+
+/* ============================================================
+   OS Text Performance (admin): the enrichment-to-text KPI tracker.
+   Reuses the ob-* chrome (cards, pills, meters, heat tables); otk-*
+   adds the funnel rows, trend tiles and two-column card grids.
+   ============================================================ */
+.otk-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.otk-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.otk-cols .panel-card.ob-card { margin-bottom: 0; }
+.otk-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.otk-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.otk-tile-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.otk-tile-top .sl { font-size: 12px; color: var(--text-muted); }
+.otk-tile-top b { font-size: 18px; }
+.otk-tile-sub { margin-top: 5px; font-size: 11px; color: var(--text-dim); }
+.otk-frow { display: grid; grid-template-columns: 150px minmax(80px, 1fr) 72px minmax(120px, 170px); gap: 10px; align-items: center; margin: 8px 0; }
+.otk-flabel { font-size: 12.5px; color: var(--text-muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.otk-fbar { height: 18px; background: var(--surface-2); border-radius: 5px; overflow: hidden; }
+.otk-fbar span { display: block; height: 100%; background: var(--brand); border-radius: 0 4px 4px 0; min-width: 3px; }
+.otk-fval { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.otk-fconv { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.otk-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+.otk-line:last-child { border-bottom: none; }
+.otk-line-r { display: flex; align-items: center; gap: 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+@media (max-width: 680px) {
+  .otk-frow { grid-template-columns: minmax(60px, 1fr) 64px; }
+  .otk-flabel { grid-column: 1 / -1; text-align: left; }
+  .otk-fconv { grid-column: 1 / -1; margin-top: -4px; }
+}
