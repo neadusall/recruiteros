@@ -14796,13 +14796,28 @@
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
         '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words, <b>if qualified:</b> tell them they\'re a strong fit and lock in their updated resume as the step that moves everything. <b>If not a fit:</b> let them down kindly and still ask for the updated resume so you can represent them when the right role lands. Either way the resume ask happens on every call, and the follow-up ladder (thank-you email + text, then a next-day email and a final text) chases it until it arrives.</div>' +
         '<div class="vt-form-grid">' +
-        '<div class="vt-field"><label>If QUALIFIED</label><textarea id="vtfNextYes" rows="3" placeholder="Leave blank to use the default above, or write your own.">' + esc(d.nextStepQualified || "") + "</textarea></div>" +
-        '<div class="vt-field"><label>If NOT qualified</label><textarea id="vtfNextNo" rows="3" placeholder="Leave blank to use the default above, or write your own.">' + esc(d.nextStepUnqualified || "") + "</textarea></div>" +
+        '<div class="vt-field"><label>If QUALIFIED</label>' + tplBar("qualified") + '<textarea id="vtfNextYes" rows="3" placeholder="Leave blank to use the default above, or write your own.">' + esc(d.nextStepQualified || "") + "</textarea></div>" +
+        '<div class="vt-field"><label>If NOT qualified</label>' + tplBar("unqualified") + '<textarea id="vtfNextNo" rows="3" placeholder="Leave blank to use the default above, or write your own.">' + esc(d.nextStepUnqualified || "") + "</textarea></div>" +
         "</div>" +
         '<div class="vt-formactions">' +
         '<button class="vt-btn vt-btn-primary" id="vtSave">' + (d.id ? "Save changes" : "Create desk") + "</button>" +
         '<button class="vt-btn vt-btn-ghost" id="vtCancel">Cancel</button>' +
         "</div></div>";
+    }
+    /* Saved next-step messages: dropdown + save/remove controls per field.
+       Templates are workspace-scoped and loaded with the tab (vt.msgTemplates);
+       picking one fills the textarea, Save stores the current text for reuse. */
+    function tplOptions(kind) {
+      var list = (vt.msgTemplates || []).filter(function (t) { return t.kind === kind; });
+      return '<option value="">Insert a saved message...</option>' +
+        list.map(function (t) { return '<option value="' + esc(t.id) + '">' + esc(t.name) + "</option>"; }).join("");
+    }
+    function tplBar(kind) {
+      return '<div class="vt-tplbar" style="display:flex;gap:6px;align-items:center;margin:2px 0 6px">' +
+        '<select id="vtTplSel_' + kind + '" style="flex:1;min-width:0">' + tplOptions(kind) + "</select>" +
+        '<button type="button" class="vt-btn" id="vtTplSave_' + kind + '" title="Save the message written below so you can reuse it on every desk">Save</button>' +
+        '<button type="button" class="vt-btn" id="vtTplDel_' + kind + '" title="Remove the selected saved message">Remove</button>' +
+        "</div>";
     }
     function collectDesk() {
       var qs = [];
@@ -14907,7 +14922,8 @@
         safe(api("/vetting/numbers")),
         safe(api("/voice/clones")),
         safe(api("/vetting/desks?motion=" + motion)),
-        safe(api("/vetting/inbox"))
+        safe(api("/vetting/inbox")),
+        safe(api("/vetting/templates"))
       ]).then(function (res) {
         var nd = res[0] || {}, vd = res[1] || {}, data = res[2] || {};
         vt.numbers = nd.numbers || [];
@@ -14915,6 +14931,7 @@
         vt.numbersErr = nd.error || (res[0] ? null : "unreachable");
         vt.voices = ((vd.consent) || []).filter(function (c) { return c.voiceId; });
         vt.inbox = res[3] || null;
+        vt.msgTemplates = (res[4] && res[4].templates) || [];
 
         var list = data.desks || [];
         var editing = vt.editing ? list.filter(function (x) { return x.id === vt.editing; })[0] : null;
@@ -14959,7 +14976,7 @@
         head += '<span class="vt-pill live" style="text-transform:none">' + esc(ib.address) + "</span></div>";
         bodyHtml =
           '<div class="vt-meta" style="margin-top:8px">' +
-          '<span class="vt-chip">checked every 5 min · last: <b>' + esc(last) + "</b></span>" +
+          '<span class="vt-chip">checked automatically · last: <b>' + esc(last) + "</b></span>" +
           '<span class="vt-chip"><b>' + (ib.resumesOnFile || 0) + "</b> resumes on file</span>" +
           '<span class="vt-chip"><b>' + (ib.savedTotal || 0) + "</b> filed from email</span>" +
           (ib.lastError ? '<span class="vt-chip" style="color:var(--vt-bad)">last check failed, will retry</span>' : "") +
@@ -14995,6 +15012,50 @@
             : ("Checked " + (d.checked || 0) + " email" + (d.checked === 1 ? "" : "s") + ", filed " + (d.saved || 0) + " resume" + (d.saved === 1 ? "" : "s") + ".");
           if (d.saved > 0) paintDesks(body);
         }).catch(function () { sweep.disabled = false; if (msg) msg.textContent = "Couldn't reach the server."; });
+      });
+      // Saved next-step messages: insert on pick, Save stores, Remove deletes.
+      [["qualified", "vtfNextYes"], ["unqualified", "vtfNextNo"]].forEach(function (pair) {
+        var kind = pair[0], ta = $("#" + pair[1]);
+        var sel = $("#vtTplSel_" + kind), sv = $("#vtTplSave_" + kind), del = $("#vtTplDel_" + kind);
+        if (!sel || !ta) return;
+        function findTpl(id) {
+          return (vt.msgTemplates || []).filter(function (x) { return x.id === id; })[0];
+        }
+        function repaintSel(keepId) {
+          sel.innerHTML = tplOptions(kind);
+          sel.value = keepId || "";
+        }
+        sel.addEventListener("change", function () {
+          var t = findTpl(sel.value);
+          if (t) ta.value = t.text;
+        });
+        if (sv) sv.addEventListener("click", function () {
+          var text = ta.value.trim();
+          if (!text) { toast("Write the message in the box first, then hit Save."); return; }
+          var current = findTpl(sel.value);
+          var suggested = current ? current.name : text.replace(/\s+/g, " ").split(" ").slice(0, 4).join(" ");
+          var name = prompt("Name this saved message (what you'll see in the dropdown):", suggested);
+          if (!name || !name.trim()) return;
+          send("/vetting/templates", "POST", { action: "add", kind: kind, name: name.trim(), text: text }).then(function (r) {
+            if (!r.ok) { toast((r.data && r.data.detail) || "Couldn't save the message."); return; }
+            var t = r.data.template;
+            vt.msgTemplates = (vt.msgTemplates || []).filter(function (x) { return x.id !== t.id; });
+            vt.msgTemplates.unshift(t);
+            repaintSel(t.id);
+            toast('Saved "' + t.name + '" for reuse.');
+          }).catch(function () { toast("Couldn't reach the server."); });
+        });
+        if (del) del.addEventListener("click", function () {
+          var t = findTpl(sel.value);
+          if (!t) { toast("Pick a saved message to remove first."); return; }
+          if (!confirm('Remove "' + t.name + '" from the dropdown? Desks already using this text keep it.')) return;
+          send("/vetting/templates", "POST", { action: "delete", id: t.id }).then(function (r) {
+            if (!r.ok) { toast("Couldn't remove it."); return; }
+            vt.msgTemplates = (vt.msgTemplates || []).filter(function (x) { return x.id !== t.id; });
+            repaintSel("");
+            toast("Removed.");
+          }).catch(function () { toast("Couldn't reach the server."); });
+        });
       });
       var saveBtn = $("#vtSave");
       if (saveBtn) saveBtn.addEventListener("click", function () {

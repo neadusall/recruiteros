@@ -23,7 +23,8 @@ import {
   type TurnTuning, type ExtractionField, type InboxState, type InboxLogEntry,
   type DeskQA, type QACluster, type CallQuestion, type KnowledgeItem,
   type ResumeChase, type ChaseStep, type ClientReport,
-  type ScreenSchedule, type ScheduleStep,
+  type ScreenSchedule, type ScheduleStep, type DeskMsgTemplate,
+  MSG_TEMPLATE_CAP,
   DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, DEFAULT_DESK_QA, KNOWLEDGE_CAP,
   clampVoiceTuning, clampTurnTuning,
   normalizeExtraction, normalizeKnowledge,
@@ -36,6 +37,8 @@ const store = {
   resumeReviews: [] as ResumeReview[],
   /** Resume-inbox sweep state, keyed by workspace id. */
   inbox: {} as Record<string, InboxState>,
+  /** Saved next-step messages for the desk form's dropdowns. */
+  msgTemplates: [] as DeskMsgTemplate[],
 };
 
 /* ---------------- durability ---------------- */
@@ -50,6 +53,7 @@ function hydrate(s: any) {
   store.calls = s.calls ?? [];
   store.resumeReviews = s.resumeReviews ?? [];
   store.inbox = s.inbox ?? {};
+  store.msgTemplates = s.msgTemplates ?? [];
 }
 const persist = debouncedSaver(SNAP_KEY, serialize);
 
@@ -657,6 +661,65 @@ export function recordInboxSweep(workspaceId: string, entries: InboxLogEntry[], 
   }
   persist();
   return s;
+}
+
+/* ---------------- reusable next-step messages ---------------- */
+
+/** This workspace's saved messages, newest first, optionally one kind only. */
+export function listMsgTemplates(
+  workspaceId: string,
+  kind?: DeskMsgTemplate["kind"],
+): DeskMsgTemplate[] {
+  return store.msgTemplates
+    .filter((t) => t.workspaceId === workspaceId && (!kind || t.kind === kind))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+/**
+ * Save a message for reuse. Same-name saves within a kind overwrite (that's
+ * how a recruiter edits a template: insert, tweak, save under the same name).
+ */
+export function addMsgTemplate(
+  workspaceId: string,
+  input: { kind: DeskMsgTemplate["kind"]; name: string; text: string },
+): DeskMsgTemplate {
+  const name = input.name.trim().slice(0, 60);
+  const existing = store.msgTemplates.find(
+    (t) => t.workspaceId === workspaceId && t.kind === input.kind &&
+      t.name.toLowerCase() === name.toLowerCase(),
+  );
+  if (existing) {
+    existing.text = input.text.trim();
+    persist();
+    return existing;
+  }
+  const t: DeskMsgTemplate = {
+    id: rid("vmsg"),
+    workspaceId,
+    kind: input.kind,
+    name,
+    text: input.text.trim(),
+    createdAt: nowIso(),
+  };
+  store.msgTemplates.push(t);
+  // Cap per workspace: drop the oldest beyond the cap so the list stays usable.
+  const mine = listMsgTemplates(workspaceId);
+  if (mine.length > MSG_TEMPLATE_CAP) {
+    const cut = new Set(mine.slice(MSG_TEMPLATE_CAP).map((x) => x.id));
+    store.msgTemplates = store.msgTemplates.filter((x) => !cut.has(x.id));
+  }
+  persist();
+  return t;
+}
+
+export function deleteMsgTemplate(workspaceId: string, id: string): boolean {
+  const before = store.msgTemplates.length;
+  store.msgTemplates = store.msgTemplates.filter(
+    (t) => !(t.workspaceId === workspaceId && t.id === id),
+  );
+  const removed = store.msgTemplates.length < before;
+  if (removed) persist();
+  return removed;
 }
 
 /* ---------------- resume coaching loop ---------------- */

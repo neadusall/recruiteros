@@ -970,3 +970,23 @@ export function clampVoiceTuning(t?: Partial<VoiceTuning> | null): VoiceTuning {
     speakerBoost: t?.speakerBoost === undefined ? DEFAULT_VOICE_TUNING.speakerBoost : Boolean(t.speakerBoost),
   };
 }
+
+/* ---------------- reusable next-step messages ---------------- */
+
+/**
+ * A saved, reusable "next step" message for the desk form's If QUALIFIED /
+ * If NOT qualified fields. Workspace-scoped: recruiters build a small library
+ * of their own closing scripts and insert one from a dropdown instead of
+ * retyping it on every desk.
+ */
+export interface DeskMsgTemplate {
+  id: string;
+  workspaceId: string;
+  kind: "qualified" | "unqualified";
+  name: string;
+  text: string;
+  createdAt: string;
+}
+
+/** Per-workspace cap so the dropdown stays a pick-list, not a landfill. */
+export const MSG_TEMPLATE_CAP = 40;
