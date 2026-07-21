@@ -203,5 +203,33 @@ export async function POST(req: Request) {
     return ok({ sent, failed, skipped, dryRun, errors, requested: ids.length + pids.length });
   }
 
+  // Ask each selected person for their CURRENT RESUME, from the workspace's
+  // own brand mailbox (white-label safe, DNC + cooldown guarded). Replies land
+  // in the resume inbox, which files the resume, pairs the JD, and opens the
+  // vetting loop automatically; the person's stage nudges to Outbound now and
+  // Screening when the resume arrives.
+  if (b?.action === "request_resume" && (Array.isArray(b.ids) || Array.isArray(b.prospectIds))) {
+    const { requestResumes } = await import("../../../lib/vetting/resumeRequest");
+    const people: Array<{ fullName?: string; email: string; phone?: string; linkedinUrl?: string }> = [];
+    let noEmail = 0;
+    const ids: string[] = (Array.isArray(b.ids) ? b.ids : []).filter(Boolean).slice(0, 500);
+    for (const id of ids) {
+      const rec = await getRecord(ws, id);
+      if (!rec?.email) { noEmail++; continue; }
+      people.push({ fullName: rec.fullName, email: rec.email, phone: rec.phone || rec.directPhone, linkedinUrl: rec.linkedinUrl });
+    }
+    const pids: string[] = (Array.isArray(b.prospectIds) ? b.prospectIds : []).filter(Boolean).slice(0, 500);
+    if (pids.length) {
+      const { getCore } = await import("../../../lib/core/repository");
+      const wanted = new Set(pids);
+      for (const p of (await getCore().listProspects(ws)).filter((x) => wanted.has(x.id))) {
+        if (!p.email) { noEmail++; continue; }
+        people.push({ fullName: p.fullName, email: p.email, phone: p.phone, linkedinUrl: p.linkedinUrl });
+      }
+    }
+    const tally = await requestResumes(ws, people, { source: "candidates", requesterName: g.ctx.user.name });
+    return ok({ sent: tally.sent, skipped: tally.skipped + noEmail, reasons: { ...tally.reasons, ...(noEmail ? { no_email: (tally.reasons.no_email || 0) + noEmail } : {}) } });
+  }
+
   return fail("unknown_action", 400);
 }

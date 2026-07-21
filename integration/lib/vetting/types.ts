@@ -511,6 +511,11 @@ export interface CandidateProfile {
   resumeFileName?: string;
   /** When the "your resume is in, here's the screening call" invite went out. */
   screenInviteSentAt?: string;
+  /** The resume-request email channel (resumeRequest.ts): one ask + one reminder. */
+  resumeRequestedAt?: string;
+  resumeRequestRemindedAt?: string;
+  /** Where the ask originated: the Candidates tab ("candidates") or the sourcing belt ("sourcing"). */
+  resumeRequestSource?: string;
   /** The self-scheduling loop: availability ask -> parsed reply -> booked call. */
   screen?: ScreenSchedule;
 

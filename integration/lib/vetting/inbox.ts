@@ -318,6 +318,16 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
                   }, "resume_inbox");
                 }
 
+                // Pipeline write-back: a filed resume moves them into Screening
+                // on the Candidates board (never past a recruiter-set stage).
+                try {
+                  const { markPipelineStage } = await import("./resumeRequest");
+                  void markPipelineStage(workspaceId, {
+                    email: candidate.email, phone: candidate.phone,
+                    fullName: `${candidate.firstName} ${candidate.lastName}`.trim(),
+                  }, "Screening");
+                } catch { /* the stage nudge never blocks the intake */ }
+
                 // Coverage review (recruiter-facing data); never blocks the intake.
                 if (desk) {
                   try {
@@ -428,6 +438,11 @@ export async function sweepAllResumeInboxes(): Promise<void> {
     const { runScheduleTick } = await import("./scheduling");
     await runScheduleTick();
   } catch { /* scheduling never blocks the inbox */ }
+  // The resume-request channel's one reminder rides the same cadence too.
+  try {
+    const { runResumeRequestTick } = await import("./resumeRequest");
+    await runResumeRequestTick();
+  } catch { /* the reminder never blocks the inbox */ }
 }
 
 /**

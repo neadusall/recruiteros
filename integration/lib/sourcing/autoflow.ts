@@ -272,6 +272,22 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       stamp.error = "ostext_not_connected: sent to Candidates only";
     }
 
+    // 3) Resume-request email (flag-gated: RESUME_REQUEST_AUTO=on). Every
+    //    candidate on the list with an email gets ONE ask for their current
+    //    resume, sent from the workspace's own brand mailbox. Replies land in
+    //    the resume inbox, which files the resume, pairs the JD, and opens the
+    //    vetting loop by itself. Per-candidate stamps make top-up re-runs free;
+    //    a failure here never fails the send that already happened.
+    try {
+      const { autoRequestResumesForRun } = await import("../vetting/resumeRequest");
+      const rr = await autoRequestResumesForRun(run);
+      if (rr.enabled && (rr.sent || rr.skipped)) {
+        console.log(`[sourcing-autoflow] "${run.name}" resume requests: ${rr.sent} asked, ${rr.skipped} skipped`);
+      }
+    } catch (e) {
+      console.error(`[sourcing-autoflow] "${run.name}" resume-request leg failed: ${(e as Error).message}`);
+    }
+
     stamp.sentAt = nowIso();
     stamp.phonesAtSend = phonesNow;
     stamp.peopleAtSend = run.candidates.length;

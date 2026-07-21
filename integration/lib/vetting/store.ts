@@ -516,6 +516,27 @@ export function upsertCandidate(
   return existing ?? rec;
 }
 
+/** Find a candidate anywhere in the workspace by email (the resume-request channel's dedupe key). */
+export function findCandidateByEmail(workspaceId: string, email: string): CandidateProfile | undefined {
+  const e = email.trim().toLowerCase();
+  if (!e) return undefined;
+  return store.candidates.find((c) => c.workspaceId === workspaceId && (c.email || "").trim().toLowerCase() === e);
+}
+
+/** Stamp resume-request channel state (the ask went out / the reminder went out). */
+export function markResumeRequested(
+  candidateId: string,
+  patch: { requestedAt?: string; remindedAt?: string; source?: string },
+): void {
+  const c = store.candidates.find((x) => x.id === candidateId);
+  if (!c) return;
+  if (patch.requestedAt) c.resumeRequestedAt = patch.requestedAt;
+  if (patch.remindedAt) c.resumeRequestRemindedAt = patch.remindedAt;
+  if (patch.source) c.resumeRequestSource = patch.source;
+  c.updatedAt = nowIso();
+  persist();
+}
+
 export function setCandidateEnrichment(candidateId: string, enrichment: CandidateEnrichment): void {
   const c = store.candidates.find((x) => x.id === candidateId);
   if (!c) return;

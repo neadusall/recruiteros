@@ -7881,6 +7881,7 @@
                 '<label><input type="checkbox" id="cnEnrPhone" checked /> Phone</label>' +
                 '<button class="btn btn-primary btn-sm" id="cnEnrichSel">Run</button></span>' +
               '<button class="btn btn-ghost btn-sm" id="cnEmailSel" title="One personalized email per person through your connected sending path.">Email…</button>' +
+              '<button class="btn btn-ghost btn-sm" id="cnResumeSel" title="Email everyone selected a personal ask for their current resume. Replies land in the resume inbox and move them into Screening automatically.">Request resume</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnPushSel" title="Send the selected candidates straight into an OS Text campaign, no CSV, no drag and drop.">Push to OS Text</button>' +
               '<select class="pr-bulk-sel" id="cnBulkStatus">' + statusOpts + "</select>" +
               '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="cnBulkSeq">' + seqOpts + "</select>" +
@@ -7902,6 +7903,7 @@
           'Viewing saved list: <b>' + esc(listName) + "</b> · " + list.length + " shown" + reachPills +
           '<button class="btn btn-primary btn-sm" id="cnPushList" style="margin-left:auto" title="Send this whole list into an OS Text campaign under the same name.">Push list to OS Text</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnEmailList" title="Email everyone on this list.">Email list</button>' +
+          '<button class="btn btn-ghost btn-sm" id="cnResumeList" title="Ask everyone on this list for their current resume by email.">Request resumes</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnShowAll">Show all</button></div>'
         : "";
       var shownRows = list.slice(0, state.limit);
@@ -7934,8 +7936,10 @@
       });
       var pushList = $("#cnPushList", el); if (pushList) pushList.addEventListener("click", function () { pushToOsText(list.map(function (r) { return r.id; }), listName); });
       var emailList = $("#cnEmailList", el); if (emailList) emailList.addEventListener("click", function () { bulkEmail(list.map(function (r) { return r.id; })); });
+      var resumeList = $("#cnResumeList", el); if (resumeList) resumeList.addEventListener("click", function () { requestResumeAsk(list.map(function (r) { return r.id; })); });
       var enrSel = $("#cnEnrichSel", el); if (enrSel) enrSel.addEventListener("click", function () { enrichSelected(selIds, enrSel); });
       var emailSel = $("#cnEmailSel", el); if (emailSel) emailSel.addEventListener("click", function () { bulkEmail(selIds); });
+      var resumeSel = $("#cnResumeSel", el); if (resumeSel) resumeSel.addEventListener("click", function () { requestResumeAsk(selIds); });
       var pushSel = $("#cnPushSel", el); if (pushSel) pushSel.addEventListener("click", function () { pushToOsText(selIds, listName); });
       var stSel = $("#cnBulkStatus", el); if (stSel) stSel.addEventListener("change", function () { if (stSel.value) bulkSetStatus(selIds, stSel.value); });
       var seqBtn = $("#cnSeqAssign", el); if (seqBtn) seqBtn.addEventListener("click", function () {
@@ -8149,6 +8153,48 @@
               if (d.skipped) msg += ", " + d.skipped + " skipped (no email)";
               toast(msg);
             }).catch(function () { go.disabled = false; go.textContent = "Send to " + recips.length; toast("Could not reach the server."); });
+          });
+        });
+    }
+    /* ---- ask the selected people for their current resume, by email ---- */
+    function rrSummaryToast(d) {
+      var msg = "Asked " + (d.sent || 0) + " for their resume";
+      var r = (d && d.reasons) || {};
+      var parts = [];
+      if (r.has_resume) parts.push(r.has_resume + " already have a resume on file");
+      if (r.already_asked) parts.push(r.already_asked + " were asked recently");
+      var prot = (r.do_not_contact || 0) + (r.recently_contacted || 0);
+      if (prot) parts.push(prot + " protected (active conversation or do not contact)");
+      if (r.no_email) parts.push(r.no_email + " missing an email");
+      if (r.daily_cap) parts.push("daily limit reached, the rest can go tomorrow");
+      if (r.error) parts.push(r.error + " failed");
+      toast(parts.length ? msg + " · " + parts.join(", ") : msg);
+    }
+    function requestResumeAsk(ids) {
+      if (!ids || !ids.length) { toast("Select candidates first."); return; }
+      var recips = ids.map(function (id) { return byId[id]; }).filter(function (r) { return r && r.email; });
+      if (!recips.length) { toast("None of the selected have an email yet. Run Enrich first."); return; }
+      var noEmail = ids.length - recips.length;
+      var sp = splitIds(recips.map(function (r) { return r.id; }));
+      openModal("Request updated resumes",
+        "Each person gets a personal email from your recruiting mailbox asking for their current resume.",
+        '<div class="muted" style="font-size:13px;line-height:1.55;margin:2px 0 8px">Replies come straight back in: the resume is filed to the candidate, paired to the job, and they move into Screening automatically. One polite reminder goes out three days later if nothing lands, then it goes quiet.</div>' +
+        '<div class="muted" style="font-size:12.5px;margin:0 0 2px">Safeguards: anyone asked in the last two weeks, anyone with a recent resume on file, and anyone already in an active conversation is skipped automatically.' +
+          (noEmail ? " " + noEmail + " of the selected have no email and are skipped." : "") + '</div>' +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="cnRrCancel">Cancel</button><button class="btn btn-primary" id="cnRrGo">Ask ' + recips.length + (recips.length === 1 ? " person" : " people") + '</button></div>',
+        function (card, close) {
+          card.querySelector("#cnRrCancel").addEventListener("click", function () { close(); });
+          var go = card.querySelector("#cnRrGo");
+          go.addEventListener("click", function () {
+            go.disabled = true; go.textContent = "Sending…";
+            send("/data", "POST", { action: "request_resume", ids: sp.dids, prospectIds: sp.pids }).then(function (res) {
+              if (!res.ok) {
+                go.disabled = false; go.textContent = "Ask " + recips.length;
+                toast("Could not send (" + ((res.data && (res.data.detail || res.data.error)) || res.status) + ")");
+                return;
+              }
+              close(); rrSummaryToast(res.data || {});
+            }).catch(function () { go.disabled = false; go.textContent = "Ask " + recips.length; toast("Could not reach the server."); });
           });
         });
     }
@@ -10500,6 +10546,7 @@
         '<button class="cd-tbtn" id="cdDelete"' + dis + '>Delete</button>' +
         '<span class="cd-tsep"></span>' +
         '<button class="cd-tbtn" id="cdEmail"' + dis + '>Email</button>' +
+        '<button class="cd-tbtn" id="cdResume"' + dis + ' title="Email everyone selected a personal ask for their current resume. Replies come back in on their own and move them into Screening.">Request resume</button>' +
         '<button class="cd-tbtn" id="cdSms"' + dis + '>SMS</button>' +
         '<button class="cd-tbtn" id="cdFind"' + dis + '>Find contact</button>' +
         '<button class="cd-tbtn" id="cdStage"' + dis + ' title="Set the pipeline stage on everyone selected">Set stage</button>' +
@@ -10514,6 +10561,7 @@
         if (n && confirm("Delete " + n + " record" + (n === 1 ? "" : "s") + " from the database? This cannot be undone.")) delSel();
       });
       $("#cdEmail", el).addEventListener("click", function () { if (n) bulkEmail(); });
+      $("#cdResume", el).addEventListener("click", function () { if (n) bulkResumeReq(); });
       $("#cdSms", el).addEventListener("click", function () { if (n) bulkSms(); });
       $("#cdFind", el).addEventListener("click", function () { if (n) enrichSel($("#cdFind", el)); });
       $("#cdStage", el).addEventListener("click", function () { if (n) pickStage(function (s) { updateStage(sel(), s); }); });
@@ -10824,6 +10872,44 @@
               if (d.skipped) msg += ", " + d.skipped + " skipped (no email)";
               toast(msg);
             }).catch(function () { go.disabled = false; go.textContent = "Send to " + recips.length; toast("Could not reach the server."); });
+          });
+        });
+    }
+    // Ask the selected people for their current resume, by email. The reply
+    // path is hands-free: the resume inbox files it, pairs the job, and the
+    // person moves into Screening on this board.
+    function bulkResumeReq() {
+      var ids = Object.keys(state.sel);
+      var recips = ids.map(function (id) { return state.all.find(function (x) { return x.id === id; }); }).filter(function (r) { return r && r.email; });
+      if (!recips.length) { toast("None of the selected have an email yet. Run Find contact first."); return; }
+      var noEmail = ids.length - recips.length;
+      openModal("Request updated resumes",
+        "Each person gets a personal email from your recruiting mailbox asking for their current resume.",
+        '<div class="muted" style="font-size:13px;line-height:1.55;margin:2px 0 8px">Replies come straight back in: the resume is filed to the candidate, paired to the job, and they move into Screening automatically. One polite reminder goes out three days later if nothing lands, then it goes quiet.</div>' +
+        '<div class="muted" style="font-size:12.5px;margin:0 0 2px">Safeguards: anyone asked in the last two weeks, anyone with a recent resume on file, and anyone already in an active conversation is skipped automatically.' +
+          (noEmail ? " " + noEmail + " of the selected have no email and are skipped." : "") + '</div>' +
+        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="cdRrCancel">Cancel</button><button class="btn btn-primary" id="cdRrGo">Ask ' + recips.length + (recips.length === 1 ? " person" : " people") + '</button></div>',
+        function (card, close) {
+          card.querySelector("#cdRrCancel").addEventListener("click", function () { close(); });
+          var go = card.querySelector("#cdRrGo");
+          go.addEventListener("click", function () {
+            go.disabled = true; go.textContent = "Sending…";
+            send("/data", "POST", { action: "request_resume", ids: recips.map(function (r) { return r.id; }) }).then(function (res) {
+              if (!res.ok) {
+                go.disabled = false; go.textContent = "Ask " + recips.length;
+                toast("Could not send (" + ((res.data && (res.data.detail || res.data.error)) || res.status) + ")");
+                return;
+              }
+              close();
+              var d = res.data || {}, r = d.reasons || {}, parts = [];
+              if (r.has_resume) parts.push(r.has_resume + " already have a resume on file");
+              if (r.already_asked) parts.push(r.already_asked + " were asked recently");
+              var prot = (r.do_not_contact || 0) + (r.recently_contacted || 0);
+              if (prot) parts.push(prot + " protected (active conversation or do not contact)");
+              if (r.no_email) parts.push(r.no_email + " missing an email");
+              if (r.daily_cap) parts.push("daily limit reached, the rest can go tomorrow");
+              toast(parts.length ? "Asked " + (d.sent || 0) + " for their resume · " + parts.join(", ") : "Asked " + (d.sent || 0) + " for their resume");
+            }).catch(function () { go.disabled = false; go.textContent = "Ask " + recips.length; toast("Could not reach the server."); });
           });
         });
     }
