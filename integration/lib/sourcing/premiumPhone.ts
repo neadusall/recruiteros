@@ -1,5 +1,5 @@
 /**
- * RecruitersOS · JD Sourcing · Premium phone boost (the "$0.10 tool")
+ * RecruitersOS · JD Sourcing · Premium phone boost (the paid skip-trace rung)
  *
  * The recruiter-triggered paid phone rung. It NEVER runs automatically: after the
  * free enrichment chain (KoldInfo, Laxis, LandlineDB, contact cache) has finished,
@@ -69,7 +69,9 @@ export async function getPremiumPhoneStats(ws: string): Promise<PremiumPhoneStat
 function bumpStats(ws: string, calls: number, hits: number, spentUsd: number): void {
   const s = store.byWorkspace[ws] ?? { calls: 0, hits: 0, spentUsd: 0, updatedAt: "" };
   s.calls += calls; s.hits += hits;
-  s.spentUsd = Math.round((s.spentUsd + spentUsd) * 100) / 100;
+  // 4-decimal precision: at plan pricing a whole batch costs fractions of a cent
+  // per request, and 2-decimal rounding would drift the running total badly.
+  s.spentUsd = Math.round((s.spentUsd + spentUsd) * 10000) / 10000;
   s.updatedAt = nowIso();
   store.byWorkspace[ws] = s;
   persist();
@@ -352,7 +354,7 @@ async function runBoostBatch(
       }
     }
 
-    costUsd = Math.round(costUsd * 100) / 100;
+    costUsd = Math.round(costUsd * 10000) / 10000;
     if (called > 0 || costUsd > 0) {
       bumpStats(ws, called, found - cacheHits, costUsd);
       recordUsage({

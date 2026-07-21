@@ -10662,12 +10662,19 @@
       '.jt-live .jd-tdot .isvg{animation:jdspin 1.7s linear infinite}' +
       '.jt-act .jd-tdot{background:var(--warn);border-style:solid;border-color:var(--warn);color:#fff;box-shadow:0 0 0 4px var(--warn-bg)}' +
       '.jd-ttxt{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}' +
+      /* Emphasis inversion (status-tracker practice): the CURRENT step is the loud
+         one; finished steps recede to quiet checks + muted counts so the eye lands
+         on what is happening now, not on what is already over. */
       '.jd-tlabel{font-size:12.5px;font-weight:650;color:var(--text);line-height:1.25;letter-spacing:.01em}' +
       '.jt-wait .jd-tlabel{color:var(--text-dim);font-weight:600}' +
+      '.jt-live .jd-tlabel,.jt-act .jd-tlabel{font-weight:700}' +
       '.jd-tsub{font-size:11.5px;color:var(--text-muted);line-height:1.35;font-variant-numeric:tabular-nums}' +
-      '.jt-done .jd-tsub{color:var(--ok);font-weight:600}' +
       '.jt-live .jd-tsub{color:var(--brand-2);font-weight:600}' +
       '.jt-act .jd-tsub{color:var(--warn);background:var(--warn-bg);font-weight:650;padding:2px 9px;border-radius:999px}' +
+      /* The amber pill IS the button: press it right where the problem is. */
+      'button.jd-tsub{border:0;cursor:pointer;font:inherit;font-size:11.5px;line-height:1.35;transition:background .15s ease,color .15s ease}' +
+      '.jt-act button.jd-tsub:hover{background:var(--warn);color:#fff}' +
+      '.jt-act button.jd-tsub:focus-visible{outline:none;box-shadow:var(--focus-ring)}' +
       /* Honest mini progress bar under the live stop: width = rows actually done
          (chunk ledger); .ind = no ledger yet, a small segment glides instead. */
       '.jd-tbar{display:block;width:88px;max-width:100%;height:4px;border-radius:999px;background:var(--brand-soft);overflow:hidden;margin-top:3px}' +
@@ -11083,10 +11090,16 @@
             if (linkId == null) open = '<span class="jd-tstop ' + state + reach + '"';
             else if (String(linkId).charAt(0) === "#") open = '<a class="jd-tstop ' + state + reach + '" href="' + esc(linkId) + '"';
             else open = '<a class="jd-tstop ' + state + reach + '" href="#prospects" data-openlist="' + esc(linkId) + '"';
+            // sub as {btn, act}: the detail pill IS the button (one press, right
+            // where the amber state points), wired through the same data-autoenrich
+            // delegate as the row's Enrich; a string stays a plain readout.
+            var subHtml = !sub ? "" : (typeof sub === "object"
+              ? '<button type="button" class="jd-tsub" data-autoenrich="' + esc(sub.act) + '">' + sub.btn + '</button>'
+              : '<span class="jd-tsub">' + sub + '</span>');
             return open + ' title="' + esc(tip || "") + '">' +
               '<span class="jd-tdot">' + dot + '</span>' +
               '<span class="jd-ttxt"><span class="jd-tlabel">' + label + '</span>' +
-              (sub ? '<span class="jd-tsub">' + sub + '</span>' : '') + (extra || "") + '</span>' +
+              subHtml + (extra || "") + '</span>' +
               (linkId != null ? '</a>' : '</span>');
           }
           var sSearch = jStop("jt-done", jIcons.check, "Searched", n + " found",
@@ -11100,22 +11113,22 @@
             var liveBar = '<span class="jd-tbar' + (livePct == null ? ' ind' : '') + '"><b' + (livePct != null ? ' style="width:' + livePct + '%"' : '') + '></b></span>';
             sEnrich = jStop("jt-live", jIcons.loop, "Enriching now", ep ? "~" + epDone + " of " + (ep.total || n) + " rows" : "working…",
               "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.", null, liveBar);
-            jNote = "<b>Working now:</b> contact info is being filled in. When it finishes, everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
+            jNote = "<b>Working now:</b> contact info is being filled in. Next: everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
           } else if (ep && ep.nextStart == null && lxSkipN) {
-            sEnrich = jStop("jt-act", jIcons.alert, "Enriched", lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " to redo",
-              "Every batch finished, but " + lxSkipN + " ran while one enrichment source was unreachable, so they were filled by the other sources only. Press Enrich to give them their full pass; finished batches are never bought twice.");
-            jNote = "<b>Almost done:</b> " + lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " ran while one source was unreachable. Press Enrich to give them their full pass; finished batches are never bought twice.";
+            sEnrich = jStop("jt-act", jIcons.alert, "Enriched", { btn: lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " to redo · press to finish", act: r.id },
+              "Every batch finished, but " + lxSkipN + " ran while one enrichment source was unreachable, so they were filled by the other sources only. Press the amber pill to give them their full pass; finished batches are never bought twice.");
+            jNote = "<b>Almost done:</b> " + lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " ran while one source was unreachable. Press the amber pill to give them their full pass; finished batches are never bought twice.";
           } else if (ep && ep.nextStart == null) {
             sEnrich = jStop("jt-done", jIcons.check, "Enriched", ems + " email" + (ems === 1 ? "" : "s") + " · " + phs + " phone" + (phs === 1 ? "" : "s"),
               "Every batch went through the full enrichment chain. Anyone still missing an email or phone is someone the sources had no contact info for.");
           } else if (ep) {
-            sEnrich = jStop("jt-act", jIcons.alert, "Enrich paused", "~" + epDone + " of " + (ep.total || n) + " · press Enrich",
-              "Enrichment stopped partway, usually a server update mid-run. Press Enrich to continue exactly where it stopped; finished batches are never bought twice.");
-            jNote = "<b>Needs a press:</b> enrichment stopped partway (about " + epDone + " of " + (ep.total || n) + " rows done). Press Enrich to continue; it resumes where it stopped and finished batches are never bought twice.";
+            sEnrich = jStop("jt-act", jIcons.alert, "Enrich paused", { btn: "~" + epDone + " of " + (ep.total || n) + " done · press to resume", act: r.id },
+              "Enrichment stopped partway, usually a server update mid-run. Press the amber pill to continue exactly where it stopped; finished batches are never bought twice.");
+            jNote = "<b>Needs a press:</b> enrichment stopped partway (about " + epDone + " of " + (ep.total || n) + " rows done). Press the amber pill to continue; it resumes where it stopped and finished batches are never bought twice.";
           } else {
-            sEnrich = jStop("jt-act", jIcons.alert, "Enrich", "not run · press Enrich",
-              "This list has not been through the full enrichment chain yet. Press Enrich to run it; when it finishes the refreshed contacts are re-sent to Candidates and OS Text.");
-            jNote = "<b>Needs a press:</b> this list has not run enrichment yet. Press Enrich to start it; everything after that is automatic.";
+            sEnrich = jStop("jt-act", jIcons.alert, "Enrich", { btn: "not run · press to start", act: r.id },
+              "This list has not been through the full enrichment chain yet. Press the amber pill to run it; when it finishes the refreshed contacts are re-sent to Candidates and OS Text.");
+            jNote = "<b>Needs a press:</b> this list has not run enrichment yet. Press the amber pill (or Enrich) to start it; everything after that is automatic.";
           }
           // Delivered = the promote record exists. Older top-up promotes stamped a
           // net-new count of 0 after deduping, so the count alone can't gate "done";
@@ -11142,7 +11155,7 @@
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
             else if (afErr) jNote = "The automatic send hit a problem and keeps retrying on its own. If this stays up for more than an hour, ask your admin.";
             else if (sentOk && candN) jNote = phs > 0
-              ? "<b>Done:</b> everyone is in Candidates and the text campaign is ready to review and launch in OS Text."
+              ? "<b>Done:</b> everyone is in Candidates. Next: open OS Text to review and launch the text campaign."
               : "<b>Done:</b> everyone is in Candidates. No phone numbers were found to text yet; Boost phones can grow the textable count.";
             else jNote = "Waiting for the automatic pipeline to pick this list up; it sweeps every few minutes and needs no button.";
           }
@@ -11154,8 +11167,20 @@
           var jDoneN = jsArr.filter(function (x) { return x === "done"; }).length;
           var jOverall = jsArr.indexOf("act") >= 0 ? "act" : jsArr.indexOf("live") >= 0 ? "live" : jDoneN === 4 ? "done" : "wait";
           var jChipTxt = jOverall === "act" ? "Needs a press" : jOverall === "live" ? "Working now" : jOverall === "done" ? (phs > 0 ? "Ready to launch" : "All done") : "Runs by itself";
+          // Recency stamp (NN/g status-tracker guidance): a tracker that shows when
+          // it last moved is trusted; one that doesn't reads as possibly stale.
+          function jAgo(s) {
+            if (!s) return "";
+            var t = Date.parse(String(s).replace(" ", "T")); if (isNaN(t)) return "";
+            var m = Math.round(Math.max(0, Date.now() - t) / 60000);
+            if (m < 1) return "just now"; if (m < 60) return m + " min ago";
+            var h = Math.round(m / 60); if (h < 24) return h + " hr ago";
+            var d = Math.round(h / 24); if (d < 30) return d + " day" + (d === 1 ? "" : "s") + " ago";
+            var mo = Math.round(d / 30); return mo < 12 ? mo + " mo ago" : Math.round(mo / 12) + " yr ago";
+          }
+          var jUpd = jAgo(r.updatedAt || (r.autoflow && r.autoflow.sentAt) || r.createdAt);
           var jHead = '<div class="jd-jhead"><span class="jd-jstate js-' + jOverall + '"><i></i>' + jChipTxt + '</span>' +
-            '<span class="jd-jsteps">' + jDoneN + ' of 4 steps done</span></div>';
+            '<span class="jd-jsteps">' + jDoneN + ' of 4 steps' + (jUpd ? ' · updated ' + jUpd : '') + '</span></div>';
           var journey = n
             ? '<div class="jd-journeywrap">' + jHead + '<div class="jd-journey">' + sSearch + sEnrich + sCand + sText + '</div>' +
               '<div class="jd-journey-note">' + jNote + '</div></div>'
@@ -11191,7 +11216,7 @@
             // Boost phones is the ONLY paid extra: it appears once the free chain has
             // run, is recruiter-triggered, and always shows the estimated cost first.
             '<div class="jd-run-actions">' +
-              (boostable ? '<button class="btn btn-ghost btn-sm" data-boost="' + esc(r.id) + '" title="The free sources found phones for ' + phs + ' of ' + n + '. Boost runs a paid public-records lookup (about 10 cents each) on the ' + boostable + ' still missing one. You see the estimated cost and approve it before anything is spent; the actual spend is logged to your account.">Boost phones · ' + boostable + ' left</button>' : '') +
+              (boostable ? '<button class="btn btn-ghost btn-sm" data-boost="' + esc(r.id) + '" title="The free sources found phones for ' + phs + ' of ' + n + '. Boost runs a paid public-records lookup on the ' + boostable + ' still missing one, priced from your plan. You see the estimated cost and approve it before anything is spent; the actual spend is logged to your account.">Boost phones · ' + boostable + ' left</button>' : '') +
               '<button class="btn btn-ghost btn-sm" data-autoenrich="' + esc(r.id) + '" title="Enrichment runs automatically after every search. Press this only if a run stopped early: it resumes exactly where it left off (already-enriched batches are never re-bought) and re-sends the refreshed contacts to Candidates and OS Text when done.">Enrich</button>' +
               '<button class="btn btn-ghost btn-sm" data-del="' + esc(r.id) + '">Delete</button>' +
             '</div></div>' + journey + '</div>';
@@ -11759,9 +11784,11 @@
     $("#jdRuns").addEventListener("click", function (e) {
       var t = e.target;
       // "Open in Candidates" on a sent list: remember which list to open, then
-      // let the #prospects navigation happen naturally.
-      if (t.tagName === "A" && t.hasAttribute("data-openlist")) {
-        try { sessionStorage.setItem("ros_open_list", t.getAttribute("data-openlist") || ""); } catch (err) {}
+      // let the #prospects navigation happen naturally. closest(), not t itself:
+      // the journey stop is an <a> full of child spans, and clicks land on those.
+      var openA = t.closest ? t.closest("a[data-openlist]") : null;
+      if (openA) {
+        try { sessionStorage.setItem("ros_open_list", openA.getAttribute("data-openlist") || ""); } catch (err) {}
         return;
       }
       if (t.tagName !== "BUTTON") return;
@@ -11855,7 +11882,7 @@
         if (!q.ok) { alert("Could not price the boost: " + ((q.data && q.data.error) || gatewayMsg(q.status))); return; }
         var quote = (q.data && q.data.quote) || {};
         if (!quote.configured) {
-          alert("Boost phones is not set up yet.\n\nAsk your admin to open Setup > JD Sourcing and fill the Boost phones fields (the host + path of a RapidAPI skip-trace listing, about $0.10 per lookup). Once saved, this button prices and runs it.");
+          alert("Boost phones is not set up yet.\n\nAsk your admin to open Setup > JD Sourcing and fill the Boost phones fields (the host + path of a RapidAPI skip-trace listing; the per-lookup price comes from your plan settings). Once saved, this button prices and runs it.");
           return;
         }
         if (!quote.missing) { toast("Nothing left to boost: everyone reachable already has a phone number."); loadRuns(); return; }
@@ -11877,6 +11904,9 @@
        exactly that choice before anything is spent. */
     function boostDialog(rid2, rname, btn, orig, quote) {
       var per = Number(quote.unitCostUsd);
+      // Plan-priced lookups cost fractions of a cent; "$0.01" would overstate
+      // them 2x and "$0.00" would read as free, so show sub-cent prices exactly.
+      function usd(v) { v = Number(v) || 0; return "$" + (v >= 0.01 || v === 0 ? v.toFixed(2) : v.toFixed(4)); }
       var bud = quote.budget || null;
       var afford = (typeof quote.affordable === "number") ? quote.affordable : quote.missing;
       var maxRows = Math.max(1, Math.min(quote.missing, afford));
@@ -11886,7 +11916,7 @@
       var body =
         '<div style="font-size:13.5px;line-height:1.55">' +
           '<p style="margin:0 0 12px">' + quote.missing + ' candidate' + (quote.missing === 1 ? '' : 's') + ' on &quot;' + esc(rname) + '&quot; still ' +
-            (quote.missing === 1 ? 'has' : 'have') + ' no phone number after the free enrichment. Each lookup costs <b>$' + per.toFixed(2) + '</b> per ' +
+            (quote.missing === 1 ? 'has' : 'have') + ' no phone number after the free enrichment. Each lookup costs <b>' + usd(per) + '</b> per ' +
             (quote.billing === "hit" ? 'number found (misses are free)' : 'lookup, found or not') +
             (quote.missing > maxRows ? '. Your remaining budget covers up to ' + maxRows + ' of them this month.' : '.') + '</p>' +
           '<label style="display:block;font-weight:600;margin:0 0 5px" for="boostN">How many candidates to look up</label>' +
@@ -11913,7 +11943,7 @@
           var n = chosen();
           var estFinds = Math.max(quote.hitRate > 0 ? 1 : 0, Math.round(n * quote.hitRate));
           var estCost = (quote.billing === "hit" ? estFinds : n) * per;
-          calc.innerHTML = '<b>' + n + '</b> lookup' + (n === 1 ? '' : 's') + ' &middot; estimated cost <b>$' + estCost.toFixed(2) + '</b> for about <b>' + estFinds + '</b> new phone' + (estFinds === 1 ? '' : 's') + '.';
+          calc.innerHTML = '<b>' + n + '</b> lookup' + (n === 1 ? '' : 's') + ' &middot; estimated cost <b>' + usd(estCost) + '</b> for about <b>' + estFinds + '</b> new phone' + (estFinds === 1 ? '' : 's') + '.';
           if (budLine && bud) {
             budLine.innerHTML = 'Your Boost budget: <b>$' + Number(bud.spentUsd).toFixed(2) + '</b> of $' + Number(bud.capUsd).toFixed(0) +
               ' spent this month &middot; <b>$' + Number(bud.remainingUsd).toFixed(2) + '</b> left. This run stops by itself before it can go over.';

@@ -1,7 +1,7 @@
 /**
  * RecruitersOS · Signal Engine · Skip-trace phone finder (RapidAPI)
  *
- * The "$0.10 tool": a RapidAPI skip-tracing / people-search listing that keys on
+ * A RapidAPI skip-tracing / people-search listing that keys on
  * NAME + CITY/STATE (no LinkedIn URL needed) and returns the person's own phone
  * numbers, mobiles included, from US public records. This is the recruiter-triggered
  * "Boost phones" rung in JD Sourcing: it only ever runs manually, after the free
@@ -18,7 +18,11 @@
  *                                {linkedin} {domain} {title}
  *   RAPIDAPI_SKIPTRACE_METHOD    GET (default) or POST
  *   RAPIDAPI_SKIPTRACE_BODY     POST only: JSON body template, same placeholders
- *   RAPIDAPI_SKIPTRACE_COST_USD  what the listing bills per REQUEST (default 0.10)
+ *   RAPIDAPI_SKIPTRACE_COST_USD  what the listing bills per REQUEST; overrides the
+ *                                plan math below when set
+ *   RAPIDAPI_SKIPTRACE_PLAN_USD       subscription plans: the monthly plan price...
+ *   RAPIDAPI_SKIPTRACE_PLAN_REQUESTS  ...and the requests it includes; per-request
+ *                                cost = price / requests (used when COST_USD is unset)
  *   RAPIDAPI_SKIPTRACE_BILLING   "call" (default: every request bills, hit or miss)
  *                                or "hit" (pay-per-result listings)
  *   RAPIDAPI_SKIPTRACE_DETAILS_PATH  two-step listings only: the person-details path,
@@ -46,12 +50,28 @@ import {
 } from "./waterfall";
 import { cred } from "../providers/http";
 
-export const SKIPTRACE_DEFAULT_COST_USD = 0.1;
+/**
+ * Default per-request cost = the subscribed RapidAPI plan, verified against the
+ * real invoice 2026-07-21: $60/month buys 22,500 requests, so one request costs
+ * $0.002667, NOT the $0.10 flat guess this shipped with (which over-stated spend
+ * 37.5x and froze recruiters' monthly Boost budgets on pennies of real usage).
+ */
+export const SKIPTRACE_DEFAULT_PLAN_USD = 60;
+export const SKIPTRACE_DEFAULT_PLAN_REQUESTS = 22500;
+export const SKIPTRACE_DEFAULT_COST_USD = SKIPTRACE_DEFAULT_PLAN_USD / SKIPTRACE_DEFAULT_PLAN_REQUESTS;
 
-/** The listing's per-lookup price, Setup-tunable so a cheaper listing bills honestly. */
+/** The listing's per-REQUEST price. Resolution order: explicit COST_USD override,
+ *  then the workspace's own plan math (PLAN_USD / PLAN_REQUESTS), then the default
+ *  plan above. Setup-tunable so any listing bills honestly. */
 export function skipTraceUnitCost(): number {
   const v = Number(cred("RAPIDAPI_SKIPTRACE_COST_USD"));
-  return Number.isFinite(v) && v > 0 ? v : SKIPTRACE_DEFAULT_COST_USD;
+  if (Number.isFinite(v) && v > 0) return v;
+  const planUsd = Number(cred("RAPIDAPI_SKIPTRACE_PLAN_USD"));
+  const planReq = Number(cred("RAPIDAPI_SKIPTRACE_PLAN_REQUESTS"));
+  if (Number.isFinite(planUsd) && planUsd > 0 && Number.isFinite(planReq) && planReq > 0) {
+    return planUsd / planReq;
+  }
+  return SKIPTRACE_DEFAULT_COST_USD;
 }
 
 /** "call" = billed per request (the RapidAPI norm); "hit" = pay-per-result listings. */
