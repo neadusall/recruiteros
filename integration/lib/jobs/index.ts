@@ -27,7 +27,7 @@ import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 /* ---------------- types ---------------- */
 
 export type JdStatus = "open" | "closed";
-export type JdSource = "upload" | "paste" | "vetting" | "sourcing";
+export type JdSource = "upload" | "paste" | "vetting" | "sourcing" | "loxo";
 export type PairingSource = "vetting" | "resume_inbox" | "jdsourcing" | "ostext" | "manual";
 
 export interface JobDescription {
@@ -43,6 +43,8 @@ export interface JobDescription {
   fileName?: string;
   /** Content hash for dedupe (djb2 of normalized text). */
   hash: string;
+  /** The ATS's own id for this job (Loxo job id) when it came from a sync. */
+  providerId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -190,6 +192,67 @@ export function upsertJd(
   store.jds.push(rec);
   persist();
   return rec;
+}
+
+export function getJdByProvider(workspaceId: string, providerId: string): JobDescription | undefined {
+  return store.jds.find((j) => j.workspaceId === workspaceId && j.providerId === providerId);
+}
+
+/**
+ * Upsert a job that lives in the connected ATS (Loxo). Matched by the ATS's
+ * own job id first, so a re-sync UPDATES the record in place (title, company,
+ * text, open/closed) instead of creating twins; a content-hash match adopts an
+ * already-pasted copy of the same JD by stamping the provider id onto it. The
+ * ATS is the source of truth for its own jobs: local edits to these fields are
+ * overwritten on the next sync. Persists only when something actually changed,
+ * so the 15-minute sync tick doesn't churn timestamps or snapshots.
+ */
+export function upsertAtsJd(
+  workspaceId: string,
+  input: { providerId: string; title?: string; company?: string; text: string; open: boolean },
+): { jd: JobDescription; created: boolean; changed: boolean } {
+  const text = (input.text || "").trim().slice(0, JD_TEXT_CAP);
+  const title = (input.title?.trim() || titleFromJdText(text)).slice(0, 90);
+  const company = input.company?.trim().slice(0, 90) || undefined;
+  const status: JdStatus = input.open ? "open" : "closed";
+  const hash = contentHash(text);
+
+  let jd = getJdByProvider(workspaceId, input.providerId);
+  if (!jd) {
+    const byHash = store.jds.find((j) => j.workspaceId === workspaceId && !j.providerId && j.hash === hash);
+    if (byHash) {
+      byHash.providerId = input.providerId;
+      jd = byHash;
+    }
+  }
+
+  if (jd) {
+    let changed = false;
+    if (jd.title !== title && title) { jd.title = title; changed = true; }
+    if (jd.company !== company && (company || jd.source === "loxo")) { jd.company = company; changed = true; }
+    if (text && jd.text !== text) { jd.text = text; jd.hash = hash; changed = true; }
+    if (jd.status !== status) { jd.status = status; changed = true; }
+    if (changed) { jd.updatedAt = nowIso(); persist(); }
+    return { jd, created: false, changed };
+  }
+
+  const now = nowIso();
+  const rec: JobDescription = {
+    id: rid("jd"),
+    workspaceId,
+    title,
+    company,
+    text,
+    status,
+    source: "loxo",
+    hash,
+    providerId: input.providerId,
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.jds.push(rec);
+  persist();
+  return { jd: rec, created: true, changed: true };
 }
 
 export function setJdStatus(workspaceId: string, id: string, status: JdStatus): JobDescription | undefined {

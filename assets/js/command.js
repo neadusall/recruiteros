@@ -11142,10 +11142,10 @@
       '.jd-or span{padding:0 12px}' +
       '.jd-buildbar{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin:12px 0 2px}' +
       '.jd-buildbar .muted{font-size:12px}' +
-      '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation,#jdSnavUrl,#jdSnavName{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
+      '#jdName,#jdText,#jdbTitle,#jdbCompany,#jdbNotes,#jdbLocation,#jdSnavUrl,#jdSnavName,#jdLibPick{width:100%;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:14px;padding:11px 14px;margin:0;transition:border-color .12s,box-shadow .12s}' +
       '#jdText{line-height:1.55;resize:vertical;min-height:104px}' +
       '#jdName::placeholder,#jdText::placeholder,#jdbTitle::placeholder,#jdbCompany::placeholder,#jdbNotes::placeholder,#jdbLocation::placeholder,#jdSnavUrl::placeholder,#jdSnavName::placeholder{color:var(--text-dim)}' +
-      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,#jdSnavUrl:focus,#jdSnavName:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
+      '#jdName:focus,#jdText:focus,#jdbTitle:focus,#jdbCompany:focus,#jdbNotes:focus,#jdbLocation:focus,#jdSnavUrl:focus,#jdSnavName:focus,#jdLibPick:focus,.jd-cap input:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}' +
       '.jd-field{margin-bottom:8px}' +
       '.jd-field>label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:600;margin-bottom:6px}' +
       '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
@@ -11330,6 +11330,8 @@
           '<div class="jd-field"><label>List name</label><input id="jdName" type="text" placeholder="e.g. JAGGAER VP Sales · East" /></div>' +
         '</div>' +
         '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, certs/licenses, must-have experience, deal-breakers" /></div>' +
+        '<div class="jd-field" id="jdLibRow" style="display:none"><label>Start from your Job Library <span class="jd-opt muted">your Loxo jobs are already in there</span></label>' +
+          '<select id="jdLibPick"><option value="">Pick a saved job and every box below fills itself</option></select></div>' +
         '<div class="jd-field"><label>Job description <span class="jd-opt muted">optional, or let the AI write it</span></label>' +
           '<textarea id="jdText" rows="4" placeholder="Paste the job description here. The more real detail, the stronger the search."></textarea></div>' +
         '<div class="jd-builder"><div class="jd-buildbar" style="margin:0;justify-content:space-between;gap:10px">' +
@@ -12704,6 +12706,33 @@
       planHost.addEventListener("keydown", function (e) { if (e.target && e.target.id === "jdRefineInput" && (e.key === "Enter" || e.keyCode === 13)) { e.preventDefault(); doRefine(); } });
     }
     var jdbBtn = $("#jdbBtn"); if (jdbBtn) jdbBtn.addEventListener("click", doBuildJd);
+    /* Job Library picker: choose a saved job (Loxo jobs sync in automatically)
+       and the title, company, list name, and JD fill themselves. */
+    var jdLibSel = $("#jdLibPick");
+    if (jdLibSel) {
+      api("/jobs").then(function (d) {
+        var jds = ((d && d.jds) || []).filter(function (j) { return j.status === "open"; });
+        if (!jds.length) return;
+        jds.forEach(function (j) {
+          var o = document.createElement("option");
+          o.value = j.id;
+          o.textContent = j.title + (j.company ? " · " + j.company : "");
+          jdLibSel.appendChild(o);
+        });
+        var row = $("#jdLibRow"); if (row) row.style.display = "";
+      }).catch(function () {});
+      jdLibSel.addEventListener("change", function () {
+        var id = jdLibSel.value; if (!id) return;
+        api("/jobs?id=" + encodeURIComponent(id)).then(function (d) {
+          if (!d || !d.jd) { msg("Could not load that job. Try again."); return; }
+          var ta2 = $("#jdText"); if (ta2) ta2.value = d.jd.text || "";
+          var t2 = $("#jdbTitle"); if (t2 && !t2.value.trim()) t2.value = d.jd.title || "";
+          var c2 = $("#jdbCompany"); if (c2 && !c2.value.trim()) c2.value = d.jd.company || "";
+          var n2 = $("#jdName"); if (n2 && !n2.value.trim()) n2.value = d.jd.title || "";
+          msg('Loaded "' + d.jd.title + '" from the Job Library. Set the location if you have one, then press Initiate Search.');
+        }).catch(function () { msg("Could not load that job. Try again."); });
+      });
+    }
     ["#jdbTitle", "#jdbCompany", "#jdbNotes"].forEach(function (sel) {
       var e = $(sel); if (e) e.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.keyCode === 13) { ev.preventDefault(); doBuildJd(); } });
     });
@@ -14437,21 +14466,28 @@
       try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
       catch (e) { return esc(s); }
     }
-    var JL_SRC = { upload: "Uploaded", paste: "Pasted", vetting: "From AI Vetting", sourcing: "From JD Sourcing" };
+    var JL_SRC = { upload: "Uploaded", paste: "Pasted", vetting: "From AI Vetting", sourcing: "From JD Sourcing", loxo: "Synced from Loxo" };
+    var loxoOn = false;
     var JL_PAIR_SRC = { vetting: "Vetting opt-in", resume_inbox: "Resume inbox", jdsourcing: "JD Sourcing", ostext: "OS Text push", manual: "Added by you" };
 
     function paint() {
       body.innerHTML = loading();
       api("/jobs").then(function (d) {
         var jds = (d && d.jds) || [];
+        loxoOn = !!(d && d.loxoConnected);
         var headCard = '<div class="vt-card"><div class="vt-toolbar" style="margin:0">' +
           '<span class="vt-count">' + jds.length + " job description" + (jds.length === 1 ? "" : "s") +
           " · " + jds.reduce(function (n, j) { return n + (j.candidates || 0); }, 0) + " paired candidates</span>" +
           '<span style="display:flex;gap:8px;flex-wrap:wrap">' +
+          (loxoOn ? '<button class="vt-btn" id="jlLoxoBtn">Pull from Loxo now</button>' : "") +
           '<button class="vt-btn" id="jlPasteBtn">' + (pasting ? "Hide paste box" : "Paste a JD") + "</button>" +
           '<button class="vt-btn vt-btn-primary" id="jlUploadBtn">Upload JDs</button>' +
           '<input type="file" id="jlFile" accept=".pdf,.docx,.doc,.txt,.md" multiple style="display:none" aria-label="Upload job description files" /></span></div>' +
-          '<div class="vt-hint" style="margin-top:8px">Upload as many JD files as you like (PDF, Word, or text) in one go; duplicates are folded automatically. Copy any JD from here into a new AI Vetting desk or a JD Sourcing search and everything that touches it pairs back to this record.</div>' +
+          '<div class="vt-hint" style="margin-top:8px">' +
+          (loxoOn
+            ? "Your Loxo jobs sync in here automatically (new roles appear, edited JDs refresh, filled or closed roles flip to Closed); Pull from Loxo now forces a refresh this second. You can also upload JD files (PDF, Word, or text) or paste one. "
+            : "Upload as many JD files as you like (PDF, Word, or text) in one go; duplicates are folded automatically. Connect Loxo under Settings and every job in your ATS syncs in here on its own. ") +
+          "Every job here is pickable inside AI Vetting and JD Sourcing, no copy and paste, and everything that touches it pairs back to this record.</div>" +
           (pasting
             ? '<div style="margin-top:12px"><div class="vt-form-grid">' +
               '<div class="vt-field"><label>Title</label><input id="jlNewTitle" placeholder="e.g. Senior Healthcare Recruiter" /></div>' +
@@ -14474,7 +14510,7 @@
         '<div class="vt-desk-head"><h3 class="vt-desk-title">' + esc(j.title) + (j.company ? ' <span>· ' + esc(j.company) + "</span>" : "") + "</h3>" + pill + "</div>" +
         '<div class="vt-meta">' +
         '<span class="vt-chip"><b>' + (j.candidates || 0) + "</b> paired candidate" + (j.candidates === 1 ? "" : "s") + "</span>" +
-        '<span class="vt-chip">' + esc(JL_SRC[j.source] || j.source) + (j.fileName ? " · " + esc(j.fileName) : "") + "</span>" +
+        '<span class="vt-chip">' + esc(j.providerId ? "Synced from Loxo" : (JL_SRC[j.source] || j.source)) + (j.fileName ? " · " + esc(j.fileName) : "") + "</span>" +
         '<span class="vt-chip">updated ' + esc(fmtWhen(j.updatedAt)) + "</span></div>" +
         '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
         '<button class="vt-btn" data-jlopen="' + esc(j.id) + '">Candidates & JD</button>' +
@@ -14535,6 +14571,17 @@
     }
 
     function wire(jds) {
+      var loxoBtn = $("#jlLoxoBtn");
+      if (loxoBtn) loxoBtn.addEventListener("click", function () {
+        loxoBtn.disabled = true; loxoBtn.textContent = "Pulling from Loxo…";
+        send("/jobs", "POST", { action: "loxo_sync" }).then(function (r) {
+          loxoBtn.disabled = false; loxoBtn.textContent = "Pull from Loxo now";
+          if (!r.ok) { toast((r.data && r.data.detail) || "Loxo pull failed, try again."); return; }
+          var d2 = r.data || {};
+          toast("Loxo: " + (d2.scanned || 0) + " jobs checked, " + (d2.added || 0) + " new, " + (d2.updated || 0) + " updated");
+          paint();
+        }).catch(function () { loxoBtn.disabled = false; loxoBtn.textContent = "Pull from Loxo now"; toast("Couldn’t reach the server."); });
+      });
       var pasteBtn = $("#jlPasteBtn");
       if (pasteBtn) pasteBtn.addEventListener("click", function () { pasting = !pasting; paint(); });
       var createBtn = $("#jlCreate");
@@ -14654,23 +14701,30 @@
         '<select id="vtfPhone">' + opts + "</select>" +
         '<div class="vt-hint">' + hint + "</div></div>";
     }
-    // Cloned-voice picker, REQUIRED to go live. Populated from the operator's
-    // own consented cloned voices (Voice Drops → Voice & Consent). The agent
-    // speaks the whole call in whichever voice is selected here.
+    // Agent-voice picker. Populated from the operator's own saved voices
+    // (Voice Drops → Voice & Consent) plus the workspace default voice when one
+    // is configured; leaving it on the default is a valid go-live choice. The
+    // agent speaks the whole call in whichever voice this resolves to.
     function voiceSelect(d) {
       var cur = d.voiceId || "";
       var voices = vt.voices || [];
-      var opts = '<option value="">- select your cloned voice -</option>';
+      var dflt = vt.defaultVoiceId || "";
+      var dname = vt.defaultVoiceName || "Default voice";
+      var opts = dflt
+        ? '<option value="">' + esc(dname) + " (default)</option>"
+        : '<option value="">- select your cloned voice -</option>';
       var hasCur = false;
       voices.forEach(function (v) {
         if (v.voiceId === cur) hasCur = true;
         opts += '<option value="' + esc(v.voiceId) + '"' + (v.voiceId === cur ? " selected" : "") + ">" + esc(v.agentName || v.voiceId) + "</option>";
       });
       if (cur && !hasCur) opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + "</option>";
-      var hint = voices.length
+      var hint = dflt
+        ? "Speaks in " + esc(dname) + " unless you pick a different voice here."
+        : voices.length
         ? "Required, the voice the agent speaks in on every call."
         : "No cloned voices yet. Record one in Voice Drops → Voice &amp; Consent, then pick it here.";
-      return '<div class="vt-field"><label>Your cloned voice <span style="color:var(--vt-bad)">*</span></label>' +
+      return '<div class="vt-field"><label>Agent voice' + (dflt ? "" : ' <span style="color:var(--vt-bad)">*</span>') + "</label>" +
         '<select id="vtfVoice">' + opts + "</select>" +
         '<div class="vt-hint">' + hint + "</div></div>";
     }
@@ -14753,6 +14807,8 @@
           '<button type="button" class="vt-btn vt-gen-btn" id="vtJdUpload">Upload JD</button>' +
           '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtAutoFill"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Auto-fill from JD</button>' +
         "</div>" +
+        '<div class="vt-field" id="vtfJdLibRow" style="display:none;margin-bottom:10px"><select id="vtfJdLib" style="width:100%">' +
+          '<option value="">Or pick a job from your Job Library (your Loxo jobs are already in there)</option></select></div>' +
         '<textarea id="vtfJd" rows="6" placeholder="Paste the full job description here. The agent uses this as its source of truth, it won\'t read it aloud.">' + esc(d.jobDescription || "") + "</textarea>" +
         '<div class="vt-hint" id="vtAutoMsg"></div></div>' +
         '<div class="vt-section">Your voice on the call</div>' +
@@ -14930,6 +14986,8 @@
         vt.numbersDry = !!nd.dryRun;
         vt.numbersErr = nd.error || (res[0] ? null : "unreachable");
         vt.voices = ((vd.consent) || []).filter(function (c) { return c.voiceId; });
+        vt.defaultVoiceId = vd.defaultVoiceId || null;
+        vt.defaultVoiceName = vd.defaultVoiceName || null;
         vt.inbox = res[3] || null;
         vt.msgTemplates = (res[4] && res[4].templates) || [];
 
@@ -15157,6 +15215,35 @@
         if (!e || !val || e.value.trim()) return 0;
         e.value = val; afFlash(e); return 1;
       }
+      /* Job Library picker: drop a saved JD (Loxo jobs sync in automatically)
+         straight into the desk, then Auto-fill drafts the rest. */
+      var jdLib = $("#vtfJdLib");
+      if (jdLib) {
+        api("/jobs").then(function (dd) {
+          var jds = ((dd && dd.jds) || []).filter(function (j) { return j.status === "open"; });
+          if (!jds.length) return;
+          jds.forEach(function (j) {
+            var o = document.createElement("option");
+            o.value = j.id;
+            o.textContent = j.title + (j.company ? " · " + j.company : "");
+            jdLib.appendChild(o);
+          });
+          var row = $("#vtfJdLibRow"); if (row) row.style.display = "";
+        }).catch(function () {});
+        jdLib.addEventListener("change", function () {
+          var id = jdLib.value; if (!id) return;
+          afMsg("Loading the JD from the library…");
+          api("/jobs?id=" + encodeURIComponent(id)).then(function (dd) {
+            if (!dd || !dd.jd) { afMsg("Could not load that job. Try again.", true); return; }
+            var ta = $("#vtfJd");
+            if (ta) { ta.value = dd.jd.text || ""; afFlash(ta); }
+            afSet("vtfRole", dd.jd.title);
+            afSet("vtfCompany", dd.jd.company);
+            afSet("vtfName", dd.jd.title);
+            afMsg("JD loaded from the library. Press <b>Auto-fill from JD</b> and the desk drafts itself.");
+          }).catch(function () { afMsg("Could not load that job. Try again.", true); });
+        });
+      }
       if (afBtn) afBtn.addEventListener("click", function () {
         var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
         if (!jd) {
@@ -15220,7 +15307,7 @@
           // Say plainly what a JD can never fill, so the operator finishes the rest.
           var manual = [];
           if (!vget("vtfPhone")) manual.push("inbound number");
-          if (!vget("vtfVoice")) manual.push("your cloned voice");
+          if (!vget("vtfVoice") && !vt.defaultVoiceId) manual.push("your cloned voice");
           if (!vget("vtfAgentName")) manual.push("your name");
           if (!vget("vtfBooking")) manual.push("scheduling link (optional)");
           if (!vget("vtfTransfer")) manual.push("live transfer number (optional)");

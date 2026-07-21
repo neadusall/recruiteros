@@ -94,6 +94,24 @@ export class LoxoClient {
     return this.get(`/companies/${id}`).catch(() => null);
   }
 
+  /* ---------------- jobs ---------------- */
+
+  /**
+   * One page of Jobs (GET /jobs). Unlike people/companies (scroll-only), the
+   * jobs endpoint is page-numbered and documents `per_page`; we still fall back
+   * per-resource on a 422 so a stricter account pages small instead of failing.
+   */
+  async listJobs(opts: { page?: number } = {}): Promise<LoxoPage<any>> {
+    const p = new URLSearchParams();
+    if (opts.page && opts.page > 1) p.set("page", String(opts.page));
+    return this.getActivityPage("jobs", p, "jobs");
+  }
+
+  /** Full job detail (carries the description the list may omit). */
+  async getJob(id: string | number): Promise<any | null> {
+    return this.get(`/jobs/${id}`).catch(() => null);
+  }
+
   /* ---------------- activity / communication history ---------------- */
 
   /**

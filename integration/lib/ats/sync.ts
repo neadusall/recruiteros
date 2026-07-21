@@ -22,6 +22,7 @@ import {
 } from "./credentials";
 import { LoxoClient } from "./loxoClient";
 import { syncLoxoActivity } from "./activity";
+import { syncLoxoJobs } from "./jobs";
 import {
   loxoPersonToDataRecord,
   loxoCompanyToRecord,
@@ -63,6 +64,8 @@ export interface SyncReport {
   companies: { added: number; updated: number; scanned: number };
   /** Communication-history pull (person_events + email_tracking + sms). */
   activity?: { scanned: number; touches: number; peopleUpdated: number; error?: string };
+  /** Loxo Jobs -> Job Library pull. */
+  jobs?: { scanned: number; added: number; updated: number; error?: string };
   /** People whose Loxo DNC signal was mirrored into the suppression list. */
   dncSuppressed?: number;
   error?: string;
@@ -149,6 +152,12 @@ export async function syncLoxo(workspaceId: string, opts: { full?: boolean } = {
     }
 
     await markSynced(workspaceId, "loxo", new Date().toISOString());
+
+    // Jobs -> the Job Library, so the agency's live job list (new roles,
+    // edited JDs, closed/filled flips) lands in the portal automatically and
+    // AI Vetting / JD Sourcing pull from it with no copy and paste. Never
+    // throws; a failure is reported without failing the record sync.
+    report.jobs = await syncLoxoJobs(workspaceId, client);
 
     // Communication history (person_events + email_tracking + sms) -> the
     // warehouse `lastContactedAt` stamps the no-double-contact guard reads.
@@ -266,7 +275,10 @@ export async function registerLoxoWebhooks(workspaceId: string, baseUrl: string)
   }
 
   const wanted: Array<{ item_type: string; action: string }> = [];
-  for (const item_type of ["person", "company"]) {
+  // "job" keeps the Job Library live between sync ticks: a role opened, edited,
+  // or deleted in Loxo lands here within seconds. If an account rejects the
+  // job subscriptions, the others still register and the polling sync covers it.
+  for (const item_type of ["person", "company", "job"]) {
     for (const action of ["create", "update", "destroy"]) {
       wanted.push({ item_type, action });
     }

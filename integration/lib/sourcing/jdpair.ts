@@ -18,9 +18,14 @@ export async function pairRunToJobLibrary(run: SourcingRun, note?: string): Prom
   try {
     if ((run.jd || "").trim().length < 40) return;
     await ensureJobsReady();
+    // The search UI appends "Based in: <location>" to the JD it runs with. A
+    // run started from a Job Library pick must fold back into THAT library
+    // record (often a Loxo-synced job), so strip the location tail before the
+    // content-hash match; runs from pasted text are unaffected.
+    const baseText = run.jd.replace(/\n+Based in:[^\n]*\s*$/i, "").trim();
     const jd = upsertJd(run.workspaceId, {
       title: run.name || undefined,
-      text: run.jd,
+      text: baseText.length >= 40 ? baseText : run.jd,
       source: "sourcing",
     });
     let paired = 0;

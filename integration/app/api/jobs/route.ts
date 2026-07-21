@@ -9,6 +9,7 @@
  *   POST { action: "pair", jdId, email?, phone?, name?, note? }   (manual pairing)
  *   POST { action: "unpair", pairingId }
  *   POST { action: "lookup", contacts: [{ key, email?, phone? }] } (batch: which job is this person for?)
+ *   POST { action: "loxo_sync" }  (pull ALL jobs from the connected Loxo now)
  *   DELETE /api/jobs?id=
  *
  * Session-gated. This is the central home for every JD in the workspace; the
@@ -22,6 +23,7 @@ import {
   listPairings, recordPairing, deletePairing, pairingCounts, lookupJobs,
 } from "../../../lib/jobs";
 import { extractResumeText } from "../../../lib/vetting";
+import { getVendorConfig, LoxoClient, syncLoxoJobs, loxoIsActive } from "../../../lib/ats";
 
 export async function GET(req: Request) {
   const g = requireSession(req);
@@ -43,7 +45,7 @@ export async function GET(req: Request) {
     textChars: j.text.length,
     candidates: counts[j.id] ?? 0,
   }));
-  return ok({ jds });
+  return ok({ jds, loxoConnected: await loxoIsActive(ws) });
 }
 
 export async function POST(req: Request) {
@@ -120,6 +122,17 @@ export async function POST(req: Request) {
 
   if (b.action === "unpair") {
     return deletePairing(ws, String(b.pairingId || "")) ? ok({ removed: true }) : fail("not_found", 404);
+  }
+
+  if (b.action === "loxo_sync") {
+    const cfg = await getVendorConfig(ws, "loxo");
+    if (!cfg || !cfg.domain || !cfg.slug || !cfg.apiKey) {
+      return fail("loxo_not_connected", 422, { detail: "Connect Loxo first (Settings, ATS) and this pulls every job automatically." });
+    }
+    const client = new LoxoClient({ domain: cfg.domain, slug: cfg.slug, apiKey: cfg.apiKey });
+    const r = await syncLoxoJobs(ws, client);
+    if (r.error && !r.scanned) return fail("loxo_sync_failed", 502, { detail: r.error });
+    return ok({ scanned: r.scanned, added: r.added, updated: r.updated, error: r.error });
   }
 
   if (b.action === "lookup") {

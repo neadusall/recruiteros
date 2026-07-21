@@ -15,12 +15,13 @@
  */
 
 import { NextResponse } from "next/server";
-import { getVendorConfig, syncOnePerson, syncOneCompany, syncLoxoActivity, LoxoClient } from "../../../../lib/ats";
+import { getVendorConfig, syncOnePerson, syncOneCompany, syncLoxoActivity, syncOneLoxoJob, closeLoxoJob, LoxoClient } from "../../../../lib/ats";
 import { deleteByProviderId as deletePerson } from "../../../../lib/data";
 import { deleteByProviderId as deleteCompany } from "../../../../lib/companies";
 
 const PERSON_TYPES = new Set(["person", "candidate", "person_job_profile", "person_education_profile"]);
 const COMPANY_TYPES = new Set(["company"]);
+const JOB_TYPES = new Set(["job"]);
 
 /**
  * person_event webhooks burst (one per activity a recruiter logs), and the
@@ -87,6 +88,19 @@ export async function POST(req: Request) {
       }
       const synced = await syncOnePerson(ws, itemId);
       return NextResponse.json({ ok: true, type: "person", action, synced });
+    }
+
+    if (JOB_TYPES.has(itemType)) {
+      // A job edited in Loxo lands in the Job Library within seconds; a job
+      // deleted there flips to Closed here (pairings and history are kept).
+      if (action === "destroy") {
+        const closed = await closeLoxoJob(ws, itemId);
+        return NextResponse.json({ ok: true, type: "job", action, closed });
+      }
+      if (!cfg.domain || !cfg.slug || !cfg.apiKey) return NextResponse.json({ ok: true, ignored: "no_credentials" });
+      const client = new LoxoClient({ domain: cfg.domain, slug: cfg.slug, apiKey: cfg.apiKey });
+      const synced = await syncOneLoxoJob(ws, client, itemId);
+      return NextResponse.json({ ok: true, type: "job", action, synced });
     }
 
     if (COMPANY_TYPES.has(itemType)) {

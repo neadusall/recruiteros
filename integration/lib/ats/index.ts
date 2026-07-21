@@ -28,6 +28,10 @@ export {
 } from "./sync";
 export { dataRecordToLoxoPerson, companyToLoxoCompany, detectLoxoDnc } from "./map";
 
+// Loxo Jobs -> Job Library: the agency's live job list mirrored into the
+// portal so AI Vetting and JD Sourcing pull JDs with no copy and paste.
+export { syncLoxoJobs, syncOneLoxoJob, closeLoxoJob, type JobsSyncReport } from "./jobs";
+
 // Communication-history layer: the Loxo activity pull (who has the agency
 // already talked to?) and the touch write-back (log our sends into Loxo).
 export { syncLoxoActivity, logTouchToAts, classifyActivityName, type ActivityReport, type TouchLog } from "./activity";
