@@ -71,10 +71,13 @@ export async function POST(req: Request) {
   const desk = dialed ? findDeskByNumber(dialed) : undefined;
   if (!desk) {
     // No desk for this number — hand back neutral defaults so the call survives.
+    // Same variable SET as the real branch so the engine's substitution never
+    // sees a missing key.
     return NextResponse.json({
       dynamic_variables: {
         agent_name: "the recruiter", agent_company: "our firm",
-        first_name: "there", current_title: "", current_company: "", experience: "", resume: "",
+        first_name: "there", current_title: "", current_company: "", experience: "",
+        resume: "", resume_email: "", resume_gaps: "",
       },
     });
   }
