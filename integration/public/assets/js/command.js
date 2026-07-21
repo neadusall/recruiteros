@@ -924,6 +924,10 @@
     // Outbound Performance: the admin utilization + accountability command
     // center (capacity engine, scores, heatmap, triggers, goals, reports).
     outbound: { title: "Outbound Performance", crumb: "Admin", action: null, render: renderOutbound, cap: "team:manage" },
+    // OS Text Performance: the enrichment-to-SMS KPI tracker. Pairs the JD
+    // Sourcing scraping/enriching supply with the OS Text engine's Telnyx
+    // send-and-response outcomes over one shared window.
+    ostextkpi: { title: "OS Text Performance", crumb: "Admin", action: null, render: renderOstextKpi, cap: "team:manage" },
     // My Outbound: the personal performance view + the 10-15 minute Daily
     // Checklist worksheet. Self-scoped; available in both portals.
     myoutbound: { title: "My Outbound", crumb: "Operate", action: null, render: renderMyOutbound },
@@ -1147,6 +1151,453 @@
      /api/outbound (self-scoped for members, team-wide for admins). */
 
   var obState = { range: 30, sort: "score", dir: -1, filter: "" };
+
+  /* ============================================================
+     OS Text Performance (admin): the enrichment-to-text KPI tracker.
+     Pairs JD Sourcing's scraping + enriching supply with the OS Text
+     engine's Telnyx send-and-response outcomes over ONE shared window,
+     so cell rate, delivery, replies, opt-outs and spend all read
+     against the same period. Data: GET /api/ostext/kpi?days=N.
+     ============================================================ */
+  var otkWindow = 30;
+
+  function otkNum(x) { return Number(x || 0).toLocaleString(); }
+  function otkUsd(x) { return "$" + Number(x || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function otkRate(n, d) { return d > 0 ? (100 * n) / d : -1; }
+  function otkRateTxt(n, d, dp) {
+    var p = otkRate(n, d);
+    if (p < 0) return "n/a";
+    var f = Math.pow(10, dp || 0);
+    return (Math.round(p * f) / f) + "%";
+  }
+  function otkShort(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+
+  // Last N local days as YYYY-MM-DD keys, oldest first (zero-fills quiet days
+  // so a day with no sends reads as a real gap, not a skipped x-step).
+  function otkDayKeys(n) {
+    var out = [];
+    for (var i = n - 1; i >= 0; i--) {
+      var d = new Date(Date.now() - i * 86400000);
+      out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"));
+    }
+    return out;
+  }
+  function otkDayLabel(key) {
+    return new Date(key + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  /* One trend chart: a 2px line (or day columns), an optional threshold
+     hairline, an end-dot with a surface ring, and a native tooltip per day.
+     Null points (no denominator that day) break the line honestly. */
+  function otkTrend(opts) {
+    var series = opts.series || [], titles = opts.titles || [];
+    var w = 300, h = 84, padT = 8, padB = 10, padX = 4;
+    var innerH = h - padT - padB;
+    var max = opts.max;
+    if (max == null) {
+      max = 1;
+      series.forEach(function (v) { if (v != null && v > max) max = v; });
+      max = max * 1.15;
+    }
+    var n = series.length, step = n > 1 ? (w - padX * 2) / (n - 1) : 0;
+    function sx(i) { return padX + i * step; }
+    function sy(v) { return padT + innerH - (Math.max(0, Math.min(v, max)) / max) * innerH; }
+    var svg = '<svg width="100%" viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" style="display:block;height:84px">';
+    if (opts.threshold != null && opts.threshold <= max) {
+      var ty = sy(opts.threshold).toFixed(1);
+      svg += '<line x1="0" y1="' + ty + '" x2="' + w + '" y2="' + ty + '" stroke="var(--border-strong,var(--border))" stroke-width="1"/>';
+    }
+    if (opts.kind === "cols") {
+      var bw = Math.max(2, Math.min(14, (n > 0 ? (w - padX * 2) / n : w) * 0.55));
+      series.forEach(function (v, i) {
+        if (v == null || v <= 0) return;
+        var y = sy(v);
+        svg += '<rect x="' + (sx(i) - bw / 2).toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + (padT + innerH - y).toFixed(1) + '" rx="2" fill="var(--brand)"/>';
+      });
+    } else {
+      var d = "", started = false, last = null;
+      series.forEach(function (v, i) {
+        if (v == null) { started = false; return; }
+        d += (started ? " L" : " M") + sx(i).toFixed(1) + " " + sy(v).toFixed(1);
+        started = true; last = { x: sx(i), y: sy(v) };
+      });
+      if (d) svg += '<path d="' + d + '" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+      if (last) svg += '<circle cx="' + last.x.toFixed(1) + '" cy="' + last.y.toFixed(1) + '" r="4" fill="var(--brand)" stroke="var(--surface)" stroke-width="2"/>';
+    }
+    // Per-day hover targets; every value is also in the cards and tables, so
+    // the tooltip enhances rather than gates.
+    if (titles.length) {
+      var hitW = n > 0 ? (w - padX * 2) / n : w;
+      titles.forEach(function (t, i) {
+        if (!t) return;
+        svg += '<rect x="' + (padX + i * hitW).toFixed(1) + '" y="0" width="' + hitW.toFixed(1) + '" height="' + h + '" fill="transparent"><title>' + esc(t) + "</title></rect>";
+      });
+    }
+    return svg + "</svg>";
+  }
+  function otkTrendTile(label, valueTxt, sub, chart) {
+    return '<div class="otk-tile"><div class="otk-tile-top"><span class="sl">' + esc(label) + "</span><b>" + valueTxt + "</b></div>" + chart +
+      (sub ? '<div class="otk-tile-sub">' + esc(sub) + "</div>" : "") + "</div>";
+  }
+
+  /* Funnel rows: bar length carries the magnitude, the right column carries the
+     stage-to-stage conversion, and the single worst conversion is called out as
+     the biggest leak (the cheapest place to improve). */
+  function otkFunnelHtml(stages) {
+    var max = 0;
+    stages.forEach(function (s) { if (s.v > max) max = s.v; });
+    if (!max) return '<div class="muted" style="font-size:12.5px">Nothing in this window yet. Numbers appear as lists are enriched and texts go out.</div>';
+    var worstIdx = -1, worstPct = 1e9;
+    stages.forEach(function (s, i) {
+      if (!i) return;
+      var prev = stages[i - 1].v;
+      var p = prev > 0 ? (100 * s.v) / prev : -1;
+      if (p >= 0 && p < worstPct) { worstPct = p; worstIdx = i; }
+    });
+    return stages.map(function (s, i) {
+      var conv = "";
+      if (i > 0) {
+        var prev = stages[i - 1].v;
+        var p = prev > 0 ? Math.round((100 * s.v) / prev) : -1;
+        if (p >= 0) {
+          conv = Math.min(p, 999) + "% of previous";
+          if (i === worstIdx && p < 100) conv = '<span style="color:var(--danger);font-weight:600">' + conv + " · biggest leak</span>";
+        }
+      }
+      return '<div class="otk-frow"><div class="otk-flabel" title="' + esc(s.sub || "") + '">' + esc(s.label) + "</div>" +
+        '<div class="otk-fbar"><span style="width:' + Math.max(1.5, (100 * s.v) / max).toFixed(1) + '%"></span></div>' +
+        '<div class="otk-fval">' + otkNum(s.v) + "</div>" +
+        '<div class="otk-fconv">' + conv + "</div></div>";
+    }).join("");
+  }
+
+  function otkLine(label, valueHtml, labelTitle) {
+    return '<div class="otk-line"><span' + (labelTitle ? ' title="' + esc(labelTitle) + '"' : "") + ">" + esc(label) + '</span><span class="otk-line-r">' + valueHtml + "</span></div>";
+  }
+  function otkMiniBar(p, fg) {
+    return '<span style="display:inline-block;width:90px;vertical-align:middle">' + obBar(p, fg) + "</span>";
+  }
+
+  var OTK_CLASS_LABELS = {
+    positive: "Interested", curious: "Curious", referral: "Referral",
+    asked_email: "Asked for email", asked_compensation: "Asked about pay",
+    asked_remote: "Asked about remote", asked_client: "Asked about the client",
+    already_employed: "Already employed", later: "Follow up later",
+    negative: "Negative", not_interested: "Not interested",
+    wrong_person: "Wrong number", stop: "Opted out (STOP)", other: "Other"
+  };
+
+  function renderOstextKpi(view) {
+    view.innerHTML = head("OS Text Performance",
+      "The enrichment-to-text scoreboard: what JD Sourcing scraped and enriched, what Telnyx confirmed as textable, and what those texts produced. Every rate below reads against the same window.") +
+      '<div class="ob-toolbar"><div class="ob-tabs" style="margin:0" id="otkRange">' +
+      [7, 14, 30, 90].map(function (dd) {
+        return '<a href="javascript:void(0)" class="chip' + (dd === otkWindow ? " ob-tab-on" : "") + '" data-otk-days="' + dd + '">' + dd + " days</a>";
+      }).join("") + "</div>" +
+      '<span class="muted" id="otkStamp" style="font-size:12px;margin-left:auto"></span></div>' +
+      '<div id="otkBody">' + loading() + "</div>";
+
+    function load() {
+      api("/ostext/kpi?days=" + otkWindow).catch(function () { return null; }).then(function (d) {
+        var body = $("#otkBody"); if (!body) return;
+        if (!d) { body.innerHTML = '<div class="empty">Could not load OS Text KPIs (admin only, or a brief blip right after a deploy).</div>'; return; }
+        body.innerHTML = otkBodyHtml(d);
+        var st = $("#otkStamp");
+        if (st) st.textContent = "Live · updated " + new Date().toLocaleTimeString() + " · refreshes every 60s";
+      });
+    }
+    var range = $("#otkRange");
+    if (range) range.addEventListener("click", function (e) {
+      var chip = e.target && e.target.closest ? e.target.closest("[data-otk-days]") : null;
+      if (!chip) return;
+      otkWindow = Number(chip.getAttribute("data-otk-days")) || 30;
+      Array.prototype.forEach.call(range.querySelectorAll(".chip"), function (c) { c.classList.toggle("ob-tab-on", c === chip); });
+      var body = $("#otkBody"); if (body) body.innerHTML = loading();
+      load();
+    });
+    load();
+    viewTimers.push(setInterval(load, 60000));
+  }
+
+  function otkBodyHtml(d) {
+    var sup = d.supply || null;
+    var eng = d.engine || null;
+    var fun = eng && eng.funnel ? eng.funnel : null;
+    var msg = eng && eng.messages ? eng.messages : null;
+    var html = otkHealthHtml(d, sup, eng && eng.engine);
+    if (fun && msg) html += otkTilesHtml(d, fun, msg, sup);
+
+    var stages = [];
+    if (sup) {
+      stages.push({ label: "Leads on lists", v: sup.candidates, sub: "Rows on the recruiting lists JD Sourcing touched in this window" });
+      stages.push({ label: "With a phone", v: sup.withPhone, sub: "Rows the enrichment chain filled with any phone number" });
+    }
+    if (fun) {
+      stages.push({ label: "Cell-verified", v: fun.cellConfirmed, sub: "Telnyx line-type checks that confirmed a textable mobile" });
+      stages.push({ label: "Texted", v: fun.texted, sub: "Contacts sent at least one text" });
+      stages.push({ label: "Delivered", v: fun.delivered, sub: "Contacts with a carrier-confirmed delivery" });
+      stages.push({ label: "Replied", v: fun.replied, sub: "Contacts who texted back" });
+      stages.push({ label: "Positive", v: fun.positive, sub: "Replies triaged as interested, curious, a referral, or asking for details" });
+    }
+    if (stages.length) {
+      html += '<div class="panel-card ob-card"><div class="ob-card-head" style="flex-wrap:wrap"><b>The funnel · supply to conversations</b>' +
+        '<span class="muted" style="font-size:12px;flex:1 1 100%">Supply stages count lists touched in the window; engine stages count texting activity inside it. Hover a stage name for its exact definition.</span></div>' +
+        otkFunnelHtml(stages) +
+        '<div class="ob-note">The marked leak is the cheapest place to win: more confirmed cells means leaning on the sources that supply real mobiles, more deliveries means healthier numbers and content, more positive replies means better scripts and timing.</div></div>';
+    }
+
+    if (eng) html += otkTrendsHtml(eng);
+    html += otkSourceTableHtml(d, sup);
+    if (sup) html += otkSupplyHtml(sup);
+    if (eng) html += otkOutcomeCardsHtml(eng);
+    if (eng || (sup && sup.boost)) html += otkSpendHtml(d);
+
+    if (d.engineError === "ostext_engine_outdated") {
+      html += '<div class="ob-note">The OS Text engine behind this workspace has not picked up the KPI endpoint yet (deploy in progress). Supply-side numbers are live; texting outcomes fill in as soon as the engine updates.</div>';
+    } else if (d.engineError === "ostext_not_connected") {
+      html += '<div class="ob-note">OS Text is not connected for this workspace, so only the JD Sourcing supply side is shown. Connect the engine under Setup to complete the funnel.</div>';
+    }
+    return html;
+  }
+
+  function otkPill(tone, txt) {
+    var m = tone === "ok" ? ["var(--ok)", "var(--ok-bg)"]
+      : tone === "warn" ? ["var(--warn)", "var(--warn-bg)"]
+      : tone === "bad" ? ["var(--danger)", "var(--danger-bg)"]
+      : ["var(--text-dim)", "var(--surface-2)"];
+    return '<span class="ob-pill" style="color:' + m[0] + ";background:" + m[1] + '">' + esc(txt) + "</span>";
+  }
+
+  function otkHealthHtml(d, sup, g) {
+    var pills = [];
+    if (d.engine) pills.push(otkPill("ok", "Engine connected"));
+    else if (d.engineError === "ostext_not_connected") pills.push(otkPill("bad", "OS Text not connected"));
+    else if (d.engineError === "ostext_engine_outdated") pills.push(otkPill("warn", "Engine update pending"));
+    else if (d.engineError) pills.push(otkPill("bad", "Engine unreachable"));
+    if (g) {
+      pills.push(otkPill("none", "Last text " + obWhen(g.lastOutboundAt)));
+      pills.push(otkPill("none", "Last reply " + obWhen(g.lastInboundAt)));
+      pills.push(otkPill("none", "Last cell check " + obWhen(g.lastCheckAt)));
+      var cbs = g.contactsByStatus || {};
+      if ((cbs.validating || 0) > 0) pills.push(otkPill("warn", otkNum(cbs.validating) + " held in validation"));
+      pills.push(otkPill("none", otkNum(cbs.pending || 0) + " ready to text"));
+      pills.push(otkPill("none", otkNum(g.activeCampaigns || 0) + " active campaign" + (g.activeCampaigns === 1 ? "" : "s")));
+    }
+    if (sup) {
+      pills.push(otkPill("none", "Lists updated " + obWhen(sup.lastListUpdateAt)));
+      pills.push(otkPill("none", "Last push " + obWhen(sup.lastPushAt)));
+      if (sup.pushErrors > 0) pills.push(otkPill("bad", sup.pushErrors + " push error" + (sup.pushErrors === 1 ? "" : "s")));
+    }
+    return '<div class="panel-card ob-card"><div class="ob-card-head" style="margin-bottom:8px"><b>Pipeline health</b>' +
+      '<span class="muted" style="font-size:12px;margin-left:10px">Freshness first: a quiet dashboard should read as "pipeline idle", never as a mystery.</span></div>' +
+      '<div class="otk-pills">' + pills.join(" ") + "</div></div>";
+  }
+
+  function otkTilesHtml(d, fun, msg, sup) {
+    // Color only where a real benchmark exists, and only past a minimum sample
+    // (25) so three texts on a Sunday never paint the tab red.
+    function tone(p, okAt, warnAt, denom, invert) {
+      if (p < 0 || denom < 25) return "";
+      if (invert) return p <= okAt ? "var(--ok)" : p <= warnAt ? "var(--warn)" : "var(--danger)";
+      return p >= okAt ? "var(--ok)" : p >= warnAt ? "var(--warn)" : "var(--danger)";
+    }
+    var cellP = otkRate(fun.cellConfirmed, fun.checked);
+    var delP = otkRate(msg.deliveredMsgs, msg.sentMsgs);
+    var repP = otkRate(fun.replied, fun.delivered);
+    var posP = otkRate(fun.positive, fun.delivered);
+    var optP = otkRate(fun.optedOut, fun.delivered);
+    var costs = (d.engine && d.engine.costs) || {};
+    var boostUsd = sup && sup.boost ? (sup.boost.windowUsd || 0) : 0;
+    // Same composition as the "What this window cost" card total, so the
+    // cost-per-reply tile and the spend card can never quote two numbers.
+    var windowUsd = (costs.smsUsd || 0) + (costs.llmUsd || 0) + (costs.lookupUsd || 0) + (costs.enrichUsd || 0) + boostUsd;
+    var cpr = fun.replied > 0 ? windowUsd / fun.replied : -1;
+    var cpp = fun.positive > 0 ? windowUsd / fun.positive : -1;
+    return '<div class="stat-grid" style="margin:0 0 14px">' +
+      obStat(cellP < 0 ? "n/a" : Math.round(cellP) + "%", "Cell rate", otkNum(fun.checked) + " numbers checked by Telnyx") +
+      obStat(delP < 0 ? "n/a" : Math.round(delP) + "%", "Delivery rate", otkNum(msg.sentMsgs) + " texts sent · target 95%+", tone(delP, 95, 90, msg.sentMsgs)) +
+      obStat(repP < 0 ? "n/a" : Math.round(repP) + "%", "Reply rate", otkNum(fun.replied) + " replied · cold SMS norm 20-30%", tone(repP, 20, 10, fun.delivered)) +
+      obStat(posP < 0 ? "n/a" : Math.round(posP) + "%", "Positive reply rate", otkNum(fun.positive) + " interested or asking for details") +
+      obStat(optP < 0 ? "n/a" : (Math.round(optP * 10) / 10) + "%", "Opt-out rate", "carrier scrutiny starts near 2%", tone(optP, 1, 2, fun.delivered, true)) +
+      obStat(cpr < 0 ? "n/a" : otkUsd(cpr), "Cost per reply", cpp < 0 ? "window spend ÷ replies" : otkUsd(cpp) + " per positive reply") +
+      "</div>";
+  }
+
+  function otkTrendsHtml(eng) {
+    var keys = otkDayKeys(Math.min(eng.days || otkWindow, 90));
+    var byDay = {};
+    (eng.daily || []).forEach(function (r) { byDay[r.day] = r; });
+    var totSent = 0, totDel = 0, totIn = 0, totOpt = 0;
+    keys.forEach(function (k) {
+      var r = byDay[k]; if (!r) return;
+      totSent += r.sentMsgs || 0; totDel += r.deliveredMsgs || 0; totIn += r.inboundMsgs || 0; totOpt += r.optOuts || 0;
+    });
+    var del = keys.map(function (k) { var r = byDay[k]; return r && r.sentMsgs > 0 ? Math.round((100 * r.deliveredMsgs) / r.sentMsgs) : null; });
+    var sent = keys.map(function (k) { var r = byDay[k]; return r ? (r.sentMsgs || 0) : 0; });
+    var inb = keys.map(function (k) { var r = byDay[k]; return r ? (r.inboundMsgs || 0) : 0; });
+    var opt = keys.map(function (k) { var r = byDay[k]; return r && r.deliveredMsgs > 0 ? Math.round((1000 * (r.optOuts || 0)) / r.deliveredMsgs) / 10 : null; });
+    var optMax = 5;
+    opt.forEach(function (v) { if (v != null && v * 1.25 > optMax) optMax = v * 1.25; });
+
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head"><b>Trends · day by day</b>' +
+      '<span class="muted" style="font-size:12px;margin-left:10px">Hover any day. The thin gray line is the health threshold.</span></div><div class="otk-charts">';
+    html += otkTrendTile("Delivery rate", otkRateTxt(totDel, totSent), "of texts sent · threshold 95%",
+      otkTrend({ series: del, max: 100, threshold: 95, titles: keys.map(function (k) {
+        var r = byDay[k];
+        return r && r.sentMsgs > 0
+          ? otkDayLabel(k) + ": " + Math.round((100 * r.deliveredMsgs) / r.sentMsgs) + "% delivered (" + r.deliveredMsgs + " of " + r.sentMsgs + ")"
+          : otkDayLabel(k) + ": no sends";
+      }) }));
+    html += otkTrendTile("Texts sent", otkNum(totSent), "outbound texts in this window",
+      otkTrend({ kind: "cols", series: sent, titles: keys.map(function (k) { var r = byDay[k]; return otkDayLabel(k) + ": " + ((r && r.sentMsgs) || 0) + " sent"; }) }));
+    html += otkTrendTile("Replies", otkNum(totIn), "inbound texts in this window",
+      otkTrend({ kind: "cols", series: inb, titles: keys.map(function (k) {
+        var r = byDay[k];
+        return otkDayLabel(k) + ": " + ((r && r.inboundMsgs) || 0) + " repl" + (r && r.inboundMsgs === 1 ? "y" : "ies") + (r && r.positiveMsgs ? " · " + r.positiveMsgs + " positive" : "");
+      }) }));
+    html += otkTrendTile("Opt-out rate", otkRateTxt(totOpt, totDel, 1), "of delivered · carrier line at 2%",
+      otkTrend({ series: opt, max: optMax, threshold: 2, titles: keys.map(function (k) {
+        var r = byDay[k];
+        return r && r.deliveredMsgs > 0
+          ? otkDayLabel(k) + ": " + (Math.round((1000 * (r.optOuts || 0)) / r.deliveredMsgs) / 10) + "% opted out (" + (r.optOuts || 0) + ")"
+          : otkDayLabel(k) + ": no deliveries";
+      }) }));
+    return html + "</div></div>";
+  }
+
+  function otkSourceTableHtml(d, sup) {
+    var rows = (d.accuracy && d.accuracy.sources) || [];
+    var supBySrc = (sup && sup.byPhoneSource) || {};
+    var hasSupply = Object.keys(supBySrc).some(function (k) { return supBySrc[k] > 0; });
+    if (!rows.length && !hasSupply) return "";
+    var accBySrc = {}, order = [], seen = {};
+    rows.forEach(function (s) { accBySrc[s.source] = s; if (!seen[s.source]) { seen[s.source] = 1; order.push(s.source); } });
+    Object.keys(supBySrc).forEach(function (k) { if (supBySrc[k] > 0 && !seen[k]) { seen[k] = 1; order.push(k); } });
+
+    var days = obAccDays();
+    var trendBySource = {};
+    ((d.accuracy && d.accuracy.trend) || []).forEach(function (r) { (trendBySource[r.source] = trendBySource[r.source] || {})[r.day] = r; });
+    function sparkCell(source) {
+      var byDay = trendBySource[source];
+      if (!byDay) return '<span class="muted">·</span>';
+      var series = days.map(function (dd) { return (byDay[dd] && byDay[dd].texted) || 0; });
+      var total = series.reduce(function (a, b) { return a + b; }, 0);
+      if (!total) return '<span class="muted">·</span>';
+      return '<div style="width:110px;margin:0 auto" title="Contacts texted per day, last 14 days (' + total + ' total)">' + obSpark(series, "var(--brand)") + "</div>";
+    }
+
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head" style="flex-wrap:wrap"><b>Source scoreboard · which rung earns its keep</b>' +
+      '<span class="muted" style="font-size:12px;flex:1 1 100%">"On lists" counts this window\'s supply; the outcome columns are the engine\'s lifetime ledger for every number that source ever pushed.</span></div>' +
+      '<div style="overflow-x:auto"><table class="ob-heat"><thead><tr>' +
+      '<th style="text-align:left">Source</th><th>On lists</th><th>Checked</th><th>Confirmed cells</th><th>Texted</th><th>Delivered</th><th>Replied</th><th>Wrong number</th><th>Opt-outs</th><th>Texted / day · 14d</th></tr></thead><tbody>';
+    order.forEach(function (src) {
+      var s = accBySrc[src] || { checked: 0, cellConfirmed: 0, texted: 0, delivered: 0, replied: 0, wrongNumber: 0, optedOut: 0 };
+      var label = OB_PHONE_SOURCE_LABELS[src] || src;
+      var wrongPct = s.replied > 0 ? Math.round((100 * s.wrongNumber) / s.replied) : 0;
+      html += '<tr><td style="text-align:left">' + esc(label) + "</td>" +
+        '<td style="text-align:center">' + otkNum(supBySrc[src] || 0) + "</td>" +
+        '<td style="text-align:center">' + otkNum(s.checked) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.cellConfirmed, s.checked) + "</td>" +
+        '<td style="text-align:center">' + otkNum(s.texted) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.delivered, s.texted) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.replied, s.delivered) + "</td>" +
+        '<td style="text-align:center"' + (s.wrongNumber > 0 ? ' title="' + wrongPct + '% of replies"' : "") + ">" +
+          (s.wrongNumber > 0 ? '<span style="color:var(--danger);font-weight:600">' + s.wrongNumber + "</span>" : "0") + "</td>" +
+        '<td style="text-align:center">' + otkNum(s.optedOut) + "</td>" +
+        '<td style="text-align:center">' + sparkCell(src) + "</td></tr>";
+    });
+    return html + "</tbody></table></div>" +
+      '<div class="ob-note">Read it left to right: how many numbers each rung supplied, how many were real cells, and what those cells did. A rung with a high cell rate and low wrong-number count deserves more of the budget; the reverse deserves less.</div></div>';
+  }
+
+  function otkSupplyHtml(sup) {
+    var b = sup.boost || { windowUsd: 0, windowLookups: 0, windowFound: 0, allTime: { calls: 0, hits: 0, spentUsd: 0 } };
+    var u = sup.apiUsage || {};
+    var html = '<div class="otk-cols">';
+    html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>JD Sourcing supply · this window</b></div>' +
+      '<div class="stat-grid" style="margin:2px 0 10px">' +
+      obStat(otkNum(sup.lists), "Lists worked", "of " + otkNum(sup.listsTotal) + " saved recruiting lists") +
+      obStat(otkNum(sup.candidates), "Leads on those lists") +
+      obStat(otkRateTxt(sup.withEmail, sup.candidates), "Email fill rate", otkNum(sup.withEmail) + " with an email") +
+      obStat(otkRateTxt(sup.withPhone, sup.candidates), "Phone fill rate", otkNum(sup.withPhone) + " with a phone") +
+      "</div>" +
+      otkLine("Discovery requests spent", "<b>" + otkNum((u.rapidapi || 0) + (u.serper || 0) + (u.google || 0)) + "</b>", "People search " + otkNum(u.rapidapi || 0) + ", Serper " + otkNum(u.serper || 0) + ", Google " + otkNum(u.google || 0)) +
+      otkLine("Boost paid lookups", "<b>" + otkNum(b.windowLookups) + "</b> <span class=\"muted\" style=\"font-size:11.5px\">" + otkNum(b.windowFound) + " phones found · " + otkUsd(b.windowUsd) + "</span>") +
+      otkLine("Boost hit rate", (b.windowLookups > 0 ? "<b>" + otkRateTxt(b.windowFound, b.windowLookups) + "</b> " + otkMiniBar(otkRate(b.windowFound, b.windowLookups)) : '<span class="muted">no paid lookups this window</span>')) +
+      otkLine("Boost all-time", '<span class="muted" style="font-size:12px">' + otkNum(b.allTime.calls) + " lookups · " + otkNum(b.allTime.hits) + " hits · " + otkUsd(b.allTime.spentUsd) + "</span>") +
+      "</div>";
+    html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Push parity · lists into OS Text</b></div>' +
+      '<div class="stat-grid" style="margin:2px 0 10px">' +
+      obStat(otkNum(sup.pushed.lists), "Lists pushed", "counting each list's latest push") +
+      obStat(otkNum(sup.pushed.added), "Contacts accepted") +
+      obStat(otkNum(sup.pushed.confirmedCell), "Known cells", "skipped the check, straight to textable", sup.pushed.confirmedCell > 0 ? "var(--ok)" : "") +
+      obStat(otkNum(sup.pushed.knownNonMobile), "Rejected non-cells", "landlines and VoIP, never inserted", sup.pushed.knownNonMobile > 0 ? "var(--warn)" : "") +
+      "</div>" +
+      (sup.pendingPush > 0 ? '<div class="ob-note">' + otkNum(sup.pendingPush) + " phone-holding list" + (sup.pendingPush === 1 ? "" : "s") + " awaiting first push; the sweeper sends them automatically within minutes of the chain finishing.</div>" : "") +
+      '<div class="ob-note">A campaign holding fewer people than its list has phones is the Telnyx cell-only gate doing its job: landlines, VoIP and toll-free numbers are dropped so texts only ever go to real mobiles.</div></div>';
+    return html + "</div>";
+  }
+
+  function otkOutcomeCardsHtml(eng) {
+    var msg = eng.messages || {};
+    var cls = eng.classifications || [];
+    var html = '<div class="otk-cols">';
+    html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Reply mix · AI triage</b>' +
+      '<span class="muted" style="font-size:12px;margin-left:10px">Conversations classified in this window.</span></div>';
+    if (!cls.length) {
+      html += '<div class="muted" style="font-size:12.5px">No classified replies in this window yet.</div>';
+    } else {
+      var tot = 0;
+      cls.forEach(function (c) { tot += c.count; });
+      cls.forEach(function (c) {
+        var label = OTK_CLASS_LABELS[c.label] || c.label;
+        var p = tot > 0 ? Math.round((100 * c.count) / tot) : 0;
+        var fg = (c.label === "positive" || c.label === "curious" || c.label === "referral") ? "var(--ok)"
+          : (c.label === "stop" || c.label === "wrong_person") ? "var(--danger)" : "var(--brand)";
+        html += otkLine(label, '<span class="muted" style="font-size:11.5px">' + p + "%</span> <b>" + otkNum(c.count) + "</b> " + otkMiniBar(p, fg));
+      });
+    }
+    html += "</div>";
+    html += '<div class="panel-card ob-card"><div class="ob-card-head"><b>Delivery failures</b><span style="flex:1"></span><b>' + otkNum(msg.failedMsgs || 0) + "</b></div>";
+    if (!msg.failedMsgs) {
+      html += '<div class="muted" style="font-size:12.5px">No failed sends in this window.</div>';
+    } else {
+      (msg.failureReasons || []).forEach(function (r) {
+        var p = Math.round((100 * r.count) / msg.failedMsgs);
+        html += otkLine(otkShort(r.reason, 56), "<b>" + otkNum(r.count) + "</b> " + otkMiniBar(p, "var(--danger)"), r.reason);
+      });
+    }
+    if (msg.unconfirmedMsgs > 0) {
+      html += '<div class="ob-note">' + otkNum(msg.unconfirmedMsgs) + " text" + (msg.unconfirmedMsgs === 1 ? "" : "s") + " sent but not yet carrier-confirmed; they usually confirm within minutes.</div>";
+    }
+    html += "</div>";
+    return html + "</div>";
+  }
+
+  function otkSpendHtml(d) {
+    var costs = (d.engine && d.engine.costs) || {};
+    var fun = d.engine && d.engine.funnel;
+    var b = (d.supply && d.supply.boost) || { windowUsd: 0 };
+    var items = [
+      ["Text messages (Telnyx, by segment)", costs.smsUsd || 0],
+      ["Cell-line checks (" + otkNum(costs.lookups || 0) + " lookups)", costs.lookupUsd || 0],
+      ["AI triage, scoring and drafting", costs.llmUsd || 0],
+      ["Boost skip trace (paid phones)", b.windowUsd || 0],
+      ["Profile enrichment (" + otkNum(costs.profilesEnriched || 0) + " profiles)", costs.enrichUsd || 0]
+    ];
+    var total = 0;
+    items.forEach(function (it) { total += it[1]; });
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head"><b>What this window cost</b><span style="flex:1"></span><b>' + otkUsd(total) + "</b></div>";
+    items.forEach(function (it) { html += otkLine(it[0], "<b>" + otkUsd(it[1]) + "</b>"); });
+    if (fun) {
+      html += '<div class="ob-note">Unit economics: ' +
+        (fun.delivered > 0 ? otkUsd(total / fun.delivered) + " per delivered contact" : "no deliveries yet") +
+        (fun.replied > 0 ? " · " + otkUsd(total / fun.replied) + " per reply" : "") +
+        (fun.positive > 0 ? " · " + otkUsd(total / fun.positive) + " per positive reply" : "") +
+        ". SMS is estimated by billable segment, AI is metered exactly per call, Boost comes from the billing ledger.</div>";
+    }
+    return html + "</div>";
+  }
 
   var OB_STATE_META = {
     strong:             { label: "Strong",              fg: "var(--ok)",       bg: "var(--ok-bg)" },
@@ -10954,6 +11405,10 @@
        they added; the list itself appears under saved lists like any other run. ---- */
     var nightTimer = null;
     function renderNight(items) {
+      // The Boost progress card mirrors queue state, so it updates on the same
+      // refresh; must run before the empty-queue early-out so a just-finished
+      // boost still gets its done state painted.
+      updateBoostCard(items);
       var host = $("#jdNight"); if (!host) return;
       if (!items.length) { host.innerHTML = ""; return; }
       var STAGE_WORDS = {
@@ -10962,6 +11417,7 @@
         kold: "free enrichment pass 1…",
         koldDb: "free enrichment pass 2…",
         laxis: "final enrichment pass…",
+        boost: "paid phone lookups…",
         done: "finished",
         error: "stopped",
       };
@@ -10969,7 +11425,10 @@
         '<span class="muted" style="font-size:12.5px">runs on the server, no tab needed; finished lists land under Your saved candidate lists</span></div>' +
         items.map(function (i) {
           var line = i.stage === "done"
-            ? (i.added ? (i.added.emails + " email" + (i.added.emails === 1 ? "" : "s") + " + " + i.added.phones + " phone" + (i.added.phones === 1 ? "" : "s") + " added") : "finished")
+            // A finished boost's note carries the honest readout (phones + real
+            // cost); the generic emails+phones line would hide what it cost.
+            ? (i.kind === "boost" && i.note ? i.note
+              : (i.added ? (i.added.emails + " email" + (i.added.emails === 1 ? "" : "s") + " + " + i.added.phones + " phone" + (i.added.phones === 1 ? "" : "s") + " added") : "finished"))
             : (i.note || STAGE_WORDS[i.stage] || i.stage);
           if (i.stage === "error") line = "stopped: " + (i.error || "unknown");
           // Say where the finished list WENT, or "0 emails added" on a re-enrich
@@ -10993,10 +11452,12 @@
         });
       });
       // While anything is active, quietly refresh so the card (and the finished
-      // list's reach pills) update on their own.
+      // list's reach pills) update on their own. A live boost refreshes faster:
+      // its progress card should read like a ticker, not a clock.
       var active = items.some(function (i) { return i.stage !== "done" && i.stage !== "error"; });
+      var boostActive = items.some(function (i) { return i.kind === "boost" && i.stage !== "done" && i.stage !== "error"; });
       if (nightTimer) { clearTimeout(nightTimer); nightTimer = null; }
-      if (active) nightTimer = setTimeout(function () { loadRuns(); }, 30000);
+      if (active) nightTimer = setTimeout(function () { loadRuns(); }, boostActive ? 8000 : 30000);
     }
 
     function queueOvernight() {
@@ -11211,11 +11672,6 @@
                 ". The free engines did the rest, and enrichment is metered separately.";
               return '<span class="' + (cr ? "jr-api" : "jr-zero") + '" title="' + esc(t) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' + cr + ' credit' + (cr === 1 ? "" : "s") + '</span>';
             })(r.apiUsage) : '') +
-            // Explains a low phone count instead of leaving it silent: no paid
-            // phone-lookup rung is connected, so phones come from the free sources only.
-            ((r.warnings || []).some(function (w) { return String(w).indexOf("phone_finder_off") === 0; })
-              ? '<span class="jr-zero" title="Phone numbers on this list come only from the free sources right now (KoldInfo, Laxis, the in-house database). Add a phone-finder listing under Setup to top up the misses automatically, or use Boost phones on the row as the pay-per-lookup alternative.">phone finder off</span>'
-              : '') +
             '</span>';
           return '<div class="jd-run"><div class="jd-run-top"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
@@ -11822,27 +12278,22 @@
       }
     });
 
-    /* ---- Boost phones live ticker: the same prominent progress card the searches
-       use, but driven by REAL counts (rows actually bought) instead of a guessed
-       curve. It sits directly above the saved lists so the recruiter can watch the
-       run happen: filling bar, "N of M" counter, phones found so far, and a
-       time-left estimate measured from how fast this run's own batches complete. */
-    var boostProg = { timer: null, total: 0, done: 0, found: 0, perMs: 1800, runStart: 0, batchStart: 0, batchSize: 20 };
+    /* ---- Boost phones live card: painted from the SERVER queue. The boost itself
+       runs on the overnight queue (one list at a time, back-to-back), so this card
+       just mirrors the queue item's real counts on each refresh. Closing the tab
+       changes nothing; reopening it picks the run back up mid-flight. */
     function boostBarEls() {
       return { fill: $("#jdBoostFill"), pct: $("#jdBoostPct"), phase: $("#jdBoostPhase"), eta: $("#jdBoostEta") };
     }
-    function boostBarTick() {
-      var e = boostBarEls(); if (!e.fill) return;
-      // Between batch results, creep forward at the measured per-lookup pace so the
-      // bar visibly moves instead of jumping once per 20-row batch.
-      var inBatch = Math.min(boostProg.batchSize, (Date.now() - boostProg.batchStart) / boostProg.perMs);
-      var est = Math.min(boostProg.total, boostProg.done + inBatch);
-      var p = boostProg.total ? Math.min(99, Math.round((est / boostProg.total) * 100)) : 0;
-      e.fill.style.width = p + "%"; if (e.pct) e.pct.textContent = p + "%";
-      if (e.phase) e.phase.textContent = "Looking up phone numbers: about " + Math.min(boostProg.total, Math.floor(est)) + " of " + boostProg.total + " done · " + boostProg.found + " phone" + (boostProg.found === 1 ? "" : "s") + " found so far";
-      if (e.eta) e.eta.textContent = "~" + fmtSecs(Math.max(0, (boostProg.total - est) * boostProg.perMs)) + " left · " + fmtSecs(Date.now() - boostProg.runStart) + " elapsed";
+    function boostBarEnd(label, ok) {
+      var el = $("#jdBoostProg"); if (!el) return;
+      var e = boostBarEls();
+      if (ok) { el.classList.add("done"); if (e.fill) e.fill.style.width = "100%"; if (e.pct) e.pct.textContent = "100%"; }
+      if (e.phase) e.phase.textContent = label || "Done"; if (e.eta) e.eta.textContent = "";
+      setTimeout(function () { var h = $("#jdBoostProg"); if (h && !h.classList.contains("live")) h.style.display = "none"; }, 12000);
     }
-    function boostBarShow(listName, total) {
+    /** Paint the card from the queue item working (or waiting) right now. */
+    function boostBarPaintQueue(cur, moreWaiting) {
       var runsHost = $("#jdRuns"); if (!runsHost || !runsHost.parentNode) return;
       var el = $("#jdBoostProg");
       if (!el) {
@@ -11850,34 +12301,39 @@
         el.className = "card jd-prog"; el.id = "jdBoostProg";
         runsHost.parentNode.insertBefore(el, runsHost);
       }
-      el.classList.remove("done"); el.style.display = "";
+      el.classList.remove("done"); el.classList.add("live"); el.style.display = "";
+      var b = cur.boost || { wanted: 1, done: 0, found: 0 };
+      var pct = cur.stage === "boost" ? Math.min(99, Math.round((Math.min(b.done, b.wanted) / Math.max(1, b.wanted)) * 100)) : 0;
+      var phase;
+      if (cur.stage === "queued") phase = cur.note || "Waiting in line; it starts by itself";
+      else if (cur.stage === "boost") phase = "Looking up phone numbers: " + Math.min(b.done, b.wanted) + " of " + b.wanted + " done · " + b.found + " phone" + (b.found === 1 ? "" : "s") + " found so far";
+      else phase = cur.note || "Finishing the free enrichment first, then the paid lookups";
+      var extra = moreWaiting > 0 ? " · " + moreWaiting + " more Boost run" + (moreWaiting === 1 ? "" : "s") + " waiting in line" : "";
       el.innerHTML =
-        '<div class="jd-prog-head"><span class="jd-prog-dot"></span><b>' + esc('Boosting phones on "' + listName + '"') + '</b>' +
-          '<span class="jd-prog-pct" id="jdBoostPct">0%</span></div>' +
-        '<div class="jd-prog-track"><div class="jd-prog-fill" id="jdBoostFill" style="width:0%"></div></div>' +
-        '<div class="jd-prog-meta muted"><span id="jdBoostPhase">Starting the paid lookups…</span><span id="jdBoostEta"></span></div>';
-      boostProg.total = total; boostProg.done = 0; boostProg.found = 0;
-      boostProg.perMs = 1800; boostProg.runStart = Date.now(); boostProg.batchStart = Date.now();
-      boostProg.batchSize = Math.min(20, total);
-      if (boostProg.timer) clearInterval(boostProg.timer);
-      boostProg.timer = setInterval(boostBarTick, 250); boostBarTick();
-      try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (err) {}
+        '<div class="jd-prog-head"><span class="jd-prog-dot"></span><b>' + esc('Boosting phones on "' + (cur.name || "list") + '"') + '</b>' +
+          '<span class="jd-prog-pct" id="jdBoostPct">' + pct + '%</span></div>' +
+        '<div class="jd-prog-track"><div class="jd-prog-fill" id="jdBoostFill" style="width:' + pct + '%"></div></div>' +
+        '<div class="jd-prog-meta muted"><span id="jdBoostPhase">' + esc(phase + extra) + '</span><span id="jdBoostEta">runs on the server, no tab needed</span></div>';
     }
-    /** Fold a finished batch's real server counts in and re-measure the pace. */
-    function boostBarBatch(done, found) {
-      boostProg.done = Math.min(boostProg.total, done); boostProg.found = found;
-      if (done > 0) boostProg.perMs = Math.max(250, (Date.now() - boostProg.runStart) / done);
-      boostProg.batchStart = Date.now();
-      boostProg.batchSize = Math.min(20, Math.max(1, boostProg.total - boostProg.done));
-      boostBarTick();
-    }
-    function boostBarEnd(label, ok) {
-      if (boostProg.timer) { clearInterval(boostProg.timer); boostProg.timer = null; }
-      var el = $("#jdBoostProg"); if (!el) return;
-      var e = boostBarEls();
-      if (ok) { el.classList.add("done"); if (e.fill) e.fill.style.width = "100%"; if (e.pct) e.pct.textContent = "100%"; }
-      if (e.phase) e.phase.textContent = label || "Done"; if (e.eta) e.eta.textContent = "";
-      setTimeout(function () { var h = $("#jdBoostProg"); if (h && !boostProg.timer) h.style.display = "none"; }, 6000);
+    /** Called on every queue refresh: show the working boost, close out finished ones. */
+    var boostShown = {};
+    function updateBoostCard(items) {
+      var boosts = (items || []).filter(function (i) { return i.kind === "boost"; });
+      var active = boosts.filter(function (i) { return i.stage !== "done" && i.stage !== "error"; });
+      Object.keys(boostShown).forEach(function (id) {
+        if (active.some(function (i) { return i.id === id; })) return;
+        var fin = boosts.find(function (i) { return i.id === id; });
+        var h = $("#jdBoostProg"); if (h) h.classList.remove("live");
+        if (fin) boostBarEnd(fin.stage === "done" ? (fin.note || "Done") : ("Stopped: " + (fin.error || "see the queue card below")), fin.stage === "done");
+        else if (h) h.style.display = "none";
+        delete boostShown[id];
+      });
+      if (!active.length) return;
+      // The queue works one boost at a time: show the one past "queued" if any.
+      var cur = null;
+      active.forEach(function (i) { if (!cur || (cur.stage === "queued" && i.stage !== "queued")) cur = i; });
+      boostShown[cur.id] = 1;
+      boostBarPaintQueue(cur, active.length - 1);
     }
 
     /* ---- Boost phones: the recruiter-triggered paid phone lookup ----
@@ -11943,7 +12399,7 @@
           '<div id="boostCalc" style="margin:12px 0 0;padding:10px 12px;border:1px solid var(--border-strong);border-radius:10px;background:var(--bg-soft);font-variant-numeric:tabular-nums"></div>' +
           (bud ? '<div class="muted" id="boostBudLine" style="margin-top:10px;font-size:12.5px"></div>' : '') +
           (quote.plan ? '<div style="margin-top:8px;padding:8px 12px;border-radius:10px;background:var(--brand-soft);color:var(--brand-2);font-size:12.5px;line-height:1.5">Team lookup plan this month: <b>' + Number(quote.plan.usedRequests).toLocaleString() + '</b> of ' + Number(quote.plan.includedRequests).toLocaleString() + ' requests used (' + quote.plan.usedPct + '%) &middot; about <b>$' + Number(quote.plan.usedUsd).toFixed(2) + '</b> of the $' + Number(quote.plan.monthlyUsd).toFixed(0) + '/month subscription. Prices here come straight from that plan.</div>' : '') +
-          '<div class="muted" style="margin-top:6px;font-size:12px">Estimate based on ' + basis + '. You see the exact cost when it finishes; the spend is logged to your account and counts against your monthly budget.</div>' +
+          '<div class="muted" style="margin-top:6px;font-size:12px">Estimate based on ' + basis + '. You see the exact cost when it finishes; the spend is logged to your account and counts against your monthly budget. It runs on the server, so you can close this tab; if another Boost is already running, this one waits its turn and starts by itself.</div>' +
         '</div>' +
         '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="boostCancel">Cancel</button><button class="btn btn-primary btn-sm" id="boostGo">Go</button></div>';
       openModal("Boost phones", null, body, function (card, close) {
@@ -11979,64 +12435,29 @@
       });
     }
 
-    /** The buying loop, in 20-row batches up to the count the recruiter chose. */
+    /** Hand the approved boost to the server-side queue. Presses on several lists
+        line up and run back-to-back with no babysitting: a half-enriched list gets
+        the free chain finished first, batches run on the server (tab can close),
+        the budget still caps every batch, and the refreshed list flows on to
+        Candidates and OS Text by itself. */
     function runBoost(rid2, rname, btn, orig, quote, wanted) {
-        btn.disabled = true;
-        var tot = { called: 0, found: 0, cache: 0, cost: 0 };
-        var startMissing = wanted;
-        boostBarShow(rname, startMissing);
-        function batch() {
-          // A background list refresh can re-render the row mid-run; re-find the
-          // live button so the small per-row ticker keeps updating too.
-          var liveBtn = $("#jdRuns") && $("#jdRuns").querySelector('[data-boost="' + rid2 + '"]');
-          if (liveBtn && liveBtn !== btn) { btn = liveBtn; }
-          btn.disabled = true;
-          btn.textContent = "Boosting " + Math.min(startMissing, tot.called + tot.cache) + "/" + startMissing + "…";
-          // Never ask the server for more than is left of the recruiter's CHOSEN
-          // amount; the server additionally clamps every batch to their budget.
-          var batchMax = Math.min(20, Math.max(1, wanted - (tot.called + tot.cache)));
-          sendPatient("/sourcing", "POST", { action: "premiumPhoneRun", id: rid2, max: batchMax }).then(function (r) {
-            if (!r.ok) {
-              btn.disabled = false; btn.textContent = orig;
-              boostBarEnd("Boost stopped: everything found so far is saved", false);
-              alert("Boost stopped: " + ((r.data && r.data.error) || gatewayMsg(r.status)) +
-                ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "") +
-                (tot.called ? ("\n\nSpent so far: $" + tot.cost.toFixed(2) + " for " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + ". Everything found is saved; press Boost again to continue.") : ""));
-              loadRuns(); return;
-            }
-            var d = r.data || {};
-            tot.called += d.called || 0; tot.found += d.found || 0;
-            tot.cache += d.cacheHits || 0; tot.cost += d.costUsd || 0;
-            boostBarBatch(Math.min(startMissing, tot.called + tot.cache), tot.found);
-            var budNote = d.budget ? ("\n\nYour Boost budget: $" + Number(d.budget.spentUsd).toFixed(2) + " of $" + Number(d.budget.capUsd).toFixed(0) + " spent this month · $" + Number(d.budget.remainingUsd).toFixed(2) + " left.") : "";
-            if (d.budgetExhausted) {
-              btn.disabled = false; btn.textContent = orig;
-              boostBarEnd("Stopped at your monthly budget: what it found is saved", false);
-              alert("Boost stopped at your monthly budget.\n\n" +
-                "This run: " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added for $" + tot.cost.toFixed(2) + " (all saved)." + budNote +
-                "\n\nThe allowance resets on the 1st; your Daily Checklist page shows this budget at all times.");
-              loadRuns(); return;
-            }
-            if (d.stoppedEarly) {
-              btn.disabled = false; btn.textContent = orig;
-              boostBarEnd("Boost stopped early: what it found is saved", false);
-              alert("Boost stopped early: " + d.stoppedEarly + "\n\nActual spend so far: $" + tot.cost.toFixed(2) + " · " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added (all saved). Fix the listing settings, then press Boost again to continue; rows already bought are never re-billed." + budNote);
-              loadRuns(); return;
-            }
-            var did = tot.called + tot.cache;
-            if (d.remaining > 0 && did < wanted && (d.called > 0 || d.cacheHits > 0)) { batch(); return; }
-            btn.disabled = false; btn.textContent = orig;
-            boostBarEnd("Done: " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added · actual cost $" + tot.cost.toFixed(2), true);
-            var read = "Boost finished on \"" + rname + "\".\n\n" +
-              "Phones added: " + tot.found + (tot.cache ? (" (" + tot.cache + " came free from your contact cache)") : "") + "\n" +
-              "Paid lookups: " + tot.called + "\n" +
-              "Actual cost: $" + tot.cost.toFixed(2) + budNote + "\n\n" +
-              "The spend is logged to your account (Outbound Performance shows it), the refreshed list flows on to Candidates and OS Text by itself, and every new number still passes the cell-line check before any text goes out.";
-            alert(read);
-            loadRuns();
-          });
+      btn.disabled = true; btn.textContent = "Starting…";
+      sendPatient("/sourcing", "POST", { action: "premiumPhoneQueue", id: rid2, max: wanted }).then(function (r) {
+        btn.disabled = false; btn.textContent = orig;
+        if (!r.ok) {
+          alert("Could not start the boost: " + ((r.data && (r.data.detail || r.data.error)) || gatewayMsg(r.status)));
+          return;
         }
-        batch();
+        var d = r.data || {};
+        if (d.alreadyQueued) {
+          toast('"' + rname + '" is already lined up for a Boost run; it runs by itself.');
+        } else if (d.waitingBehind > 0) {
+          toast("Queued behind " + d.waitingBehind + " other Boost run" + (d.waitingBehind === 1 ? "" : "s") + ". They run one after another on the server; you can close this tab.");
+        } else {
+          toast("Boost started on the server; you can close this tab. Progress shows above your lists.");
+        }
+        loadRuns();
+      });
     }
 
     /* ---- Combine lists: tick 2+ saved lists, merge into ONE deduped master list ----
