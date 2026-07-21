@@ -200,7 +200,12 @@ async function hydrateJobs(items: any[], client: LoxoClient): Promise<any[]> {
         continue;
       }
       const full = await client.getJob(item.id).catch(() => null);
-      out[idx] = full || item;
+      // Loxo's job DETAIL omits updated_at (verified live 2026-07-21); only the
+      // LIST item carries it. Fold the list stamp onto the detail record or the
+      // unchanged-skip can never engage and every tick re-reads every job.
+      out[idx] = full
+        ? { ...full, updated_at: full.updated_at ?? item.updated_at, updatedAt: full.updatedAt ?? item.updatedAt }
+        : item;
     }
   }
   await Promise.all(Array.from({ length: Math.min(DETAIL_CONCURRENCY, items.length) }, worker));
