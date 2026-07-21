@@ -10635,7 +10635,12 @@
          stop's color, and the plain-words note is the card's footer, so where a list
          is reads at a glance across the room. */
       '.jd-journeywrap{margin:14px 0 2px;max-width:860px;border:1px solid var(--border);border-radius:14px;background:var(--surface);box-shadow:var(--shadow-xs);overflow:hidden}' +
-      '.jd-jhead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px 0}' +
+      '.jd-jhead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 16px 0}' +
+      '.jd-jhstate{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}' +
+      /* Boost upsell next to the verdict: brand-blue (an option, not a problem). */
+      '.jd-boostcta{display:inline-flex;align-items:center;font:inherit;font-size:11.5px;font-weight:650;line-height:1;padding:4px 11px;border-radius:999px;border:1px solid color-mix(in srgb, var(--brand) 35%, transparent);background:var(--brand-soft);color:var(--brand-2);cursor:pointer;transition:background .15s ease,color .15s ease}' +
+      '.jd-boostcta:hover{background:var(--brand);color:#fff}' +
+      '.jd-boostcta:focus-visible{outline:none;box-shadow:var(--focus-ring)}' +
       '.jd-jstate{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:650;line-height:1;padding:4px 11px;border-radius:999px;overflow:hidden}' +
       '.jd-jstate i{width:6px;height:6px;border-radius:50%;background:currentColor}' +
       '.js-done{color:var(--ok);background:var(--ok-bg)}' +
@@ -11155,8 +11160,10 @@
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
             else if (afErr) jNote = "The automatic send hit a problem and keeps retrying on its own. If this stays up for more than an hour, ask your admin.";
             else if (sentOk && candN) jNote = phs > 0
-              ? "<b>Done:</b> everyone is in Candidates. Next: open OS Text to review and launch the text campaign."
-              : "<b>Done:</b> everyone is in Candidates. No phone numbers were found to text yet; Boost phones can grow the textable count.";
+              ? ("<b>Done:</b> everyone is in Candidates. Next: open OS Text to review and launch the text campaign." +
+                (boostable ? " Texts reach " + phs + " of " + n + " so far; Boost phones can find numbers for up to " + boostable + " more." : ""))
+              : ("<b>Done:</b> everyone is in Candidates. No phone numbers were found to text yet" +
+                (boostable ? "; Boost phones can find numbers for up to " + boostable + " of them." : "; Boost phones can grow the textable count."));
             else jNote = "Waiting for the automatic pipeline to pick this list up; it sweeps every few minutes and needs no button.";
           }
           // The card's one-glance verdict: a status chip (worst state wins: amber
@@ -11179,7 +11186,14 @@
             var mo = Math.round(d / 30); return mo < 12 ? mo + " mo ago" : Math.round(mo / 12) + " yr ago";
           }
           var jUpd = jAgo(r.updatedAt || (r.autoflow && r.autoflow.sentAt) || r.createdAt);
-          var jHead = '<div class="jd-jhead"><span class="jd-jstate js-' + jOverall + '"><i></i>' + jChipTxt + '</span>' +
+          // Launch-ready is honest but incomplete when rows still lack a phone:
+          // the upsell CTA sits right next to the verdict, priced-and-approved
+          // through the same data-boost flow as the row button. Settled lists only
+          // (boostable is 0 while jobs run or before the free chain has been through).
+          var jBoostCta = (boostable && (jOverall === "done" || jOverall === "wait"))
+            ? '<button type="button" class="jd-boostcta" data-boost="' + esc(r.id) + '" title="Texts reach ' + phs + ' of ' + n + ' candidates so far. Boost runs a paid lookup on the ' + boostable + ' still missing a phone; you see the estimated cost and approve it before anything is spent.">Boost phones · up to ' + boostable + ' more</button>'
+            : '';
+          var jHead = '<div class="jd-jhead"><span class="jd-jhstate"><span class="jd-jstate js-' + jOverall + '"><i></i>' + jChipTxt + '</span>' + jBoostCta + '</span>' +
             '<span class="jd-jsteps">' + jDoneN + ' of 4 steps' + (jUpd ? ' · updated ' + jUpd : '') + '</span></div>';
           var journey = n
             ? '<div class="jd-journeywrap">' + jHead + '<div class="jd-journey">' + sSearch + sEnrich + sCand + sText + '</div>' +
