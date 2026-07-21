@@ -256,6 +256,7 @@ const CATALOG: IntegrationMeta[] = [
     fields: [
       { key: "VOICE_CLONE_API_KEY", label: "API key", required: true, secret: true, placeholder: "sk_…" },
       { key: "VOICE_CLONE_VOICE_ID", label: "Default voice id", required: false, placeholder: "e.g. wSqOdjeNqDrHcoK0zorF", hint: "Optional. The ElevenLabs voice used when a desk or campaign has no voice picked. Copy any voice id from ElevenLabs (My Voices or the Voice Library)." },
+      { key: "VOICE_CLONE_VOICE_NAME", label: "Default voice name", required: false, placeholder: "e.g. Lukas", hint: "Optional. A friendly name for the default voice, shown in voice pickers." },
     ],
     steps: [
       "In ElevenLabs, open your profile, then API Keys.",
