@@ -106,6 +106,15 @@ check("sent list, enrichment later found a phone -> topup",
     autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, attempts: 1 },
   }), NOW), "topup");
 
+// ...but debounced: a send 2 minutes ago waits for the live Boost/gap-fill run
+// to accumulate more finds instead of re-pushing the whole list every tick.
+check("sent 2 min ago, one more phone found -> wait out the debounce",
+  due(run({
+    candidates: [enriched(), enriched()],
+    updatedAt: new Date(NOW - 1 * MIN).toISOString(),
+    autoflow: { sentAt: new Date(NOW - 2 * MIN).toISOString(), phonesAtSend: 1, attempts: 1 },
+  }), NOW), null);
+
 // ostext_not_connected self-heal (2026-07-20 Lume incident): a FRESH sent list
 // stamped not-connected retries through the fresh lane. The tick loop gates the
 // actual send on ostextConfiguredFor(ws), so returning ostext-retry while the

@@ -43,6 +43,7 @@ const IDLE_MS = 45 * 60_000;       // a stalled / never-started chain still flow
 const STUCK_MS = 60 * 60_000;      // a job ref idle this long = orphaned chain (tab died mid-job) -> resume it
 const FRESH_MS = 7 * 24 * 3600_000; // only lists touched in the last 7 days are eligible
 const MAX_ATTEMPTS = 20;           // ~1 hour of retries on a hard failure, then park with the error
+const TOPUP_DEBOUNCE_MS = 10 * 60_000; // let a live Boost/gap-fill run accumulate finds between top-ups
 const MAX_SENDS_PER_TICK = 3;      // bound one tick's work; the rest go next tick
 
 function phoneCount(run: SourcingRun): number {
@@ -94,8 +95,16 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
   }
 
   if (run.autoflow?.sentAt) {
-    // Already sent: only a later enrichment that found MORE phones re-sends (top-up).
-    if (phoneCount(run) > run.autoflow.phonesAtSend) return "topup";
+    // Already sent: only a later enrichment that found MORE phones re-sends
+    // (top-up). Debounced: a live Boost run finds numbers continuously, and
+    // without the wait every 2-minute tick re-pushed the WHOLE list for one or
+    // two new phones (a real list hit 35 attempts in a day). Nothing is lost
+    // by waiting: the phones sit on the run and ride the next top-up.
+    if (phoneCount(run) > run.autoflow.phonesAtSend) {
+      const sentAt = Date.parse(run.autoflow.sentAt);
+      if (Number.isFinite(sentAt) && now - sentAt < TOPUP_DEBOUNCE_MS) return null;
+      return "topup";
+    }
     // A sent list whose enrichment chain never FINISHED (it was force-sent while the
     // worker was down mid-run) still deserves its enrichment: queue ONE server-side
     // resume; the top-up rule above then re-sends if the finished chain finds more
