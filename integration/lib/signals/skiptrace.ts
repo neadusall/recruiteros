@@ -79,6 +79,20 @@ export function skipTraceBilling(): "call" | "hit" {
   return cred("RAPIDAPI_SKIPTRACE_BILLING").trim().toLowerCase() === "hit" ? "hit" : "call";
 }
 
+/** The subscription plan behind the unit cost, for user-facing "used X of Y this
+ *  month" readouts. Null when an explicit per-request COST_USD override is set
+ *  (flat-priced listings have no request allowance to show). */
+export function skipTracePlan(): { monthlyUsd: number; includedRequests: number } | null {
+  const override = Number(cred("RAPIDAPI_SKIPTRACE_COST_USD"));
+  if (Number.isFinite(override) && override > 0) return null;
+  const planUsd = Number(cred("RAPIDAPI_SKIPTRACE_PLAN_USD"));
+  const planReq = Number(cred("RAPIDAPI_SKIPTRACE_PLAN_REQUESTS"));
+  if (Number.isFinite(planUsd) && planUsd > 0 && Number.isFinite(planReq) && planReq > 0) {
+    return { monthlyUsd: planUsd, includedRequests: planReq };
+  }
+  return { monthlyUsd: SKIPTRACE_DEFAULT_PLAN_USD, includedRequests: SKIPTRACE_DEFAULT_PLAN_REQUESTS };
+}
+
 export function skipTraceConfigured(): boolean {
   return Boolean(cred("RAPIDAPI_KEY") && cred("RAPIDAPI_SKIPTRACE_HOST") && cred("RAPIDAPI_SKIPTRACE_PATH"));
 }

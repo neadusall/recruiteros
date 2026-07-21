@@ -11930,7 +11930,7 @@
       var body =
         '<div style="font-size:13.5px;line-height:1.55">' +
           '<p style="margin:0 0 12px">' + quote.missing + ' candidate' + (quote.missing === 1 ? '' : 's') + ' on &quot;' + esc(rname) + '&quot; still ' +
-            (quote.missing === 1 ? 'has' : 'have') + ' no phone number after the free enrichment. Each lookup costs <b>' + usd(per) + '</b> per ' +
+            (quote.missing === 1 ? 'has' : 'have') + ' no phone number after the free enrichment. Each lookup costs <b>' + usd(per) + '</b>' + (per > 0 && per < 0.01 ? ' (less than a cent)' : '') + ' per ' +
             (quote.billing === "hit" ? 'number found (misses are free)' : 'lookup, found or not') +
             (quote.missing > maxRows ? '. Your remaining budget covers up to ' + maxRows + ' of them this month.' : '.') + '</p>' +
           '<label style="display:block;font-weight:600;margin:0 0 5px" for="boostN">How many candidates to look up</label>' +
@@ -11942,6 +11942,7 @@
           '</div>' +
           '<div id="boostCalc" style="margin:12px 0 0;padding:10px 12px;border:1px solid var(--border-strong);border-radius:10px;background:var(--bg-soft);font-variant-numeric:tabular-nums"></div>' +
           (bud ? '<div class="muted" id="boostBudLine" style="margin-top:10px;font-size:12.5px"></div>' : '') +
+          (quote.plan ? '<div style="margin-top:8px;padding:8px 12px;border-radius:10px;background:var(--brand-soft);color:var(--brand-2);font-size:12.5px;line-height:1.5">Team lookup plan this month: <b>' + Number(quote.plan.usedRequests).toLocaleString() + '</b> of ' + Number(quote.plan.includedRequests).toLocaleString() + ' requests used (' + quote.plan.usedPct + '%) &middot; about <b>$' + Number(quote.plan.usedUsd).toFixed(2) + '</b> of the $' + Number(quote.plan.monthlyUsd).toFixed(0) + '/month subscription. Prices here come straight from that plan.</div>' : '') +
           '<div class="muted" style="margin-top:6px;font-size:12px">Estimate based on ' + basis + '. You see the exact cost when it finishes; the spend is logged to your account and counts against your monthly budget.</div>' +
         '</div>' +
         '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="boostCancel">Cancel</button><button class="btn btn-primary btn-sm" id="boostGo">Go</button></div>';

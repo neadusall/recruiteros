@@ -21,11 +21,11 @@ import { stateFromLocation } from "./landlinePhones";
 import {
   enrich, rapidMobileFinder,
   makeSkipTracePhoneProvider, skipTraceConfigured, skipTraceUnitCost, skipTraceBilling,
-  skipTraceCallsPerLookup,
+  skipTraceCallsPerLookup, skipTracePlan,
   type EnrichmentPlan, type EnrichmentProvider,
 } from "../signals";
 import { withWorkspaceCreds } from "../connected";
-import { recordUsage, userMonthSpend, ensureLedgerReady } from "../billing/ledger";
+import { recordUsage, userMonthSpend, workspaceMonthSpend, ensureLedgerReady } from "../billing/ledger";
 import { nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
@@ -147,6 +147,18 @@ export interface PremiumPhoneQuote {
   budget?: BoostBudget;
   /** Rows the remaining allowance can still pay for (missing, clamped by budget). */
   affordable?: number;
+  /** The RapidAPI subscription behind the price, so the dialog can show honest
+   *  plan usage ("used X of Y requests this month"). Absent when a flat
+   *  per-request COST_USD override is configured instead of a plan. */
+  plan?: {
+    monthlyUsd: number;
+    includedRequests: number;
+    /** Workspace-wide billed requests so far this calendar month. */
+    usedRequests: number;
+    usedPct: number;
+    /** Workspace-wide real spend this calendar month, at plan pricing. */
+    usedUsd: number;
+  };
 }
 
 export async function premiumPhoneQuote(ws: string, run: SourcingRun, actorEmail?: string): Promise<PremiumPhoneQuote> {
@@ -166,7 +178,24 @@ export async function premiumPhoneQuote(ws: string, run: SourcingRun, actorEmail
     // Priced at the per-lookup rate even for billed-per-hit listings: conservative
     // on purpose, the fail-safe never quotes more rows than the budget covers.
     const affordable = perLookup > 0 ? Math.min(missing, Math.floor((budget.remainingUsd + 1e-9) / perLookup)) : missing;
+    // Plan usage readout: how much of the RapidAPI subscription the whole team
+    // has consumed this month, derived from the ledger at the real unit price.
+    const planInfo = skipTracePlan();
+    let plan: PremiumPhoneQuote["plan"];
+    if (planInfo) {
+      const unit = skipTraceUnitCost();
+      const usedUsd = workspaceMonthSpend(ws, "premium_phone_boost");
+      const usedRequests = unit > 0 ? Math.round(usedUsd / unit) : 0;
+      plan = {
+        ...planInfo,
+        usedRequests,
+        usedPct: planInfo.includedRequests > 0
+          ? Math.min(100, Math.round((usedRequests / planInfo.includedRequests) * 100)) : 0,
+        usedUsd: Math.round(usedUsd * 100) / 100,
+      };
+    }
     return {
+      plan,
       configured: skipTraceConfigured(),
       unitCostUsd: perLookup,
       billing,

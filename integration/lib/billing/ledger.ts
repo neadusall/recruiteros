@@ -281,6 +281,21 @@ export function userMonthSpend(workspaceId: string, userEmail: string, type: str
   return round(total);
 }
 
+/** The whole workspace's spend on one event type this calendar month (UTC):
+ *  feeds plan-allowance readouts ("used X of the plan's Y requests"), so it
+ *  counts every recruiter, attributed or not. 4-decimal precision because
+ *  plan-priced events cost fractions of a cent each. */
+export function workspaceMonthSpend(workspaceId: string, type: string): number {
+  const now = new Date();
+  const since = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  let total = 0;
+  for (const e of store.events) {
+    if (e.workspaceId !== workspaceId || e.type !== type || Date.parse(e.at) < since) continue;
+    total += e.costUsd;
+  }
+  return round(total, 4);
+}
+
 /** One recruiter's own slice of the rollup (self-scoped analytics). */
 export function userSpend(
   workspaceId: string,
