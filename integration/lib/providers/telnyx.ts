@@ -459,6 +459,18 @@ export class TelnyxClient extends ProviderClient {
     });
   }
 
+  /**
+   * Read back one scheduled event: status (pending | in_progress | completed |
+   * failed) and, for phone calls, the call_attempts array. This is how the
+   * scheduling loop confirms a booked call actually fired (and catches the
+   * no-answer case) instead of trusting the create blindly.
+   */
+  getAssistantScheduledEvent(assistantId: string, eventId: string) {
+    return this.request({
+      path: `/ai/assistants/${encodeURIComponent(assistantId)}/scheduled_events/${encodeURIComponent(eventId)}`,
+    });
+  }
+
   /** Cancel a scheduled assistant event (reschedules delete + recreate). */
   deleteAssistantScheduledEvent(assistantId: string, eventId: string) {
     return this.request({

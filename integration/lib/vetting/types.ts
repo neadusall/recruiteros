@@ -446,7 +446,7 @@ export type ScheduleStepKind =
   | "clarify_sms" | "clarify_email"
   | "confirm_sms" | "confirm_email"
   | "booked" | "rebooked" | "canceled"
-  | "reminder_sms"
+  | "reminder_sms" | "missed_sms"
   | "error";
 
 /** One event in a candidate's scheduling conversation (sends + replies). */

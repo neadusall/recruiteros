@@ -25,7 +25,7 @@ import type { VettingDesk, CandidateProfile, ScreenSchedule, ScheduleStep, Sched
 import {
   getDeskById, getCandidateById, setCandidateScreen, addScreenStep,
   listActiveScheduleCandidates, markScreenInviteSent, latestResumeReview,
-  ensureVettingReady, phoneDigits,
+  ensureVettingReady, phoneDigits, listCalls,
 } from "./store";
 import { buildCallContext } from "./prompt";
 
@@ -128,6 +128,38 @@ function tzLabel(tz: string): string {
   return names[tz] || "";
 }
 
+/** The candidate's local wall-clock parts at a UTC instant. */
+function localParts(tz: string, at: Date): { y: number; m: number; d: number; hh: number; mm: number } {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const p: Record<string, string> = {};
+  for (const part of dtf.formatToParts(at)) p[part.type] = part.value;
+  return { y: +p.year, m: +p.month, d: +p.day, hh: +p.hour % 24, mm: +p.minute };
+}
+
+/**
+ * Keep OUR chosen call moments civil: anything we pick ourselves ("anytime",
+ * a past-time rail) lands inside 8:00am-8:30pm in the candidate's zone, else
+ * it moves to 9:00am (same morning if before 8, next morning if late). A time
+ * the candidate EXPLICITLY asked for is never clamped; they said it.
+ */
+export function clampToCallingWindow(whenUtc: string, tz: string): string {
+  const at = new Date(whenUtc);
+  const L = localParts(tz, at);
+  const frac = L.hh + L.mm / 60;
+  if (frac >= 8 && frac <= 20.5) return whenUtc;
+  const day = frac < 8 ? L.d : L.d + 1; // Date.UTC normalizes month overflow
+  return zonedToUtc(L.y, L.m, day, 9, 0, tz).toISOString();
+}
+
+/** 9am-8pm in the CANDIDATE's zone: the only hours we nudge or chase anyone. */
+function inLocalDaytime(tz: string, now = new Date()): boolean {
+  const h = localParts(tz, now).hh;
+  return h >= 9 && h < 20;
+}
+
 /** "Tue, Jul 22 at 4:00 PM Eastern" in the candidate's zone. */
 export function speakWhen(iso: string, tz: string): string {
   const d = new Date(iso);
@@ -194,8 +226,6 @@ async function parseWithLlm(text: string, tz: string, now: Date): Promise<{ kind
 /** Regex fallback: the common shapes people actually text. */
 function parseDeterministic(text: string, tz: string, now: Date): { kind: ParsedAvailability["kind"]; local?: string } {
   const t = text.toLowerCase().trim();
-  if (/\b(not interested|no thanks|no thank|stop|unsubscribe|found (a|another) (job|role)|pass on)\b/.test(t)) return { kind: "decline" };
-  if (/\b(now|asap|as soon as|any ?time|whenever)\b/.test(t)) return { kind: "anytime" };
 
   // Day: today / tonight / tomorrow / weekday name.
   const localNow = new Date(now.getTime() + tzOffsetMs(tz, now));
@@ -234,7 +264,16 @@ function parseDeterministic(text: string, tz: string, now: Date): { kind: Parsed
     if (h >= 0 && h <= 23 && mm >= 0 && mm <= 59) hh = h;
   }
 
-  if (hh === null && dayOffset === null) return { kind: "unclear" };
+  // A concrete CLOCK time always wins: "no thanks needed, 4pm tomorrow works"
+  // is a booking, not a decline. Without one, decline phrasing wins even next
+  // to a day word ("don't call tomorrow, not interested").
+  if (hh === null) {
+    if (/\b(not interested|no thanks|no thank|stop|unsubscribe|found (a|another) (job|role)|pass on)\b/.test(t)) return { kind: "decline" };
+    if (dayOffset === null) {
+      if (/\b(now|asap|as soon as|any ?time|whenever)\b/.test(t)) return { kind: "anytime" };
+      return { kind: "unclear" };
+    }
+  }
   if (hh === null) hh = 10; // a day with no time: mid-morning
   if (dayOffset === null) dayOffset = 0; // a time with no day: today (rolled below if past)
 
@@ -312,6 +351,26 @@ async function sendEmail(desk: VettingDesk, cand: CandidateProfile, kind: Schedu
   return Boolean(step.ok);
 }
 
+/**
+ * Answer the candidate on the best channel that WORKS: the desk's SMS thread
+ * first, their email as the fallback. Nobody in this loop is ever left hanging
+ * because one channel bounced.
+ */
+async function respond(
+  desk: VettingDesk, cand: CandidateProfile,
+  smsKind: ScheduleStepKind, emailKind: ScheduleStepKind,
+  smsText: string, emailSubject: string, emailBody?: string,
+): Promise<boolean> {
+  if (cand.phone && desk.phoneNumber) {
+    if (await sendSms(desk, cand, smsKind, smsText)) return true;
+  }
+  if (cand.email) {
+    return sendEmail(desk, cand, emailKind, emailSubject,
+      emailBody || `Hi ${cand.firstName || "there"},\n\n${smsText}\n\n${desk.persona.agentName}\n${desk.persona.agentCompany}`);
+  }
+  return false;
+}
+
 /* ---------------- copy (warm, short, no em-dashes) ---------------- */
 
 function askText(desk: VettingDesk, cand: CandidateProfile): string {
@@ -355,15 +414,25 @@ export async function sendAvailabilityAsk(desk: VettingDesk, cand: CandidateProf
   try {
     if (!opts?.force && (cand.screenInviteSentAt || cand.screen)) return false;
     if (desk.status !== "live") return false;
-    const channel: "sms" | "email" = cand.phone && desk.phoneNumber ? "sms" : "email";
     const screen: ScreenSchedule = {
-      status: "awaiting_reply", askedAt: new Date().toISOString(), askChannel: channel,
+      status: "awaiting_reply", askedAt: new Date().toISOString(),
+      askChannel: cand.phone && desk.phoneNumber ? "sms" : "email",
       clarifyCount: 0, steps: [],
     };
     setCandidateScreen(cand.id, screen);
-    const ok = channel === "sms"
-      ? await sendSms(desk, cand, "ask_sms", askText(desk, cand))
-      : await sendEmail(desk, cand, "ask_email", `Quick call about the ${desk.roleTitle || "role"}?`, askEmailBody(desk, cand));
+    // SMS first, email as the automatic fallback: a bounced text must never
+    // strand a candidate we HAVE an email for.
+    let ok = false;
+    if (cand.phone && desk.phoneNumber) {
+      ok = await sendSms(desk, cand, "ask_sms", askText(desk, cand));
+    }
+    if (!ok && cand.email) {
+      ok = await sendEmail(desk, cand, "ask_email", `Quick call about the ${desk.roleTitle || "role"}?`, askEmailBody(desk, cand));
+      if (ok) {
+        screen.askChannel = "email";
+        setCandidateScreen(cand.id, screen);
+      }
+    }
     if (ok) markScreenInviteSent(cand.id);
     return ok;
   } catch (e: any) {
@@ -424,12 +493,33 @@ async function bookScreenCall(desk: VettingDesk, cand: CandidateProfile, whenUtc
   }
 }
 
+/** Best-effort: pull a booked call off the engine's calendar. */
+async function cancelEngineEvent(desk: VettingDesk, screen: ScreenSchedule): Promise<void> {
+  if (!screen.eventId || screen.eventId.startsWith("dry_") || !desk.assistantId) return;
+  try {
+    await withWorkspaceCreds(desk.workspaceId, () =>
+      telnyx.deleteAssistantScheduledEvent(desk.assistantId!, screen.eventId!));
+  } catch { /* the event may already be gone */ }
+}
+
 /**
  * A candidate replied (SMS to the desk's number, or an email to the resume
  * inbox with no attachment). Parse it, then book / clarify / close out.
  * Never throws; every branch answers the candidate so nobody texts into a void.
+ * Replies for the same candidate are SERIALIZED: two texts seconds apart
+ * process one after the other, so the loop can never double-book.
  */
-export async function handleScheduleReply(candidateId: string, text: string, channel: "sms" | "email"): Promise<{ handled: boolean; outcome: string }> {
+export function handleScheduleReply(candidateId: string, text: string, channel: "sms" | "email"): Promise<{ handled: boolean; outcome: string }> {
+  const prev = replyChain.get(candidateId) ?? Promise.resolve();
+  const run = prev
+    .catch(() => {})
+    .then(() => handleScheduleReplyOne(candidateId, text, channel));
+  replyChain.set(candidateId, run.then(() => {}, () => {}));
+  return run;
+}
+const replyChain = new Map<string, Promise<void>>();
+
+async function handleScheduleReplyOne(candidateId: string, text: string, channel: "sms" | "email"): Promise<{ handled: boolean; outcome: string }> {
   await ensureVettingReady();
   const cand = getCandidateById(candidateId);
   const desk = cand ? getDeskById(cand.deskId) : undefined;
@@ -452,28 +542,45 @@ export async function handleScheduleReply(candidateId: string, text: string, cha
   setCandidateScreen(cand.id, screen);
   addScreenStep(cand.id, { at: new Date().toISOString(), kind: "reply", note: trimmed.slice(0, 300) });
 
+  const wasBooked = screen.status === "booked";
   const parsed = await parseAvailability(trimmed, cand.phone);
 
   if (parsed.kind === "decline") {
+    // A decline after a booking MUST pull the engine's call too, or the AI
+    // would still dial someone who just said no.
+    if (wasBooked) await cancelEngineEvent(desk, screen);
     screen.status = "declined";
     screen.note = "candidate passed";
     setCandidateScreen(cand.id, screen);
-    await sendSms(desk, cand, "confirm_sms",
-      `No problem at all, ${cand.firstName || "thanks for letting me know"}. If timing changes down the road, text me here any time.`);
+    await respond(desk, cand, "confirm_sms", "confirm_email",
+      `No problem at all, ${cand.firstName || "thanks for letting me know"}. If timing changes down the road, reach me right here any time.`,
+      "No problem at all");
     return { handled: true, outcome: "declined" };
   }
 
   const now = Date.now();
-  let whenUtc = parsed.kind === "anytime" ? new Date(now + 3 * 60_000).toISOString() : parsed.whenUtc;
+  let whenUtc = parsed.kind === "anytime"
+    ? clampToCallingWindow(new Date(now + 3 * 60_000).toISOString(), parsed.tz)
+    : parsed.whenUtc;
 
-  // Sanity rails: never book the past, never book absurdly far out.
-  if (whenUtc) {
+  // Sanity rails: never book the past, never book absurdly far out. Times WE
+  // pick get clamped into the candidate's civil calling hours; a time they
+  // explicitly asked for is honored as said.
+  if (whenUtc && parsed.kind === "time") {
     const t = Date.parse(whenUtc);
-    if (t < now + 90_000) whenUtc = new Date(now + 3 * 60_000).toISOString();
+    if (t < now + 90_000) whenUtc = clampToCallingWindow(new Date(now + 3 * 60_000).toISOString(), parsed.tz);
     else if (t > now + 45 * 24 * 60 * 60 * 1000) whenUtc = undefined;
   }
 
   if (!whenUtc) {
+    // A booked candidate texting something unclear ("can we change it?") keeps
+    // their call: we ask for the new time WITHOUT dropping the one on the books.
+    if (wasBooked) {
+      await respond(desk, cand, "clarify_sms", "clarify_email",
+        `Happy to move it. What day and time works instead? Until I hear back you're still on for ${screen.scheduledFor && screen.timezone ? speakWhen(screen.scheduledFor, screen.timezone) : "our scheduled time"}.`,
+        "Want to move our call?");
+      return { handled: true, outcome: "clarify_kept_booking" };
+    }
     screen.clarifyCount = (screen.clarifyCount ?? 0) + 1;
     screen.status = "clarify";
     if (screen.clarifyCount > 2) {
@@ -482,13 +589,11 @@ export async function handleScheduleReply(candidateId: string, text: string, cha
       return { handled: true, outcome: "needs_human" };
     }
     setCandidateScreen(cand.id, screen);
-    const sent = channel === "sms" || cand.phone
-      ? await sendSms(desk, cand, "clarify_sms", clarifyText(desk))
-      : await sendEmail(desk, cand, "clarify_email", `When works for our call?`, `${clarifyText(desk)}\n\n${desk.persona.agentName}`);
+    const sent = await respond(desk, cand, "clarify_sms", "clarify_email",
+      clarifyText(desk), "When works for our call?");
     return { handled: sent, outcome: "clarify" };
   }
 
-  const rebooked = screen.status === "booked";
   const booked = await bookScreenCall(desk, cand, whenUtc, parsed.tz, parsed.tzSource);
   if (!booked) {
     // No live assistant to fire from: keep the human in the loop instead of
@@ -501,12 +606,11 @@ export async function handleScheduleReply(candidateId: string, text: string, cha
     return { handled: true, outcome: "desk_not_live" };
   }
 
-  const confirmed = cand.phone
-    ? await sendSms(desk, cand, "confirm_sms", confirmText(desk, cand, whenUtc, parsed.tz, rebooked))
-    : await sendEmail(desk, cand, "confirm_email", `Locked in: our call ${speakWhen(whenUtc, parsed.tz)}`,
-        `Hi ${cand.firstName || "there"},\n\n${confirmText(desk, cand, whenUtc, parsed.tz, rebooked)}\n\n${desk.persona.agentName}`);
-  void confirmed;
-  return { handled: true, outcome: rebooked ? "rebooked" : "booked" };
+  await respond(desk, cand, "confirm_sms", "confirm_email",
+    confirmText(desk, cand, whenUtc, parsed.tz, wasBooked),
+    `Locked in: our call ${speakWhen(whenUtc, parsed.tz)}`,
+    `Hi ${cand.firstName || "there"},\n\n${confirmText(desk, cand, whenUtc, parsed.tz, wasBooked)}\n\n${desk.persona.agentName}\n${desk.persona.agentCompany}`);
+  return { handled: true, outcome: wasBooked ? "rebooked" : "booked" };
 }
 
 /* ================================================================
@@ -515,10 +619,86 @@ export async function handleScheduleReply(candidateId: string, text: string, cha
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Same daytime window as the chase ladder: no 3am nudges. */
-function inDaytimeWindow(now = new Date()): boolean {
-  const h = now.getUTCHours();
-  return h >= 13 && h < 24;
+/** Did a screen call actually connect for this candidate around the booked time? */
+function callConnectedSince(cand: CandidateProfile, scheduledFor: string): boolean {
+  const from = Date.parse(scheduledFor) - 15 * 60 * 1000;
+  return listCalls(cand.workspaceId, cand.deskId, 500)
+    .some((c) => c.candidateId === cand.id && Date.parse(c.startedAt) >= from);
+}
+
+/**
+ * What the engine says happened to a booked event: "connected" (an attempt
+ * completed), "missed" (the event failed or every attempt went unanswered),
+ * or "unknown" (still pending / API unavailable / dry-run).
+ */
+async function engineEventOutcome(desk: VettingDesk, screen: ScreenSchedule): Promise<"connected" | "missed" | "unknown"> {
+  if (!screen.eventId || screen.eventId.startsWith("dry_") || !desk.assistantId) return "unknown";
+  try {
+    const res: any = await withWorkspaceCreds(desk.workspaceId, () =>
+      telnyx.getAssistantScheduledEvent(desk.assistantId!, screen.eventId!));
+    if (res?.dryRun) return "unknown";
+    const ev = res?.data ?? res ?? {};
+    const attempts: any[] = Array.isArray(ev.call_attempts) ? ev.call_attempts : [];
+    if (attempts.some((a) => /answer|complete|success/i.test(String(a?.status ?? "")))) return "connected";
+    const status = String(ev.status ?? "").toLowerCase();
+    if (status === "completed") return "connected";
+    if (status === "failed") return "missed";
+    if (attempts.length && attempts.every((a) => /fail|busy|no.?answer|cancel/i.test(String(a?.status ?? "")))) return "missed";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * A booked call came due but nobody connected: own it. One "sorry I missed
+ * you, text me a new time" and the loop reopens; a second miss goes quiet
+ * instead of nagging. Never fires when we can't tell what happened (better
+ * silent than texting "missed you" to someone we just talked to).
+ */
+async function settleDueBooking(desk: VettingDesk, cand: CandidateProfile, screen: ScreenSchedule, now: number): Promise<void> {
+  if (!screen.scheduledFor) return;
+  const overdueMs = now - Date.parse(screen.scheduledFor);
+  if (overdueMs < 10 * 60 * 1000) return;
+
+  // The context webhook settles a connected call instantly; these two are the
+  // belt and braces for engine paths that skip it.
+  if (callConnectedSince(cand, screen.scheduledFor)) {
+    screen.status = "completed";
+    setCandidateScreen(cand.id, screen);
+    return;
+  }
+  const outcome = await engineEventOutcome(desk, screen);
+  if (outcome === "connected") {
+    screen.status = "completed";
+    setCandidateScreen(cand.id, screen);
+    return;
+  }
+  if (outcome === "missed") {
+    const missedBefore = screen.steps.some((s) => s.kind === "missed_sms");
+    if (missedBefore) {
+      screen.status = "expired";
+      screen.note = "missed twice; gone quiet";
+      setCandidateScreen(cand.id, screen);
+      return;
+    }
+    screen.status = "awaiting_reply";
+    screen.note = "call didn't connect; asked for a new time";
+    screen.scheduledFor = undefined;
+    screen.eventId = undefined;
+    setCandidateScreen(cand.id, screen);
+    await respond(desk, cand, "missed_sms", "clarify_email",
+      `Hi ${cand.firstName || "there"}, ${desk.persona.agentName} here. Tried you just now and missed you, no worries at all. ` +
+      `Text me another day and time, like "tomorrow at 2pm", and I'll call you then.`,
+      "Missed you just now, want to pick a new time?");
+    return;
+  }
+  // Unknown after 2 hours: settle quietly rather than guess at the candidate.
+  if (overdueMs > 2 * 60 * 60 * 1000) {
+    screen.status = "completed";
+    screen.note = screen.note || "call window passed (engine outcome unconfirmed)";
+    setCandidateScreen(cand.id, screen);
+  }
 }
 
 let tickInFlight: Promise<void> | null = null;
@@ -532,15 +712,10 @@ export function runScheduleTick(): Promise<void> {
         const desk = getDeskById(cand.deskId);
         const screen = cand.screen!;
         if (!desk) continue;
+        const tz = screen.timezone || tzFromPhone(cand.phone).tz;
 
         if (screen.status === "booked") {
-          // The engine fired the call at the exact time; once the window has
-          // clearly passed, settle the loop (the call record itself lives on
-          // the Calls & Scores tab like any other call).
-          if (screen.scheduledFor && now - Date.parse(screen.scheduledFor) > 2 * 60 * 60 * 1000) {
-            screen.status = "completed";
-            setCandidateScreen(cand.id, screen);
-          }
+          await settleDueBooking(desk, cand, screen, now);
           continue;
         }
 
@@ -552,13 +727,16 @@ export function runScheduleTick(): Promise<void> {
           setCandidateScreen(cand.id, screen);
           continue;
         }
-        if (!inDaytimeWindow()) continue;
+        // Nudges run on the CANDIDATE's clock, not the server's: we know (or
+        // inferred) their zone, so use it.
+        if (!inLocalDaytime(tz)) continue;
         if (age > 22 * 60 * 60 * 1000 && !screen.remindedAt) {
           screen.remindedAt = new Date().toISOString();
           setCandidateScreen(cand.id, screen);
-          await sendSms(desk, cand, "reminder_sms",
+          await respond(desk, cand, "reminder_sms", "clarify_email",
             `Hi ${cand.firstName || "there"}, ${desk.persona.agentName} here. Still holding time for our quick call about the ${desk.roleTitle || "role"}. ` +
-            `What day and time works? Reply like "today at 4pm" and I'll call you then.`);
+            `What day and time works? Reply like "today at 4pm" and I'll call you then.`,
+            "Still want to grab a time for our call?");
         }
       } catch (e: any) {
         console.error("[vetting] schedule tick failed for candidate", cand.id, e?.message || e);
