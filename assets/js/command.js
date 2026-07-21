@@ -1315,29 +1315,81 @@
     finder: "Phone finder",
     unknown: "Unknown source"
   };
+  /* Last 14 local days as YYYY-MM-DD keys, oldest first (zero-fills the trend
+     so a quiet day shows as a real dip, not a skipped x-step). */
+  function obAccDays() {
+    var out = [];
+    for (var i = 13; i >= 0; i--) {
+      var d = new Date(Date.now() - i * 86400000);
+      out.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"));
+    }
+    return out;
+  }
+  function obAccMeter(n, d) {
+    if (!(d > 0)) return '<span class="muted">n/a</span>';
+    var p = Math.round((100 * n) / d);
+    return '<div style="min-width:74px"><div style="font-weight:600">' + p + "%</div>" + obBar(p) + "</div>";
+  }
   function obPhoneAccuracyHtml(acc) {
-    var html = '<div class="panel-card ob-card"><div class="ob-card-head"><b>Phone number accuracy by source</b>' +
-      '<span class="muted" style="font-size:12px;margin-left:10px">Cell check is the Telnyx line-type gate on every push; delivery, replies and wrong-number flags come from real sends.</span></div>';
+    var stamp = new Date();
+    var hh = String(stamp.getHours()).padStart(2, "0") + ":" + String(stamp.getMinutes()).padStart(2, "0") + ":" + String(stamp.getSeconds()).padStart(2, "0");
+    var html = '<div class="panel-card ob-card"><div class="ob-card-head" style="flex-wrap:wrap"><b>Phone number accuracy by source</b>' +
+      '<span class="ob-pill" style="color:var(--ok);background:var(--ok-bg);margin-left:auto">Live · updated ' + hh + " · refreshes every 60s</span>" +
+      '<span class="muted" style="font-size:12px;flex:1 1 100%">Cell check is the Telnyx line-type gate on every push; delivery, replies and wrong-number flags come from real sends.</span></div>';
     var rows = acc && acc.sources ? acc.sources : null;
     if (!rows || !rows.length) {
       html += '<div class="muted" style="font-size:12.5px">No accuracy data yet. It starts accruing as pushed numbers go through the cell check and get texted; numbers pushed before this feature shipped count under "Unknown source".</div></div>';
       return html;
     }
-    function pct(n, d) { return d > 0 ? Math.round((100 * n) / d) + "%" : '<span class="muted">n/a</span>'; }
+    function pct(n, d) { return d > 0 ? Math.round((100 * n) / d) : -1; }
+
+    // Headline tiles: the whole book, all sources combined.
+    var tot = { checked: 0, cellConfirmed: 0, texted: 0, delivered: 0, replied: 0, wrongNumber: 0 };
+    rows.forEach(function (s) {
+      tot.checked += s.checked || 0; tot.cellConfirmed += s.cellConfirmed || 0;
+      tot.texted += s.texted || 0; tot.delivered += s.delivered || 0;
+      tot.replied += s.replied || 0; tot.wrongNumber += s.wrongNumber || 0;
+    });
+    var dPct = pct(tot.delivered, tot.texted);
+    var wPct = pct(tot.wrongNumber, tot.replied);
+    html += '<div class="stat-grid" style="margin:12px 0">' +
+      obStat(pct(tot.cellConfirmed, tot.checked) < 0 ? "n/a" : pct(tot.cellConfirmed, tot.checked) + "%", "Cell-check pass rate", tot.checked.toLocaleString() + " numbers checked") +
+      obStat(dPct < 0 ? "n/a" : dPct + "%", "Delivery rate", tot.texted.toLocaleString() + " contacts texted", dPct < 0 ? "" : dPct >= 90 ? "var(--ok)" : dPct >= 75 ? "var(--warn)" : "var(--danger)") +
+      obStat(pct(tot.replied, tot.delivered) < 0 ? "n/a" : pct(tot.replied, tot.delivered) + "%", "Reply rate", tot.replied.toLocaleString() + " replies") +
+      obStat(String(tot.wrongNumber), "Wrong-number replies", wPct < 0 ? "the someone-else's-number signal" : wPct + "% of all replies", tot.wrongNumber > 0 ? "var(--danger)" : "var(--ok)") +
+      "</div>";
+
+    // Per-source sparklines: contacts texted per day, last 14 days (zero-filled).
+    var days = obAccDays();
+    var trendBySource = {};
+    ((acc && acc.trend) || []).forEach(function (r) {
+      (trendBySource[r.source] = trendBySource[r.source] || {})[r.day] = r;
+    });
+    function sparkCell(source) {
+      var byDay = trendBySource[source];
+      if (!byDay) return '<span class="muted">·</span>';
+      var series = days.map(function (d) { return (byDay[d] && byDay[d].texted) || 0; });
+      var total = series.reduce(function (a, b) { return a + b; }, 0);
+      if (!total) return '<span class="muted">·</span>';
+      return '<div style="width:110px;margin:0 auto" title="Contacts texted per day, last 14 days (' + total + ' total)">' +
+        obSpark(series, "var(--brand)") + "</div>";
+    }
+
     html += '<div style="overflow-x:auto"><table class="ob-heat"><thead><tr>' +
-      '<th style="text-align:left">Source</th><th>Checked</th><th>Confirmed cells</th><th>Texted</th><th>Delivered</th><th>Replied</th><th>Wrong number</th><th>Opt-outs</th></tr></thead><tbody>';
+      '<th style="text-align:left">Source</th><th>Checked</th><th>Confirmed cells</th><th>Texted</th><th>Delivered</th><th>Replied</th><th>Wrong number</th><th>Opt-outs</th><th>Texted / day · 14d</th></tr></thead><tbody>';
     rows.forEach(function (s) {
       var label = OB_PHONE_SOURCE_LABELS[s.source] || s.source;
       var wrongPct = s.replied > 0 ? Math.round((100 * s.wrongNumber) / s.replied) : 0;
       html += '<tr><td style="text-align:left">' + esc(label) + "</td>" +
         '<td style="text-align:center">' + (s.checked || 0) + "</td>" +
-        '<td style="text-align:center">' + pct(s.cellConfirmed, s.checked) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.cellConfirmed, s.checked) + "</td>" +
         '<td style="text-align:center">' + (s.texted || 0) + "</td>" +
-        '<td style="text-align:center">' + pct(s.delivered, s.texted) + "</td>" +
-        '<td style="text-align:center">' + pct(s.replied, s.delivered) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.delivered, s.texted) + "</td>" +
+        '<td style="text-align:center">' + obAccMeter(s.replied, s.delivered) + "</td>" +
         '<td style="text-align:center"' + (s.wrongNumber > 0 ? ' title="' + wrongPct + '% of replies"' : "") + ">" +
-          (s.wrongNumber > 0 ? '<span style="color:var(--danger)">' + s.wrongNumber + "</span>" : "0") + "</td>" +
-        '<td style="text-align:center">' + (s.optedOut || 0) + "</td></tr>";
+          (s.wrongNumber > 0 ? '<span style="color:var(--danger);font-weight:600">' + s.wrongNumber + "</span>" : "0") + "</td>" +
+        '<td style="text-align:center">' + (s.optedOut || 0) + "</td>" +
+        '<td style="text-align:center">' + sparkCell(s.source) + "</td></tr>";
     });
     html += "</tbody></table></div>" +
       '<div class="ob-note">How to read it: Confirmed cells is the share of pushed numbers Telnyx verified as textable mobiles. Delivered is of texted contacts; Replied is of delivered. Wrong number counts replies the AI triage classified as "wrong person", the direct accuracy signal that a number belonged to someone else.</div></div>';
@@ -10908,6 +10960,14 @@
             ? (i.added ? (i.added.emails + " email" + (i.added.emails === 1 ? "" : "s") + " + " + i.added.phones + " phone" + (i.added.phones === 1 ? "" : "s") + " added") : "finished")
             : (i.note || STAGE_WORDS[i.stage] || i.stage);
           if (i.stage === "error") line = "stopped: " + (i.error || "unknown");
+          // Say where the finished list WENT, or "0 emails added" on a re-enrich
+          // top-up reads as if the whole run went nowhere (it already delivered).
+          if (i.stage === "done" && i.runId) {
+            var nrun = (state.runs || []).find(function (r) { return r.id === i.runId; });
+            var naf = nrun && nrun.autoflow;
+            if (naf && naf.sentAt) line += " · in Candidates + OS Text";
+            else if (nrun) line += " · sending to Candidates + OS Text…";
+          }
           return '<div class="jd-night-row" style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line, #e5e8ef)">' +
             '<b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(i.name) + '</b>' +
             '<span class="muted" style="flex:1;font-size:12.5px">' + esc(line) + '</span>' +
