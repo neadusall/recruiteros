@@ -201,25 +201,40 @@ let tickingSince = 0;
 const TICK_STEAL_MS = 15 * 60 * 1000;
 
 /** How long a finished item stays on the card so the morning readout is seeable. */
-const DONE_LINGER_MS = 60 * 60 * 1000;
+export const DONE_LINGER_MS = 60 * 60 * 1000;
 /** Finished but never confirmed delivered (e.g. a BD-motion list the autoflow
  *  sweeper deliberately skips): clear after a day rather than pile up forever. */
-const DONE_MAX_MS = 24 * 60 * 60 * 1000;
+export const DONE_MAX_MS = 24 * 60 * 60 * 1000;
 
 /**
  * The queue card is a WORKING queue, not a history log: the saved list under
  * "Your saved candidate lists" is the permanent record (journey strip included).
  * A done item lingers an hour, then drops off once its run is confirmed sent to
  * Candidates + OS Text (autoflow.sentAt); undelivered done items clear after a
- * day. Stopped ("error") items stay until the user removes them.
+ * day. Stopped ("error") items stay until the user removes them. Pure so the
+ * regression suite (scripts/test-sourcing-nightqueue.mts) can pin the rules.
  */
+export function pruneDecision(
+  i: Pick<NightItem, "stage" | "finishedAt" | "updatedAt" | "createdAt">,
+  delivered: boolean,
+  now: number,
+): "keep" | "drop" {
+  if (i.stage !== "done") return "keep";
+  const finished = Date.parse(i.finishedAt ?? i.updatedAt ?? i.createdAt);
+  // An unparseable timestamp counts as age 0: never drop on bad data.
+  const age = Number.isFinite(finished) ? now - finished : 0;
+  if (age <= DONE_LINGER_MS) return "keep";
+  return delivered || age > DONE_MAX_MS ? "drop" : "keep";
+}
+
 async function pruneFinished(): Promise<void> {
   const now = Date.now();
   let changed = false;
   for (const i of [...store]) {
     if (i.stage !== "done") continue;
-    const age = now - (Date.parse(i.finishedAt ?? i.updatedAt ?? i.createdAt) || now);
-    if (age <= DONE_LINGER_MS) continue;
+    // delivered=true is the most drop-eager case, so "keep" here means the
+    // linger hasn't passed yet: skip the run lookup (cheap ticks stay cheap).
+    if (pruneDecision(i, true, now) === "keep") continue;
     let delivered = false;
     if (i.runId) {
       try {
@@ -227,7 +242,7 @@ async function pruneFinished(): Promise<void> {
         delivered = Boolean(run?.autoflow?.sentAt);
       } catch { /* store hiccup: leave the item, retry next tick */ }
     }
-    if (delivered || age > DONE_MAX_MS) {
+    if (pruneDecision(i, delivered, now) === "drop") {
       const at = store.indexOf(i);
       if (at >= 0) store.splice(at, 1);
       changed = true;
