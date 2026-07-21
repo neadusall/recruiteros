@@ -85,8 +85,8 @@ function reminderEmail(desk: VettingDesk, cand: CandidateProfile, address: strin
     subject: `Your updated resume for ${role}`,
     body:
       `Hi ${cand.firstName},\n\n` +
-      `Really enjoyed our conversation about ${role}. Quick nudge on the one thing I still need from you: your updated resume. ` +
-      `That is what I put in front of the hiring side, so the sooner I have it, the sooner I can get you moving.\n\n` +
+      `Really enjoyed our conversation about ${role}. Quick nudge on the one thing I still need from you: the updated version of your resume, tailored to what we talked about. ` +
+      `I have your current one, but the updated version is what goes in front of the hiring side, so the sooner it lands, the sooner I can get you moving.\n\n` +
       `${sendLine(address, link)}\n\n` +
       `Even a lightly touched-up version today beats a perfect one next week. If anything is holding you up, just reply and tell me.\n\n` +
       `Talk soon,\n${desk.persona.agentName}\n${desk.persona.agentCompany}`,
@@ -95,15 +95,15 @@ function reminderEmail(desk: VettingDesk, cand: CandidateProfile, address: strin
 
 function thanksSmsText(desk: VettingDesk, cand: CandidateProfile, address: string): string {
   const first = cand.firstName ? `${cand.firstName}, thanks` : "Thanks";
-  const where = address ? `send your updated resume to ${address}` : `send over your updated resume (link in your email)`;
+  const where = address ? `send the updated resume we talked about to ${address}` : `send over the updated resume we talked about (link in your email)`;
   return `${first} for the great call about the ${desk.roleTitle || "role"}. It's ${desk.persona.agentName} with ${desk.persona.agentCompany}. ` +
-    `One thing keeps you moving: ${where}. I just emailed you the details. Any questions, call or text this number.`;
+    `One thing keeps you moving: ${where}. I just emailed you exactly what to strengthen. Any questions, call or text this number.`;
 }
 
 function reminderSmsText(desk: VettingDesk, cand: CandidateProfile, address: string): string {
   const where = address ? `Send it to ${address}` : `The link is in your email`;
   return `Hi ${cand.firstName || "there"}, ${desk.persona.agentName} here with ${desk.persona.agentCompany}. ` +
-    `Still holding a spot open on the ${desk.roleTitle || "role"} conversation for you. Your updated resume is the one thing I need to move you forward. ${where} and I'll take it from there.`;
+    `Still holding a spot open on the ${desk.roleTitle || "role"} conversation for you. The updated resume we talked about is the one thing I need to move you forward. ${where} and I'll take it from there.`;
 }
 
 /* ---------------- sends (best-effort, recorded) ---------------- */

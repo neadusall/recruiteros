@@ -17,8 +17,30 @@
 import { NextResponse } from "next/server";
 import {
   findDeskByNumber, findCandidate, createCall, buildCallContext, inboxConfig,
+  latestResumeReview,
 } from "../../../../lib/vetting";
 import { withWorkspaceCreds } from "../../../../lib/connected";
+
+/**
+ * The gap list the agent walks in with: from the recruiter-review of the
+ * candidate's CURRENT resume against this role's must-haves, the requirements
+ * the resume doesn't clearly show yet. Short plain lines the agent can work
+ * from live; "" when there's no review on file (prompt handles blank).
+ */
+function resumeGapLines(candidateId: string): string {
+  const review = latestResumeReview(candidateId);
+  if (!review) return "";
+  return review.coverage
+    .filter((c) => c.status !== "shown")
+    .slice(0, 6)
+    .map((c) => {
+      const state = c.status === "partial"
+        ? "hinted at on the resume but easy to miss"
+        : "not shown on the resume";
+      return `- ${c.requirement}${c.mustHave ? " (must-have)" : ""}: ${state}.${c.coaching ? ` If they have it: ${c.coaching}` : ""}`;
+    })
+    .join("\n");
+}
 
 /** Pull the first present phone-ish value from a set of candidate keys. */
 function firstPhone(obj: any, keys: string[]): string {
@@ -76,7 +98,8 @@ export async function POST(req: Request) {
     resumeEmail = (await withWorkspaceCreds(desk.workspaceId, async () => inboxConfig()?.user || "")) || "";
   } catch { /* blank is handled by the prompt */ }
 
-  const vars = buildCallContext(desk, candidate, { resumeEmail });
+  const resumeGaps = candidate ? resumeGapLines(candidate.id) : "";
+  const vars = buildCallContext(desk, candidate, { resumeEmail, resumeGaps });
   // Return both the canonical Telnyx key and a flat copy for forward-compat.
   return NextResponse.json({ dynamic_variables: vars, ...vars });
 }
