@@ -265,6 +265,9 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
  * "New candidates on your desk" ping, fired the moment a list lands in
  * Candidates/OS Text (first send AND every top-up). Rides the Outbound
  * notification stack (in-app inbox + email + optional SMS, per user prefs).
+ * Capped at ONE per list per recipient per day via the notify sent-guard: an
+ * enrichment chain that tops up chunk after chunk must read as one event, not
+ * a ping per chunk (2026-07-20: six pings in six minutes for one list).
  */
 async function notifyNewCandidates(run: SourcingRun, phonesPushed: number, topup: boolean): Promise<void> {
   const ws = run.workspaceId;
@@ -287,9 +290,14 @@ async function notifyNewCandidates(run: SourcingRun, phonesPushed: number, topup
     owner ? "" : "This list's campaign has no recruiter assigned yet, so you are receiving this as an admin.",
     "They are waiting for their first outreach: open Candidates, filter to Uncontacted, and work the list.",
   ].filter(Boolean).join("\n");
+  const { alreadySent, markSent } = await import("../outbound/notify");
+  const day = new Date().toISOString().slice(0, 10);
+  const guardKind = `new_candidates_${run.id}`;
   for (const r of recipients) {
     try {
+      if (await alreadySent(ws, r.userId, day, guardKind)) continue;
       await pushNotification(ws, { userId: r.userId, category: "campaign", severity: "opportunity", title, body });
+      await markSent(ws, r.userId, day, guardKind);
     } catch { /* one recipient's delivery */ }
   }
 }
