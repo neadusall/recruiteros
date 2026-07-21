@@ -1383,6 +1383,19 @@ table.seqlib tbody tr:hover td { background: var(--surface-2); }
 .topbar .crumb { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: 3px; }
 .topbar h1, #pageTitle { font-size: 18px; font-weight: 650; line-height: 1.1; }
 
+/* ---- Demo video: "Watch demo" pill next to the page title + lightbox player ---- */
+.title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.demo-btn { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 12px; font-weight: 600; color: var(--brand); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px 4px 9px; cursor: pointer; white-space: nowrap; transition: background .12s ease, border-color .12s ease; }
+.demo-btn:hover { background: var(--bg-soft); border-color: var(--brand); }
+.demo-btn svg { width: 14px; height: 14px; flex: none; }
+.demo-btn[hidden] { display: none; }
+.video-lightbox { position: fixed; inset: 0; z-index: 6000; background: rgba(15, 18, 25, .72); display: grid; place-items: center; padding: 24px; }
+.vl-card { width: min(960px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); }
+.vl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.vl-close { border: 0; background: none; color: var(--text-muted); font-size: 20px; line-height: 1; padding: 3px 9px; border-radius: var(--radius-sm); cursor: pointer; }
+.vl-close:hover { background: var(--bg-soft); color: var(--text); }
+.vl-card video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+
 /* ---- Main content: consistent vertical rhythm ---- */
 .v-head { margin-bottom: 20px; }
 .v-head p { color: var(--text-muted); font-size: 14px; line-height: 1.55; max-width: 76ch; }

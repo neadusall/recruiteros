@@ -2594,6 +2594,8 @@
     // In recruiting the Candidates pipeline lives under the Build nav group.
     var crumbLabel = (key === "prospects" && motion === "recruiting") ? "Build" : r.crumb;
     $("#crumb").textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + crumbLabel;
+    var demoBtn = $("#demoVideoBtn");
+    if (demoBtn) demoBtn.hidden = !DEMO_VIDEOS[key];
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) { n.classList.toggle("active", n.dataset.route === key); });
     var pa = $("#primaryAction");
     if (r.action) { pa.style.display = ""; pa.textContent = (key === "prospects") ? ("+ Add " + prospectNoun()) : r.action; pa.onclick = function () { primaryAction(key); }; }
@@ -2603,6 +2605,36 @@
     view.innerHTML = "";
     r.render(view);
   }
+
+  // Per-route walkthrough videos: routes listed here get a "Watch demo" pill next
+  // to the page title that opens the video in a lightbox.
+  var DEMO_VIDEOS = {
+    jdsourcing: { src: "/assets/video/jd-sourcing-demo.mp4", title: "JD Sourcing walkthrough" }
+  };
+  function openDemoVideo(key) {
+    var v = DEMO_VIDEOS[key];
+    if (!v || document.querySelector(".video-lightbox")) return;
+    var ov = document.createElement("div");
+    ov.className = "video-lightbox";
+    ov.innerHTML =
+      '<div class="vl-card">' +
+        '<div class="vl-head"><b>' + esc(v.title) + '</b><button class="vl-close" type="button" aria-label="Close">&times;</button></div>' +
+        '<video src="' + v.src + '" controls autoplay playsinline></video>' +
+      '</div>';
+    function close() {
+      var vid = ov.querySelector("video");
+      if (vid) vid.pause();
+      ov.remove();
+      document.removeEventListener("keydown", onKey);
+    }
+    function onKey(e) { if (e.key === "Escape") close(); }
+    ov.addEventListener("click", function (e) { if (e.target === ov) close(); });
+    ov.querySelector(".vl-close").onclick = close;
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(ov);
+  }
+  var demoVideoBtn = document.getElementById("demoVideoBtn");
+  if (demoVideoBtn) demoVideoBtn.onclick = function () { openDemoVideo(currentRoute()); };
 
   window.addEventListener("hashchange", render);
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) {
