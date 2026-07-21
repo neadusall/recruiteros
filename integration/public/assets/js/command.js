@@ -15019,6 +15019,7 @@
       }
       if (d.phoneNumber) actions += '<button class="vt-btn" data-vtact="detach" data-id="' + d.id + '">Detach #</button>';
       actions += '<button class="vt-btn" data-vtact="copy" data-id="' + d.id + '" data-url="' + esc(optinUrl) + '">Opt-in link</button>' +
+        (d.assistantId ? '<button class="vt-btn" data-vtact="test" data-id="' + d.id + '">Test drive</button>' : "") +
         '<button class="vt-btn" data-vtact="viewcalls" data-id="' + d.id + '">Calls (' + (d.callCount || 0) + ")</button>" +
         '<button class="vt-btn" data-vtact="optimize" data-id="' + d.id + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Optimizer</button>' +
         '<button class="vt-btn vt-btn-danger" data-vtact="del" data-id="' + d.id + '"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button>';
@@ -15044,6 +15045,17 @@
       }
       if (d.bookingUrl) chips += '<span class="vt-chip" title="Can text the scheduling link mid-call">texts calendar</span>';
       if (d.transferNumber) chips += '<span class="vt-chip" title="Can hand the call to you live">live transfer</span>';
+      // Test drive: the live agent calls or texts whoever the operator types,
+      // exactly as it treats a real candidate. Demos and tuning, any account.
+      var testPanel = d.assistantId
+        ? '<div class="vt-testbox" data-test="' + d.id + '" style="display:none">' +
+            '<input class="vt-test-phone" type="tel" placeholder="Cell number, e.g. +1 479 555 0134" aria-label="Number the agent should reach" />' +
+            '<input class="vt-test-name" type="text" placeholder="First name it greets (optional)" aria-label="First name the agent greets" />' +
+            '<button class="vt-btn vt-btn-primary" data-vttest="call" data-id="' + d.id + '">Call this number</button>' +
+            '<button class="vt-btn" data-vttest="text" data-id="' + d.id + '">Text this number</button>' +
+            '<div class="vt-hint">The live agent reaches whoever you put here and runs the real screening conversation. Use it for demos, or to test the agent yourself.</div>' +
+          "</div>"
+        : "";
       return '<div class="vt-desk" data-id="' + d.id + '">' +
         '<div class="vt-desk-head">' +
         '<h3 class="vt-desk-title">' + esc(d.name) + " <span>· " + esc(d.roleTitle || "no role title") + "</span></h3>" +
@@ -15051,6 +15063,7 @@
         '<div class="vt-meta">' + chips + "</div>" +
         (d.jobDescription ? "" : '<div class="vt-warn">Add a job description before going live.</div>') +
         '<div class="vt-actions">' + actions + "</div>" +
+        testPanel +
         '<div class="vt-msg" data-msg="' + d.id + '"></div></div>';
     }
     function paintDesks(body) {
@@ -15430,6 +15443,29 @@
       Array.prototype.forEach.call(body.querySelectorAll("[data-vtact]"), function (b) {
         b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
       });
+      // Test drive: the agent calls or texts the typed number in ~15 seconds.
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vttest]"), function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-id");
+          var mode = b.getAttribute("data-vttest");
+          var boxEl = b.closest(".vt-testbox");
+          var phone = boxEl ? (boxEl.querySelector(".vt-test-phone").value || "").trim() : "";
+          var name = boxEl ? (boxEl.querySelector(".vt-test-name").value || "").trim() : "";
+          if (!phone) { toast("Type the number the agent should reach first."); return; }
+          deskMsg(id, mode === "text" ? "Opening the text conversation…" : "Queuing the call…");
+          send("/vetting/test", "POST", { deskId: id, phone: phone, mode: mode, name: name }).then(function (r) {
+            if (!r.ok) { deskMsg(id, (r.data && r.data.detail) || "Couldn't start the test.", true); return; }
+            var d = r.data || {};
+            if (d.dryRun) {
+              deskMsg(id, "Dry-run: calling isn't connected on this account yet, so nothing was sent.", true);
+              return;
+            }
+            deskMsg(id, mode === "text"
+              ? "The agent texts " + (d.phone || phone) + " from " + (d.from || "the desk number") + " in about 15 seconds. Reply and chat with it."
+              : "The agent calls " + (d.phone || phone) + " from " + (d.from || "the desk number") + " in about 15 seconds. Pick up and put it through its paces.");
+          }).catch(function () { deskMsg(id, "Couldn't reach the server.", true); });
+        });
+      });
     }
     function deskMsg(id, text, warn) {
       var m = document.querySelector('[data-msg="' + id + '"]');
@@ -15445,6 +15481,14 @@
       }
       if (act === "viewcalls") { vt.tab = "calls"; vt.deskId = id; tabBar(); paint(); return; }
       if (act === "optimize") { vt.tab = "optimizer"; vt.deskId = id; tabBar(); paint(); return; }
+      if (act === "test") {
+        var tb = document.querySelector('[data-test="' + id + '"]');
+        if (!tb) return;
+        var showing = tb.style.display !== "none";
+        tb.style.display = showing ? "none" : "";
+        if (!showing) { var ph = tb.querySelector(".vt-test-phone"); if (ph) ph.focus(); }
+        return;
+      }
       if (act === "detach") {
         if (!confirm("Unbind this number from the desk? The number stops answering for this JD and frees up to assign elsewhere.")) return;
         deskMsg(id, "Detaching number…");
