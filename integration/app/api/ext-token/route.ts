@@ -29,14 +29,14 @@ function publicOrigin(req: Request): string {
 }
 
 export async function GET(req: Request) {
-  const g = requireCapability(req, "apikeys:manage");
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   return ok({ token: await getOrCreateToken(ws), backendBaseUrl: publicOrigin(req) + "/api/linkedin", importMotion: await getImportMotion(ws) });
 }
 
 export async function POST(req: Request) {
-  const g = requireCapability(req, "apikeys:manage");
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<{ action?: string; motion?: Motion }>(req);
