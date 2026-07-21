@@ -122,6 +122,48 @@ export async function workspaceForDomain(domain: string): Promise<string | null>
   return null;
 }
 
+/* ---------------- portal isolation (sync lookups) ----------------
+   The per-request session wall in lib/api runs synchronously, so it needs
+   non-async access to the branding map. Hydration is kicked at module load;
+   these also re-kick it so the map is warm from the first request on. */
+
+/**
+ * Hosts that are ALWAYS the house portal and may never be claimed as a
+ * customer's custom domain. Without this, a workspace that typed the house
+ * domain into Setup -> Branding would hijack the host -> workspace lookup and
+ * lock every house user out of their own portal.
+ */
+export function isReservedHouseHost(host: string): boolean {
+  const h = normalizeDomain((host || "").replace(/:\d+$/, ""));
+  if (!h) return true;
+  if (h === "localhost" || h.endsWith(".localhost") || /^\d+\.\d+\.\d+\.\d+$/.test(h)) return true;
+  if (h === "recruitersos.co" || h.endsWith(".recruitersos.co")) return true;
+  try {
+    const app = new URL(process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co").hostname.toLowerCase();
+    if (h === app) return true;
+  } catch { /* unparsable env -> only the built-in list applies */ }
+  return false;
+}
+
+/** Sync twin of workspaceForDomain, VERIFIED/LIVE domains only: unverified
+ *  records must not steer session isolation (ownership was never proven). */
+export function workspaceForDomainSync(host: string): string | null {
+  void ensureBrandingReady();
+  const h = normalizeDomain((host || "").replace(/:\d+$/, ""));
+  if (!h || isReservedHouseHost(h)) return null;
+  for (const b of store.brand.values()) {
+    if (!b.customDomain || b.customDomain.toLowerCase() !== h) continue;
+    if (b.domainStatus === "verified" || b.domainStatus === "live") return b.workspaceId;
+  }
+  return null;
+}
+
+/** Sync: the raw branding record a workspace has saved, if any (no defaults). */
+export function brandingRecordSync(workspaceId: string): Branding | undefined {
+  void ensureBrandingReady();
+  return store.brand.get(workspaceId);
+}
+
 /* ---------------- custom domain lifecycle ---------------- */
 
 /** Where customers point their CNAME. Defaults to the live host that actually
@@ -167,7 +209,7 @@ export async function setCustomDomain(
   input: string,
 ): Promise<{ branding: Branding; instructions: DomainInstructions }> {
   const domain = normalizeDomain(input);
-  if (!domain || !domain.includes(".")) throw new Error("invalid_domain");
+  if (!domain || !domain.includes(".") || isReservedHouseHost(domain)) throw new Error("invalid_domain");
   const cur = await getBranding(workspaceId);
   const token = cur.domainToken || "ros-verify-" + randomBytes(8).toString("hex");
   const branding = await setBranding(workspaceId, { customDomain: domain, domainStatus: "pending", domainToken: token });

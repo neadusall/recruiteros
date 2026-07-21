@@ -107,11 +107,23 @@ export async function ostextConfiguredFor(workspaceId?: string): Promise<boolean
  */
 export async function ostextTenantFor(workspaceId?: string, fallbackEmail?: string | null): Promise<string> {
   if (!workspaceId) return "house"; // background/global callers act as the house
+  // A workspace served on its OWN white-label portal is ALWAYS its own tenant,
+  // even when the credential-house rules would claim it as house (HOUSE_WORKSPACE_ID
+  // unset, or an owner-email account holding an owner role inside the customer
+  // workspace). Portal binding is the stronger signal here: recruitersos.co and
+  // app.lumesp.com are separate companies whatever the key-sharing rules say.
+  let portalBound = false;
   try {
-    const { isHouseWorkspace } = await import("./connected/access");
-    if (isHouseWorkspace(workspaceId)) return "house";
-  } catch {
-    return "house"; // access store unavailable -> legacy behavior, never crash a push
+    const { isTenantWorkspace } = await import("./branding/portal");
+    portalBound = isTenantWorkspace(workspaceId);
+  } catch { /* branding store unavailable -> fall back to the house rules */ }
+  if (!portalBound) {
+    try {
+      const { isHouseWorkspace } = await import("./connected/access");
+      if (isHouseWorkspace(workspaceId)) return "house";
+    } catch {
+      return "house"; // access store unavailable -> legacy behavior, never crash a push
+    }
   }
   try {
     const { workspaceTenantDomain } = await import("./auth");

@@ -5,7 +5,8 @@
  */
 
 import { NextResponse } from "next/server";
-import { sessionContext, tokenFromRequest, type AuthResult } from "./auth";
+import { membershipWorkspaceIds, rescopeContext, sessionContext, tokenFromRequest, type AuthResult } from "./auth";
+import { isTenantWorkspace, requestHost, tenantWorkspaceForHost } from "./branding/portal";
 import { isOwnerEmail } from "./owner";
 
 export function ok(data: unknown, status = 200): NextResponse {
@@ -24,9 +25,31 @@ export async function body<T>(req: Request): Promise<T | null> {
   }
 }
 
-/** Resolve the signed-in context, or null. */
+/**
+ * Resolve the signed-in context, or null.
+ *
+ * PORTAL ISOLATION: the host a request arrives on decides which company's
+ * workspace it may operate in. recruitersos.co and each white-label portal
+ * (e.g. app.lumesp.com) are separate companies; a session must never read or
+ * write across that line, whatever workspace it was issued in. On a tenant's
+ * portal only the tenant workspace exists; on the house portal a workspace
+ * that has its own portal is invisible. Sessions pointing across the line are
+ * re-scoped to the user's workspace on THIS portal, or rejected outright.
+ */
 export function context(req: Request): AuthResult | null {
-  return sessionContext(tokenFromRequest(req));
+  const ctx = sessionContext(tokenFromRequest(req));
+  if (!ctx) return null;
+  const tenantWs = tenantWorkspaceForHost(requestHost(req));
+  if (tenantWs) {
+    return ctx.workspace.id === tenantWs ? ctx : rescopeContext(ctx, tenantWs);
+  }
+  if (!isTenantWorkspace(ctx.workspace.id)) return ctx;
+  for (const wsId of membershipWorkspaceIds(ctx.user.id)) {
+    if (wsId === ctx.workspace.id || isTenantWorkspace(wsId)) continue;
+    const rescoped = rescopeContext(ctx, wsId);
+    if (rescoped) return rescoped;
+  }
+  return null;
 }
 
 /** Guard: require a session; returns the context or a 401 response. */
