@@ -2630,7 +2630,7 @@
       { src: "/assets/video/jd-sourcing-demo-live.mp4", label: "Demo Video", title: "JD Sourcing demo video" }
     ],
     ostext: [
-      { src: "/assets/video/os-text-demo.mp4", label: "Feature Demo", title: "OS Text feature demo" },
+      { src: "/assets/video/os-text-demo.mp4", label: "Features Video", title: "OS Text features video" },
       { src: "/assets/video/os-text-demo-live.mp4", label: "Demo Video", title: "OS Text demo video" }
     ]
   };
