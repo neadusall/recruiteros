@@ -147,6 +147,27 @@
     .docs-nav .os { color: var(--brand); }
     .docs-nav .links { display: flex; gap: 6px; align-items: center; }
 
+    /* AI Vetting self-scheduling flow (the "how a screen books itself" walkthrough) */
+    .flow { display: grid; gap: 0; margin: 14px 0 6px; }
+    .flow-step { display: grid; grid-template-columns: 34px 1fr; gap: 0 14px; }
+    .flow-rail { display: flex; flex-direction: column; align-items: center; }
+    .flow-dot {
+      width: 26px; height: 26px; border-radius: 50%; flex: none; background: var(--brand);
+      color: #ffffff; display: grid; place-items: center; font-size: 13px; font-weight: 600;
+    }
+    .flow-line { width: 2px; flex: 1; background: var(--border); margin: 4px 0; }
+    .flow-step:last-child .flow-line { background: transparent; }
+    .flow-body { padding: 2px 0 20px; min-width: 0; }
+    .flow-body h4 { margin: 2px 0 4px; font-size: 15px; }
+    .flow-body p { margin: 0 0 8px; color: var(--text-muted); font-size: 14px; }
+    .sms-demo {
+      border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+      padding: 12px 12px 10px; max-width: 440px; display: flex; flex-direction: column; gap: 7px;
+    }
+    .sms-demo .msg { border-radius: 12px; padding: 8px 12px; font-size: 13.5px; line-height: 1.45; max-width: 90%; }
+    .sms-demo .ai { background: var(--brand); color: #ffffff; border-bottom-left-radius: 4px; align-self: flex-start; }
+    .sms-demo .them { background: var(--brand-soft); color: var(--text); border-bottom-right-radius: 4px; align-self: flex-end; }
+
     @media (max-width: 880px) {
       .docs-shell { grid-template-columns: 1fr; gap: 24px; }
       .toc { position: static; max-height: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
@@ -237,6 +258,7 @@
         <ul>
           <li><strong>Make it yours.</strong> Upload your logo (a separate one for dark and light appearance), set your brand name and accent color, and run the portal on your own web address.</li>
           <li><strong>Natural voicemail scripts.</strong> Voice Drops scripts now open pre-formatted for human-sounding delivery, with a built-in pacing guide and the same rhythm baked into AI-drafted scripts. See <a href="#voicedrops">Voice Drops</a>.</li>
+          <li><strong>AI Vetting schedules its own calls.</strong> When a resume arrives, the AI texts the candidate for a time, understands answers like "today at 4pm", matches their timezone, and calls them at exactly that moment. See <a href="#vetting-scheduling">how a screen books itself</a>.</li>
           <li><strong>AI Vetting.</strong> Automated phone screening in your own cloned voice, every call recorded, transcribed, and scored.</li>
           <li><strong>Setup hub.</strong> One place to connect your tools and track launch readiness at a glance.</li>
           <li><strong>Campaign Sequences Library.</strong> Reusable multi-channel templates you can drop into any campaign.</li>
@@ -662,14 +684,98 @@
         </p>
         <ul>
           <li><strong>Set up a "desk"</strong>: bind a job description, one of your phone numbers, and your
-            consented cloned voice. Each desk screens for one role.</li>
-          <li><strong>Candidates opt in and get a call</strong> from an AI recruiter that asks your questions in
-            your voice and holds a natural back-and-forth, not a rigid IVR.</li>
+            consented cloned voice. Each desk screens for one role, and one JD is a complete setup.</li>
+          <li><strong>The screen schedules itself</strong>: when a candidate's resume arrives, the AI texts
+            them for a time, they answer in plain words, and it calls them at exactly that time. The full
+            walkthrough is just below.</li>
+          <li><strong>A natural conversation</strong>: the agent greets them by name, works from their actual
+            resume, asks your top 3-4 qualifiers, answers their questions from the role's facts, and holds a
+            real back-and-forth, not a rigid IVR. Candidates can also call the desk's number directly any time.</li>
           <li><strong>Recorded, transcribed &amp; scored</strong>: every call produces a recording, a full
             transcript, and a 1-100 fit score against the role.</li>
           <li><strong>Review scorecards</strong>: read the transcript and score per candidate, then push the
             strong ones forward. Swap a desk's number anytime without rebuilding it.</li>
         </ul>
+
+        <h3 id="vetting-scheduling">How a screen books itself</h3>
+        <p>
+          There is no booking page and no calendar link. The candidate just answers a text, and the call
+          happens at the moment they asked for. Here is the whole journey:
+        </p>
+        <div class="flow">
+          <div class="flow-step">
+            <div class="flow-rail"><div class="flow-dot">1</div><div class="flow-line"></div></div>
+            <div class="flow-body">
+              <h4>A resume lands in your vetting inbox</h4>
+              <p>The platform reads it and verifies who sent it: their email on file first, then a phone
+                number found in the message or resume, then a unique name and job title match. Verified
+                resumes are filed to the candidate; anything unrecognized is left alone for you.</p>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-rail"><div class="flow-dot">2</div><div class="flow-line"></div></div>
+            <div class="flow-body">
+              <h4>One text asks for a time</h4>
+              <p>Sent from the desk's own number the moment the resume is filed. If the text can't be
+                delivered and we have their email, the same ask goes out by email automatically.</p>
+              <div class="sms-demo">
+                <div class="msg ai">Hi Maria, it's Alex with Harper Search. Your resume for the BCBA role just landed,
+                  thank you. Next step is a quick call with me, about ten minutes. What day and time works for
+                  you? Reply right here with something like "today at 4pm" or "tomorrow morning" and I'll call
+                  you then.</div>
+              </div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-rail"><div class="flow-dot">3</div><div class="flow-line"></div></div>
+            <div class="flow-body">
+              <h4>They reply like a person, not a form</h4>
+              <p>"Tomorrow at 2pm", "Friday morning", "today at 4 EST" all work. Their timezone comes from
+                what they said, or from their phone number's area code when they didn't say one, so "4pm"
+                means 4pm <em>their</em> time.</p>
+              <div class="sms-demo">
+                <div class="msg them">tomorrow at 2pm</div>
+                <div class="msg ai">Perfect, you're on my calendar. I'll call you at this number Wed, Jul 22
+                  at 2:00 PM Central. If anything changes just text me a new time here. Talk then, Maria!</div>
+              </div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-rail"><div class="flow-dot">4</div><div class="flow-line"></div></div>
+            <div class="flow-body">
+              <h4>The AI calls them at exactly that time</h4>
+              <p>To the minute, in your voice, opening with "thanks for making time" because it knows this
+                call was scheduled. The screen runs like any other: your qualifiers, their story, the resume
+                ask.</p>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-rail"><div class="flow-dot">5</div><div class="flow-line"></div></div>
+            <div class="flow-body">
+              <h4>You watch it all from the Scheduled Calls tab</h4>
+              <p>Who's booked and for when, who we're still waiting on, what each candidate said, plus cancel
+                and ask-again buttons. The finished call lands in Calls &amp; Scores with its recording,
+                transcript, and score.</p>
+            </div>
+          </div>
+        </div>
+
+        <p><strong>Whatever they text back, it's handled:</strong></p>
+        <ul>
+          <li><strong>A clear time</strong> books the call and confirms it by text, timezone spelled out.</li>
+          <li><strong>"Anytime" or "call me now"</strong> books a near-immediate call, kept inside civil
+            hours (8:00am-8:30pm their local time). Nobody gets a 2am call.</li>
+          <li><strong>Something vague</strong> ("next week maybe?") gets one friendly follow-up for a concrete
+            day and time, twice at most, then it flags for you instead of nagging.</li>
+          <li><strong>A reschedule</strong> ("can we do 6 instead?") moves the call and re-confirms. A vague
+            "can we change it?" keeps the original call until they name a new time.</li>
+          <li><strong>A no</strong> gets a polite goodbye, and any call already booked is taken off the
+            calendar so the AI never dials someone who declined.</li>
+        </ul>
+        <div class="callout note"><b>Built-in safety nets.</b> If a booked call doesn't connect, the candidate
+          gets one "sorry I missed you, text me a new time" and the loop reopens; a second miss goes quiet. No
+          reply to the first ask gets one daytime reminder on <em>their</em> clock, then the loop expires
+          silently after a few days. Nobody is ever left hanging and nobody gets pestered.</div>
 
         <h3>The Optimizer: your agent gets more human with every call</h3>
         <p>
