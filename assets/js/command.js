@@ -10954,6 +10954,10 @@
        they added; the list itself appears under saved lists like any other run. ---- */
     var nightTimer = null;
     function renderNight(items) {
+      // The Boost progress card mirrors queue state, so it updates on the same
+      // refresh; must run before the empty-queue early-out so a just-finished
+      // boost still gets its done state painted.
+      updateBoostCard(items);
       var host = $("#jdNight"); if (!host) return;
       if (!items.length) { host.innerHTML = ""; return; }
       var STAGE_WORDS = {
@@ -10962,6 +10966,7 @@
         kold: "free enrichment pass 1…",
         koldDb: "free enrichment pass 2…",
         laxis: "final enrichment pass…",
+        boost: "paid phone lookups…",
         done: "finished",
         error: "stopped",
       };
@@ -10969,7 +10974,10 @@
         '<span class="muted" style="font-size:12.5px">runs on the server, no tab needed; finished lists land under Your saved candidate lists</span></div>' +
         items.map(function (i) {
           var line = i.stage === "done"
-            ? (i.added ? (i.added.emails + " email" + (i.added.emails === 1 ? "" : "s") + " + " + i.added.phones + " phone" + (i.added.phones === 1 ? "" : "s") + " added") : "finished")
+            // A finished boost's note carries the honest readout (phones + real
+            // cost); the generic emails+phones line would hide what it cost.
+            ? (i.kind === "boost" && i.note ? i.note
+              : (i.added ? (i.added.emails + " email" + (i.added.emails === 1 ? "" : "s") + " + " + i.added.phones + " phone" + (i.added.phones === 1 ? "" : "s") + " added") : "finished"))
             : (i.note || STAGE_WORDS[i.stage] || i.stage);
           if (i.stage === "error") line = "stopped: " + (i.error || "unknown");
           // Say where the finished list WENT, or "0 emails added" on a re-enrich
@@ -10993,10 +11001,12 @@
         });
       });
       // While anything is active, quietly refresh so the card (and the finished
-      // list's reach pills) update on their own.
+      // list's reach pills) update on their own. A live boost refreshes faster:
+      // its progress card should read like a ticker, not a clock.
       var active = items.some(function (i) { return i.stage !== "done" && i.stage !== "error"; });
+      var boostActive = items.some(function (i) { return i.kind === "boost" && i.stage !== "done" && i.stage !== "error"; });
       if (nightTimer) { clearTimeout(nightTimer); nightTimer = null; }
-      if (active) nightTimer = setTimeout(function () { loadRuns(); }, 30000);
+      if (active) nightTimer = setTimeout(function () { loadRuns(); }, boostActive ? 8000 : 30000);
     }
 
     function queueOvernight() {
@@ -11822,27 +11832,22 @@
       }
     });
 
-    /* ---- Boost phones live ticker: the same prominent progress card the searches
-       use, but driven by REAL counts (rows actually bought) instead of a guessed
-       curve. It sits directly above the saved lists so the recruiter can watch the
-       run happen: filling bar, "N of M" counter, phones found so far, and a
-       time-left estimate measured from how fast this run's own batches complete. */
-    var boostProg = { timer: null, total: 0, done: 0, found: 0, perMs: 1800, runStart: 0, batchStart: 0, batchSize: 20 };
+    /* ---- Boost phones live card: painted from the SERVER queue. The boost itself
+       runs on the overnight queue (one list at a time, back-to-back), so this card
+       just mirrors the queue item's real counts on each refresh. Closing the tab
+       changes nothing; reopening it picks the run back up mid-flight. */
     function boostBarEls() {
       return { fill: $("#jdBoostFill"), pct: $("#jdBoostPct"), phase: $("#jdBoostPhase"), eta: $("#jdBoostEta") };
     }
-    function boostBarTick() {
-      var e = boostBarEls(); if (!e.fill) return;
-      // Between batch results, creep forward at the measured per-lookup pace so the
-      // bar visibly moves instead of jumping once per 20-row batch.
-      var inBatch = Math.min(boostProg.batchSize, (Date.now() - boostProg.batchStart) / boostProg.perMs);
-      var est = Math.min(boostProg.total, boostProg.done + inBatch);
-      var p = boostProg.total ? Math.min(99, Math.round((est / boostProg.total) * 100)) : 0;
-      e.fill.style.width = p + "%"; if (e.pct) e.pct.textContent = p + "%";
-      if (e.phase) e.phase.textContent = "Looking up phone numbers: about " + Math.min(boostProg.total, Math.floor(est)) + " of " + boostProg.total + " done · " + boostProg.found + " phone" + (boostProg.found === 1 ? "" : "s") + " found so far";
-      if (e.eta) e.eta.textContent = "~" + fmtSecs(Math.max(0, (boostProg.total - est) * boostProg.perMs)) + " left · " + fmtSecs(Date.now() - boostProg.runStart) + " elapsed";
+    function boostBarEnd(label, ok) {
+      var el = $("#jdBoostProg"); if (!el) return;
+      var e = boostBarEls();
+      if (ok) { el.classList.add("done"); if (e.fill) e.fill.style.width = "100%"; if (e.pct) e.pct.textContent = "100%"; }
+      if (e.phase) e.phase.textContent = label || "Done"; if (e.eta) e.eta.textContent = "";
+      setTimeout(function () { var h = $("#jdBoostProg"); if (h && !h.classList.contains("live")) h.style.display = "none"; }, 12000);
     }
-    function boostBarShow(listName, total) {
+    /** Paint the card from the queue item working (or waiting) right now. */
+    function boostBarPaintQueue(cur, moreWaiting) {
       var runsHost = $("#jdRuns"); if (!runsHost || !runsHost.parentNode) return;
       var el = $("#jdBoostProg");
       if (!el) {
@@ -11850,34 +11855,39 @@
         el.className = "card jd-prog"; el.id = "jdBoostProg";
         runsHost.parentNode.insertBefore(el, runsHost);
       }
-      el.classList.remove("done"); el.style.display = "";
+      el.classList.remove("done"); el.classList.add("live"); el.style.display = "";
+      var b = cur.boost || { wanted: 1, done: 0, found: 0 };
+      var pct = cur.stage === "boost" ? Math.min(99, Math.round((Math.min(b.done, b.wanted) / Math.max(1, b.wanted)) * 100)) : 0;
+      var phase;
+      if (cur.stage === "queued") phase = cur.note || "Waiting in line; it starts by itself";
+      else if (cur.stage === "boost") phase = "Looking up phone numbers: " + Math.min(b.done, b.wanted) + " of " + b.wanted + " done · " + b.found + " phone" + (b.found === 1 ? "" : "s") + " found so far";
+      else phase = cur.note || "Finishing the free enrichment first, then the paid lookups";
+      var extra = moreWaiting > 0 ? " · " + moreWaiting + " more Boost run" + (moreWaiting === 1 ? "" : "s") + " waiting in line" : "";
       el.innerHTML =
-        '<div class="jd-prog-head"><span class="jd-prog-dot"></span><b>' + esc('Boosting phones on "' + listName + '"') + '</b>' +
-          '<span class="jd-prog-pct" id="jdBoostPct">0%</span></div>' +
-        '<div class="jd-prog-track"><div class="jd-prog-fill" id="jdBoostFill" style="width:0%"></div></div>' +
-        '<div class="jd-prog-meta muted"><span id="jdBoostPhase">Starting the paid lookups…</span><span id="jdBoostEta"></span></div>';
-      boostProg.total = total; boostProg.done = 0; boostProg.found = 0;
-      boostProg.perMs = 1800; boostProg.runStart = Date.now(); boostProg.batchStart = Date.now();
-      boostProg.batchSize = Math.min(20, total);
-      if (boostProg.timer) clearInterval(boostProg.timer);
-      boostProg.timer = setInterval(boostBarTick, 250); boostBarTick();
-      try { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (err) {}
+        '<div class="jd-prog-head"><span class="jd-prog-dot"></span><b>' + esc('Boosting phones on "' + (cur.name || "list") + '"') + '</b>' +
+          '<span class="jd-prog-pct" id="jdBoostPct">' + pct + '%</span></div>' +
+        '<div class="jd-prog-track"><div class="jd-prog-fill" id="jdBoostFill" style="width:' + pct + '%"></div></div>' +
+        '<div class="jd-prog-meta muted"><span id="jdBoostPhase">' + esc(phase + extra) + '</span><span id="jdBoostEta">runs on the server, no tab needed</span></div>';
     }
-    /** Fold a finished batch's real server counts in and re-measure the pace. */
-    function boostBarBatch(done, found) {
-      boostProg.done = Math.min(boostProg.total, done); boostProg.found = found;
-      if (done > 0) boostProg.perMs = Math.max(250, (Date.now() - boostProg.runStart) / done);
-      boostProg.batchStart = Date.now();
-      boostProg.batchSize = Math.min(20, Math.max(1, boostProg.total - boostProg.done));
-      boostBarTick();
-    }
-    function boostBarEnd(label, ok) {
-      if (boostProg.timer) { clearInterval(boostProg.timer); boostProg.timer = null; }
-      var el = $("#jdBoostProg"); if (!el) return;
-      var e = boostBarEls();
-      if (ok) { el.classList.add("done"); if (e.fill) e.fill.style.width = "100%"; if (e.pct) e.pct.textContent = "100%"; }
-      if (e.phase) e.phase.textContent = label || "Done"; if (e.eta) e.eta.textContent = "";
-      setTimeout(function () { var h = $("#jdBoostProg"); if (h && !boostProg.timer) h.style.display = "none"; }, 6000);
+    /** Called on every queue refresh: show the working boost, close out finished ones. */
+    var boostShown = {};
+    function updateBoostCard(items) {
+      var boosts = (items || []).filter(function (i) { return i.kind === "boost"; });
+      var active = boosts.filter(function (i) { return i.stage !== "done" && i.stage !== "error"; });
+      Object.keys(boostShown).forEach(function (id) {
+        if (active.some(function (i) { return i.id === id; })) return;
+        var fin = boosts.find(function (i) { return i.id === id; });
+        var h = $("#jdBoostProg"); if (h) h.classList.remove("live");
+        if (fin) boostBarEnd(fin.stage === "done" ? (fin.note || "Done") : ("Stopped: " + (fin.error || "see the queue card below")), fin.stage === "done");
+        else if (h) h.style.display = "none";
+        delete boostShown[id];
+      });
+      if (!active.length) return;
+      // The queue works one boost at a time: show the one past "queued" if any.
+      var cur = null;
+      active.forEach(function (i) { if (!cur || (cur.stage === "queued" && i.stage !== "queued")) cur = i; });
+      boostShown[cur.id] = 1;
+      boostBarPaintQueue(cur, active.length - 1);
     }
 
     /* ---- Boost phones: the recruiter-triggered paid phone lookup ----
@@ -11943,7 +11953,7 @@
           '<div id="boostCalc" style="margin:12px 0 0;padding:10px 12px;border:1px solid var(--border-strong);border-radius:10px;background:var(--bg-soft);font-variant-numeric:tabular-nums"></div>' +
           (bud ? '<div class="muted" id="boostBudLine" style="margin-top:10px;font-size:12.5px"></div>' : '') +
           (quote.plan ? '<div style="margin-top:8px;padding:8px 12px;border-radius:10px;background:var(--brand-soft);color:var(--brand-2);font-size:12.5px;line-height:1.5">Team lookup plan this month: <b>' + Number(quote.plan.usedRequests).toLocaleString() + '</b> of ' + Number(quote.plan.includedRequests).toLocaleString() + ' requests used (' + quote.plan.usedPct + '%) &middot; about <b>$' + Number(quote.plan.usedUsd).toFixed(2) + '</b> of the $' + Number(quote.plan.monthlyUsd).toFixed(0) + '/month subscription. Prices here come straight from that plan.</div>' : '') +
-          '<div class="muted" style="margin-top:6px;font-size:12px">Estimate based on ' + basis + '. You see the exact cost when it finishes; the spend is logged to your account and counts against your monthly budget.</div>' +
+          '<div class="muted" style="margin-top:6px;font-size:12px">Estimate based on ' + basis + '. You see the exact cost when it finishes; the spend is logged to your account and counts against your monthly budget. It runs on the server, so you can close this tab; if another Boost is already running, this one waits its turn and starts by itself.</div>' +
         '</div>' +
         '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="boostCancel">Cancel</button><button class="btn btn-primary btn-sm" id="boostGo">Go</button></div>';
       openModal("Boost phones", null, body, function (card, close) {
@@ -11979,64 +11989,29 @@
       });
     }
 
-    /** The buying loop, in 20-row batches up to the count the recruiter chose. */
+    /** Hand the approved boost to the server-side queue. Presses on several lists
+        line up and run back-to-back with no babysitting: a half-enriched list gets
+        the free chain finished first, batches run on the server (tab can close),
+        the budget still caps every batch, and the refreshed list flows on to
+        Candidates and OS Text by itself. */
     function runBoost(rid2, rname, btn, orig, quote, wanted) {
-        btn.disabled = true;
-        var tot = { called: 0, found: 0, cache: 0, cost: 0 };
-        var startMissing = wanted;
-        boostBarShow(rname, startMissing);
-        function batch() {
-          // A background list refresh can re-render the row mid-run; re-find the
-          // live button so the small per-row ticker keeps updating too.
-          var liveBtn = $("#jdRuns") && $("#jdRuns").querySelector('[data-boost="' + rid2 + '"]');
-          if (liveBtn && liveBtn !== btn) { btn = liveBtn; }
-          btn.disabled = true;
-          btn.textContent = "Boosting " + Math.min(startMissing, tot.called + tot.cache) + "/" + startMissing + "…";
-          // Never ask the server for more than is left of the recruiter's CHOSEN
-          // amount; the server additionally clamps every batch to their budget.
-          var batchMax = Math.min(20, Math.max(1, wanted - (tot.called + tot.cache)));
-          sendPatient("/sourcing", "POST", { action: "premiumPhoneRun", id: rid2, max: batchMax }).then(function (r) {
-            if (!r.ok) {
-              btn.disabled = false; btn.textContent = orig;
-              boostBarEnd("Boost stopped: everything found so far is saved", false);
-              alert("Boost stopped: " + ((r.data && r.data.error) || gatewayMsg(r.status)) +
-                ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "") +
-                (tot.called ? ("\n\nSpent so far: $" + tot.cost.toFixed(2) + " for " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + ". Everything found is saved; press Boost again to continue.") : ""));
-              loadRuns(); return;
-            }
-            var d = r.data || {};
-            tot.called += d.called || 0; tot.found += d.found || 0;
-            tot.cache += d.cacheHits || 0; tot.cost += d.costUsd || 0;
-            boostBarBatch(Math.min(startMissing, tot.called + tot.cache), tot.found);
-            var budNote = d.budget ? ("\n\nYour Boost budget: $" + Number(d.budget.spentUsd).toFixed(2) + " of $" + Number(d.budget.capUsd).toFixed(0) + " spent this month · $" + Number(d.budget.remainingUsd).toFixed(2) + " left.") : "";
-            if (d.budgetExhausted) {
-              btn.disabled = false; btn.textContent = orig;
-              boostBarEnd("Stopped at your monthly budget: what it found is saved", false);
-              alert("Boost stopped at your monthly budget.\n\n" +
-                "This run: " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added for $" + tot.cost.toFixed(2) + " (all saved)." + budNote +
-                "\n\nThe allowance resets on the 1st; your Daily Checklist page shows this budget at all times.");
-              loadRuns(); return;
-            }
-            if (d.stoppedEarly) {
-              btn.disabled = false; btn.textContent = orig;
-              boostBarEnd("Boost stopped early: what it found is saved", false);
-              alert("Boost stopped early: " + d.stoppedEarly + "\n\nActual spend so far: $" + tot.cost.toFixed(2) + " · " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added (all saved). Fix the listing settings, then press Boost again to continue; rows already bought are never re-billed." + budNote);
-              loadRuns(); return;
-            }
-            var did = tot.called + tot.cache;
-            if (d.remaining > 0 && did < wanted && (d.called > 0 || d.cacheHits > 0)) { batch(); return; }
-            btn.disabled = false; btn.textContent = orig;
-            boostBarEnd("Done: " + tot.found + " phone" + (tot.found === 1 ? "" : "s") + " added · actual cost $" + tot.cost.toFixed(2), true);
-            var read = "Boost finished on \"" + rname + "\".\n\n" +
-              "Phones added: " + tot.found + (tot.cache ? (" (" + tot.cache + " came free from your contact cache)") : "") + "\n" +
-              "Paid lookups: " + tot.called + "\n" +
-              "Actual cost: $" + tot.cost.toFixed(2) + budNote + "\n\n" +
-              "The spend is logged to your account (Outbound Performance shows it), the refreshed list flows on to Candidates and OS Text by itself, and every new number still passes the cell-line check before any text goes out.";
-            alert(read);
-            loadRuns();
-          });
+      btn.disabled = true; btn.textContent = "Starting…";
+      sendPatient("/sourcing", "POST", { action: "premiumPhoneQueue", id: rid2, max: wanted }).then(function (r) {
+        btn.disabled = false; btn.textContent = orig;
+        if (!r.ok) {
+          alert("Could not start the boost: " + ((r.data && (r.data.detail || r.data.error)) || gatewayMsg(r.status)));
+          return;
         }
-        batch();
+        var d = r.data || {};
+        if (d.alreadyQueued) {
+          toast('"' + rname + '" is already lined up for a Boost run; it runs by itself.');
+        } else if (d.waitingBehind > 0) {
+          toast("Queued behind " + d.waitingBehind + " other Boost run" + (d.waitingBehind === 1 ? "" : "s") + ". They run one after another on the server; you can close this tab.");
+        } else {
+          toast("Boost started on the server; you can close this tab. Progress shows above your lists.");
+        }
+        loadRuns();
+      });
     }
 
     /* ---- Combine lists: tick 2+ saved lists, merge into ONE deduped master list ----

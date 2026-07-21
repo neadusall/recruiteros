@@ -10,6 +10,7 @@
  *   { action: "enrich", id, top? }                 -> enrich contacts for the top N staged candidates
  *   { action: "premiumPhoneQuote", id }            -> price the paid phone boost: rows still missing a phone, est cost from the rolling hit rate
  *   { action: "premiumPhoneRun", id, max? }        -> RECRUITER-TRIGGERED paid phone rung (skip-trace listing) over the next `max` phone-less rows; ledger-attributed to the caller
+ *   { action: "premiumPhoneQueue", id, max }       -> queue the approved boost on the overnight queue: runs server-side, one boost at a time, free chain finished first if the list is not fully enriched
  *   { action: "vet", id, top? }                    -> deep-vet the top N: submits a 50%-cheaper Message Batch (sync fallback)
  *   { action: "vetStatus", id }                    -> poll the in-flight vet batch; ingests results once it ends
  *   { action: "koldinfoExport", id, top? }         -> FIRST rung (free): CSV of candidates still missing an email, for KoldInfo
@@ -490,6 +491,35 @@ export async function POST(req: Request) {
       });
       await saveSourcingRun(ws, { ...run });
       return ok({ ...result, run });
+    }
+
+    // HANDS-OFF boost: put the approved run on the server-side overnight queue
+    // instead of batch-looping from the tab. Presses on several lists line up and
+    // run back-to-back (one at a time), a half-enriched list gets the free chain
+    // finished first, and closing the tab changes nothing. The recruiter's approval
+    // (count + the estimate dialog) already happened client-side; the server still
+    // enforces the monthly budget on every batch regardless.
+    if (action === "premiumPhoneQueue") {
+      if (!b?.id) return fail("missing_id", 422);
+      const run = await getSourcingRun(ws, b.id);
+      if (!run) return fail("run_not_found", 404);
+      const actorEmail = (g.ctx.user.email || "").trim();
+      if (!actorEmail) {
+        return fail("no_actor", 422, { detail: "this spend could not be attributed to your account; sign out, sign back in, and try again" });
+      }
+      const wanted = Math.round(Number(b.max));
+      if (!Number.isFinite(wanted) || wanted < 1) return fail("missing_max", 422);
+      const queue = await listNightItems(ws);
+      const activeBoosts = queue.filter((i) => i.kind === "boost" && i.stage !== "done" && i.stage !== "error");
+      // One live boost item per list: a second press on the same list is a no-op
+      // (the queued run already covers it), not a second bill.
+      const existing = activeBoosts.find((i) => i.runId === run.id);
+      if (existing) return ok({ item: existing, alreadyQueued: true, waitingBehind: 0 });
+      const item = await addNightItem(ws, {
+        kind: "boost", name: run.name, runId: run.id,
+        boost: { wanted, actorUserId: g.ctx.user.id, actorEmail },
+      });
+      return ok({ item, waitingBehind: activeBoosts.length });
     }
 
     // KoldInfo is the FIRST enrichment rung (free CSV round-trip the operator drives):

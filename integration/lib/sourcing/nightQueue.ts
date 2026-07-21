@@ -12,6 +12,12 @@
  * runs and a queue item can even resume a chain the UI started (and vice versa).
  *
  *   queued -> search (kind:"search" only) -> kold -> koldDb -> laxis(+gap-fill) -> done
+ *   queued -> [kold -> koldDb -> laxis if not fully enriched] -> boost -> done   (kind:"boost")
+ *
+ * kind:"boost" is the recruiter-approved paid phone run: pressing Boost on several
+ * lists queues them here, so they run one after another with no babysitting, and a
+ * list that is not fully enriched gets the free chain finished FIRST (free rungs may
+ * still fill rows the paid lookup would otherwise bill for).
  *
  * Deliberately NOT automated: promote / Send to OS Text. Outbound stays a human
  * decision; the queue's job is data, not sending.
@@ -36,16 +42,17 @@ import {
 } from "./laxis";
 import { buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv } from "./koldinfo";
 import { gapFillContacts } from "./gapfill";
+import { runPremiumPhoneBoost } from "./premiumPhone";
 import { withWorkspaceCreds } from "../connected";
 
 const KEY = "sourcing_night_queue_v1";
 
-export type NightStage = "queued" | "search" | "kold" | "koldDb" | "laxis" | "done" | "error";
+export type NightStage = "queued" | "search" | "kold" | "koldDb" | "laxis" | "boost" | "done" | "error";
 
 export interface NightItem {
   id: string;
   workspaceId: string;
-  kind: "search" | "enrich";
+  kind: "search" | "enrich" | "boost";
   /** List name (becomes the saved run's name for kind:"search"). */
   name: string;
   jd?: string;
@@ -64,6 +71,23 @@ export interface NightItem {
    *  recreating the container kills Chromium mid-job) re-runs the rung ONCE
    *  instead of silently abandoning its remaining rows. */
   retried?: Partial<Record<"kold" | "koldDb", boolean>>;
+  /** kind:"boost" only: the recruiter-approved paid phone run. Queued presses on
+   *  several lists run back-to-back with no babysitting: one at a time (the queue's
+   *  invariant), each finishing the FREE enrichment chain first if the list is not
+   *  fully enriched, then buying in batches until the approved count is reached or
+   *  the monthly budget stops it. The actor rides on the item because the batches
+   *  run on cron ticks, long after the request that queued them is gone, and every
+   *  cent must still land on the recruiter who pressed Go. */
+  boost?: {
+    wanted: number;
+    /** Lookups completed so far (billed calls + free cache fills). */
+    done: number;
+    /** Phones added so far. */
+    found: number;
+    costUsd: number;
+    actorUserId?: string;
+    actorEmail: string;
+  };
   createdAt: string;
   updatedAt: string;
   finishedAt?: string;
@@ -101,13 +125,15 @@ export async function listNightItems(workspaceId: string): Promise<NightItem[]> 
 }
 
 export interface NightAddInput {
-  kind: "search" | "enrich";
+  kind: "search" | "enrich" | "boost";
   name: string;
   jd?: string;
   location?: string;
   breadth?: SearchBreadth;
   outsideGeo?: boolean;
   runId?: string;
+  /** kind:"boost" only: approved lookup count + the recruiter the spend bills to. */
+  boost?: { wanted: number; actorUserId?: string; actorEmail: string };
 }
 
 export async function addNightItem(workspaceId: string, input: NightAddInput): Promise<NightItem> {
@@ -122,6 +148,12 @@ export async function addNightItem(workspaceId: string, input: NightAddInput): P
     breadth: input.breadth,
     outsideGeo: input.outsideGeo,
     runId: input.runId,
+    boost: input.kind === "boost" && input.boost ? {
+      wanted: Math.max(1, Math.round(input.boost.wanted)),
+      done: 0, found: 0, costUsd: 0,
+      actorUserId: input.boost.actorUserId,
+      actorEmail: input.boost.actorEmail,
+    } : undefined,
     stage: "queued",
     added: { emails: 0, phones: 0 },
     createdAt: nowIso(),
@@ -159,6 +191,26 @@ function finish(item: NightItem, stage: "done" | "error", error?: string): void 
   touch(item, stage === "done"
     ? `finished: ${item.added.emails} email(s) + ${item.added.phones} phone(s) added`
     : undefined);
+}
+
+/** Boost items ride the SAME free-chain stages first (a half-enriched list must be
+ *  properly enriched before money is spent on rows the free rungs may still fill);
+ *  when that chain completes they move on to buying instead of finishing. */
+function chainDone(item: NightItem): void {
+  if (item.kind === "boost") {
+    item.stage = "boost";
+    touch(item, "free enrichment finished, starting the paid phone lookups…");
+    return;
+  }
+  finish(item, "done");
+}
+
+/** Finish a boost item "done" with its own readout (phones + real cost), which the
+ *  queue card prints verbatim. */
+function finishBoost(item: NightItem, note: string): void {
+  item.stage = "done";
+  item.finishedAt = nowIso();
+  touch(item, note);
 }
 
 /** First grid offset below `total` not yet enriched (mirrors the route's resume rule). */
@@ -314,6 +366,25 @@ async function step(item: NightItem): Promise<void> {
   const ws = item.workspaceId;
 
   if (item.stage === "queued") {
+    if (item.kind === "boost") {
+      // Route past what already ran: resume a mid-flight free rung if one is parked
+      // on the run, run the whole free chain if it never ran (the list must be
+      // properly enriched before paid lookups), else go straight to buying. Never
+      // re-submit the KoldInfo rungs on an already-finished chain: that would
+      // re-spend vendor tokens on rows they already failed to fill.
+      const brun = item.runId ? await getSourcingRun(ws, item.runId) : undefined;
+      if (!brun) { finish(item, "error", "the saved list is gone"); return; }
+      const enrichRan = Boolean(brun.laxisProgress || brun.autoflow?.sentAt || brun.promotedCount || brun.promotedListId);
+      if (brun.koldJob) item.stage = "kold";
+      else if (brun.koldDbJob) item.stage = "koldDb";
+      else if (brun.laxisJob || (brun.laxisProgress && brun.laxisProgress.nextStart !== null)) item.stage = "laxis";
+      else if (!enrichRan) item.stage = "kold";
+      else item.stage = "boost";
+      touch(item, item.stage === "boost"
+        ? "starting the paid phone lookups…"
+        : "finishing the free enrichment first, then the paid phone lookups…");
+      return;
+    }
     item.stage = item.kind === "search" ? "search" : "kold";
     touch(item, item.kind === "search" ? "searching…" : "starting enrichment…");
     if (item.kind === "enrich") return; // enrichment starts next tick (cheap steps)
@@ -440,13 +511,13 @@ async function step(item: NightItem): Promise<void> {
       item.added.emails += gf.enriched; item.added.phones += gf.phones;
       notePhoneFinderOff(run, gf);
       await saveSourcingRun(ws, { ...run });
-      finish(item, "done");
+      chainDone(item);
       return;
     }
     const progress = run.laxisProgress ?? { doneOffsets: [], total, nextStart: 0, updatedAt: nowIso() };
     if (!run.laxisJob) {
       const start = nextOffset(progress.doneOffsets, total, MAX_LAXIS_UPLOAD);
-      if (start === null) { finish(item, "done"); return; }
+      if (start === null) { chainDone(item); return; }
       const targetRows = run.candidates.slice(start, start + MAX_LAXIS_UPLOAD);
       // Laxis down-cooldown (a fatal worker failure was just seen): don't feed chunks
       // to a dead login. The waterfall still runs, the chunk is marked done so the
@@ -459,7 +530,7 @@ async function step(item: NightItem): Promise<void> {
         rememberLaxisSkip(run, start, "laxis_down_cooldown");
         run.laxisProgress = markOffsetDone(progress, start, total);
         await saveSourcingRun(ws, { ...run });
-        if (run.laxisProgress.nextStart === null) { finish(item, "done"); return; }
+        if (run.laxisProgress.nextStart === null) { chainDone(item); return; }
         touch(item, laxisNote(run, total));
         return;
       }
@@ -517,9 +588,55 @@ async function step(item: NightItem): Promise<void> {
     delete run.laxisJob;
     run.laxisProgress = markOffsetDone(run.laxisProgress ?? progress, start, total);
     await saveSourcingRun(ws, { ...run });
-    if (run.laxisProgress.nextStart === null) { finish(item, "done"); return; }
+    if (run.laxisProgress.nextStart === null) { chainDone(item); return; }
     touch(item, laxisNote(run, total));
     return;
+  }
+
+  if (item.stage === "boost") {
+    const boost = item.boost;
+    if (!boost) { finish(item, "error", "the boost details were lost; press Boost phones on the list again"); return; }
+    const money = (v: number) => `$${v >= 0.01 || v === 0 ? v.toFixed(2) : v.toFixed(4)}`;
+    const readout = () =>
+      `${boost.found} phone${boost.found === 1 ? "" : "s"} added for ${money(boost.costUsd)} (all saved)`;
+    // Buy in bounded 20-row batches inside this tick, then yield: momentum without
+    // wedging the tick (the latch-steal window is 15 min; we stop well before it).
+    const deadline = Date.now() + 3 * 60 * 1000;
+    while (true) {
+      const remainingWanted = boost.wanted - boost.done;
+      if (remainingWanted <= 0) { finishBoost(item, `boost finished: ${readout()}`); return; }
+      const r = await runPremiumPhoneBoost(ws, run, {
+        max: Math.min(20, remainingWanted),
+        actor: { userId: boost.actorUserId, userEmail: boost.actorEmail },
+      });
+      boost.done += r.called + r.cacheHits;
+      boost.found += r.found;
+      boost.costUsd = Math.round((boost.costUsd + r.costUsd) * 10000) / 10000;
+      item.added.phones += r.found;
+      await saveSourcingRun(ws, { ...run });
+      if (r.budgetExhausted) {
+        finishBoost(item, `stopped at your monthly Boost budget: ${readout()}; the allowance resets on the 1st`);
+        return;
+      }
+      if (r.stoppedEarly) {
+        // Another boost still holds this recruiter's lock (a tab running the old
+        // loop, or a race with a just-finished item): wait, don't fail the item.
+        if (r.called === 0 && r.cacheHits === 0 && /already in progress/i.test(r.stoppedEarly)) {
+          touch(item, "waiting for your other Boost run to finish…");
+          return;
+        }
+        finish(item, "error", `${r.stoppedEarly} · so far: ${readout()}; fix the listing settings and press Boost phones again, rows already bought are never re-billed`);
+        return;
+      }
+      if (r.remaining <= 0) { finishBoost(item, `boost finished: ${readout()}`); return; }
+      if (r.called === 0 && r.cacheHits === 0) {
+        // Nothing progressed and nothing explained why: bail rather than spin.
+        finish(item, "error", `the paid lookup made no progress · so far: ${readout()}`);
+        return;
+      }
+      touch(item, `paid phone lookups: ${Math.min(boost.done, boost.wanted)} of ${boost.wanted} · ${boost.found} phone${boost.found === 1 ? "" : "s"} found · ${money(boost.costUsd)} spent`);
+      if (Date.now() > deadline) return; // next tick continues from boost.done
+    }
   }
 }
 
