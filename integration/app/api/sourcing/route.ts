@@ -108,6 +108,12 @@ function rankByVerdict(rows: CandidateRow[]): void {
 export async function GET(req: Request) {
   const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
+  // Job Library self-heal: lists pushed before the library existed pair their
+  // contacts retroactively, once per process. Fire-and-forget.
+  try {
+    const { backfillPromotedRunPairings } = await import("../../../lib/sourcing/jdpair");
+    void backfillPromotedRunPairings(g.ctx.workspace.id);
+  } catch { /* never blocks the tab */ }
   // `durable` tells the UI whether saved runs survive a restart. If it's ever false the tab
   // should warn loudly rather than let the user save into volatile memory and lose it silently.
   // apiQuota: the paid people-search/profile subscriptions' latest credit readings

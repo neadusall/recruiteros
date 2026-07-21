@@ -41,3 +41,26 @@ export async function pairRunToJobLibrary(run: SourcingRun, note?: string): Prom
     console.error("[jobs] run pairing failed:", e?.message || e);
   }
 }
+
+/**
+ * History self-heal: saved lists that were pushed (to Candidates / OS Text)
+ * BEFORE the Job Library existed carry no pairings. Walking the workspace's
+ * promoted runs once per process registers each run's JD and pairs its
+ * contacts retroactively, so "no candidate left floating" covers history.
+ * Dedupe upstream makes it idempotent; the per-process guard keeps the
+ * repeated GETs that trigger it cheap. Fire-and-forget, never throws.
+ */
+const backfilledWorkspaces = new Set<string>();
+export async function backfillPromotedRunPairings(workspaceId: string): Promise<void> {
+  if (backfilledWorkspaces.has(workspaceId)) return;
+  backfilledWorkspaces.add(workspaceId);
+  try {
+    const { listSourcingRuns } = await import("./store");
+    for (const run of await listSourcingRuns(workspaceId)) {
+      if (!run.promotedListId) continue; // never pushed: pairs when it is
+      await pairRunToJobLibrary(run);
+    }
+  } catch (e: any) {
+    console.error("[jobs] promoted-run backfill failed:", e?.message || e);
+  }
+}
