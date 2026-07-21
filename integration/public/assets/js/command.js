@@ -2594,8 +2594,7 @@
     // In recruiting the Candidates pipeline lives under the Build nav group.
     var crumbLabel = (key === "prospects" && motion === "recruiting") ? "Build" : r.crumb;
     $("#crumb").textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + crumbLabel;
-    var demoBtn = $("#demoVideoBtn");
-    if (demoBtn) demoBtn.hidden = !DEMO_VIDEOS[key];
+    renderDemoButtons(key);
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) { n.classList.toggle("active", n.dataset.route === key); });
     var pa = $("#primaryAction");
     if (r.action) { pa.style.display = ""; pa.textContent = (key === "prospects") ? ("+ Add " + prospectNoun()) : r.action; pa.onclick = function () { primaryAction(key); }; }
@@ -2606,13 +2605,37 @@
     r.render(view);
   }
 
-  // Per-route walkthrough videos: routes listed here get a "Watch demo" pill next
-  // to the page title that opens the video in a lightbox.
+  // Per-route walkthrough videos: each entry becomes a pill next to the page
+  // title that opens the video in a lightbox. A pill only shows once its video
+  // actually exists on the server (HEAD probe), so an entry can be listed here
+  // before its file ships and the button appears on its own when the file lands.
   var DEMO_VIDEOS = {
-    jdsourcing: { src: "/assets/video/jd-sourcing-demo.mp4", title: "JD Sourcing walkthrough" }
+    jdsourcing: [
+      { src: "/assets/video/jd-sourcing-demo.mp4", label: "Features Video", title: "JD Sourcing features video" },
+      { src: "/assets/video/jd-sourcing-demo-live.mp4", label: "Demo Video", title: "JD Sourcing demo video" }
+    ]
   };
-  function openDemoVideo(key) {
-    var v = DEMO_VIDEOS[key];
+  var demoSeen = {}; // src -> true once the file is confirmed present (missing files re-probe)
+  function renderDemoButtons(key) {
+    var host = $("#demoVideoBtns");
+    if (!host) return;
+    host.innerHTML = "";
+    (DEMO_VIDEOS[key] || []).forEach(function (v) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "demo-btn";
+      b.hidden = demoSeen[v.src] !== true;
+      b.innerHTML = '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6.6 5.4v5.2L10.8 8z" fill="currentColor"/></svg>' + esc(v.label);
+      b.onclick = function () { openDemoVideo(v); };
+      host.appendChild(b);
+      if (demoSeen[v.src] !== true) {
+        fetch(v.src, { method: "HEAD" }).then(function (r) {
+          if (r.ok) { demoSeen[v.src] = true; b.hidden = false; }
+        }).catch(function () {});
+      }
+    });
+  }
+  function openDemoVideo(v) {
     if (!v || document.querySelector(".video-lightbox")) return;
     var ov = document.createElement("div");
     ov.className = "video-lightbox";
@@ -2633,9 +2656,6 @@
     document.addEventListener("keydown", onKey);
     document.body.appendChild(ov);
   }
-  var demoVideoBtn = document.getElementById("demoVideoBtn");
-  if (demoVideoBtn) demoVideoBtn.onclick = function () { openDemoVideo(currentRoute()); };
-
   window.addEventListener("hashchange", render);
   Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (n) {
     // Hash-routed items get a "#route" href; external links (e.g. PiP Studio at /pip-studio)

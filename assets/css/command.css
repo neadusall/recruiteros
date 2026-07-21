@@ -1384,7 +1384,10 @@ table.seqlib tbody tr:hover td { background: var(--surface-2); }
 .topbar h1, #pageTitle { font-size: 18px; font-weight: 650; line-height: 1.1; }
 
 /* ---- Demo video: "Watch demo" pill next to the page title + lightbox player ---- */
-.title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+.title-row h1 { white-space: nowrap; }
+.demo-btns { display: inline-flex; align-items: center; gap: 8px; }
+.demo-btns:empty { display: none; }
 .demo-btn { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 12px; font-weight: 600; color: var(--brand); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px 4px 9px; cursor: pointer; white-space: nowrap; transition: background .12s ease, border-color .12s ease; }
 .demo-btn:hover { background: var(--bg-soft); border-color: var(--brand); }
 .demo-btn svg { width: 14px; height: 14px; flex: none; }
