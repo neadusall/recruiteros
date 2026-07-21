@@ -75,6 +75,8 @@ export interface SaveRunInput {
   sendAsap?: boolean;
   /** Source run ids when this run is a "Combine lists" merge. */
   combinedFrom?: string[];
+  /** The recruiter who initiated the search (drives the OS Text campaign owner). */
+  createdBy?: SourcingRun["createdBy"];
 }
 
 /** Create or update a named run. Re-saving by id replaces its candidate set. */
@@ -93,6 +95,8 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     if (input.apiUsage) existing.apiUsage = input.apiUsage;
     if (input.sendAsap !== undefined) existing.sendAsap = input.sendAsap;
     if (input.combinedFrom) existing.combinedFrom = input.combinedFrom;
+    // First writer wins: a later re-save (enrich tick, merge) never steals the list.
+    if (input.createdBy && !existing.createdBy) existing.createdBy = input.createdBy;
     existing.updatedAt = nowIso();
     await save();
     return existing;
@@ -112,6 +116,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     apiUsage: input.apiUsage,
     sendAsap: input.sendAsap,
     combinedFrom: input.combinedFrom,
+    createdBy: input.createdBy,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };

@@ -61,6 +61,9 @@ export interface NightItem {
   outsideGeo?: boolean;
   /** The saved run being enriched (given for kind:"enrich", set after the search saves). */
   runId?: string;
+  /** kind:"search" only: the recruiter who queued it, stamped onto the saved run
+   *  so the auto-send credits the campaign to them (not the workspace owner). */
+  createdBy?: { userId: string; name: string; email: string };
   stage: NightStage;
   /** Plain-English progress line for the queue card. */
   note?: string;
@@ -153,6 +156,8 @@ export interface NightAddInput {
   breadth?: SearchBreadth;
   outsideGeo?: boolean;
   runId?: string;
+  /** kind:"search" only: the recruiter queueing it (becomes the run's createdBy). */
+  createdBy?: { userId: string; name: string; email: string };
   /** kind:"boost" only: approved lookup count + the recruiter the spend bills to. */
   boost?: { wanted: number; actorUserId?: string; actorEmail: string };
 }
@@ -169,6 +174,7 @@ export async function addNightItem(workspaceId: string, input: NightAddInput): P
     breadth: input.breadth,
     outsideGeo: input.outsideGeo,
     runId: input.runId,
+    createdBy: input.createdBy,
     boost: input.kind === "boost" && input.boost ? {
       wanted: Math.max(1, Math.round(input.boost.wanted)),
       done: 0, found: 0, costUsd: 0,
@@ -486,6 +492,7 @@ async function step(item: NightItem): Promise<void> {
       name: item.name,
       jd: item.jd,
       location: item.location,
+      createdBy: item.createdBy,
       icp,
       queries,
       candidates: result.candidates,

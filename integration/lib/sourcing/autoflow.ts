@@ -35,7 +35,6 @@ import { promoteSourcingRun } from "./promote";
 import { listNightItems, addNightItem } from "./nightQueue";
 import { mergeSourcingRuns } from "./mergeRuns";
 import { combinableGroups } from "./sameRole";
-import { workspaceOwner } from "../auth";
 import {
   ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
 } from "../ostextImport";
@@ -234,22 +233,27 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     // or, for house/granted, the shared one).
     const ostextReady = await ostextConfiguredFor(ws);
     if (ostextReady) {
-      const owner = await workspaceOwner(ws);
+      // The campaign belongs to whoever RAN the search (run.createdBy), never the
+      // workspace owner: owner-fallback stamped every auto-pushed campaign (and
+      // its "this is <name>" starter text) with the owner's name (user report
+      // 2026-07-21). A creator-less legacy run lands Unassigned; the admin ping
+      // in notifyNewCandidates covers it and the owner chip reassigns.
+      const recruiter = run.createdBy;
       try {
         const imported = await ostextImport({
           name: run.name,
-          template: ostextStarterTemplate(owner?.name || "", run.name),
+          template: ostextStarterTemplate(recruiter?.name || "", run.name),
           positionSummary: `Pushed from JD Sourcing list "${run.name}" (${contacts.length} contacts, server auto-send).`,
-          recruiterName: owner?.name || "",
-          recruiterEmail: owner?.email || "",
+          recruiterName: recruiter?.name || "",
+          recruiterEmail: recruiter?.email || "",
           contacts,
           // SAFEGUARD (user mandate): Telnyx cell-line confirmation on every push.
           validate: true,
           // NO-DOUBLE-CONTACT GUARD: DNC + recent-communication cooldown.
           workspaceId: ws,
-          // The owner's assigned phone line (Numbers page) becomes the
-          // campaign's SMS from-number: same number for their calls and texts.
-          fromUserId: owner?.userId,
+          // The searching recruiter's assigned phone line (Numbers page) becomes
+          // the campaign's SMS from-number: same number for their calls and texts.
+          fromUserId: recruiter?.userId,
         });
         // Keep the engine's answer on the run: "list shows N phones but the
         // campaign holds fewer" is almost always knownNonMobile (Telnyx already
@@ -274,9 +278,10 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     if (stamp.error?.startsWith("ostext_not_connected") !== true) stamp.error = undefined;
     console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) sent on: ${run.candidates.length} to Candidates, ${contacts.length} phone(s) to OS Text${topup ? " (top-up)" : ""}`);
     // Tell the desk that owns this list RIGHT NOW: new candidates just landed and
-    // are waiting for their first outreach. Recipient = the promoted campaign's
-    // recruiter; with nobody assigned, every admin hears it instead. Best-effort:
-    // a notification failure must never fail the send.
+    // are waiting for their first outreach. Recipient = the recruiter who ran the
+    // search (else the promoted campaign's recruiter); with nobody assigned, every
+    // admin hears it instead. Best-effort: a notification failure must never fail
+    // the send.
     try {
       if (opts?.notify !== false) await notifyNewCandidates(run, contacts.length, topup);
     } catch { /* delivery is best-effort */ }
@@ -305,7 +310,10 @@ async function notifyNewCandidates(run: SourcingRun, phonesPushed: number, topup
   const { listMembers } = await import("../auth/team");
   const campaign = run.promotedCampaignId ? await getCore().getCampaign(run.promotedCampaignId) : null;
   const members = listMembers(ws);
-  const owner = campaign?.recruiterId ? members.find((m) => m.userId === campaign.recruiterId) : undefined;
+  // The recruiter who ran the search hears first; a campaign-level assignment is
+  // the fallback for legacy runs. Neither -> every admin hears it.
+  const owner = (run.createdBy && members.find((m) => m.userId === run.createdBy!.userId))
+    || (campaign?.recruiterId ? members.find((m) => m.userId === campaign.recruiterId) : undefined);
   const recipients = owner ? [owner] : members.filter((m) => m.role === "owner" || m.role === "admin");
   if (!recipients.length) return;
   const title = topup

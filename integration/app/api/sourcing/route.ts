@@ -128,6 +128,10 @@ export async function POST(req: Request) {
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);
   const action = b?.action ?? "plan";
+  // The signed-in recruiter, stamped onto every run THEY create so the background
+  // auto-send credits its OS Text campaign (owner chip + "this is <name>" starter
+  // text) to the person who ran the search, not the workspace owner.
+  const actor = { userId: g.ctx.user.id, name: g.ctx.user.name || "", email: g.ctx.user.email || "" };
 
   try {
     if (action === "plan") {
@@ -315,6 +319,7 @@ export async function POST(req: Request) {
         location: result.icp.geos[0],
         icp: result.icp, queries: result.queries, candidates: result.candidates,
         warnings: result.warnings, motion: "recruiting",
+        createdBy: actor,
         apiUsage: result.apiUsage ? {
           rapidapi: Number(result.apiUsage.rapidapi) || 0,
           serper: Number(result.apiUsage.serper) || 0,
@@ -398,6 +403,7 @@ export async function POST(req: Request) {
       const item = await addNightItem(ws, {
         kind: "search", name, jd: b.jd, location: b.location,
         breadth: parseBreadth(b.breadth), outsideGeo: b.outsideGeo === true,
+        createdBy: actor,
       });
       return ok({ item });
     }
@@ -425,6 +431,7 @@ export async function POST(req: Request) {
         icp: b.icp, queries: b.queries ?? [], candidates: b.candidates ?? [],
         warnings: b.warnings ?? [],
         motion: b.motion === "bd" ? "bd" : "recruiting",
+        createdBy: actor,
         // The run's search-API spend, stamped onto the list (sanitized: counts only).
         apiUsage: b.apiUsage && typeof b.apiUsage === "object" ? {
           rapidapi: Number(b.apiUsage.rapidapi) || 0,
@@ -1005,6 +1012,9 @@ export async function POST(req: Request) {
         // the whole refined set for campaign assignment.
         sendAsap: anchor.motion !== "bd",
         combinedFrom: ids,
+        // Keep the sources' recruiter on the combined list; a creator-less legacy
+        // set falls to whoever pressed Combine.
+        createdBy: master.createdBy || runs.find((r) => r.createdBy)?.createdBy || actor,
       });
       if (carried && name === carried.name) {
         // Promote leg reuses the existing campaign/list; the sentAt stamp makes the

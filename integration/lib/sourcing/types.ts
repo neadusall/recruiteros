@@ -155,6 +155,11 @@ export interface CandidateRow {
 export interface SourcingRun {
   id: string;
   workspaceId: string;
+  /** The recruiter who ran (or queued) the search. The server-side auto-send
+   *  stamps THEM as the OS Text campaign owner and texts introduce them by
+   *  name; absent (legacy runs, pre-2026-07-21), the campaign lands Unassigned
+   *  and admins get the new-candidates ping instead. */
+  createdBy?: { userId: string; name: string; email: string };
   /** The name the recruiter saves it under — reused as the Candidates list name. */
   name: string;
   motion: Motion;
