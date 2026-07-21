@@ -355,8 +355,12 @@ export function makeSkipTracePhoneProvider(unitCostUsd: number): EnrichmentProvi
       }
       // 404-style "no record" answers are a billed miss, not an error; real transport
       // or auth failures surface as errors so a broken listing stops the run loudly.
+      // ERROR ANSWERS STILL BILL on per-call listings: RapidAPI counts every request
+      // that reached the listing, whatever the status code, and the ledger must
+      // track the provider dashboard as closely as possible (2026-07-21 audit found
+      // a 31-request undercount from exactly this "errors are free" assumption).
       if (res.status === 404 || res.status === 204) return { status: "miss", cost: missCost };
-      if (!res.ok) return { status: "error", error: `RapidAPI ${host} ${res.status}`, cost: 0 };
+      if (!res.ok) return { status: "error", error: `RapidAPI ${host} ${res.status}`, cost: missCost };
       const data = (await res.json().catch(() => null)) as unknown;
       const best = data ? extractSkipTracePhone(data) : null;
       if (best) {
@@ -380,7 +384,9 @@ export function makeSkipTracePhoneProvider(unitCostUsd: number): EnrichmentProvi
       const twoCallCost = billing === "call" ? unitCostUsd * 2 : 0;
       const res2 = await fetch(`https://${host}${detailsPath}`, { headers });
       if (res2.status === 404 || res2.status === 204) return { status: "miss", cost: twoCallCost };
-      if (!res2.ok) return { status: "error", error: `RapidAPI ${host} details ${res2.status}`, cost: missCost };
+      // Both requests reached the listing (search + details), so both bill even
+      // when the details answer is an error status.
+      if (!res2.ok) return { status: "error", error: `RapidAPI ${host} details ${res2.status}`, cost: twoCallCost };
       const data2 = (await res2.json().catch(() => null)) as unknown;
       const best2 = data2 ? extractSkipTracePhone(data2) : null;
       if (!best2) return { status: "miss", cost: twoCallCost };
