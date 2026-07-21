@@ -82,27 +82,41 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
   if (!Number.isFinite(touched) || now - touched > FRESH_MS) return null;
 
   if (enrichmentInFlight(run)) {
-    // A LIVE chain updates the run on every submit/merge; a job ref that has sat
-    // untouched for STUCK_MS is an orphan (the driving tab died mid-job). Hand it
-    // to the overnight queue's resume machinery once — it polls, merges, clears
-    // the refs and finishes the chain server-side. PARITY FIRST: a never-sent
-    // list also sends RIGHT NOW with what it already has (the resumed chain's
-    // finds flow on later via the top-up rule) — its people must not stay out of
-    // Candidates/OS Text for however long the queue takes to finish the chain.
-    if (now - touched < STUCK_MS) return null;
-    if (run.autoflow?.sentAt) return null; // already sent; a landed resume re-triggers via top-up
-    if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
+    if (now - touched < STUCK_MS) {
+      // A LIVE chain updates the run on every submit/merge — leave it alone…
+      // except FIRST-SIGHT DELIVERY (user mandate 2026-07-21: "why hasn't every
+      // search been pushed to OS Text"): a NEVER-SENT list ships what it already
+      // holds right now, so its Candidates list and OS Text campaign exist
+      // minutes after the search finishes, not hours later when enrichment
+      // ends. Everything the chain finds afterwards rides the top-up rule.
+      if (!run.autoflow?.sentAt && (run.autoflow?.attempts ?? 0) < MAX_ATTEMPTS) return "send";
+      return null;
+    }
+    // Job refs untouched past STUCK_MS = orphaned chain (the driving tab died
+    // mid-job). Hand it to the overnight queue's resume machinery once — it
+    // polls, merges, clears the refs and finishes the chain server-side. A SENT
+    // list needs that resume too: with first-sight delivery every list is sent
+    // almost immediately, and an orphaned chain would otherwise never finish
+    // (top-up only fires on finds, and a dead chain finds nothing).
     const resumedAt = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
+    if (run.autoflow?.sentAt) return Number.isFinite(resumedAt) ? null : "resume";
+    if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
     return Number.isFinite(resumedAt) ? "send" : "resume-send";
   }
 
   if (run.autoflow?.sentAt) {
-    // Already sent: only a later enrichment that found MORE phones re-sends
-    // (top-up). Debounced: a live Boost run finds numbers continuously, and
-    // without the wait every 2-minute tick re-pushed the WHOLE list for one or
-    // two new phones (a real list hit 35 attempts in a day). Nothing is lost
-    // by waiting: the phones sit on the run and ride the next top-up.
-    if (phoneCount(run) > run.autoflow.phonesAtSend) {
+    // Already sent: a later enrichment that found MORE phones re-sends (top-up),
+    // and so does a merge that added MORE PEOPLE — a Sales Nav / pasted-search
+    // merge can add people who hold no phone yet, and they still belong in
+    // Candidates (older stamps lack peopleAtSend; they fall back to the
+    // phones-only trigger). Debounced: a live Boost run finds numbers
+    // continuously, and without the wait every 2-minute tick re-pushed the
+    // WHOLE list for one or two new phones (a real list hit 35 attempts in a
+    // day). Nothing is lost by waiting: the finds sit on the run and ride the
+    // next top-up.
+    const morePhones = phoneCount(run) > run.autoflow.phonesAtSend;
+    const morePeople = run.candidates.length > (run.autoflow.peopleAtSend ?? run.candidates.length);
+    if (morePhones || morePeople) {
       const sentAt = Date.parse(run.autoflow.sentAt);
       if (Number.isFinite(sentAt) && now - sentAt < TOPUP_DEBOUNCE_MS) return null;
       return "topup";
@@ -127,26 +141,17 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
   }
   if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
 
-  // Born-finished runs (a "Combine lists" merge of already-enriched lists) skip the
-  // settle/idle waits: the merge handler fires a send in-request, and this branch is
-  // the sweeper backstop in case that process died before the send landed.
-  if (run.sendAsap) return "send";
-
-  const chainDone = !chainUnfinished(run);
-  if (chainDone && now - touched >= SETTLE_MS) return "send";
-  // A chain that stopped PARTWAY with no job ref parked (the worker failed between
-  // chunks, or the driving tab died between submit cycles) used to force-send and
-  // leave the list "enrichment unfinished" forever. Same for a chain that never
-  // STARTED but has rows to fill (tab died after save, or a merge wiped the
-  // ledger). PARITY FIRST: send what it has NOW and queue ONE server-side resume
-  // to finish the chain — whose finds then flow on via the top-up rule.
-  const chainPartial = chainUnfinished(run);
-  if (chainPartial && now - touched >= IDLE_MS) {
+  // Never sent, no job in flight: FIRST-SIGHT DELIVERY — ship what it has NOW.
+  // A chain that stopped PARTWAY with nothing driving it (the worker failed
+  // between chunks, or the driving tab died between submit cycles) also queues
+  // ONE server-side resume to finish the chain, whose finds then flow on via the
+  // top-up rule — but only once the list has sat quiet for IDLE_MS, so a live
+  // tab about to fire the next chunk isn't double-driven by the night queue.
+  if (chainUnfinished(run) && now - touched >= IDLE_MS) {
     const resumedAt = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
     return Number.isFinite(resumedAt) ? "send" : "resume-send";
   }
-  if (now - touched >= IDLE_MS) return "send"; // stalled or never-started: flow on with what it has
-  return null;
+  return "send";
 }
 
 /** Queue an orphaned chain for the overnight processor to finish (once per run). */
@@ -220,14 +225,14 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       });
     }
 
-    // 2) OS Text. Zero phones is not a failure: the list is stamped sent with
-    //    phonesAtSend 0, so the moment a later enrichment finds phones the top-up
-    //    rule fires and the campaign gets built then.
+    // 2) OS Text. Zero phones is not a failure — the campaign is still created
+    //    (empty, draft) so every search is VISIBLE in OS Text the moment it
+    //    lands, and the top-up rule fills it as enrichment finds phones.
     const contacts = toOsTextContacts(run);
     // Per-workspace: only push if THIS workspace has an OS Text engine (its own
     // or, for house/granted, the shared one).
-    const ostextReady = contacts.length ? await ostextConfiguredFor(ws) : false;
-    if (contacts.length && ostextReady) {
+    const ostextReady = await ostextConfiguredFor(ws);
+    if (ostextReady) {
       const owner = await workspaceOwner(ws);
       try {
         const imported = await ostextImport({
@@ -264,6 +269,7 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
 
     stamp.sentAt = nowIso();
     stamp.phonesAtSend = phonesNow;
+    stamp.peopleAtSend = run.candidates.length;
     if (stamp.error?.startsWith("ostext_not_connected") !== true) stamp.error = undefined;
     console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) sent on: ${run.candidates.length} to Candidates, ${contacts.length} phone(s) to OS Text${topup ? " (top-up)" : ""}`);
     // Tell the desk that owns this list RIGHT NOW: new candidates just landed and
@@ -363,6 +369,8 @@ export function parityDue(run: SourcingRun, now: number): boolean {
   if (Number.isFinite(parityAt) && now - parityAt < PARITY_RETRY_MS) return false;
   if (!run.autoflow?.sentAt) return true;                       // never sent at all
   if (phoneCount(run) > run.autoflow.phonesAtSend) return true; // phones OS Text never got
+  // People a later merge added who never reached Candidates (no phone required).
+  if (run.candidates.length > (run.autoflow.peopleAtSend ?? run.candidates.length)) return true;
   return Boolean(run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0);
 }
 

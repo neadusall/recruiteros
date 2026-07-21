@@ -229,6 +229,14 @@ export interface SourcingRun {
     sentAt?: string;
     /** Candidates holding a phone at the last send — the top-up trigger. */
     phonesAtSend: number;
+    /**
+     * Total candidates on the run at the last send. A later merge (Sales Nav /
+     * pasted-search / Combine) can add PEOPLE without adding phones; this stamp
+     * lets the top-up rule deliver them to Candidates anyway. Optional: stamps
+     * written before 2026-07-21 lack it, and the rule then falls back to the
+     * phones-only trigger.
+     */
+    peopleAtSend?: number;
     attempts: number;
     /** When the sweeper queued a server-side resume for an orphaned chain. */
     resumedAt?: string;

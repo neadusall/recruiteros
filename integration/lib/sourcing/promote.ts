@@ -68,7 +68,10 @@ export async function promoteSourcingRun(
   const tag = (opts.tag || "").trim() || listName;
 
   // 1. The campaign that holds them — named after the chosen list name.
-  let campaignId = opts.campaignId;
+  // Reuse the campaign a prior promote of THIS run created unless the caller
+  // targets a different one: a top-up re-promote must grow the existing
+  // campaign, never fork a sibling.
+  let campaignId = opts.campaignId || run.promotedCampaignId;
   if (!campaignId) {
     const campaign = await createCampaign({
       workspaceId,
@@ -132,8 +135,13 @@ export async function promoteSourcingRun(
     added++;
   }
 
-  // 3. A saved list under the chosen name capturing the exact set.
+  // 3. A saved list under the chosen name capturing the exact set. Passing the
+  // id a prior promote stamped makes this a true upsert: a top-up re-promote
+  // UPDATES the run's one list in place. Without the id, upsertProspectList
+  // created a brand-new list on every call — one live run accumulated ~20
+  // identical "(combined)" lists in Candidates, one per top-up (2026-07-21).
   const list = await upsertProspectList(workspaceId, {
+    id: run.promotedListId,
     name: listName,
     prospectIds,
     motion: run.motion,

@@ -146,6 +146,7 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
   }
 
   // NO-DOUBLE-CONTACT GUARD: last line of defense for every OS Text entry point.
+  const hadContacts = args.contacts.length > 0;
   let protectedDnc = 0;
   let protectedRecent = 0;
   if (args.workspaceId) {
@@ -164,7 +165,12 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
       else protectedRecent++;
     }
     args = { ...args, contacts: kept };
-    if (!kept.length) {
+    // Only a push that HAD contacts and lost them all to the guard is an error.
+    // An intentionally empty push (autoflow creating the campaign shell for a
+    // zero-phone list, so every search is visible in OS Text immediately)
+    // proceeds: the engine's /api/import get-or-creates the campaign before it
+    // touches contacts, and top-ups fill it as enrichment finds phones.
+    if (hadContacts && !kept.length) {
       const e = new Error(
         `Nothing to push: all selected people are protected (${protectedDnc} do-not-contact, ${protectedRecent} contacted recently).`,
       );

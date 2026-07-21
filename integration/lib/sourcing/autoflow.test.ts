@@ -68,18 +68,40 @@ check("...same but resume already queued -> send (no 2h grace)",
     ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
     autoflow: { phonesAtSend: 0, attempts: 0, resumedAt: new Date(NOW - 10 * MIN).toISOString() },
   }), NOW), "send");
-check("...same but already SENT -> no action (top-up handles the rest)",
+// A SENT list with an orphaned chain still gets the chain finished server-side:
+// with first-sight delivery every list is sent almost immediately, and top-up
+// only fires on finds — a dead chain finds nothing, so it must be resumed.
+check("...same but already SENT -> resume (dead chain would never top up)",
   due(run({
     ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
     autoflow: { sentAt: new Date(NOW - HOUR).toISOString(), phonesAtSend: 1, attempts: 1 },
+  }), NOW), "resume");
+check("...sent + stuck but resume already queued -> no action",
+  due(run({
+    ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
+    autoflow: { sentAt: new Date(NOW - HOUR).toISOString(), phonesAtSend: 1, attempts: 1, resumedAt: new Date(NOW - 10 * MIN).toISOString() },
   }), NOW), null);
-check("...same but jobs only 30min stale -> no action (live chain owns it)",
-  due(run({ ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 30 * MIN).toISOString() }), NOW), null);
+// FIRST-SIGHT DELIVERY (2026-07-21): a healthy live chain no longer delays the
+// FIRST send — the list ships now and enrichment finds ride the top-up rule.
+check("...same but jobs only 30min stale and never sent -> send (first sight)",
+  due(run({ ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 30 * MIN).toISOString() }), NOW), "send");
+check("...healthy in-flight chain on an already-SENT list -> no action",
+  due(run({
+    ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 30 * MIN).toISOString(),
+    autoflow: { sentAt: new Date(NOW - HOUR).toISOString(), phonesAtSend: 1, attempts: 1 },
+  }), NOW), null);
 
 // Fully-enriched ledger-less run (e.g. born of a merge of enriched lists):
-// nothing left to enrich, so it settles and sends without a resume detour.
+// nothing left to enrich, so it sends without a resume detour.
 check("unsent ledger-less run, every row enriched, settled 6min -> send",
   due(run({ candidates: [enriched()], updatedAt: new Date(NOW - 6 * MIN).toISOString() }), NOW), "send");
+
+// FIRST-SIGHT DELIVERY: a brand-new never-sent list sends on the very next
+// sweep — no settle, no idle wait. The chain (live tab) keeps enriching and
+// tops the campaign up; the resume decision keeps its own IDLE_MS clock so the
+// night queue never double-drives a chain a live tab is about to continue.
+check("unsent run saved 1min ago, chain not started -> send (first sight, no resume yet)",
+  due(run({ candidates: [enriched(), cand()], updatedAt: new Date(NOW - 1 * MIN).toISOString() }), NOW), "send");
 
 // SENT list that a Sales Nav merge just reopened (ledger wiped, resumedAt
 // cleared by the merge handler), tab died: sweeper queues the resume (gap 3).
@@ -113,6 +135,34 @@ check("sent 2 min ago, one more phone found -> wait out the debounce",
     candidates: [enriched(), enriched()],
     updatedAt: new Date(NOW - 1 * MIN).toISOString(),
     autoflow: { sentAt: new Date(NOW - 2 * MIN).toISOString(), phonesAtSend: 1, attempts: 1 },
+  }), NOW), null);
+
+// NEW PEOPLE top up too (2026-07-21): a Sales Nav / pasted-search merge can add
+// people who hold no phone yet — they still belong in Candidates. Phones equal,
+// people grew -> topup (after the same debounce).
+check("sent list, merge added a phoneless person -> topup",
+  due(run({
+    candidates: [enriched(), cand()],
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(),
+    laxisProgress: { doneOffsets: [0], total: 2, nextStart: null, updatedAt: new Date(NOW - 6 * MIN).toISOString() } as SourcingRun["laxisProgress"],
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 1, attempts: 1 },
+  }), NOW), "topup");
+check("...same but sent 2 min ago -> wait out the debounce",
+  due(run({
+    candidates: [enriched(), cand()],
+    updatedAt: new Date(NOW - 1 * MIN).toISOString(),
+    laxisProgress: { doneOffsets: [0], total: 2, nextStart: null, updatedAt: new Date(NOW - 1 * MIN).toISOString() } as SourcingRun["laxisProgress"],
+    autoflow: { sentAt: new Date(NOW - 2 * MIN).toISOString(), phonesAtSend: 1, peopleAtSend: 1, attempts: 1 },
+  }), NOW), null);
+// Stamps written before peopleAtSend existed fall back to the phones-only
+// trigger: people growth alone must NOT re-send every pre-existing list once
+// this deploys.
+check("old stamp without peopleAtSend, people grew, phones didn't -> no topup",
+  due(run({
+    candidates: [enriched(), cand()],
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(),
+    laxisProgress: { doneOffsets: [0], total: 2, nextStart: null, updatedAt: new Date(NOW - 6 * MIN).toISOString() } as SourcingRun["laxisProgress"],
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, attempts: 1 },
   }), NOW), null);
 
 // ostext_not_connected self-heal (2026-07-20 Lume incident): a FRESH sent list
@@ -176,6 +226,13 @@ check("sent list idle 30 days, phones grew after send -> parity due",
   parityDue(run({
     candidates: [enriched(), enriched()], updatedAt: new Date(NOW - 30 * DAY).toISOString(),
     autoflow: { sentAt: new Date(NOW - 30 * DAY).toISOString(), phonesAtSend: 1, attempts: 1 },
+  }), NOW), true);
+
+// ...and one whose PEOPLE grew (phoneless merge adds) is parity-due too.
+check("sent list idle 30 days, people grew after send -> parity due",
+  parityDue(run({
+    candidates: [enriched(), cand()], updatedAt: new Date(NOW - 30 * DAY).toISOString(),
+    autoflow: { sentAt: new Date(NOW - 30 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 1, attempts: 1 },
   }), NOW), true);
 
 // Gap 2: MAX_ATTEMPTS-parked runs re-enter through the parity lane...
