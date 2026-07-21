@@ -15,12 +15,12 @@
  * no key it returns dryRun + the seed unchanged.
  */
 
-import { requireSession, body, ok } from "../../../../lib/api";
+import { body, ok, requireCapability } from "../../../../lib/api";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 import { draftVoiceScript, DEFAULT_PERSONA, type VoiceChannel } from "../../../../lib/voice";
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

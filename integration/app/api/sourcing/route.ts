@@ -27,7 +27,7 @@
  * Discovery-only until promote; contact lookup and deep-vet are on demand. Session-gated.
  */
 
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../lib/api";
 import {
   planSourcing, pinIcpLocation, parseJobDescription, generateQueries, runDiscovery, parseRadiusMi,
   googleSearchConfigured, searxSearchConfigured, serperSearchConfigured, rapidApiSearchConfigured,
@@ -106,7 +106,7 @@ function rankByVerdict(rows: CandidateRow[]): void {
 // The waterfall itself lives in lib/sourcing/gapfill.ts (shared with the overnight queue).
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   // `durable` tells the UI whether saved runs survive a restart. If it's ever false the tab
   // should warn loudly rather than let the user save into volatile memory and lose it silently.
@@ -123,7 +123,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

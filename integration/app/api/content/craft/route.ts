@@ -17,10 +17,10 @@ import {
   craftSequence, craftTouch, pullForProspect, libraryCoverage,
   type ContentQuery, type JobFunction, type Seniority, type SignalType, type Motion,
 } from "../../../../lib/content/library";
-import { requireSession, body, ok } from "../../../../lib/api";
+import { body, ok, requireCapability } from "../../../../lib/api";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const u = new URL(req.url);
   const q = u.searchParams;
@@ -56,7 +56,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const b = (await body<any>(req)) ?? {};
   // A full ContentQuery (with nested prospect) routes straight to craftSequence;

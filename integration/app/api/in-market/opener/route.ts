@@ -12,7 +12,7 @@
  * Operator-only (requireSession). Uses ANTHROPIC_API_KEY when set.
  */
 
-import { requireSession, body as readBody, ok, fail } from "../../../../lib/api";
+import { body as readBody, ok, fail, requireCapability } from "../../../../lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +22,7 @@ function esc(s: string): string {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
 
   const b = await readBody<any>(req);

@@ -1,4 +1,4 @@
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import { getCore } from "../../../../lib/core/repository";
 import { getRecord } from "../../../../lib/data";
 import { checkContactable } from "../../../../lib/outreach/contactGuard";
@@ -36,7 +36,7 @@ interface PushBody {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 

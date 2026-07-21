@@ -18,7 +18,7 @@
  * BD motion only.
  */
 
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../lib/api";
 import { enrichRows, assembleEmail, type BulkBdRow, type BulkCandidate } from "../../../lib/bd/bulkMpc";
 import { sendEmail, mtaPreferred } from "../../../lib/providers/mta";
 import { listDomains, listMailboxes, serverDailyCap, listServers } from "../../../lib/sending";
@@ -30,7 +30,7 @@ const LAUNCH_BATCH = Number(process.env.BDBULK_LAUNCH_BATCH || 200);
 const PREVIEW_DEFAULT = 8;
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 
@@ -59,7 +59,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 

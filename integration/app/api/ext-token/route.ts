@@ -9,7 +9,7 @@
 
 import { getOrCreateToken, regenerateToken } from "../../../lib/exttoken";
 import { getImportMotion, setImportMotion } from "../../../lib/importmotion";
-import { requireSession, body, ok } from "../../../lib/api";
+import { body, ok, requireCapability } from "../../../lib/api";
 import type { Motion } from "../../../lib/core/types";
 
 /**
@@ -29,14 +29,14 @@ function publicOrigin(req: Request): string {
 }
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "apikeys:manage");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   return ok({ token: await getOrCreateToken(ws), backendBaseUrl: publicOrigin(req) + "/api/linkedin", importMotion: await getImportMotion(ws) });
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "apikeys:manage");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<{ action?: string; motion?: Motion }>(req);

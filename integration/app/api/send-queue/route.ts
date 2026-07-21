@@ -16,10 +16,10 @@ import { goLiveReadiness } from "../../../lib/sending/goLive";
 import { sendCapacity } from "../../../lib/senders";
 import { listMembers } from "../../../lib/auth/team";
 import { getCore } from "../../../lib/core/repository";
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../lib/api";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   try {
@@ -45,7 +45,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

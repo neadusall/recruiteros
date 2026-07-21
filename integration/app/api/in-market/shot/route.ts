@@ -16,7 +16,7 @@
  * Runs entirely on our server (Playwright + Chromium); assets persist under ROS_DATA_DIR.
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -78,7 +78,7 @@ export async function GET(req: Request) {
   }
 
   // Authed: listing the available shots (PiP Studio gallery).
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   if (url.searchParams.get("list")) {
     const { listShots } = await import("../../../../lib/inmarket/roleShot");
@@ -88,7 +88,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
 
   const b = await body<any>(req);

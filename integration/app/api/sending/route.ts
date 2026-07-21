@@ -18,7 +18,7 @@
  *   { action: "run-governor" }                    -> evaluate + pause bad domains now
  */
 
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../lib/api";
 import {
   listDomains, getDomain, addDomain, findDomainByName, deleteDomain,
   listServers, getServer, addServer, saveServer,
@@ -41,7 +41,7 @@ function publicSeed(s: SeedAccount) {
 }
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const domains = await listDomains(ws);
@@ -83,7 +83,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

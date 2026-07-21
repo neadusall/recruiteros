@@ -12,7 +12,7 @@
  *   GET ?key=<videoKey>  -> stats for one video.
  */
 
-import { requireSession, ok, fail } from "../../../../lib/api";
+import { ok, fail, requireCapability } from "../../../../lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const url = new URL(req.url);
 

@@ -9,7 +9,7 @@
 
 import { getCore } from "../../../lib/core/repository";
 import { createCampaign, DEPLOY_PHASES, BD_BENCHMARKS } from "../../../lib/campaigns";
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { requireSession, requireCapability, body, ok, fail } from "../../../lib/api";
 import type { Motion, ICP, SignalKind } from "../../../lib/core/types";
 
 export async function GET(req: Request) {
@@ -54,6 +54,13 @@ export async function PUT(req: Request) {
   };
   // Autopilot (hands-off run) is BD-only; a recruiting campaign can never arm it.
   if (campaign.motion !== "bd") (campaign as any).autoRun = false;
+  // Going live is a separate right from drafting: without campaigns:activate
+  // (members, demo workspaces) a save can never arm a run — the campaign is
+  // clamped to draft and Autopilot stays off, whatever the client sent.
+  if (!g.ctx.capabilities.includes("campaigns:activate")) {
+    campaign.status = "draft";
+    (campaign as any).autoRun = false;
+  }
   await getCore().saveCampaign(campaign as any);
   return ok({ campaign });
 }
@@ -65,7 +72,8 @@ export async function PUT(req: Request) {
  * Turning it OFF leaves status alone (you may want it active but human-gated).
  */
 export async function PATCH(req: Request) {
-  const g = requireSession(req);
+  // Arming Autopilot activates the campaign, so this is the activation right.
+  const g = requireCapability(req, "campaigns:activate");
   if ("response" in g) return g.response;
   const b = await body<{ id?: string; autoRun?: boolean }>(req);
   if (!b?.id || typeof b.autoRun !== "boolean") return fail("missing_fields", 422, { detail: "id and autoRun (boolean) are required" });

@@ -8,7 +8,7 @@
  * Session-gated; dry-run safe when the clone provider isn't configured.
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 import { cred } from "../../../../lib/providers/http";
 import {
@@ -23,7 +23,7 @@ function asProvider(v: unknown): VoiceProvider | undefined {
 }
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   // Resolve provider status the workspace-aware way — the SAME credential context
@@ -51,7 +51,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

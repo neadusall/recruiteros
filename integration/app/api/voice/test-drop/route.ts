@@ -8,12 +8,12 @@
  * Body: { to, firstName?, role?, company?, scriptTemplate, persona?, voiceId?, motion? }
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import type { Motion } from "../../../../lib/core/types";
 import { testDrop, DEFAULT_PERSONA } from "../../../../lib/voice";
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const b = await body<any>(req);
 

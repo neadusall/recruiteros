@@ -13,7 +13,7 @@
  * Capped at 1,000 recipients per request — send larger lists in chunks (the client paginates).
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 const MAX_PER_REQUEST = 1000;
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 

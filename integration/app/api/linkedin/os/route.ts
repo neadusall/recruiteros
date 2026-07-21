@@ -11,7 +11,7 @@
  * engine logic and never talks to the provider.
  */
 
-import { ok, fail, body, requireSession } from "../../../../lib/api";
+import { ok, fail, body, requireCapability } from "../../../../lib/api";
 import { getPolicy, putPolicy, policyPresets } from "../../../../lib/linkedin/os/policy";
 import {
   accountOverview, allocationView, explainAction, liveQueue, overviewSnapshot,
@@ -44,7 +44,7 @@ import { capacityFactor, getAccount as getAccountState } from "../../../../lib/l
 import type { BusinessUnit } from "../../../../lib/linkedin/os/types";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const url = new URL(req.url);
@@ -136,7 +136,7 @@ interface ActionBody {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const userName = g.ctx.user.name || g.ctx.user.email;

@@ -11,7 +11,7 @@
  * Clips are reusable across roles: record once, composite onto many hiring-signal scrolls.
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 const MAX_BYTES = 60 * 1024 * 1024;
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const id = new URL(req.url).searchParams.get("id") || "";

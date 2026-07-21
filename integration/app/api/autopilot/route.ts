@@ -20,7 +20,7 @@
  *   run-now         {}                                        -> run the Autopilot loop for this workspace now
  */
 
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../lib/api";
 import { getCore } from "../../../lib/core/repository";
 import { automationEnabled, automationArmed, automationTicks } from "../../../lib/automation/scheduler";
 import { draftCampaignModel } from "../../../lib/automation/model";
@@ -31,7 +31,7 @@ import { estimatePushCost } from "../../../lib/inmarket/launch";
 import type { Campaign, Motion } from "../../../lib/core/types";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const core = getCore();
@@ -72,7 +72,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const core = getCore();

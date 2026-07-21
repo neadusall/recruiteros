@@ -17,7 +17,7 @@
  * Runs entirely on our server (ffmpeg + the roleShot capture pipeline). No paid API.
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
 const MIME: Record<string, string> = { gif: "image/gif", mp4: "video/mp4", jpg: "image/jpeg" };
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
 
   const url = new URL(req.url);
@@ -49,7 +49,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 

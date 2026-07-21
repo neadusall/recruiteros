@@ -24,7 +24,7 @@
  *   ayrshare_link_url {}                   (Business plan: SSO linking URL)
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import {
   getState, addInspiration, deleteInspiration, rewriteToDraft, regenerateDraft,
   updateDraft, discardDraft, approveDraft, cancelSchedule, retryDraft,
@@ -40,7 +40,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 
@@ -77,7 +77,7 @@ interface PosterPost {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 

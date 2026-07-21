@@ -13,10 +13,10 @@
 
 import { searchInMarket, promoteLead, companyKey, type InMarketLead, type HiringManagerLead } from "../../../lib/inmarket";
 import { getCore } from "../../../lib/core/repository";
-import { requireSession, body, ok, fail } from "../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../lib/api";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const all = await getCore().listProspects(g.ctx.workspace.id);
   const promoted = all.filter((p) => p.category === "in_market").slice(0, 50);
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

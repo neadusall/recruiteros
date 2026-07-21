@@ -10,7 +10,7 @@
  *     -> this workspace's replies/leads, newest first (PiP Studio "Replies").
  */
 
-import { requireSession, ok } from "../../../../lib/api";
+import { ok, requireCapability } from "../../../../lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const { listLeads } = await import("../../../../lib/inmarket/leads");
   return ok({ leads: await listLeads(g.ctx.workspace.id) });

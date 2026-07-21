@@ -8,20 +8,20 @@
  * fields into the watch links it shares so the recipient page renders branded.
  */
 
-import { requireSession, body, ok } from "../../../../lib/api";
+import { body, ok, requireCapability } from "../../../../lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const { getSettings } = await import("../../../../lib/inmarket/videoSettings");
   return ok({ settings: await getSettings(g.ctx.workspace.id) });
 }
 
 export async function PUT(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const patch = (await body<any>(req)) || {};
   const { saveSettings } = await import("../../../../lib/inmarket/videoSettings");

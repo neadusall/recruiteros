@@ -10,7 +10,7 @@
  * can never dial until they pass.
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import type { Motion } from "../../../../lib/core/types";
 import {
   listCampaigns, getCampaign, upsertCampaign, deleteCampaign, attestConsent, campaignStats,
@@ -23,7 +23,7 @@ function asMotion(v: unknown): Motion | undefined {
 }
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const motion = asMotion(new URL(req.url).searchParams.get("motion"));
   const campaigns = listCampaigns(g.ctx.workspace.id, motion).map((c) => ({
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const b = await body<VoiceCampaignInput>(req);
   // Name is required to CREATE; an update (id present) may patch a subset of
@@ -44,7 +44,7 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return fail("missing_id", 422);
@@ -52,7 +52,7 @@ export async function DELETE(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

@@ -21,7 +21,7 @@
 
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../lib/linkedin/auth";
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import { jobFeedEnabled } from "../../../../lib/inmarket/jobFeed";
 import { getRapidQuota } from "../../../../lib/sourcing/rapidQuota";
 import {
@@ -70,7 +70,7 @@ async function cronBranch(req: Request): Promise<NextResponse> {
 export async function GET(req: Request) {
   if (looksLikeCron(req)) return cronBranch(req);
 
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const lists = await listWatchlists(ws);
@@ -88,7 +88,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   if (looksLikeCron(req)) return cronBranch(req);
 
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);

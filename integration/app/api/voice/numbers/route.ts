@@ -10,12 +10,12 @@
  * returns an empty list + dryRun so the UI falls back to a manual text field.
  */
 
-import { requireSession, ok } from "../../../../lib/api";
+import { ok, requireCapability } from "../../../../lib/api";
 import { telnyx } from "../../../../lib/providers";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 

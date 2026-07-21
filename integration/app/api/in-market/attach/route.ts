@@ -17,7 +17,7 @@
  * Operator-only (requireSession); prospects are created from Hire Signals beforehand.
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import { getCore } from "../../../../lib/core/repository";
 import type { Prospect } from "../../../../lib/core/types";
 
@@ -33,7 +33,7 @@ function companyMatch(a?: string, b?: string): boolean {
 }
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const company = new URL(req.url).searchParams.get("company") || "";
   if (!company) return fail("missing company", 422);
@@ -50,7 +50,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
 

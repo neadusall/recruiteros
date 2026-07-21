@@ -8,7 +8,7 @@
  * can be dropped into a Campaign Studio "Voice drop" step. Session-gated.
  */
 
-import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import type { Motion } from "../../../../lib/core/types";
 import {
   listScripts, upsertScript, deleteScript, renderScript, checkScript, segmentScript,
@@ -20,7 +20,7 @@ function asMotion(v: unknown): Motion | undefined {
 }
 
 export async function GET(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const motion = asMotion(new URL(req.url).searchParams.get("motion"));
   // Per-script outcome rollup ("learn from responses") so the Library can show
@@ -41,7 +41,7 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const b = await body<Partial<VoiceScript>>(req);
   if (!b?.name || !b?.template) return fail("missing_fields", 422);
@@ -52,7 +52,7 @@ export async function PUT(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const g = requireSession(req);
+  const g = requireCapability(req, "voice:dial");
   if ("response" in g) return g.response;
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return fail("missing_id", 422);
