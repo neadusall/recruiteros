@@ -3,8 +3,10 @@
  *
  * Queue searches (or enrichment of an existing saved list) and walk away: a cron tick
  * advances the queue entirely SERVER-SIDE, so runs finish overnight with no browser
- * tab open, and the recruiter wakes up to enriched lists. One item at a time, FIFO
- * (the enrichment worker is single-concurrency anyway).
+ * tab open, and the recruiter wakes up to enriched lists. One item LEADS at a time,
+ * FIFO — but the worker runs one browser session per VENDOR (Laxis / KoldInfo), so
+ * while the lead item waits on one vendor's job, the tick loop gives the next item
+ * (never one sharing the lead's run) steps that can use the other vendor's lane.
  *
  * Each item is a small state machine over the SAME rungs the hands-free UI chain uses,
  * and it parks job refs on the run itself (koldJob / koldDbJob / laxisJob /
@@ -395,7 +397,26 @@ export async function tickNightQueue(): Promise<{ active: number }> {
       if (nextItem !== item) { item = nextItem; continue; } // previous item finished: keep draining
       if ((await progressSig(item)) !== before) continue;   // real progress: chain the next step now
       if (await waitingOnWorker(item)) {
-        // Job still running on the worker: short in-tick wait, then re-poll.
+        // Job still running on the worker. That wait is now usable time: the
+        // worker runs one browser session PER VENDOR (Laxis / KoldInfo lanes),
+        // so while this item's job holds one lane, give the next active item a
+        // step too — its other-vendor rung, search, or boost work runs in the
+        // idle window, and a same-lane submit just queues FIFO on the worker.
+        // ONE companion at a time, and never one sharing this item's run: two
+        // items polling the same run's job refs could double-merge a result.
+        const companions = store.filter((i) =>
+          i !== item && i.stage !== "done" && i.stage !== "error" &&
+          (!i.runId || !item.runId || i.runId !== item.runId));
+        if (companions.length) {
+          const companion = await pickNext(companions);
+          try {
+            await step(companion);
+            try { await save(); } catch (e) { console.warn("[night-queue] snapshot save failed:", (e as Error).message); }
+          } catch (e) {
+            touch(companion, `retrying: ${(e as Error).message?.slice(0, 140) ?? "step failed"}`);
+          }
+        }
+        // Short in-tick wait, then re-poll this item's job.
         if (Date.now() + POLL_WAIT_MS >= deadline) break;
         await new Promise((res) => setTimeout(res, POLL_WAIT_MS));
         continue;

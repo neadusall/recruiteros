@@ -10,8 +10,12 @@
  *   GET  /jobs/:id                       -> { status, stage, enrichedCsv?, error? }
  *   GET  /health                         -> { ok: true, loggedIn }
  *
- * Single concurrency on purpose: one browser session to Laxis at a time looks like
- * one human and minimizes the chance of tripping bot detection. Jobs queue.
+ * Concurrency = one browser session PER VENDOR at a time: to any single vendor
+ * site (Laxis, or KoldInfo) we still look like exactly one human, which is what
+ * minimizes the chance of tripping bot detection — but Laxis and KoldInfo are
+ * different sites with separate logins, so one job of EACH may run simultaneously
+ * (each job launches its own Chromium; the flows share no state). Jobs queue FIFO
+ * within their vendor lane.
  *
  * Auth: if LAXIS_WORKER_TOKEN is set, every request must send it as
  * `Authorization: Bearer <token>`. The app sends the same value.
@@ -38,6 +42,17 @@ const FLOWS = {
   "koldinfo-db-search": { runJob: koldinfoDb.runDiscoveryJob, selfTest: koldinfoDb.selfTest },
 };
 
+// Which vendor SITE a job kind drives — the unit of the one-session-at-a-time rule.
+const LANES = {
+  laxis: "laxis",
+  koldinfo: "koldinfo",
+  "koldinfo-db": "koldinfo",
+  "koldinfo-db-search": "koldinfo",
+};
+function laneOf(kind) {
+  return LANES[kind] || "laxis";
+}
+
 const PORT = Number(process.env.PORT || 3000);
 const TOKEN = process.env.LAXIS_WORKER_TOKEN || "";
 const MAX_BODY = 24 * 1024 * 1024; // 24 MB — generous for a big candidate CSV
@@ -49,7 +64,8 @@ const MAX_RUN_ATTEMPTS = Number(process.env.LAXIS_MAX_ATTEMPTS || 3);
 /** jobId -> { id, token, status, stage, phase, csv?, enrichedCsv?, hash, attempts, ... } */
 const jobs = new Map();
 const queue = [];
-let running = false;
+/** Vendor lanes with a job mid-flight ("laxis" / "koldinfo"). */
+const runningLanes = new Set();
 let lastCanary = null;
 let lastKoldinfoCanary = null;
 
@@ -70,12 +86,22 @@ function stampLog(job, line) {
 }
 
 async function drain() {
-  if (running) return;
-  const id = queue.shift();
-  if (id === undefined) return;
+  // First queued job whose vendor lane is free (FIFO within each lane). The scan,
+  // splice, and lane claim below are one synchronous block, so two drain() calls
+  // in the same tick can never pick the same job or double-fill a lane.
+  let idx = -1;
+  for (let i = 0; i < queue.length; i++) {
+    const peek = jobs.get(queue[i]);
+    if (!peek || peek.status === "done" || peek.status === "error") { queue.splice(i, 1); i--; continue; }
+    if (!runningLanes.has(laneOf(peek.kind))) { idx = i; break; }
+  }
+  if (idx < 0) return;
+  const id = queue.splice(idx, 1)[0];
   const job = jobs.get(id);
-  if (!job || job.status === "done" || job.status === "error") return drain();
-  running = true;
+  const lane = laneOf(job.kind);
+  runningLanes.add(lane);
+  // The OTHER lane may have runnable work too — kick a sibling drain for it.
+  setImmediate(drain);
   job.status = "running";
   job.attempts = (job.attempts || 0) + 1;
   if (!job.startedAt) job.startedAt = new Date().toISOString();
@@ -106,7 +132,8 @@ async function drain() {
       job.error = undefined;
       stampLog(job, `retry: attempt ${job.attempts}/${MAX_RUN_ATTEMPTS} failed, requeueing (will resume by token)`);
       store.save(job);
-      running = false;
+      runningLanes.delete(lane);
+      setImmediate(drain); // the freed lane may unblock a different job right now
       setTimeout(() => { queue.push(id); setImmediate(drain); }, 5000).unref();
       return;
     }
@@ -118,7 +145,7 @@ async function drain() {
       job.csv = undefined; // free the input bytes in memory once consumed
       job.expiresAt = Date.now() + DONE_RETENTION_MS;
       store.save(job);
-      running = false;
+      runningLanes.delete(lane);
       setImmediate(drain);
     }
   }
@@ -210,7 +237,10 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         hasCreds: Boolean(CONFIG.email && CONFIG.password),
         hasKoldinfoCreds: Boolean(koldinfo.CONFIG.email && koldinfo.CONFIG.password),
-        queued: queue.length, running, lastCanary, lastKoldinfoCanary,
+        // `running` keeps its historical boolean shape for existing readers;
+        // `lanes` says WHICH vendor sessions are mid-flight.
+        queued: queue.length, running: runningLanes.size > 0, lanes: [...runningLanes],
+        lastCanary, lastKoldinfoCanary,
       });
     }
 
@@ -297,11 +327,11 @@ server.listen(PORT, () => {
 
 // Periodic canary: every LAXIS_CANARY_HOURS (default 12h) confirm + pre-emptively heal the
 // login + enrich entry point so a Laxis UI change is repaired BEFORE a real job hits it.
-// Skipped while a job is running (one browser session at a time) and when creds are absent.
+// Skipped while a Laxis job is running (one browser session per vendor) and when creds are absent.
 const CANARY_HOURS = Number(process.env.LAXIS_CANARY_HOURS || 12);
 if (CANARY_HOURS > 0 && CONFIG.email && CONFIG.password) {
   const tick = async () => {
-    if (running) return;
+    if (runningLanes.has("laxis")) return;
     try {
       const r = await selfTest({ log: (l) => console.log("[canary]", l) });
       lastCanary = { ...r, at: new Date().toISOString() };
@@ -323,7 +353,7 @@ if (CANARY_HOURS > 0 && CONFIG.email && CONFIG.password) {
 const KOLD_CANARY_HOURS = Number(process.env.KOLDINFO_CANARY_HOURS || 24);
 if (KOLD_CANARY_HOURS > 0 && koldinfo.CONFIG.email && koldinfo.CONFIG.password) {
   const koldTick = async () => {
-    if (running) return; // one browser session at a time; try again next cadence
+    if (runningLanes.has("koldinfo")) return; // one browser session per vendor; try again next cadence
     const at = new Date().toISOString();
     const out = { at };
     for (const kind of ["koldinfo", "koldinfo-db"]) {
