@@ -46,17 +46,18 @@ async function gapFillInner(ws: string, rows: CandidateRow[]): Promise<GapFillRe
   // FREE rung first: our own LandlineDB (~2.5M named-person phone rows, ~960k explicit
   // cells) fills what it can before any cached-or-paid lookup runs. Blanks only.
   try { phones += await fillPhonesFromLandlineDb(rows); } catch { /* rung is optional */ }
-  for (const c of rows) {
+
+  const fillOne = async (c: CandidateRow): Promise<void> => {
     const hasEmail = Boolean((c.email || "").trim());
     const hasPhone = Boolean((c.phone || "").trim());
-    if (hasEmail && hasPhone) continue;
+    if (hasEmail && hasPhone) return;
     const personKey = c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`;
     const cached = await getCachedContact(ws, personKey);
     if (cached && (cached.email || cached.phone)) {
       if (cached.email && !hasEmail) { c.email = cached.email; enrichedCount++; }
       if (cached.phone && !hasPhone) { c.phone = cached.phone; c.phoneSource = cached.phoneSource; phones++; }
       contactCacheHits++;
-      continue;
+      return;
     }
     const [first, ...rest] = (c.fullName || "").trim().split(/\s+/);
     try {
@@ -88,6 +89,23 @@ async function gapFillInner(ws: string, rows: CandidateRow[]): Promise<GapFillRe
         phoneSource: c.phoneSource,
       });
     } catch { /* leave unresolved */ }
+  };
+
+  // Rows resolve CONCURRENTLY (small pool) instead of strictly one after another:
+  // same cache-first lookup and same waterfall per row, just no idle waiting
+  // between rows. The pool stays small because the waterfall providers carry no
+  // 429 retry of their own — a burst they'd reject would LOSE contacts, and a
+  // 3-wide pool keeps the request rate near what sequential pacing produced.
+  let next = 0;
+  const workers = Math.min(3, rows.length);
+  if (workers > 0) {
+    await Promise.all(Array.from({ length: workers }, async () => {
+      for (;;) {
+        const c = rows[next++];
+        if (!c) return;
+        await fillOne(c);
+      }
+    }));
   }
   return { enriched: enrichedCount, phones, cacheHits: contactCacheHits };
 }

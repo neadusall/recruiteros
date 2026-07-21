@@ -315,11 +315,49 @@ async function pruneFinished(): Promise<void> {
   if (changed) await save();
 }
 
+/** How long one tick keeps chaining steps before yielding to the next timer hit.
+ *  Well under TICK_STEAL_MS, so a live tick is never mistaken for a hung one. */
+const TICK_BUDGET_MS = 100_000;
+/** In-tick re-poll cadence while a worker job is running (the timer alone would
+ *  make every poll wait a whole timer interval). */
+const POLL_WAIT_MS = 10_000;
+
+/** Everything about an item's position in its chain that a step can advance. When
+ *  this is unchanged after a step and no worker job is in flight, the tick yields. */
+async function progressSig(item: NightItem): Promise<string> {
+  let jobs = "";
+  if (item.runId) {
+    try {
+      const run = await getSourcingRun(item.workspaceId, item.runId);
+      jobs = [
+        run?.koldJob?.jobId, run?.koldDbJob?.jobId, run?.laxisJob?.jobId,
+        run?.laxisProgress?.doneOffsets.length,
+      ].join("|");
+    } catch { jobs = "unreadable"; }
+  }
+  return [item.id, item.stage, item.runId ?? "", item.boost?.done ?? 0, jobs].join("|");
+}
+
+/** Is this item just waiting on the browser worker to finish a submitted job? */
+async function waitingOnWorker(item: NightItem): Promise<boolean> {
+  if (!item.runId) return false;
+  if (item.stage !== "kold" && item.stage !== "koldDb" && item.stage !== "laxis") return false;
+  try {
+    const run = await getSourcingRun(item.workspaceId, item.runId);
+    return Boolean(run && (run.koldJob || run.koldDbJob || run.laxisJob));
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Advance the queue: process the FIRST active item one bounded step (submit a job,
- * poll a job, or run the search). Cheap to call often; a mutex makes overlapping
- * timer hits harmless. Long work (the search itself) runs inside the tick, so the
- * caller should fire-and-forget rather than await.
+ * Advance the queue: process the first active item in bounded steps (submit a job,
+ * poll a job, or run the search). One tick CHAINS steps for up to TICK_BUDGET_MS —
+ * cheap stage transitions run back-to-back and a running worker job is re-polled
+ * every POLL_WAIT_MS in-tick — so a finished job's merge, the next chunk's submit,
+ * and the next stage all happen within seconds instead of each waiting for its own
+ * timer hit. A mutex makes overlapping timer hits harmless. Long work runs inside
+ * the tick, so the caller should fire-and-forget rather than await.
  */
 export async function tickNightQueue(): Promise<{ active: number }> {
   await hydrate();
@@ -334,9 +372,30 @@ export async function tickNightQueue(): Promise<{ active: number }> {
   }
   ticking = true;
   tickingSince = Date.now();
-  const item = await pickNext(active);
+  let item = await pickNext(active);
   try {
-    await step(item);
+    const deadline = Date.now() + TICK_BUDGET_MS;
+    for (;;) {
+      const before = await progressSig(item);
+      await step(item);
+      // Persist after EVERY step, not just at tick end: step() already saved the
+      // run's own state, and losing the item's matching stage to a crash would
+      // re-run rungs the run no longer needs.
+      try { await save(); } catch (e) { console.warn("[night-queue] snapshot save failed:", (e as Error).message); }
+      if (Date.now() >= deadline) break;
+      const activeNow = store.filter((i) => i.stage !== "done" && i.stage !== "error");
+      if (!activeNow.length) break;
+      const nextItem = await pickNext(activeNow);
+      if (nextItem !== item) { item = nextItem; continue; } // previous item finished: keep draining
+      if ((await progressSig(item)) !== before) continue;   // real progress: chain the next step now
+      if (await waitingOnWorker(item)) {
+        // Job still running on the worker: short in-tick wait, then re-poll.
+        if (Date.now() + POLL_WAIT_MS >= deadline) break;
+        await new Promise((res) => setTimeout(res, POLL_WAIT_MS));
+        continue;
+      }
+      break; // no progress and nothing to poll (e.g. waiting on a lock): yield to the timer
+    }
   } catch (e) {
     // A step that throws is retried next tick; only a missing run is terminal (handled
     // inside step). Note the error so the queue card shows what is happening.

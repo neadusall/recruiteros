@@ -549,6 +549,23 @@ function keyOf(r: CandidateRow): string {
   return (r.linkedinUrl || `${r.fullName}|${r.company ?? ""}`).toLowerCase().replace(/\/+$/, "");
 }
 
+/** Minimal FIFO concurrency limiter: at most `n` callers inside `fn` at once. */
+function makeLimiter(n: number): <T>(fn: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiters: Array<() => void> = [];
+  return async function run<T>(fn: () => Promise<T>): Promise<T> {
+    if (active >= n) await new Promise<void>((res) => waiters.push(res));
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      const w = waiters.shift();
+      if (w) w();
+    }
+  };
+}
+
 /** Public alias of the dedupe key — callers record/compare the cross-run "seen" set with this. */
 export function candidateKey(r: CandidateRow): string {
   return keyOf(r);
@@ -796,15 +813,32 @@ export async function runDiscovery(
   // scarce paid resource, so the count is stamped onto the saved list).
   let rapidUsed = 0;
 
-  outer: for (const query of queries) {
+  // Queries run CONCURRENTLY (pool below) instead of strictly one after another —
+  // the run collects the same rows, just without idle waiting between HTTP calls.
+  // Each query still walks its engines in the same free→cheap→paid order, and
+  // per-engine limiters keep every vendor at a burst it tolerates. The paid
+  // people-search listing stays fully SERIAL (limit 1): its per-minute burst caps
+  // 429'd even sequential runs, so its pacing must not change. absorb() and the
+  // shared budgets are safe under this concurrency (single-threaded event loop;
+  // budget counters are reserved synchronously before each call awaits).
+  const gLimit = makeLimiter(2);
+  const sxLimit = makeLimiter(4);
+  const spLimit = makeLimiter(4);
+  const raLimit = makeLimiter(1);
+  const scLimit = makeLimiter(1);
+  let capped = false; // replaces the sequential loop's `break outer`
+
+  async function processQuery(query: SourcingQuery): Promise<void> {
     let collected = 0;
 
     // 1) FREE first pass: Google X-ray over the boolean we already built.
-    if (useGoogle && googleUsed < googleBudget) {
+    if (useGoogle && googleUsed < googleBudget && !capped) {
       const gPages = 3; // up to 30 free results per query before paying anyone
-      for (let page = 1; page <= gPages && collected < perQuery && googleUsed < googleBudget; page++) {
+      for (let page = 1; page <= gPages && collected < perQuery && !capped; page++) {
+        if (googleUsed >= googleBudget) break;
+        googleUsed++; // reserve BEFORE the await so concurrent queries can't overshoot the cap
         let rows: CandidateRow[] = [];
-        try { rows = await googleXraySearch(query.xray, page); googleUsed++; }
+        try { rows = await gLimit(() => googleXraySearch(query.xray, page)); }
         catch (err: any) {
           warnings.push(`google(${query.group} p${page}): ${err.message}`);
           if (err && err.quota) { useGoogle = false; } // daily limit hit — stop for the run
@@ -812,18 +846,18 @@ export async function runDiscovery(
         }
         if (!rows.length) break; // exhausted this query on Google
         collected += absorb(rows, query.group);
-        if (byKey.size >= cap) break outer;
+        if (byKey.size >= cap) { capped = true; return; }
       }
     }
 
     // 2) FREE always-on: the self-hosted SearXNG meta-search over the same X-ray.
     // No quota, no key — this is what guarantees a JD Sourcing run is never empty
     // just because a paid listing broke or was never configured.
-    if (useSearx && collected < perQuery) {
+    if (useSearx && collected < perQuery && !capped) {
       let searxErrors = 0;
-      for (let page = 1; page <= sPages && collected < perQuery; page++) {
+      for (let page = 1; page <= sPages && collected < perQuery && !capped; page++) {
         let rows: CandidateRow[] = [];
-        try { rows = await searxXraySearch(query.xray, page); }
+        try { rows = await sxLimit(() => searxXraySearch(query.xray, page)); }
         catch (err: any) {
           warnings.push(`searx(${query.group} p${page}): ${err.message}`);
           if (++searxErrors >= 2) { useSearx = false; } // container down — stop trying this run
@@ -831,7 +865,7 @@ export async function runDiscovery(
         }
         if (!rows.length) break; // exhausted this query
         collected += absorb(rows, query.group);
-        if (byKey.size >= cap) break outer;
+        if (byKey.size >= cap) { capped = true; return; }
       }
     }
 
@@ -839,10 +873,12 @@ export async function runDiscovery(
     // expensive people-search listing so the pennies key absorbs volume first, and it
     // keeps digging when the CSE free pass ran dry (or was never / can no longer be
     // configured: Google closed the CSE API to new signups, retiring it Jan 1, 2027).
-    if (useSerper && collected < perQuery && serperUsed < serperBudget) {
-      for (let page = 1; page <= pPages && collected < perQuery && serperUsed < serperBudget; page++) {
+    if (useSerper && collected < perQuery && !capped) {
+      for (let page = 1; page <= pPages && collected < perQuery && !capped; page++) {
+        if (serperUsed >= serperBudget) break;
+        serperUsed++; // reserved before the await, same as the Google budget above
         let rows: CandidateRow[] = [];
-        try { rows = await serperXraySearch(query.xray, page); serperUsed++; }
+        try { rows = await spLimit(() => serperXraySearch(query.xray, page)); }
         catch (err: any) {
           warnings.push(`serper(${query.group} p${page}): ${err.message}`);
           if (err && err.quota) { useSerper = false; } // credits gone / key bad, stop for the run
@@ -850,12 +886,12 @@ export async function runDiscovery(
         }
         if (!rows.length) break; // exhausted this query on Serper
         collected += absorb(rows, query.group);
-        if (byKey.size >= cap) break outer;
+        if (byKey.size >= cap) { capped = true; return; }
       }
     }
 
     // 4) PAID scale: RapidAPI people-search for whatever the free passes didn't fill.
-    if (useRapid && collected < perQuery) {
+    if (useRapid && collected < perQuery && !capped) {
       const post = PS_METHOD() === "POST";
       // POST listings return a batch sized by `count` in one call (no paging);
       // GET listings page through results. Same handling of the rows either way.
@@ -872,30 +908,31 @@ export async function runDiscovery(
       const name = structured
         ? (query.titleTerm || query.keyword || query.label || query.xray)
         : (query.keyword || query.label || query.xray);
-      for (let page = 1; page <= maxPages && collected < perQuery; page++) {
+      for (let page = 1; page <= maxPages && collected < perQuery && !capped; page++) {
         let rows: CandidateRow[] = [];
         rapidUsed++; // counted on attempt: an errored call may still bill
         try {
-          rows = await rapidApiPeopleSearch({
+          rows = await raLimit(() => rapidApiPeopleSearch({
             name, page, limit: PAGE_LIMIT(),
             currentCompany: curId,
             geoLocation: geoId,
             pastCompany: pastId,
-          });
+          }));
         } catch (err) {
           warnings.push(`rapidapi(${query.group}${post ? "" : " p" + page}): ${(err as Error).message}`);
           break; // stop this query on error; move on
         }
         if (!rows.length) break; // exhausted
         collected += absorb(rows, query.group);
-        if (byKey.size >= cap) break outer;
+        if (byKey.size >= cap) { capped = true; return; }
       }
     }
 
     // 5) Best-effort scraper sidecar (dormant unless configured).
-    if (useScraper && collected < perQuery) {
+    if (useScraper && collected < perQuery && !capped) {
       try {
-        const { profiles, warnings: w } = await scrapeSearchViaSidecar(query.linkedinUrl, Math.min(perQuery, 100));
+        const { profiles, warnings: w } = await scLimit(() =>
+          scrapeSearchViaSidecar(query.linkedinUrl, Math.min(perQuery, 100)));
         if (w?.length) warnings.push(...w.map((x) => `scraper(${query.group}): ${x}`));
         const rows: CandidateRow[] = profiles.map((p) => ({
           fullName: p.fullName,
@@ -911,11 +948,23 @@ export async function runDiscovery(
           provider: "scraper",
         }));
         collected += absorb(rows, query.group);
-        if (byKey.size >= cap) break outer;
+        if (byKey.size >= cap) { capped = true; return; }
       } catch (err) {
         warnings.push(`scraper(${query.group}): ${(err as Error).message}`);
       }
     }
+  }
+
+  {
+    const pool = Math.min(4, Math.max(1, queries.length));
+    let qi = 0;
+    await Promise.all(Array.from({ length: pool }, async () => {
+      while (!capped) {
+        const query = queries[qi++];
+        if (!query) return;
+        await processQuery(query);
+      }
+    }));
   }
 
   // Collect the database sweep that was submitted before the web pass. Patience is
