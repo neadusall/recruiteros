@@ -200,6 +200,42 @@ let tickingSince = 0;
  *  latch is stolen so the queue keeps moving instead of freezing until a redeploy. */
 const TICK_STEAL_MS = 15 * 60 * 1000;
 
+/** How long a finished item stays on the card so the morning readout is seeable. */
+const DONE_LINGER_MS = 60 * 60 * 1000;
+/** Finished but never confirmed delivered (e.g. a BD-motion list the autoflow
+ *  sweeper deliberately skips): clear after a day rather than pile up forever. */
+const DONE_MAX_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The queue card is a WORKING queue, not a history log: the saved list under
+ * "Your saved candidate lists" is the permanent record (journey strip included).
+ * A done item lingers an hour, then drops off once its run is confirmed sent to
+ * Candidates + OS Text (autoflow.sentAt); undelivered done items clear after a
+ * day. Stopped ("error") items stay until the user removes them.
+ */
+async function pruneFinished(): Promise<void> {
+  const now = Date.now();
+  let changed = false;
+  for (const i of [...store]) {
+    if (i.stage !== "done") continue;
+    const age = now - (Date.parse(i.finishedAt ?? i.updatedAt ?? i.createdAt) || now);
+    if (age <= DONE_LINGER_MS) continue;
+    let delivered = false;
+    if (i.runId) {
+      try {
+        const run = await getSourcingRun(i.workspaceId, i.runId);
+        delivered = Boolean(run?.autoflow?.sentAt);
+      } catch { /* store hiccup: leave the item, retry next tick */ }
+    }
+    if (delivered || age > DONE_MAX_MS) {
+      const at = store.indexOf(i);
+      if (at >= 0) store.splice(at, 1);
+      changed = true;
+    }
+  }
+  if (changed) await save();
+}
+
 /**
  * Advance the queue: process the FIRST active item one bounded step (submit a job,
  * poll a job, or run the search). Cheap to call often; a mutex makes overlapping
@@ -208,6 +244,9 @@ const TICK_STEAL_MS = 15 * 60 * 1000;
  */
 export async function tickNightQueue(): Promise<{ active: number }> {
   await hydrate();
+  // Sweep BEFORE the active-work check: a queue holding only finished items
+  // still needs its ticks to clear them off the card.
+  await pruneFinished().catch((e) => console.warn("[night-queue] prune failed:", (e as Error).message));
   const active = store.filter((i) => i.stage !== "done" && i.stage !== "error");
   if (!active.length) return { active: 0 };
   if (ticking) {
