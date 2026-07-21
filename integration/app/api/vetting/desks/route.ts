@@ -17,6 +17,8 @@
  */
 
 import { requireSession, body, ok, fail } from "../../../../lib/api";
+import { withWorkspaceCreds } from "../../../../lib/connected";
+import { cred } from "../../../../lib/providers/http";
 import type { Motion } from "../../../../lib/core/types";
 import {
   listDesks, getDesk, upsertDesk, deleteDesk, markDeskSynced, setDeskStatus,
@@ -178,7 +180,13 @@ export async function POST(req: Request) {
     case "provision": {
       if (!desk.jobDescription.trim()) return fail("no_job_description", 422);
       if (!desk.phoneNumber) return fail("no_phone_number", 422);
-      if (!desk.voiceId) return fail("no_voice", 422, { detail: "Select your cloned voice before going live." });
+      // A desk-level voice pick wins; otherwise the workspace's default
+      // ElevenLabs voice (VOICE_CLONE_VOICE_ID, e.g. the house "Lukas" voice)
+      // satisfies the gate, resolved isolation-correctly.
+      const hasVoice =
+        Boolean(desk.voiceId) ||
+        Boolean(await withWorkspaceCreds(ws, () => cred("VOICE_CLONE_VOICE_ID").trim()));
+      if (!hasVoice) return fail("no_voice", 422, { detail: "Pick a voice for this desk (or set a default voice id on the ElevenLabs integration in Setup) before going live." });
       setDeskStatus(ws, desk.id, "provisioning");
       const res = await provisionDesk(desk);
       if (res.error) {

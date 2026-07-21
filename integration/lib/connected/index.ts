@@ -251,14 +251,16 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "elevenlabs",
     label: "ElevenLabs (cloned voice)",
-    blurb: "The cloned voice for Voice Drops and AI Vetting. Paste your ElevenLabs API key.",
+    blurb: "The voice for Voice Drops and AI Vetting. Paste your ElevenLabs API key, and optionally a default voice id every desk falls back to when no voice is picked.",
     requiredFor: [],
     fields: [
       { key: "VOICE_CLONE_API_KEY", label: "API key", required: true, secret: true, placeholder: "sk_…" },
+      { key: "VOICE_CLONE_VOICE_ID", label: "Default voice id", required: false, placeholder: "e.g. wSqOdjeNqDrHcoK0zorF", hint: "Optional. The ElevenLabs voice used when a desk or campaign has no voice picked. Copy any voice id from ElevenLabs (My Voices or the Voice Library)." },
     ],
     steps: [
       "In ElevenLabs, open your profile, then API Keys.",
       "Create a key and copy it.",
+      "Optionally copy a voice id (My Voices → the voice → ID) as the default voice.",
       "Paste below, Save, then Test.",
     ],
     docsUrl: "https://elevenlabs.io/app/settings/api-keys",
