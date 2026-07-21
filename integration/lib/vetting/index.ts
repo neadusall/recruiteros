@@ -20,3 +20,5 @@ export * from "./optimizer";
 export * from "./simulator";
 export * from "./preview";
 export * from "./qa";
+export * from "./chase";
+export * from "./clientReport";

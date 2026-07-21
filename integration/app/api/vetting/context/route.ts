@@ -16,8 +16,9 @@
 
 import { NextResponse } from "next/server";
 import {
-  findDeskByNumber, findCandidate, createCall, buildCallContext,
+  findDeskByNumber, findCandidate, createCall, buildCallContext, inboxConfig,
 } from "../../../../lib/vetting";
+import { withWorkspaceCreds } from "../../../../lib/connected";
 
 /** Pull the first present phone-ish value from a set of candidate keys. */
 function firstPhone(obj: any, keys: string[]): string {
@@ -68,7 +69,14 @@ export async function POST(req: Request) {
     engineCallId,
   });
 
-  const vars = buildCallContext(desk, candidate);
+  // The resume-inbox address rides into the call so the agent can speak it in
+  // THE RESUME ASK. Best-effort: a cred hiccup must never drop the call.
+  let resumeEmail = "";
+  try {
+    resumeEmail = (await withWorkspaceCreds(desk.workspaceId, async () => inboxConfig()?.user || "")) || "";
+  } catch { /* blank is handled by the prompt */ }
+
+  const vars = buildCallContext(desk, candidate, { resumeEmail });
   // Return both the canonical Telnyx key and a flat copy for forward-compat.
   return NextResponse.json({ dynamic_variables: vars, ...vars });
 }

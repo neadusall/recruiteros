@@ -565,6 +565,66 @@ export interface AgentRealismScore {
   notes: string;
 }
 
+/* ---------------- resume chase (the updated-resume follow-up ladder) ----------------
+   The whole vetting motion converges on ONE artifact: the candidate's updated
+   resume. The agent asks for it on the call; the moment the call is scored the
+   chase starts: a thank-you email + a thank-you text the same day, a reminder
+   email if nothing landed after a day, a reminder text a day after that, then
+   quiet. A filed resume stops the ladder instantly wherever it is. */
+
+/** One rung of the chase ladder. */
+export type ChaseStepKind = "thanks_email" | "thanks_sms" | "reminder_email" | "reminder_sms";
+
+/** One send attempt on the ladder (kept even when it failed, for the UI). */
+export interface ChaseStep {
+  kind: ChaseStepKind;
+  at: string;
+  ok: boolean;
+  /** Short human note ("no email on file", "SMS failed: ..."). */
+  note?: string;
+}
+
+export type ChaseStatus =
+  | "active"     // ladder running: waiting on the resume
+  | "completed"  // updated resume received: ladder stopped
+  | "exhausted"  // every rung sent, no resume: we go quiet
+  | "skipped";   // never started (no contact info / thin call)
+
+/** The per-call chase state (lives on the VettingCall). */
+export interface ResumeChase {
+  status: ChaseStatus;
+  startedAt: string;
+  steps: ChaseStep[];
+  /** When the updated resume landed (what "completed" means). */
+  resumeReceivedAt?: string;
+  /** Why the chase skipped or stopped early. */
+  note?: string;
+}
+
+/* ---------------- client working summary + intro draft ----------------
+   Every scored call is organized into a client-ready working summary and an
+   intro email DRAFT. The draft is deliberately held for human review and is
+   gated on the updated resume: "awaiting_resume" until the candidate's resume
+   lands after the call, then "ready" - only then can it be sent, and sending
+   is always a human action, never automatic. */
+
+export type ClientReportStatus =
+  | "awaiting_resume" // draft written, but the updated resume isn't in yet
+  | "ready"           // resume received: cleared for the recruiter to review + send
+  | "sent";           // recruiter sent (or marked sent) the intro
+
+export interface ClientReport {
+  /** The client-facing working summary of the screen, plain text. */
+  summary: string;
+  /** The intro email draft, ready for the recruiter's review. */
+  emailSubject: string;
+  emailBody: string;
+  status: ClientReportStatus;
+  generatedAt: string;
+  sentAt?: string;
+  sentTo?: string;
+}
+
 /** Lifecycle of a single inbound vetting call. */
 export type CallStatus =
   | "ringing"     // inbound leg up, agent engaging
@@ -624,6 +684,10 @@ export interface VettingCall {
   candidateQuestions?: CallQuestion[];
   /** Stamped once the question-intelligence harvest ran (idempotence guard). */
   questionsHarvestedAt?: string;
+  /** The updated-resume follow-up ladder for this call. */
+  chase?: ResumeChase;
+  /** Client-ready working summary + intro email draft (held for review). */
+  clientReport?: ClientReport;
 
   startedAt: string;
   endedAt?: string;

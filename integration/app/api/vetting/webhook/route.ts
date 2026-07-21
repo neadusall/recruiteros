@@ -18,10 +18,9 @@ import { recordUsage } from "../../../../lib/billing/ledger";
 import { rateCost } from "../../../../lib/billing/rates";
 import {
   findCallByEngineId, getDeskById, updateCall, scoreCall, getCandidateById,
-  buildPostCallEmail, maybeAutoLearn, maybeLearnQuestions,
+  maybeAutoLearn, maybeLearnQuestions, startResumeChase, maybeDraftClientReport,
   type TranscriptTurn,
 } from "../../../../lib/vetting";
-import { sendWorkspaceEmail } from "../../../../lib/auth";
 
 /** Map an engine speaker label onto our two-role transcript model. */
 function toRole(label: unknown): "agent" | "candidate" {
@@ -141,19 +140,14 @@ export async function POST(req: Request) {
       scoredAt: new Date().toISOString(),
     });
 
-    // Best-effort: email the candidate the role's must-haves so they can update
-    // their resume to clearly reflect what they genuinely have. Never blocks or
-    // fails the webhook; skipped for thin calls and clear, unfixable mismatches.
-    if (candidate?.email && !s.needsReview) {
-      try {
-        const mail = await buildPostCallEmail(desk, { ...call, verdicts: s.verdicts }, candidate);
-        if (mail.worthInviting) {
-          await sendWorkspaceEmail(candidate.email, mail.subject, mail.body, call.workspaceId);
-        }
-      } catch (mailErr: any) {
-        console.error("[vetting] post-call coaching email failed:", mailErr?.message || mailErr);
-      }
-    }
+    // The resume chase: thank-you email (the tailored coaching note) + thank-you
+    // text right now, then the 24h email / 48h SMS reminder ladder until the
+    // updated resume lands. Fire-and-forget; never blocks the engine.
+    void startResumeChase(desk.id, call.id);
+
+    // The client side: organize this screen into a working summary + intro
+    // email draft, held for the recruiter's review and gated on the resume.
+    void maybeDraftClientReport(desk.id, call.id);
 
     // Self-improvement: count this scored call toward the desk's auto-learn
     // trigger; when the cadence is hit, an optimizer pass runs, applies, and

@@ -9,12 +9,15 @@
  */
 
 import { requireSession, ok, fail } from "../../../../lib/api";
-import { listCalls, getCall, listCandidates } from "../../../../lib/vetting";
+import { listCalls, getCall, listCandidates, runChaseTick } from "../../../../lib/vetting";
 
 export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
+  // Self-heal: opening the calls view converges the resume-chase ladder (same
+  // idiom as the resume inbox GET). Coalesced + windowed inside; fire-and-forget.
+  void runChaseTick().catch(() => {});
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
 

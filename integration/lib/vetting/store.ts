@@ -22,6 +22,7 @@ import {
   type ResumeReview, type DeskLearning, type PromptRevision, type VoiceTuning, type SimRun,
   type TurnTuning, type ExtractionField, type InboxState, type InboxLogEntry,
   type DeskQA, type QACluster, type CallQuestion, type KnowledgeItem,
+  type ResumeChase, type ChaseStep, type ClientReport,
   DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, DEFAULT_DESK_QA, KNOWLEDGE_CAP,
   clampVoiceTuning, clampTurnTuning,
   normalizeExtraction, normalizeKnowledge,
@@ -130,9 +131,9 @@ export function upsertDesk(workspaceId: string, input: VettingDeskInput): Vettin
     clientCompany: input.clientCompany ?? existing?.clientCompany,
     questions: normalizeQuestions(input.questions, existing?.questions ?? []),
     nextStepQualified: input.nextStepQualified ?? existing?.nextStepQualified ??
-      "I think you could be a strong fit. Here's the next step: I'm going to send over the full job description, and I'd love for you to put together an updated resume that focuses on the things we just talked about and tailors it to this role. Once I have that back, I'll walk it through with the hiring team.",
+      "I think you could be a strong fit, and here's exactly what happens next: everything we covered goes to the recruiter today, and the one thing I need from you is your updated resume, tailored to what we just talked about. You'll get a text and an email from me right after this call with where to send it. The moment it's in, I walk it through with the hiring side.",
     nextStepUnqualified: input.nextStepUnqualified ?? existing?.nextStepUnqualified ??
-      "I really appreciate you walking me through your background. Being straight with you, I don't think this particular role is the right fit overall — but your experience is genuinely strong, and I'd like to keep you in mind for other roles that line up better with what you've built. I'll hold onto your details and reach back out when something that fits comes across my desk.",
+      "I really appreciate you walking me through your background. Being straight with you, I don't think this particular role is the right overall fit, but your experience is genuinely strong. Send me your updated resume anyway: I'd like to have it in hand so when the right role crosses my desk, and it will, you're the first call I make. You'll get a text and an email from me with where to send it.",
     persona,
     voiceId: input.voiceId ?? existing?.voiceId,
     extraction: input.extraction ? normalizeExtraction(input.extraction) : existing?.extraction,
@@ -530,7 +531,67 @@ export function setCandidateResume(
   if (meta?.source) c.resumeSource = meta.source;
   if (meta?.fileName !== undefined) c.resumeFileName = meta.fileName;
   c.updatedAt = nowIso();
+  // The resume is THE artifact the chase ladder exists for: the moment it
+  // lands, every active chase on this candidate stops and any held client
+  // intro draft is cleared for review.
+  settleResumeArrival(candidateId);
   persist();
+}
+
+/* ---------------- resume chase + client report (per-call state) ---------------- */
+
+/** Attach or replace a call's chase state. */
+export function setCallChase(callId: string, chase: ResumeChase): VettingCall | undefined {
+  return updateCall(callId, { chase });
+}
+
+/** Append one send attempt to a call's chase ladder. */
+export function addChaseStep(callId: string, step: ChaseStep): void {
+  const c = store.calls.find((x) => x.id === callId);
+  if (!c?.chase) return;
+  c.chase.steps.push(step);
+  persist();
+}
+
+/** Every call still actively chasing a resume, across all workspaces (ticker fan-out). */
+export function listActiveChaseCalls(): VettingCall[] {
+  return store.calls.filter((c) => c.chase?.status === "active");
+}
+
+/**
+ * The updated resume arrived for this candidate: stop every active chase on
+ * their calls and flip any held client draft from "awaiting_resume" to "ready".
+ * Pure data pass (no sends), safe to run from any write path; persist() is the
+ * caller's job.
+ */
+function settleResumeArrival(candidateId: string): void {
+  const now = nowIso();
+  for (const call of store.calls) {
+    if (call.candidateId !== candidateId) continue;
+    if (call.chase?.status === "active") {
+      call.chase.status = "completed";
+      call.chase.resumeReceivedAt = now;
+    }
+    if (call.clientReport?.status === "awaiting_resume") {
+      call.clientReport.status = "ready";
+    }
+  }
+}
+
+/** Store (or replace) a call's client working summary + intro draft. */
+export function setClientReport(callId: string, report: ClientReport): VettingCall | undefined {
+  return updateCall(callId, { clientReport: report });
+}
+
+/** Mark the client intro as sent (by us or by hand), stamping who it went to. */
+export function markClientReportSent(workspaceId: string, callId: string, sentTo?: string): VettingCall | undefined {
+  const c = getCall(workspaceId, callId);
+  if (!c?.clientReport) return undefined;
+  c.clientReport.status = "sent";
+  c.clientReport.sentAt = nowIso();
+  if (sentTo) c.clientReport.sentTo = sentTo;
+  persist();
+  return c;
 }
 
 /** Stamp that the post-resume screening invite went out to this candidate. */
@@ -622,6 +683,11 @@ export function getCall(workspaceId: string, id: string): VettingCall | undefine
 /** Find a call by the engine's call id (used by the post-call webhook). */
 export function findCallByEngineId(engineCallId: string): VettingCall | undefined {
   return store.calls.find((c) => c.engineCallId === engineCallId);
+}
+
+/** Fetch a call by id alone (server-side jobs that already know the desk). */
+export function getCallById(id: string): VettingCall | undefined {
+  return store.calls.find((c) => c.id === id);
 }
 
 /** Create the call record when an inbound leg starts (or arrives post-hoc). */

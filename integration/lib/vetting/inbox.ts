@@ -357,6 +357,13 @@ export async function sweepAllResumeInboxes(): Promise<void> {
   for (const ws of listVettingWorkspaceIds()) {
     try { await sweepResumeInbox(ws); } catch { /* one workspace's inbox */ }
   }
+  // The resume-chase ladder rides the same proven cadence: after each sweep
+  // (which may have just filed the resume that stops a chase), send whatever
+  // reminders have come due. Best-effort by design.
+  try {
+    const { runChaseTick } = await import("./chase");
+    await runChaseTick();
+  } catch { /* chase never blocks the inbox */ }
 }
 
 /**
