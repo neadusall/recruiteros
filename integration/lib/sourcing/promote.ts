@@ -166,5 +166,13 @@ export async function promoteSourcingRun(
   run.promotedCount = prospectIds.length;
   await saveSourcingRun(workspaceId, { ...run });
 
+  // Job Library: register the run's JD and pair every pushed contact to it,
+  // so "which job is this person for?" follows them across the portal.
+  // Fire-and-forget; a library hiccup never fails the promote.
+  try {
+    const { pairRunToJobLibrary } = await import("./jdpair");
+    void pairRunToJobLibrary(run);
+  } catch { /* never blocks the push */ }
+
   return { campaignId, listId: list.id, added, deduped, name: listName };
 }

@@ -261,6 +261,16 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
                 const desk = getDeskById(candidate.deskId);
                 setCandidateResume(candidate.id, text, { source: "email", fileName: file });
 
+                // Job Library pairing: a filed resume proves this person is in
+                // play for this desk's JD. Fire-and-forget.
+                if (desk) {
+                  const { pairCandidateToDeskJd } = await import("./jdlink");
+                  void pairCandidateToDeskJd(desk, {
+                    email: candidate.email, phone: candidate.phone,
+                    name: `${candidate.firstName} ${candidate.lastName}`.trim(),
+                  }, "resume_inbox");
+                }
+
                 // Coverage review (recruiter-facing data); never blocks the intake.
                 if (desk) {
                   try {

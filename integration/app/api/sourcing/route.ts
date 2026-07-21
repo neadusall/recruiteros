@@ -968,6 +968,12 @@ export async function POST(req: Request) {
         return fail(code, code === "ostext_not_connected" ? 503 : 502, { detail: err.message });
       }
       const guarded = (Number(data.protectedDnc) || 0) + (Number(data.protectedRecent) || 0);
+      // Job Library: an OS Text push is a candidate-JD tie too; pair everyone
+      // pushed to this run's JD (fire-and-forget, dedupe upstream).
+      try {
+        const { pairRunToJobLibrary } = await import("../../../lib/sourcing/jdpair");
+        void pairRunToJobLibrary(run, `OS Text: ${run.name}`);
+      } catch { /* never blocks the push */ }
       return ok({ ...data, pushed: Math.max(0, contacts.length - guarded), noPhone });
     }
 

@@ -351,6 +351,8 @@ export interface VettingDesk {
 
   /** The full job description, verbatim. The agent's source of truth. */
   jobDescription: string;
+  /** The Job Library record this desk's JD registered as (lib/jobs). */
+  jdId?: string;
   /** Short role title shown in the UI + spoken by the agent ("the VP Sales role"). */
   roleTitle: string;
   /** Company the role is for (the hiring client), spoken naturally on the call. */
@@ -404,6 +406,7 @@ export interface VettingDeskInput {
   motion?: Motion;
   name?: string;
   jobDescription?: string;
+  jdId?: string;
   roleTitle?: string;
   clientCompany?: string;
   questions?: Array<Partial<QualifyingQuestion> & { prompt: string; passCriteria: string }>;
@@ -426,6 +429,63 @@ export interface VettingDeskInput {
  * normalized phone number within a desk — when they call, we match the caller ID
  * to this record so the agent already knows who they are.
  */
+/* ---------------- self-scheduling (the availability loop) ---------------- */
+
+export type ScreenScheduleStatus =
+  | "awaiting_reply" // availability ask sent; waiting for the candidate
+  | "clarify"        // reply came in but we needed to ask a follow-up
+  | "booked"         // a call is on the books (engine fires it at the time)
+  | "completed"      // the scheduled call happened (or the window passed)
+  | "declined"       // the candidate said no / not interested
+  | "expired";       // no reply after the ladder; gone quiet
+
+export type ScheduleStepKind =
+  | "ask_sms" | "ask_email"    // the availability ask
+  | "reply"                    // what the candidate wrote back (note = their text)
+  | "clarify_sms" | "clarify_email"
+  | "confirm_sms" | "confirm_email"
+  | "booked" | "rebooked" | "canceled"
+  | "reminder_sms"
+  | "error";
+
+/** One event in a candidate's scheduling conversation (sends + replies). */
+export interface ScheduleStep {
+  at: string;
+  kind: ScheduleStepKind;
+  ok?: boolean;
+  note?: string;
+}
+
+/**
+ * The state of one candidate's screen-call scheduling loop. Created when the
+ * resume lands and the availability ask goes out; the candidate replies in
+ * their own words ("today at 4pm EST", "tomorrow morning"), we parse it, and
+ * the voice engine calls them at that moment.
+ */
+export interface ScreenSchedule {
+  status: ScreenScheduleStatus;
+  askedAt: string;
+  askChannel: "sms" | "email";
+  /** How many clarifying follow-ups we've sent (capped; then a human takes over). */
+  clarifyCount: number;
+  remindedAt?: string;
+  lastReplyAt?: string;
+  /** The candidate's latest scheduling reply, verbatim (capped for storage). */
+  lastReply?: string;
+  /** When the AI will call them (UTC instant). */
+  scheduledFor?: string;
+  /** The candidate's timezone the time was parsed in (IANA). */
+  timezone?: string;
+  /** Where the timezone came from: they said it, their area code, or the default. */
+  tzSource?: "stated" | "area_code" | "default";
+  /** The engine's scheduled-event id (cancel/reschedule handle). */
+  eventId?: string;
+  bookedAt?: string;
+  note?: string;
+  /** Conversation log, oldest first (capped). */
+  steps: ScheduleStep[];
+}
+
 export interface CandidateProfile {
   id: string;
   workspaceId: string;
@@ -450,6 +510,8 @@ export interface CandidateProfile {
   resumeFileName?: string;
   /** When the "your resume is in, here's the screening call" invite went out. */
   screenInviteSentAt?: string;
+  /** The self-scheduling loop: availability ask -> parsed reply -> booked call. */
+  screen?: ScreenSchedule;
 
   createdAt: string;
   updatedAt: string;
@@ -463,7 +525,7 @@ export interface InboxLogEntry {
   /** Attachment filename we acted on (or ""). */
   file: string;
   /** What happened to it. */
-  outcome: "saved" | "unmatched" | "no_attachment" | "unsupported" | "error";
+  outcome: "saved" | "unmatched" | "no_attachment" | "unsupported" | "error" | "schedule_reply";
   candidateId?: string;
   deskId?: string;
   /** Short human note ("filed to Jane Doe on VP Sales", "no opted-in candidate"). */

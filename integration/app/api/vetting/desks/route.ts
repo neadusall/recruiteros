@@ -21,7 +21,7 @@ import type { Motion } from "../../../../lib/core/types";
 import {
   listDesks, getDesk, upsertDesk, deleteDesk, markDeskSynced, setDeskStatus,
   listCandidates, listCalls, provisionDesk, deprovisionDesk, generateQualifiers,
-  generateKnowledge, generateDeskProfile, extractResumeText,
+  generateKnowledge, generateDeskProfile, extractResumeText, ensureDeskJdRegistered,
   type VettingDeskInput, type VettingCall,
 } from "../../../../lib/vetting";
 
@@ -84,6 +84,9 @@ export async function PUT(req: Request) {
   }
 
   const d = upsertDesk(ws, b);
+  // Every desk JD lives in the central Job Library: register (content-hash
+  // deduped) and stamp the desk with its jdId so candidate pairings can flow.
+  await ensureDeskJdRegistered(d);
   return ok({ desk: d });
 }
 

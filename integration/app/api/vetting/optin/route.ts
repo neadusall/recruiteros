@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { body } from "../../../../lib/api";
 import {
   getDeskById, upsertCandidate, setCandidateEnrichment, enrichCandidate,
+  pairCandidateToDeskJd,
 } from "../../../../lib/vetting";
 
 const CORS = {
@@ -79,6 +80,10 @@ export async function POST(req: Request) {
   const candidate = upsertCandidate(desk.workspaceId, {
     deskId: desk.id, firstName, lastName, phone, email, linkedinUrl: b?.linkedinUrl,
   });
+
+  // Job Library pairing: this person is now tied to this desk's JD, so the
+  // match follows them everywhere. Fire-and-forget by design.
+  void pairCandidateToDeskJd(desk, { email, phone, name: `${firstName} ${lastName}` }, "vetting");
 
   // Enrich in line (best-effort, never throws) so the agent has talking points
   // the moment they call. Degrades to source:"none" when LinkedIn isn't keyed.

@@ -23,6 +23,7 @@ import {
   type TurnTuning, type ExtractionField, type InboxState, type InboxLogEntry,
   type DeskQA, type QACluster, type CallQuestion, type KnowledgeItem,
   type ResumeChase, type ChaseStep, type ClientReport,
+  type ScreenSchedule, type ScheduleStep,
   DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, DEFAULT_DESK_QA, KNOWLEDGE_CAP,
   clampVoiceTuning, clampTurnTuning,
   normalizeExtraction, normalizeKnowledge,
@@ -127,6 +128,7 @@ export function upsertDesk(workspaceId: string, input: VettingDeskInput): Vettin
     name: input.name ?? existing?.name ?? "Untitled vetting desk",
     status: existing?.status ?? "draft",
     jobDescription: input.jobDescription ?? existing?.jobDescription ?? "",
+    jdId: input.jdId ?? existing?.jdId,
     roleTitle: input.roleTitle ?? existing?.roleTitle ?? "",
     clientCompany: input.clientCompany ?? existing?.clientCompany,
     questions: normalizeQuestions(input.questions, existing?.questions ?? []),
@@ -592,6 +594,39 @@ export function markClientReportSent(workspaceId: string, callId: string, sentTo
   if (sentTo) c.clientReport.sentTo = sentTo;
   persist();
   return c;
+}
+
+/* ---------------- self-scheduling (the availability loop) ---------------- */
+
+/** Attach or replace a candidate's scheduling state. */
+export function setCandidateScreen(candidateId: string, screen: ScreenSchedule): CandidateProfile | undefined {
+  const c = store.candidates.find((x) => x.id === candidateId);
+  if (!c) return undefined;
+  c.screen = screen;
+  c.updatedAt = nowIso();
+  persist();
+  return c;
+}
+
+/** Append one event to a candidate's scheduling conversation log (capped). */
+export function addScreenStep(candidateId: string, step: ScheduleStep): void {
+  const c = store.candidates.find((x) => x.id === candidateId);
+  if (!c?.screen) return;
+  c.screen.steps.push(step);
+  if (c.screen.steps.length > 30) c.screen.steps = c.screen.steps.slice(-30);
+  c.updatedAt = nowIso();
+  persist();
+}
+
+/** Every candidate with a live scheduling loop, across all workspaces (ticker fan-out). */
+export function listActiveScheduleCandidates(): CandidateProfile[] {
+  return store.candidates.filter((c) =>
+    c.screen && ["awaiting_reply", "clarify", "booked"].includes(c.screen.status));
+}
+
+/** Workspace-wide phone match (an inbound text may not name a desk's candidate). */
+export function findCandidateByPhone(workspaceId: string, phone: string): CandidateProfile | undefined {
+  return store.candidates.find((c) => c.workspaceId === workspaceId && sameNumber(c.phone, phone));
 }
 
 /** Stamp that the post-resume screening invite went out to this candidate. */
