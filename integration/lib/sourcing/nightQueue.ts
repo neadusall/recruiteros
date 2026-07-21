@@ -257,15 +257,6 @@ function laxisFatal(error: string): boolean {
   return /login_failed|credentials_missing|login_form_not_found|step_unresolved/i.test(error);
 }
 
-/** Mirror of the route's one-time run note when no paid phone rung is configured. */
-function notePhoneFinderOff(run: SourcingRun, gapFill: { phoneFinderOn?: boolean }): void {
-  if (gapFill.phoneFinderOn !== false) return;
-  if (run.warnings.some((w) => w.startsWith("phone_finder_off"))) return;
-  run.warnings.push(
-    "phone_finder_off: phone numbers currently come only from the free sources (KoldInfo, Laxis, the in-house database). Add a phone-finder listing under Setup to top up the misses automatically.",
-  );
-}
-
 let ticking = false;
 let tickingSince = 0;
 
@@ -525,7 +516,6 @@ async function step(item: NightItem): Promise<void> {
       // No worker: the in-house waterfall is still worth a pass, then we're done.
       const gf = await gapFillContacts(ws, run.candidates);
       item.added.emails += gf.enriched; item.added.phones += gf.phones;
-      notePhoneFinderOff(run, gf);
       await saveSourcingRun(ws, { ...run });
       chainDone(item);
       return;
@@ -542,7 +532,6 @@ async function step(item: NightItem): Promise<void> {
       if (Number.isFinite(downUntil) && downUntil > Date.now()) {
         const gf = await gapFillContacts(ws, targetRows);
         item.added.emails += gf.enriched; item.added.phones += gf.phones;
-        notePhoneFinderOff(run, gf);
         rememberLaxisSkip(run, start, "laxis_down_cooldown");
         run.laxisProgress = markOffsetDone(progress, start, total);
         await saveSourcingRun(ws, { ...run });
@@ -555,7 +544,6 @@ async function step(item: NightItem): Promise<void> {
         // Nothing enrichable in this chunk: run the gap-fill over it and mark it done.
         const gf = await gapFillContacts(ws, targetRows);
         item.added.emails += gf.enriched; item.added.phones += gf.phones;
-        notePhoneFinderOff(run, gf);
         run.laxisProgress = markOffsetDone(progress, start, total);
         await saveSourcingRun(ws, { ...run });
         touch(item, laxisNote(run, total));
@@ -600,7 +588,6 @@ async function step(item: NightItem): Promise<void> {
     // its offset done either way, so one bad chunk can't wedge the whole night.
     const gf = await gapFillContacts(ws, run.candidates.slice(start, start + count));
     item.added.emails += gf.enriched; item.added.phones += gf.phones;
-    notePhoneFinderOff(run, gf);
     delete run.laxisJob;
     run.laxisProgress = markOffsetDone(run.laxisProgress ?? progress, start, total);
     await saveSourcingRun(ws, { ...run });

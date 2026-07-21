@@ -1408,7 +1408,9 @@
     var optP = otkRate(fun.optedOut, fun.delivered);
     var costs = (d.engine && d.engine.costs) || {};
     var boostUsd = sup && sup.boost ? (sup.boost.windowUsd || 0) : 0;
-    var windowUsd = (costs.smsUsd || 0) + (costs.llmUsd || 0) + (costs.lookupUsd || 0) + boostUsd;
+    // Same composition as the "What this window cost" card total, so the
+    // cost-per-reply tile and the spend card can never quote two numbers.
+    var windowUsd = (costs.smsUsd || 0) + (costs.llmUsd || 0) + (costs.lookupUsd || 0) + (costs.enrichUsd || 0) + boostUsd;
     var cpr = fun.replied > 0 ? windowUsd / fun.replied : -1;
     var cpp = fun.positive > 0 ? windowUsd / fun.positive : -1;
     return '<div class="stat-grid" style="margin:0 0 14px">' +
@@ -11670,11 +11672,6 @@
                 ". The free engines did the rest, and enrichment is metered separately.";
               return '<span class="' + (cr ? "jr-api" : "jr-zero") + '" title="' + esc(t) + '"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>' + cr + ' credit' + (cr === 1 ? "" : "s") + '</span>';
             })(r.apiUsage) : '') +
-            // Explains a low phone count instead of leaving it silent: no paid
-            // phone-lookup rung is connected, so phones come from the free sources only.
-            ((r.warnings || []).some(function (w) { return String(w).indexOf("phone_finder_off") === 0; })
-              ? '<span class="jr-zero" title="Phone numbers on this list come only from the free sources right now (KoldInfo, Laxis, the in-house database). Add a phone-finder listing under Setup to top up the misses automatically, or use Boost phones on the row as the pay-per-lookup alternative.">phone finder off</span>'
-              : '') +
             '</span>';
           return '<div class="jd-run"><div class="jd-run-top"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
