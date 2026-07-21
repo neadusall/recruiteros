@@ -11,6 +11,19 @@ to check when something looks stuck.
    `sourcing_night_queue_v1` (snapshot on the app `/data` volume). Items are a
    per-item state machine: `queued -> search -> kold -> koldDb -> laxis -> done`.
    Code: `integration/lib/sourcing/nightQueue.ts`.
+   **Boost phones rides the same queue** (`kind:"boost"`, added by the
+   `premiumPhoneQueue` action when the recruiter presses Go in the Boost
+   dialog): pressing Boost on several lists lines them up to run back-to-back,
+   one at a time, with nothing to babysit. `boostEntryStage` routes each item
+   in: a parked free-rung job is resumed, an unfinished chunk ledger re-enters
+   the final pass, a never-enriched list runs the whole free chain first, and
+   only a provably finished chain goes straight to buying (never re-submits
+   KoldInfo rungs on a finished chain). The `boost` stage then buys in 20-row
+   batches (3-minute bounded loop per tick), with the recruiter's monthly
+   budget enforced server-side on every batch and the actor email carried ON
+   the item so ledger attribution survives restarts. Counters persist every
+   batch, so a crash cannot forget bought rows. Budget stop finishes done with
+   a cost readout; a listing/config error finishes as error and stays visible.
 2. **Ticking.** `recruiteros-nightqueue.timer` on `ros` (systemd, every 45s)
    docker-execs a wget inside the app container against
    `GET /api/sourcing/night?secret=$RECRUITEROS_CRON_SECRET`. One bounded step

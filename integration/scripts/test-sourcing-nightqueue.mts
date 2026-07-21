@@ -9,7 +9,7 @@
  *  - tick latch constants: the steal window exists and is meaningfully shorter
  *    than the host watchdog's stall window (code heals before the big hammer).
  */
-import { pruneDecision, DONE_LINGER_MS, DONE_MAX_MS } from "../lib/sourcing/nightQueue";
+import { pruneDecision, boostEntryStage, DONE_LINGER_MS, DONE_MAX_MS } from "../lib/sourcing/nightQueue";
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean) {
@@ -40,7 +40,7 @@ check("done 25h ago, undelivered: drops (day-old fallback)",
   pruneDecision({ ...base, stage: "done", finishedAt: ago(DONE_MAX_MS + 60 * 60 * 1000) }, false, NOW) === "drop");
 
 // ---- non-done stages are untouchable, however old ----
-for (const stage of ["queued", "search", "kold", "koldDb", "laxis", "error"] as const) {
+for (const stage of ["queued", "search", "kold", "koldDb", "laxis", "boost", "error"] as const) {
   check(`stage "${stage}" 3 days old: keeps (never pruned)`,
     pruneDecision({ createdAt: ago(3 * DONE_MAX_MS), updatedAt: ago(3 * DONE_MAX_MS), stage }, true, NOW) === "keep");
 }
@@ -63,6 +63,48 @@ check("latch steal (code) fires before the 45-min host watchdog restart",
   Boolean(steal) && Number(steal![1]) < 45);
 check("latch clears in a finally block (queue can never freeze on a save throw)",
   /finally\s*\{[\s\S]{0,400}ticking = false/.test(nightQueueSrc));
+
+// ---- boost items enter the machine at the right rung (enrich-first rules):
+// resume what is parked, finish an unfinished chain, run the whole free chain on
+// a never-enriched list, and only a provably finished chain goes straight to
+// buying. A wrong entry either re-spends vendor tokens or buys rows the free
+// rungs would have filled. ----
+const job = { jobId: "j1", submittedAt: ago(60 * 1000), count: 5 } as any;
+const ledger = (nextStart: number | null) =>
+  ({ doneOffsets: [0], total: 400, nextStart, updatedAt: ago(60 * 1000) }) as any;
+check('boost entry: parked KoldInfo job resumes at "kold"',
+  boostEntryStage({ koldJob: job }) === "kold");
+check('boost entry: parked KoldInfo-DB job resumes at "koldDb"',
+  boostEntryStage({ koldDbJob: job }) === "koldDb");
+check('boost entry: parked Laxis job resumes at "laxis"',
+  boostEntryStage({ laxisJob: job }) === "laxis");
+check('boost entry: unfinished chunk ledger re-enters the final pass',
+  boostEntryStage({ laxisProgress: ledger(200) }) === "laxis");
+check("boost entry: never-enriched list runs the whole free chain first",
+  boostEntryStage({}) === "kold");
+check("boost entry: fully enriched list goes straight to buying",
+  boostEntryStage({ laxisProgress: ledger(null) }) === "boost");
+check("boost entry: delivered list with no chunk ledger (old runs) goes straight to buying",
+  boostEntryStage({ autoflow: { sentAt: ago(60 * 1000) } as any }) === "boost");
+check("boost entry: promoted-only evidence also counts as enriched",
+  boostEntryStage({ promotedCount: 12 }) === "boost");
+check("boost entry: a parked job wins over a finished ledger (resume beats buy)",
+  boostEntryStage({ koldJob: job, laxisProgress: ledger(null) }) === "kold");
+
+// ---- boost stage source guarantees: what keeps queued spending safe ----
+check("boost stage: counters persist every batch (a crash cannot forget bought rows)",
+  /boost\.costUsd = [\s\S]{0,600}?await save\(\)/.test(nightQueueSrc));
+check("boost stage: a held recruiter lock waits instead of failing the item",
+  /already in progress[\s\S]{0,300}?touch\(item/.test(nightQueueSrc));
+check("boost stage: batches never exceed 20 rows",
+  /max: Math\.min\(20, remainingWanted\)/.test(nightQueueSrc));
+check("boost stage: budget stop finishes done with a readout; config errors finish as error",
+  /budgetExhausted[\s\S]{0,300}?finishBoost/.test(nightQueueSrc) &&
+  /stoppedEarly[\s\S]{0,700}?finish\(item, "error"/.test(nightQueueSrc));
+check("boost stage: a no-progress batch bails instead of spinning",
+  /made no progress/.test(nightQueueSrc));
+check("boost stage: the in-tick batch loop yields well before the latch-steal window",
+  /deadline = Date\.now\(\) \+ 3 \* 60 \* 1000/.test(nightQueueSrc) && Boolean(steal) && 3 < Number(steal![1]));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

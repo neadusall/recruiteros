@@ -93,6 +93,27 @@ export interface NightItem {
   finishedAt?: string;
 }
 
+/**
+ * Where a queued boost item enters the state machine. Pure so the regression
+ * suite (scripts/test-sourcing-nightqueue.mts) can pin the routing:
+ *  - a free rung parked mid-flight on the run is RESUMED, not restarted;
+ *  - an unfinished chunk ledger re-enters at the final (laxis) pass;
+ *  - a never-enriched list runs the whole free chain first (the list must be
+ *    properly enriched before any paid lookup);
+ *  - only a provably finished chain goes straight to buying. The KoldInfo rungs
+ *    are never re-submitted on a finished chain: that would re-spend vendor
+ *    tokens on rows they already failed to fill.
+ */
+export function boostEntryStage(
+  run: Pick<SourcingRun, "koldJob" | "koldDbJob" | "laxisJob" | "laxisProgress" | "autoflow" | "promotedCount" | "promotedListId">,
+): Extract<NightStage, "kold" | "koldDb" | "laxis" | "boost"> {
+  if (run.koldJob) return "kold";
+  if (run.koldDbJob) return "koldDb";
+  if (run.laxisJob || (run.laxisProgress && run.laxisProgress.nextStart !== null)) return "laxis";
+  const enrichRan = Boolean(run.laxisProgress || run.autoflow?.sentAt || run.promotedCount || run.promotedListId);
+  return enrichRan ? "boost" : "kold";
+}
+
 /** A worker error worth ONE rung re-run: the job vanished (retention/volume) or
  *  the browser was killed under it (deploy recreate, crash) mid-run. Distinct
  *  from data errors, which retrying would just repeat. */
@@ -374,12 +395,7 @@ async function step(item: NightItem): Promise<void> {
       // re-spend vendor tokens on rows they already failed to fill.
       const brun = item.runId ? await getSourcingRun(ws, item.runId) : undefined;
       if (!brun) { finish(item, "error", "the saved list is gone"); return; }
-      const enrichRan = Boolean(brun.laxisProgress || brun.autoflow?.sentAt || brun.promotedCount || brun.promotedListId);
-      if (brun.koldJob) item.stage = "kold";
-      else if (brun.koldDbJob) item.stage = "koldDb";
-      else if (brun.laxisJob || (brun.laxisProgress && brun.laxisProgress.nextStart !== null)) item.stage = "laxis";
-      else if (!enrichRan) item.stage = "kold";
-      else item.stage = "boost";
+      item.stage = boostEntryStage(brun);
       touch(item, item.stage === "boost"
         ? "starting the paid phone lookups…"
         : "finishing the free enrichment first, then the paid phone lookups…");
@@ -613,7 +629,13 @@ async function step(item: NightItem): Promise<void> {
       boost.found += r.found;
       boost.costUsd = Math.round((boost.costUsd + r.costUsd) * 10000) / 10000;
       item.added.phones += r.found;
+      touch(item);
       await saveSourcingRun(ws, { ...run });
+      // Persist the counters EVERY batch (the tick's own save only runs when the
+      // whole step returns): if the process dies mid-loop, the resumed item must
+      // remember what was already bought, or it would buy up to `wanted` fresh
+      // rows again on top of the lost count.
+      await save().catch(() => {});
       if (r.budgetExhausted) {
         finishBoost(item, `stopped at your monthly Boost budget: ${readout()}; the allowance resets on the 1st`);
         return;
