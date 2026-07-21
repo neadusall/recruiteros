@@ -95,18 +95,20 @@ export async function promoteSourcingRun(
       const existing = await core.findProspectByLinkedin(workspaceId, c.linkedinUrl);
       if (existing) {
         deduped++; prospectIds.push(existing.id);
-        if (opts.retag) {
-          // Combined-list promote: the person came in earlier under a source list's
-          // tag. Restamp with the combined tag and fill any contact blanks the merge
-          // found, so one tag pulls the WHOLE combined set in Candidates.
-          let dirty = false;
-          if (existing.category !== tag) { existing.category = tag; dirty = true; }
-          if (!existing.email && c.email) { existing.email = c.email; dirty = true; }
-          if (!existing.phone && c.phone) { existing.phone = c.phone; existing.phoneSource = c.phoneSource; dirty = true; }
-          if (!existing.title && (c.title || c.headline)) { existing.title = c.title || c.headline; dirty = true; }
-          if (!existing.location && c.location) { existing.location = c.location; dirty = true; }
-          if (dirty) await core.saveProspect(existing);
-        }
+        // Blank-fill is UNCONDITIONAL: a top-up re-promote after a later
+        // enrichment (Enrich resume, overnight queue, Boost phones) hits this
+        // dedupe branch for everyone already in the pipeline, and the newly
+        // found email/phone must land on their Candidates row or the tab never
+        // shows what the enrichment bought. Fill blanks only, never overwrite.
+        let dirty = false;
+        if (!existing.email && c.email) { existing.email = c.email; dirty = true; }
+        if (!existing.phone && c.phone) { existing.phone = c.phone; existing.phoneSource = c.phoneSource; dirty = true; }
+        if (!existing.title && (c.title || c.headline)) { existing.title = c.title || c.headline; dirty = true; }
+        if (!existing.location && c.location) { existing.location = c.location; dirty = true; }
+        // Combined-list promote only: restamp the tag so one tag pulls the
+        // WHOLE combined set in Candidates.
+        if (opts.retag && existing.category !== tag) { existing.category = tag; dirty = true; }
+        if (dirty) await core.saveProspect(existing);
         continue;
       }
     }
