@@ -11050,7 +11050,7 @@
           // an auto-send, or a promote proves it), never while a job is mid-flight, and
           // only for rows the paid lookup can key (real name) that were not bought before.
           var busyJobs = !!(r.koldJob || r.koldDbJob || r.laxisJob);
-          var enrichRan = !!(ep || (r.autoflow && r.autoflow.sentAt) || r.promotedCount);
+          var enrichRan = !!(ep || (r.autoflow && r.autoflow.sentAt) || r.promotedCount || r.promotedListId);
           var boostable = (!busyJobs && enrichRan) ? (r.candidates || []).filter(function (c) {
             return !(c.phone || "").trim() && !c.premiumPhoneTriedAt &&
               ((c.fullName || "").trim().split(/\s+/).length >= 2);
@@ -11117,8 +11117,13 @@
               "This list has not been through the full enrichment chain yet. Press Enrich to run it; when it finishes the refreshed contacts are re-sent to Candidates and OS Text.");
             jNote = "<b>Needs a press:</b> this list has not run enrichment yet. Press Enrich to start it; everything after that is automatic.";
           }
-          var sCand = r.promotedCount
-            ? jStop("jt-done", jIcons.check, "In Candidates", r.promotedCount + " delivered · open",
+          // Delivered = the promote record exists. Older top-up promotes stamped a
+          // net-new count of 0 after deduping, so the count alone can't gate "done";
+          // promotedListId (or the autoflow sent stamp, which always promotes first)
+          // proves everyone reached Candidates.
+          var candN = r.promotedCount || ((r.promotedListId || sentOk) ? n : 0);
+          var sCand = candN
+            ? jStop("jt-done", jIcons.check, "In Candidates", candN + " delivered · open",
               "Everyone on this list is in the Candidates tab under this list name. Click to open them.", r.promotedListId || "")
             : jStop("jt-wait", jIcons.users, "Candidates", "arrives automatically",
               "Everyone lands in the Candidates tab automatically once enrichment settles; no button to press.");
@@ -11136,7 +11141,7 @@
           if (!jNote) {
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
             else if (afErr) jNote = "The automatic send hit a problem and keeps retrying on its own. If this stays up for more than an hour, ask your admin.";
-            else if (sentOk && r.promotedCount) jNote = phs > 0
+            else if (sentOk && candN) jNote = phs > 0
               ? "<b>Done:</b> everyone is in Candidates and the text campaign is ready to review and launch in OS Text."
               : "<b>Done:</b> everyone is in Candidates. No phone numbers were found to text yet; Boost phones can grow the textable count.";
             else jNote = "Waiting for the automatic pipeline to pick this list up; it sweeps every few minutes and needs no button.";

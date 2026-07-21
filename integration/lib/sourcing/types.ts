@@ -168,7 +168,8 @@ export interface SourcingRun {
   /** Quota'd search-API requests the discovery run spent building this list, by
    *  engine (rapidapi = the paid people-search listing's monthly credits). */
   apiUsage?: { rapidapi?: number; serper?: number; google?: number };
-  /** Set once promoted into Candidates, with the created campaign + list ids. */
+  /** Set once promoted into Candidates, with the created campaign + list ids.
+   *  promotedCount = everyone delivered (new + already-in-pipeline), not net-new. */
   promotedCampaignId?: string;
   promotedListId?: string;
   promotedCount?: number;

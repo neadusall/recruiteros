@@ -138,9 +138,12 @@ export async function promoteSourcingRun(
   });
 
   // 4. Record the promotion back on the run so the tab shows it's been sent.
+  // Delivered = everyone now in Candidates (new + deduped-into-pipeline), NOT just
+  // net-new rows: a top-up re-promote dedupes everybody, and stamping `added` (0)
+  // here used to flip the journey strip's Candidates stop back to grey.
   run.promotedCampaignId = campaignId;
   run.promotedListId = list.id;
-  run.promotedCount = added;
+  run.promotedCount = prospectIds.length;
   await saveSourcingRun(workspaceId, { ...run });
 
   return { campaignId, listId: list.id, added, deduped, name: listName };
