@@ -1,5 +1,5 @@
 import { requireCapability, ok, fail } from "../../../../lib/api";
-import { resolveOstextTarget } from "../../../../lib/ostextImport";
+import { ostextTenantFor, resolveOstextTarget } from "../../../../lib/ostextImport";
 import { supplyRollup } from "../../../../lib/sourcing/ostextKpi";
 
 export const dynamic = "force-dynamic";
@@ -30,8 +30,15 @@ export async function GET(req: Request) {
   let accuracy: { sources: unknown[]; trend: unknown[] } = { sources: [], trend: [] };
   let engineError: string | null = null;
   const target = await resolveOstextTarget(ws).catch(() => null);
+  const tenant = await ostextTenantFor(ws).catch(() => "house");
   if (!target) {
     engineError = "ostext_not_connected";
+  } else if (!target.own && tenant !== "house") {
+    // TENANT WALL: this workspace rides the SHARED house engine, whose
+    // /api/kpi-stats and /api/phone-accuracy roll up the WHOLE engine - house
+    // campaigns included. Those numbers never cross the tenant wall; the tab
+    // still renders the workspace's own supply-side stats.
+    engineError = "ostext_shared_engine";
   } else {
     const headers = { authorization: `Bearer ${target.token}` };
     const [kpiRes, accRes] = await Promise.all([

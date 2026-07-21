@@ -94,6 +94,34 @@ export async function ostextConfiguredFor(workspaceId?: string): Promise<boolean
   return (await resolveOstextTarget(workspaceId)) !== null;
 }
 
+/**
+ * TENANT WALL: the label a workspace's rows carry inside the OS Text engine.
+ * A shared engine serves the house workspace AND any granted white-label
+ * customer, all in one database - every push and every SSO entry is stamped
+ * with this label so each tenant only ever sees its own campaigns (a house
+ * campaign must never render inside app.lumesp.com, and vice versa).
+ *
+ * "house" for the operator's workspace; a customer gets its stable email
+ * domain (drift-proof, unlike workspace ids), falling back to the pushing
+ * recruiter's email domain, then to the raw workspace id.
+ */
+export async function ostextTenantFor(workspaceId?: string, fallbackEmail?: string | null): Promise<string> {
+  if (!workspaceId) return "house"; // background/global callers act as the house
+  try {
+    const { isHouseWorkspace } = await import("./connected/access");
+    if (isHouseWorkspace(workspaceId)) return "house";
+  } catch {
+    return "house"; // access store unavailable -> legacy behavior, never crash a push
+  }
+  try {
+    const { workspaceTenantDomain } = await import("./auth");
+    const d = await workspaceTenantDomain(workspaceId);
+    if (d) return d;
+  } catch { /* fall through to the email fallback */ }
+  const fd = (fallbackEmail || "").split("@")[1]?.trim().toLowerCase();
+  return fd || `ws-${workspaceId}`;
+}
+
 /** Starter SMS template: only {first_name}, which every pushed contact has, so
  *  no contact gets failed for a missing merge field before the recruiter edits.
  *  Campaign names arrive as saved-list names ("VP of Operations · Howell, New
@@ -191,6 +219,10 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
     } catch { /* phone store unavailable -> shared number */ }
   }
 
+  // Tenant stamp: on a shared engine this is what keeps the pushed campaign
+  // visible ONLY inside the pushing workspace's portal.
+  const tenant = await ostextTenantFor(args.workspaceId, args.recruiterEmail);
+
   let res: Response;
   try {
     res = await fetch(target.base + "/api/import", {
@@ -203,6 +235,7 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
           positionSummary: args.positionSummary,
           recruiterName: args.recruiterName,
           recruiterEmail: args.recruiterEmail,
+          tenant,
           ...(fromNumber ? { fromNumber } : {}),
         },
         contacts: args.contacts,

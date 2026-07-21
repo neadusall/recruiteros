@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "../../../../lib/api";
-import { resolveOstextTarget } from "../../../../lib/ostextImport";
+import { ostextTenantFor, resolveOstextTarget } from "../../../../lib/ostextImport";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -55,6 +55,11 @@ export async function GET(req: Request) {
   const who = g.ctx.user;
   if (token && who?.email) dest.searchParams.set("email", who.email);
   if (token && who?.name) dest.searchParams.set("name", who.name);
+  // TENANT WALL: tell the engine which tenant this entry belongs to, so the
+  // signed-in person only ever sees their own tenant's campaigns on a shared
+  // engine. Re-stamped on every entry (the iframe SSOs each open), so it heals
+  // itself. Only meaningful with the token; the engine validates it first.
+  if (token) dest.searchParams.set("ws", await ostextTenantFor(g.ctx.workspace.id, who?.email));
   const theme = url.searchParams.get("theme");
   const accent = url.searchParams.get("accent");
   if (theme === "dark" || theme === "light") dest.searchParams.set("theme", theme);

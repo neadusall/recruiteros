@@ -1,5 +1,5 @@
 import { requireSession, ok, fail } from "../../../../lib/api";
-import { resolveOstextTarget } from "../../../../lib/ostextImport";
+import { ostextTenantFor, resolveOstextTarget } from "../../../../lib/ostextImport";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,6 +22,10 @@ export async function GET(req: Request) {
 
   const target = await resolveOstextTarget(g.ctx.workspace.id).catch(() => null);
   if (!target) return fail("ostext_not_connected", 503);
+  // TENANT WALL: the shared house engine's accuracy rollup spans every tenant's
+  // campaigns; only the house (or a workspace on its OWN engine) may read it.
+  const tenant = await ostextTenantFor(g.ctx.workspace.id).catch(() => "house");
+  if (!target.own && tenant !== "house") return ok({ sources: [], trend: [] });
 
   let res: Response;
   try {

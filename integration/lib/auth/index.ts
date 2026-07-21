@@ -520,6 +520,19 @@ export async function workspaceOwner(workspaceId: string): Promise<{ userId: str
   return null;
 }
 
+/** A workspace's stable email-domain label: its auto-join domain when set, else
+ *  its owner's email domain. Workspace IDS drift across auth churn (2026-07-16
+ *  incident) but the company's mail domain doesn't, so shared multi-tenant
+ *  engines (OS Text) tag rows with this instead of the raw id. */
+export async function workspaceTenantDomain(workspaceId: string): Promise<string | null> {
+  await ensureAuthReady();
+  const ws = store.workspaces.get(workspaceId);
+  const d = (ws?.domain || "").trim().toLowerCase();
+  if (d) return d;
+  const owner = await workspaceOwner(workspaceId);
+  return owner?.email.split("@")[1]?.trim().toLowerCase() || null;
+}
+
 /** Validate a session token -> the authed context, or null. */
 export function sessionContext(token?: string | null): AuthResult | null {
   if (!token) return null;
@@ -536,6 +549,33 @@ export function sessionContext(token?: string | null): AuthResult | null {
 export function logout(token: string): void {
   store.sessions.delete(token);
   persist();
+}
+
+/**
+ * Re-bind an authed context onto another workspace the same user belongs to.
+ * PORTAL ISOLATION uses this: a session whose stored workspace does not match
+ * the portal host it arrives on is re-scoped to the user's workspace ON that
+ * portal. Never persisted - the wall is per-request, so one browser can hold
+ * the house portal and a tenant portal in two tabs without the stored session
+ * flip-flopping between workspaces.
+ */
+export function rescopeContext(ctx: AuthResult, workspaceId: string): AuthResult | null {
+  if (ctx.workspace.id === workspaceId) return ctx;
+  const user = store.users.get(ctx.user.id);
+  const ws = store.workspaces.get(workspaceId);
+  if (!user || !ws || store.suspended.has(ws.id)) return null;
+  const m = store.memberships.find((x) => x.userId === user.id && x.workspaceId === workspaceId);
+  if (!m) return null;
+  return result(user, ws, m.role, ctx.session);
+}
+
+/** Workspace ids this user belongs to, highest role first (owner, admin, rest). */
+export function membershipWorkspaceIds(userId: string): string[] {
+  const rank: Record<string, number> = { owner: 0, admin: 1 };
+  return store.memberships
+    .filter((m) => m.userId === userId)
+    .sort((a, b) => (rank[a.role] ?? 9) - (rank[b.role] ?? 9))
+    .map((m) => m.workspaceId);
 }
 
 /** Read the Bearer / cookie session token off a request. */
