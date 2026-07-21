@@ -48,6 +48,7 @@ import {
 } from "../../../lib/sourcing";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { sendRunNow } from "../../../lib/sourcing/autoflow";
+import { pickSameRoleMaster } from "../../../lib/sourcing/sameRole";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { withWorkspaceCreds } from "../../../lib/connected";
 import { cred } from "../../../lib/providers/http";
@@ -997,7 +998,15 @@ export async function POST(req: Request) {
       // stable person key, stronger row wins, blanks filled from the loser, deep-vet
       // verdicts carried over whole, verified-first re-rank.
       const { candidates, overlap, anchor } = mergeSourcingRuns(runs);
-      const name = ((b.name as string) || "").trim() || `${anchor.name} (combined)`;
+      // DOWNSTREAM CONTINUITY (2026-07-21): when a source already reached
+      // Candidates/OS Text, the combined list must KEEP that identity. The OS Text
+      // engine keys campaigns by EXACT name, so a "(combined)" rename forked a THIRD
+      // campaign next to the sources' two — the auto-send now tops up the campaign
+      // that already exists (and may hold replies) instead. A recruiter-typed name
+      // still wins: an explicit rename is an explicit request for a fresh campaign.
+      const master = pickSameRoleMaster(runs);
+      const carried = master.autoflow?.sentAt || master.promotedCampaignId ? master : undefined;
+      const name = ((b.name as string) || "").trim() || (carried ? carried.name : `${anchor.name} (combined)`);
       const mergedRun = await saveSourcingRun(ws, {
         name, jd: anchor.jd, jdUrl: anchor.jdUrl, location: anchor.location,
         icp: anchor.icp,
@@ -1012,6 +1021,16 @@ export async function POST(req: Request) {
         sendAsap: anchor.motion !== "bd",
         combinedFrom: ids,
       });
+      if (carried && name === carried.name) {
+        // Promote leg reuses the existing campaign/list; the sentAt stamp makes the
+        // in-request send a TOP-UP (adds only what's new) rather than a first send.
+        mergedRun.promotedCampaignId = carried.promotedCampaignId;
+        mergedRun.promotedListId = carried.promotedListId;
+        if (carried.autoflow?.sentAt) {
+          mergedRun.autoflow = { sentAt: carried.autoflow.sentAt, phonesAtSend: carried.autoflow.phonesAtSend, attempts: 0 };
+        }
+        await saveSourcingRun(ws, { ...mergedRun });
+      }
       // Optionally retire the sources — safe, the combined list holds every candidate.
       // A source with an enrich/vet job still in flight is kept so the job isn't stranded.
       let deleted = 0;

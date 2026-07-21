@@ -30,9 +30,11 @@
 
 import { nowIso } from "../core/ids";
 import type { SourcingRun } from "./types";
-import { listAllSourcingRuns, saveSourcingRun } from "./store";
+import { listAllSourcingRuns, saveSourcingRun, deleteSourcingRun } from "./store";
 import { promoteSourcingRun } from "./promote";
 import { listNightItems, addNightItem } from "./nightQueue";
+import { mergeSourcingRuns } from "./mergeRuns";
+import { combinableGroups } from "./sameRole";
 import { workspaceOwner } from "../auth";
 import {
   ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
@@ -397,6 +399,89 @@ async function parityPass(runs: SourcingRun[], now: number): Promise<number> {
   return sent;
 }
 
+/* --- Same-role auto-combine lane ---------------------------------------------
+ * USER MANDATE (2026-07-21): searches for the SAME open role must converge into
+ * ONE list — never ship as parallel lists that fan out into duplicate Candidates
+ * lists and duplicate OS Text campaigns ("VP of Operations - Howell, New Jersey,
+ * United States" next to its "+50mi" and "(combined)" variants was three lists,
+ * three campaigns, and the same people queued for the same text twice).
+ *
+ * Every sweep, saved recruiting runs whose names collapse to the same role+place
+ * key (lib/sourcing/sameRole) are folded IN-PLACE into the group's master — the
+ * run whose Candidates list / OS Text campaign already exists keeps its id and
+ * name, so every later push TOPS UP that one campaign (the engine keys campaigns
+ * by exact name) instead of creating a sibling. Donor runs are deleted once the
+ * master holds their people; the merge itself is the regression-tested
+ * mergeSourcingRuns (dedupe by person, stronger row wins, blanks filled both
+ * ways), so nothing a donor found is lost.
+ *
+ * Safety: a group is skipped while ANY of its runs has an enrichment/vet job in
+ * flight, is being worked by the overnight queue, or was touched in the last few
+ * minutes (a live tab saves on every chain step). Merging wipes the chunk ledger
+ * — same move the Sales Nav merge makes — so ONE server-side resume re-enriches
+ * only what the union still misses, and the top-up rule delivers donor phones to
+ * the master's campaign on the next tick.
+ */
+const MAX_COMBINES_PER_TICK = 2; // folds are cheap but each triggers a resend cycle
+
+/** Fold every safe same-role duplicate group; returns the deleted donor ids so
+ *  the caller's tick loop never acts on a run that no longer exists. */
+async function autoCombinePass(runs: SourcingRun[], now: number): Promise<Set<string>> {
+  const dropped = new Set<string>();
+  // Which runs is the overnight queue actively working? (per workspace, fetched once)
+  const busy = new Set<string>();
+  try {
+    const workspaces = new Set(runs.map((r) => r.workspaceId));
+    for (const ws of workspaces) {
+      for (const item of await listNightItems(ws)) {
+        if (item.runId && item.stage !== "done" && item.stage !== "error") busy.add(item.runId);
+      }
+    }
+  } catch (e) {
+    // Can't see the queue -> can't prove a run is quiet -> fold nothing this tick.
+    console.error(`[sourcing-autoflow] combine: queue check failed, skipping pass: ${(e as Error).message}`);
+    return dropped;
+  }
+  let folds = 0;
+  for (const g of combinableGroups(runs, now, busy)) {
+    if (folds >= MAX_COMBINES_PER_TICK) break;
+    try {
+      const master = g.master;
+      const { candidates, overlap } = mergeSourcingRuns([master, ...g.donors]);
+      master.candidates = candidates;
+      master.queries = master.queries.concat(g.donors.flatMap((d) => d.queries));
+      master.combinedFrom = [...new Set([...(master.combinedFrom ?? []), ...g.donors.map((d) => d.id)])];
+      // The union may hold rows the master's enrichment never saw: wipe the chunk
+      // ledger so one server-side resume enriches exactly the gaps (blank-fill
+      // only, no double spend), and re-arm the one-resume rule for this reopen.
+      master.laxisProgress = undefined;
+      master.laxisSkipped = undefined;
+      if (master.autoflow) master.autoflow.resumedAt = undefined;
+      // A donor that was promoted when the master wasn't donates its Candidates
+      // campaign/list so the promote leg reuses instead of re-creating. (When the
+      // master was already sent, its own ids win — that campaign has the history.)
+      if (!master.promotedCampaignId) {
+        const promoted = g.donors.find((d) => d.promotedCampaignId);
+        if (promoted) {
+          master.promotedCampaignId = promoted.promotedCampaignId;
+          master.promotedListId = master.promotedListId || promoted.promotedListId;
+        }
+      }
+      await saveSourcingRun(master.workspaceId, { ...master });
+      for (const d of g.donors) {
+        if (await deleteSourcingRun(d.workspaceId, d.id)) dropped.add(d.id);
+      }
+      folds++;
+      console.log(
+        `[sourcing-autoflow] auto-combined ${g.donors.length + 1} same-role lists into "${master.name}" ` +
+        `(${candidates.length} people, ${overlap} duplicate row(s) folded, donors: ${g.donors.map((d) => `"${d.name}"`).join(", ")})`);
+    } catch (e) {
+      console.error(`[sourcing-autoflow] combine of "${g.master.name}" group failed: ${(e as Error).message}`);
+    }
+  }
+  return dropped;
+}
+
 let sweeping = false;
 let lastBeat = 0;
 
@@ -408,11 +493,16 @@ export async function tickSourcingAutoflow(): Promise<{ sent: number }> {
   let sent = 0;
   try {
     const now = Date.now();
-    const runs = await listAllSourcingRuns();
+    const allRuns = await listAllSourcingRuns();
     if (now - lastBeat > 3600_000) {
       lastBeat = now;
-      console.log(`[sourcing-autoflow] sweeping ${runs.length} saved run(s) (hourly heartbeat)`);
+      console.log(`[sourcing-autoflow] sweeping ${allRuns.length} saved run(s) (hourly heartbeat)`);
     }
+    // Fold same-role duplicate lists FIRST, so the send loop below only ever acts
+    // on the surviving master — a donor sent seconds before its fold would have
+    // opened exactly the duplicate campaign this lane exists to prevent.
+    const foldedAway = await autoCombinePass(allRuns, now);
+    const runs = foldedAway.size ? allRuns.filter((r) => !foldedAway.has(r.id)) : allRuns;
     for (const run of runs) {
       if (sent >= MAX_SENDS_PER_TICK) break;
       const what = due(run, now);
