@@ -79,7 +79,12 @@ Benchmark coloring only starts past a 25-sample floor.
   missing/broken get no classification, so reply mix / positive / wrong-number
   undercount. Since 06c0c35 the internal clock's classify-backlog drain triages
   them automatically (90-day lookback, 4 per 30s sweep) once a key is present.
-  The tab's llmUsd = $0 with replies present is the tell that the key is down.
+  The engine reports `engine.triageReady` (key present) and
+  `engine.unclassifiedReplies` (backlog size); the tab shows a red "AI reply
+  triage off" pill and an n/a Positive tile when triage is down, and an amber
+  "N replies awaiting triage" pill while the backlog drains. Source tripwires:
+  `src/lib/__tests__/opt-out-ledger.test.ts` pins the whole opt-out ledger
+  contract (upsert, both stop paths, cooldown immunity, KPI reason filter).
 - **Phone-check ledger starts 2026-07-21.** `phone_check_outcomes` has no rows
   before then, so windows reaching further back show checks only from that date
   (texting history goes back to 2026-07-17). Checked/cell-verified and the

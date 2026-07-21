@@ -1375,6 +1375,11 @@
     else if (d.engineError === "ostext_engine_outdated") pills.push(otkPill("warn", "Engine update pending"));
     else if (d.engineError) pills.push(otkPill("bad", "Engine unreachable"));
     if (g) {
+      // Reply triage health: explicitly false means the engine has no LLM key,
+      // so positive/reply-mix stats are undercounting right now (older engines
+      // do not report the field; show nothing rather than guess).
+      if (g.triageReady === false) pills.push(otkPill("bad", "AI reply triage off"));
+      else if ((g.unclassifiedReplies || 0) > 0) pills.push(otkPill("warn", otkNum(g.unclassifiedReplies) + " repl" + (g.unclassifiedReplies === 1 ? "y" : "ies") + " awaiting triage"));
       pills.push(otkPill("none", "Last text " + obWhen(g.lastOutboundAt)));
       pills.push(otkPill("none", "Last reply " + obWhen(g.lastInboundAt)));
       pills.push(otkPill("none", "Last cell check " + obWhen(g.lastCheckAt)));
@@ -1401,6 +1406,7 @@
       if (invert) return p <= okAt ? "var(--ok)" : p <= warnAt ? "var(--warn)" : "var(--danger)";
       return p >= okAt ? "var(--ok)" : p >= warnAt ? "var(--warn)" : "var(--danger)";
     }
+    var triageOff = !!(d.engine && d.engine.engine && d.engine.engine.triageReady === false);
     var cellP = otkRate(fun.cellConfirmed, fun.checked);
     var delP = otkRate(msg.deliveredMsgs, msg.sentMsgs);
     var repP = otkRate(fun.replied, fun.delivered);
@@ -1417,7 +1423,7 @@
       obStat(cellP < 0 ? "n/a" : Math.round(cellP) + "%", "Cell rate", otkNum(fun.checked) + " numbers checked by Telnyx") +
       obStat(delP < 0 ? "n/a" : Math.round(delP) + "%", "Delivery rate", otkNum(msg.sentMsgs) + " texts sent · target 95%+", tone(delP, 95, 90, msg.sentMsgs)) +
       obStat(repP < 0 ? "n/a" : Math.round(repP) + "%", "Reply rate", otkNum(fun.replied) + " replied · cold SMS norm 20-30%", tone(repP, 20, 10, fun.delivered)) +
-      obStat(posP < 0 ? "n/a" : Math.round(posP) + "%", "Positive reply rate", otkNum(fun.positive) + " interested or asking for details") +
+      obStat(triageOff ? "n/a" : (posP < 0 ? "n/a" : Math.round(posP) + "%"), "Positive reply rate", triageOff ? "AI triage is off, replies are not being classified" : otkNum(fun.positive) + " interested or asking for details") +
       obStat(optP < 0 ? "n/a" : (Math.round(optP * 10) / 10) + "%", "Opt-out rate", "carrier scrutiny starts near 2%", tone(optP, 1, 2, fun.delivered, true)) +
       obStat(cpr < 0 ? "n/a" : otkUsd(cpr), "Cost per reply", cpp < 0 ? "window spend ÷ replies" : otkUsd(cpp) + " per positive reply") +
       "</div>";
