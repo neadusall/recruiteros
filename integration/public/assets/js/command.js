@@ -11227,7 +11227,8 @@
           '<div class="jd-helpsec"><h5>The buttons on a saved list</h5>' +
             '<p><b>Boost phones (optional, paid)</b>: appears once the free enrichment has finished and candidates still lack a phone. It runs a deeper paid phone lookup on just those rows to grow your textable count. You choose how many lookups to buy and see the estimated cost first; nothing is spent until you press Go, and the run is handed to the server, so you can close the tab. Press Boost on several lists and they line up and run one after another, with live progress above your lists. Each lookup costs a fraction of a cent (priced from your team\'s plan), a row that has been tried is never billed twice, every run stops itself before it can pass your monthly Boost budget, and the exact spend is logged to your account under Outbound Performance. Numbers it finds flow on to OS Text by themselves.</p>' +
             '<p><b>Enrich</b>: The resume switch; you normally never need it. If a run stops early (server update, closed tab), pressing it continues from the first unfinished batch (finished work is never redone or re-bought) and re-sends the refreshed contacts to Candidates and OS Text. Safe to press repeatedly.</p>' +
-            '<p><b>Combine lists</b>: for when you ran the same role a few different ways (a first pass, a Fresh-only rerun, a LinkedIn URL pull). The Combine searches bar above your saved lists walks you through it: <b>1.</b> tick the box on the left edge of two or more lists; <b>2.</b> the bar counts your picks and previews the result (about how many unique candidates, how many duplicate rows fold into one); <b>3.</b> press the blue Combine button in the bar. A window confirms the merge: name the master list, and choose whether to delete the originals (on by default, and safe: every person and every piece of contact info is kept in the combined list). The same person on two lists becomes one row with their best score, an email or phone found on any list fills the blanks on the others, and the combined list flows to Candidates and OS Text by itself under its own tag, so one tag pulls the whole set in Candidates.</p>' +
+            '<p><b>Combine lists</b>: for when you ran the same role a few different ways (a first pass, a Fresh-only rerun, a LinkedIn URL pull). The Combine searches bar above your saved lists walks you through it: <b>1.</b> tick the box on the left edge of two or more lists; <b>2.</b> the bar counts your picks and previews the result (about how many unique candidates, how many duplicate rows fold into one); <b>3.</b> press the blue Combine button in the bar. A window confirms the merge: name the master list, and choose whether to delete the originals (on by default, and safe: every person and every piece of contact info is kept in the combined list). If a ticked list already has a campaign in OS Text, the window suggests that list\'s name; keep it and the merge tops up that same campaign instead of creating a second one. The same person on two lists becomes one row with their best score, an email or phone found on any list fills the blanks on the others, and the combined list flows to Candidates and OS Text by itself under its own tag, so one tag pulls the whole set in Candidates.</p>' +
+            '<p><b>The simple rule: search first, combine second, set the send time last.</b> Every list delivers itself to OS Text as a draft campaign, and a draft never texts anyone until you set its send date &amp; time. So run the role as many ways as you like, combine when you are done searching, and set the send time only on the combined campaign. Even if you combine after launching, nobody is ever texted twice: anyone already contacted is automatically skipped.</p>' +
             '<p><b>Delete</b>: Removes the saved list. The people themselves are not deleted, and the workspace still remembers it surfaced them, which is what powers Fresh only.</p>' +
           '</div>' +
           '<div class="jd-helpsec"><h5>Guardrails you never have to think about</h5>' +
@@ -12524,7 +12525,7 @@
       } else if (n === 1) {
         bar.innerHTML = '<b>1 list ticked.</b><span>Tick at least one more list below, then press <b>Combine lists</b> above.</span>';
       } else {
-        bar.innerHTML = '<span><b>Combine searches:</b> ran the same role a few different ways? Tick two or more lists below, then press <b>Combine lists</b> above. Duplicates merge into one master list, contact info found on any list fills the blanks, and the combined list flows to Candidates and OS Text on its own.</span>';
+        bar.innerHTML = '<span><b>Combine searches:</b> ran the same role a few different ways? Tick two or more lists below, then press <b>Combine lists</b> above. Duplicates merge into one master list, contact info found on any list fills the blanks, and the combined list flows to Candidates and OS Text on its own. The simple rule: <b>search first, combine second, set the send time last</b>, so one combined campaign does the texting.</span>';
       }
     }
     $("#jdRuns").addEventListener("change", function (e) {
@@ -12555,11 +12556,30 @@
       }); });
       var unique = Object.keys(seen).length;
       var biggest = chosen.reduce(function (a, r) { return ((r.candidates || []).length > ((a.candidates || []).length) ? r : a); }, chosen[0]);
-      var defName = ((biggest && biggest.name) || "Candidate search") + " (combined)";
+      // Default name mirrors the server's continuity rule (pickSameRoleMaster in
+      // lib/sourcing/sameRole.ts): when a ticked list already delivered a campaign
+      // to OS Text, defaulting to ITS name makes the merge top up that existing
+      // campaign (which may already hold replies) instead of forking a second one.
+      // The sort order must match the server's exactly or the names disagree and
+      // the fork happens anyway: sent first, combined first, biggest, oldest send.
+      var tsOf = function (s) { var t = Date.parse(s || ""); return isFinite(t) ? t : Infinity; };
+      var wasSent = function (r) { return !!((r.autoflow && r.autoflow.sentAt) || r.promotedCampaignId); };
+      var master = chosen.slice().sort(function (a, b) {
+        return (Number(!wasSent(a)) - Number(!wasSent(b))) ||
+          (Number(!(a.combinedFrom && a.combinedFrom.length)) - Number(!(b.combinedFrom && b.combinedFrom.length))) ||
+          (((b.candidates || []).length) - ((a.candidates || []).length)) ||
+          (tsOf(a.autoflow && a.autoflow.sentAt) - tsOf(b.autoflow && b.autoflow.sentAt)) ||
+          (tsOf(a.createdAt) - tsOf(b.createdAt));
+      })[0];
+      var carried = wasSent(master);
+      var defName = carried ? master.name : (((biggest && biggest.name) || "Candidate search") + " (combined)");
       openModal("Combine " + chosen.length + " lists",
         "Merges the ticked lists into one master list. The same person on two lists becomes one row (best score wins), and an email or phone found on any list is kept. The combined list then flows to Candidates and OS Text by itself, tagged with the name below, so you can pull the whole set by tag in Candidates and assign it a campaign.",
         '<label class="fld"><span>Combined list name</span>' +
           '<input id="combineName" type="text" value="' + esc(defName) + '" /></label>' +
+        (carried
+          ? '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">"' + esc(master.name) + '" already has a campaign in OS Text, so the suggested name folds everything into that same campaign (nothing is duplicated, and any replies it holds stay put). Type a different name only if you want a separate fresh campaign.</div>'
+          : '') +
         '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">' +
           chosen.length + ' lists · ' + total + ' rows · about ' + unique + ' unique candidates after merging.</div>' +
         '<label style="display:flex;gap:8px;align-items:center;justify-content:flex-start;text-align:left;font-size:13px;margin-top:8px"><input type="checkbox" id="combineDelete" checked style="flex:0 0 auto;width:auto;margin:0" /><span>Delete the original lists after combining (everything is kept in the combined list)</span></label>' +
