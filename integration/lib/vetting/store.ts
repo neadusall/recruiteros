@@ -23,7 +23,7 @@ import {
   type TurnTuning, type ExtractionField, type InboxState, type InboxLogEntry,
   type DeskQA, type QACluster, type CallQuestion, type KnowledgeItem,
   type ResumeChase, type ChaseStep, type ClientReport,
-  type ScreenSchedule, type ScheduleStep, type DeskMsgTemplate,
+  type ScreenSchedule, type ScheduleStep, type DeskMsgTemplate, type PersonalPrep,
   MSG_TEMPLATE_CAP,
   DEFAULT_PERSONA, DEFAULT_PASS_THRESHOLD, DEFAULT_LEARNING, DEFAULT_DESK_QA, KNOWLEDGE_CAP,
   clampVoiceTuning, clampTurnTuning,
@@ -541,6 +541,15 @@ export function setCandidateEnrichment(candidateId: string, enrichment: Candidat
   const c = store.candidates.find((x) => x.id === candidateId);
   if (!c) return;
   c.enrichment = enrichment;
+  c.updatedAt = nowIso();
+  persist();
+}
+
+/** Store a candidate's freshly generated prepared questions (prequal.ts). */
+export function setCandidatePrequal(candidateId: string, prep: PersonalPrep): void {
+  const c = store.candidates.find((x) => x.id === candidateId);
+  if (!c) return;
+  c.prequal = prep;
   c.updatedAt = nowIso();
   persist();
 }

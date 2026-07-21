@@ -28,6 +28,7 @@ import {
   ensureVettingReady, phoneDigits, listCalls,
 } from "./store";
 import { buildCallContext } from "./prompt";
+import { refreshPersonalPrep } from "./prequal";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_VETTING_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
@@ -462,6 +463,11 @@ function scheduledCallVars(desk: VettingDesk, cand: CandidateProfile): Record<st
  */
 async function bookScreenCall(desk: VettingDesk, cand: CandidateProfile, whenUtc: string, tz: string, tzSource: ScreenSchedule["tzSource"]): Promise<boolean> {
   if (!desk.assistantId || !desk.phoneNumber || !cand.phone) return false;
+  // Scheduled events carry their dynamic variables at creation time, so the
+  // prepared personal questions must exist NOW to make it onto the call.
+  // Booking is a reply-parse path (not call-connect), so waiting a few seconds
+  // here is fine; refreshPersonalPrep never throws and no-ops when fresh.
+  await refreshPersonalPrep(desk, cand);
   const prior = cand.screen;
   const rebooked = Boolean(prior?.eventId && prior.status === "booked");
   try {

@@ -17,7 +17,7 @@ import { NextResponse } from "next/server";
 import { body } from "../../../../lib/api";
 import {
   getDeskById, upsertCandidate, setCandidateEnrichment, enrichCandidate,
-  pairCandidateToDeskJd,
+  pairCandidateToDeskJd, refreshPersonalPrep,
 } from "../../../../lib/vetting";
 
 const CORS = {
@@ -89,6 +89,11 @@ export async function POST(req: Request) {
   // the moment they call. Degrades to source:"none" when LinkedIn isn't keyed.
   const enrichment = await enrichCandidate(candidate.linkedinUrl);
   setCandidateEnrichment(candidate.id, enrichment);
+
+  // Prepare the personalized screening questions from what we now know
+  // (LinkedIn background vs the JD; upgraded again when a resume lands).
+  // Fire-and-forget so the form response stays instant.
+  void refreshPersonalPrep(desk, { ...candidate, enrichment });
 
   return json({
     ok: true,

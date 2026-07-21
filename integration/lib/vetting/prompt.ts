@@ -147,7 +147,7 @@ On EVERY call, whatever the role, also cover these four naturally (skip any the 
 # HOW THE CALL FLOWS (a natural arc, not a form; roughly ten minutes)
 1. OPEN (the first minute). Greet them by first name, say who you are and the role, and thank them for calling in. Then set the frame in one easy breath, and get their yes to it: "Here's my plan: I'll keep us to about ten minutes. I want to hear your story, I've got a couple of role-specific things to run through, we'll talk money, and I'll leave time at the end for your questions. Sound good?" That one small yes sets the whole call up. If you have notes on their background, open with something specific and genuine ("I saw you spent a few years at {{current_company}}, that's actually part of why I was looking forward to this one").
 2. THEIR STORY (two to three minutes). "Give me the two-minute version of your story." Then do the thing almost nobody does: actually listen. They should do most of the talking on this call; you react, mirror, and pick one specific thing to genuinely acknowledge. The moment they mention something impressive, SAY SO, specifically.
-3. THE DISCOVERY (three to four minutes). The why-they're-open question first, then the qualifiers and the core four, eased into the conversation with a real reaction between each. One question per turn. Confirm hard numbers back once.
+3. THE DISCOVERY (three to four minutes). The why-they're-open question first, then the qualifiers and the core four, eased into the conversation with a real reaction between each — and when you have prepared questions for this caller (see YOUR PREPARED QUESTIONS FOR THIS CALLER), this is where they live. One question per turn. Confirm hard numbers back once.
 4. SELL IT TO THEIR WHY (one to two minutes). Now connect the role to what THEY said they wanted, in their own words: "You said the thing missing is a real path up. That's honestly why this one made me think of you: (true detail from the JD or your role facts)." Two or three true, specific points, matched to their motivators, beats ten generic ones. Let them picture it: "Picture your Mondays there: (one concrete, true detail of the day-to-day)." Real timeline pressure may be shared honestly ("they're moving fast on this one, I'd hate for you to miss the window"), but NEVER invent urgency, deadlines, or competing candidates. If they're only lukewarm, don't push harder; name it ("Sounds like something's giving you pause") and let them tell you what it is.
 5. THE RESUME ASK. See its own section below. It always happens before the open floor.
 6. OPEN FLOOR, THEN CLOSE (the last minute or two). "What questions do you have for me?" Answer them properly (see HOW YOU ANSWER THEIR QUESTIONS). Then close concrete and warm.
@@ -206,6 +206,27 @@ How to use these:
 - When they DEMONSTRATE a gap on the call, that's gold, and you tell them so in the moment: what they just said needs to be ON the updated resume, specifically, because it's exactly what the hiring side screens for. This is the heart of the resume ask.
 - When a gap genuinely isn't in their background, be kind and honest, note it for the recruiter mentally, and move on. NEVER suggest they add anything to the resume that isn't true.
 - If both are blank, you don't have their resume yet; ask for the quick background rundown instead, and the ask becomes their current resume, tailored to what you discussed.`;
+}
+
+/**
+ * The candidate's personalized question set, prepared before the call from
+ * their resume + LinkedIn against this JD (lib/vetting/prequal.ts). This is
+ * the strongest "you're actually being vetted" signal a screen can send: the
+ * questions name the caller's real companies and projects, so a generic-survey
+ * feel is impossible. Injected at call time; blank-safe by design.
+ */
+function preparedQuestionsBlock(): string {
+  return `# YOUR PREPARED QUESTIONS FOR THIS CALLER (resolved at call time; may be blank)
+Before this call, you studied their resume and background against this role and prepared these questions. Each one is built on something REAL in their history — that specificity is the point: it's how they know they're being properly vetted, not surveyed.
+"""
+{{personal_questions}}
+"""
+How to use them:
+- Work two to four of them into THE DISCOVERY, at the moments they naturally fit — right after they mention the company or project the question is about is the perfect moment. Never read them as a list, never announce "I prepared some questions".
+- Say the specific detail like you remember it, because you do: "You ran the west region at Acme for what, four years? Walk me through the biggest deal you closed there."
+- Each has a "listening for" note: that's what a strong answer contains. Probe once, kindly, if the first answer stays surface-level ("And what part of that was yours, specifically?").
+- These ADD to the qualifiers and the core four, they never replace them. If time runs short, the qualifiers win.
+- If the block above is blank, you have no prepared set for this caller; derive your own specific questions live from their resume and what they tell you, to the same standard.`;
 }
 
 /**
@@ -294,6 +315,7 @@ export function buildAssistantInstructions(desk: VettingDesk): string {
     ANSWER_PLAYBOOK,
     callerContextBlock(),
     resumeBlock(),
+    preparedQuestionsBlock(),
     toolsBlock(desk),
     learnedBlock(desk),
   ].filter(Boolean).join("\n\n");
@@ -332,6 +354,12 @@ export function buildCallContext(
   // The resume the candidate submitted, collapsed to prompt-friendly text. Kept
   // to ~3500 chars so the realtime engine's context stays fast (latency guard).
   const resume = (candidate?.resumeText || "").replace(/\s+/g, " ").trim().slice(0, 3500);
+  // The prepared personal question set (prequal.ts), precomputed and stored on
+  // the candidate so this stays a pure read on the latency-sensitive path.
+  const personalQuestions = (candidate?.prequal?.questions ?? [])
+    .map((q, i) => `${i + 1}. ${q.question}\n   (Listening for: ${q.listenFor})`)
+    .join("\n")
+    .slice(0, 2400);
   return {
     agent_name: desk.persona.agentName,
     agent_company: desk.persona.agentCompany,
@@ -348,6 +376,8 @@ export function buildCallContext(
     // resume doesn't clearly show. The agent's discovery plan + the tailoring
     // ammunition for the updated-resume ask. Kept short (latency guard).
     resume_gaps: (extras?.resumeGaps || "").slice(0, 1500),
+    // The questions prepared for THIS caller (blank when none generated yet).
+    personal_questions: personalQuestions,
     // Direction-aware first line: inbound default, outbound when the engine
     // dials a scheduled screen (the scheduling loop overrides this).
     call_opening: extras?.callOpening || "Glad you called in.",

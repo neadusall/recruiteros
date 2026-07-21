@@ -487,6 +487,36 @@ export interface ScreenSchedule {
   steps: ScheduleStep[];
 }
 
+/* ---------------- per-candidate prepared questions (pre-qualification) ----------------
+   The desk's qualifiers are role-level: the same 3-4 screens for every caller.
+   PersonalPrep is the candidate-level layer on top: before the call, one LLM
+   pass studies THIS candidate's resume + LinkedIn against the JD and prepares
+   thoughtful, specific questions that reference their actual background — the
+   "I read your resume" moves that make a screen feel like real vetting instead
+   of a generic survey. Generated ahead of time (opt-in, resume filing, call
+   booking) so the call-connect webhook never waits on a model. */
+
+/** One question prepared for a specific candidate before their screen. */
+export interface PersonalQuestion {
+  id: string;
+  /** The question, speakable, referencing their real background. */
+  question: string;
+  /** What a strong answer contains — what the agent is listening for. */
+  listenFor: string;
+}
+
+/** The prepared-questions state stored on a candidate. */
+export interface PersonalPrep {
+  questions: PersonalQuestion[];
+  generatedAt: string;
+  /**
+   * Fingerprint of the material the questions were built from (JD + qualifiers
+   * + resume + enrichment). When it no longer matches, the prep is stale and
+   * gets regenerated at the next seam.
+   */
+  basis: string;
+}
+
 export interface CandidateProfile {
   id: string;
   workspaceId: string;
@@ -518,6 +548,8 @@ export interface CandidateProfile {
   resumeRequestSource?: string;
   /** The self-scheduling loop: availability ask -> parsed reply -> booked call. */
   screen?: ScreenSchedule;
+  /** Questions prepared for THIS candidate from their resume/LinkedIn vs the JD. */
+  prequal?: PersonalPrep;
 
   createdAt: string;
   updatedAt: string;

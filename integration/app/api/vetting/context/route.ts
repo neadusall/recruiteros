@@ -17,7 +17,7 @@
 import { NextResponse } from "next/server";
 import {
   findDeskByNumber, findCandidate, createCall, buildCallContext, inboxConfig,
-  latestResumeReview, setCandidateScreen,
+  latestResumeReview, setCandidateScreen, refreshPersonalPrep,
 } from "../../../../lib/vetting";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 
@@ -86,7 +86,8 @@ export async function POST(req: Request) {
       dynamic_variables: {
         agent_name: "the recruiter", agent_company: "our firm",
         first_name: "there", current_title: "", current_company: "", experience: "",
-        resume: "", resume_email: "", resume_gaps: "", call_opening: "Glad you called in.",
+        resume: "", resume_email: "", resume_gaps: "", personal_questions: "",
+        call_opening: "Glad you called in.",
       },
     });
   }
@@ -121,6 +122,11 @@ export async function POST(req: Request) {
   try {
     resumeEmail = (await withWorkspaceCreds(desk.workspaceId, async () => inboxConfig()?.user || "")) || "";
   } catch { /* blank is handled by the prompt */ }
+
+  // Prepared questions ride in from the store (pure read — this path answers a
+  // ringing call). If the prep is missing or stale, regenerate in the
+  // background so the NEXT call has it; never make the greeting wait on a model.
+  if (candidate) void refreshPersonalPrep(desk, candidate);
 
   const resumeGaps = candidate ? resumeGapLines(candidate.id) : "";
   const vars = buildCallContext(desk, candidate, {

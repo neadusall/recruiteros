@@ -328,6 +328,14 @@ async function sweepMailbox(workspaceId: string, cfg: InboxConfig): Promise<Swee
                   }, "Screening");
                 } catch { /* the stage nudge never blocks the intake */ }
 
+                // A filed resume is the richest personalization material there
+                // is: rebuild this candidate's prepared screening questions
+                // from it so the call references their real background.
+                if (desk) {
+                  const { refreshPersonalPrep } = await import("./prequal");
+                  void refreshPersonalPrep(desk, candidate);
+                }
+
                 // Coverage review (recruiter-facing data); never blocks the intake.
                 if (desk) {
                   try {

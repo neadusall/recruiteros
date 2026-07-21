@@ -19,7 +19,7 @@ import { NextResponse } from "next/server";
 import { body } from "../../../../lib/api";
 import {
   getDeskById, getCandidateById, setCandidateResume, addResumeReview,
-  markReviewEmailSent, latestResumeReview, reviewResume,
+  markReviewEmailSent, latestResumeReview, reviewResume, refreshPersonalPrep,
 } from "../../../../lib/vetting";
 import { sendWorkspaceEmail } from "../../../../lib/auth";
 
@@ -91,7 +91,12 @@ export async function POST(req: Request) {
   if (!desk) return json({ error: "not_found" }, 404);
 
   const candidate = candidateId ? getCandidateById(candidateId) : undefined;
-  if (candidate) setCandidateResume(candidate.id, resumeText);
+  if (candidate) {
+    setCandidateResume(candidate.id, resumeText);
+    // Updated resume in hand: rebuild their prepared screening questions from
+    // it in the background so the next call is personalized to this version.
+    void refreshPersonalPrep(desk, candidate);
+  }
 
   let result;
   try {

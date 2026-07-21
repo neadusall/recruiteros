@@ -9,6 +9,7 @@ export * from "./store";
 export * from "./prompt";
 export * from "./enrich";
 export * from "./qualifiers";
+export * from "./prequal";
 export * from "./knowledge";
 export * from "./autofill";
 export * from "./inbox";
