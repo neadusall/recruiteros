@@ -39,6 +39,7 @@ import { workspaceOwner } from "../auth";
 import {
   ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
 } from "../ostextImport";
+import { dedupeProspectLists } from "../prospect-lists";
 
 const SETTLE_MS = 5 * 60_000;      // chain-finished lists rest this long first (live tab pushes within seconds)
 const IDLE_MS = 45 * 60_000;       // a stalled / never-started chain still flows on after this
@@ -505,6 +506,19 @@ export async function tickSourcingAutoflow(): Promise<{ sent: number }> {
     if (now - lastBeat > 3600_000) {
       lastBeat = now;
       console.log(`[sourcing-autoflow] sweeping ${allRuns.length} saved run(s) (hourly heartbeat)`);
+    }
+    // SELF-HEALING LIST DEDUPE (user mandate: "no duplicates ever"): fold any
+    // same-name Candidates lists that slipped in from any source — members are
+    // unioned into the newest referenced copy, so nothing saved is ever lost,
+    // and a run's promotedListId is never deleted out from under it. Runs every
+    // tick; a clean store costs one in-memory group-by.
+    try {
+      const referenced = new Set<string>();
+      for (const r of allRuns) if (r.promotedListId) referenced.add(r.promotedListId);
+      const folded = await dedupeProspectLists(referenced);
+      if (folded) console.log(`[sourcing-autoflow] folded ${folded} duplicate Candidates list(s) into their originals`);
+    } catch (e) {
+      console.error(`[sourcing-autoflow] list dedupe failed: ${(e as Error).message}`);
     }
     // Fold same-role duplicate lists FIRST, so the send loop below only ever acts
     // on the surviving master — a donor sent seconds before its fold would have

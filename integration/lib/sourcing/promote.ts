@@ -73,6 +73,16 @@ export async function promoteSourcingRun(
   // campaign, never fork a sibling.
   let campaignId = opts.campaignId || run.promotedCampaignId;
   if (!campaignId) {
+    // Get-or-create BY NAME, same rule the OS Text engine applies to its
+    // campaigns: promoting a second run under a name that already has a
+    // campaign (a re-run of the same search, a restored run whose stamp was
+    // lost) tops that campaign up instead of forking "Name" twins.
+    const existing = (await core.listCampaigns(workspaceId)).find(
+      (c) => c.motion === run.motion && c.name.trim().toLowerCase() === listName.trim().toLowerCase(),
+    );
+    if (existing) campaignId = existing.id;
+  }
+  if (!campaignId) {
     const campaign = await createCampaign({
       workspaceId,
       motion: run.motion,
