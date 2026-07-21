@@ -45,6 +45,8 @@ export interface JobDescription {
   hash: string;
   /** The ATS's own id for this job (Loxo job id) when it came from a sync. */
   providerId?: string;
+  /** The ATS's own updated_at for this job; lets the sync skip unchanged jobs. */
+  providerUpdatedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -209,7 +211,7 @@ export function getJdByProvider(workspaceId: string, providerId: string): JobDes
  */
 export function upsertAtsJd(
   workspaceId: string,
-  input: { providerId: string; title?: string; company?: string; text: string; open: boolean },
+  input: { providerId: string; title?: string; company?: string; text: string; open: boolean; providerUpdatedAt?: string },
 ): { jd: JobDescription; created: boolean; changed: boolean } {
   const text = (input.text || "").trim().slice(0, JD_TEXT_CAP);
   const title = (input.title?.trim() || titleFromJdText(text)).slice(0, 90);
@@ -232,6 +234,12 @@ export function upsertAtsJd(
     if (jd.company !== company && (company || jd.source === "loxo")) { jd.company = company; changed = true; }
     if (text && jd.text !== text) { jd.text = text; jd.hash = hash; changed = true; }
     if (jd.status !== status) { jd.status = status; changed = true; }
+    if (input.providerUpdatedAt && jd.providerUpdatedAt !== input.providerUpdatedAt) {
+      jd.providerUpdatedAt = input.providerUpdatedAt;
+      // The stamp alone isn't a user-visible change: persist it but don't bump
+      // updatedAt (which would churn the library's sort order every tick).
+      if (!changed) persist();
+    }
     if (changed) { jd.updatedAt = nowIso(); persist(); }
     return { jd, created: false, changed };
   }
@@ -247,6 +255,7 @@ export function upsertAtsJd(
     source: "loxo",
     hash,
     providerId: input.providerId,
+    providerUpdatedAt: input.providerUpdatedAt,
     createdAt: now,
     updatedAt: now,
   };

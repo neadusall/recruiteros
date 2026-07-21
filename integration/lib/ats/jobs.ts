@@ -20,6 +20,8 @@ export interface JobsSyncReport {
   scanned: number;
   added: number;
   updated: number;
+  /** Jobs whose Loxo updated_at matched our stamp: no detail fetch, no upsert. */
+  unchanged: number;
   error?: string;
 }
 
@@ -28,13 +30,16 @@ const DETAIL_CONCURRENCY = 4;
 
 /** Pull all jobs for one workspace into the Job Library. */
 export async function syncLoxoJobs(workspaceId: string, client: LoxoClient): Promise<JobsSyncReport> {
-  const report: JobsSyncReport = { scanned: 0, added: 0, updated: 0 };
+  const report: JobsSyncReport = { scanned: 0, added: 0, updated: 0, unchanged: 0 };
   try {
     await ensureJobsReady();
     const seen = new Set<string>();
     let pageSize = 0; // learned from the largest page; a shorter page = the last one
+    let scrollId: string | undefined;
     for (let page = 1; page <= MAX_JOB_PAGES; page++) {
-      const res = await client.listJobs({ page });
+      // Speak both pagination styles: a returned scroll cursor wins (some
+      // accounts serve the scroll style here); otherwise page numbers.
+      const res = await client.listJobs(scrollId ? { scrollId } : { page });
       if (!res.items.length) break;
 
       // Guard against an account whose jobs endpoint ignores `page`: a page
@@ -48,9 +53,24 @@ export async function syncLoxoJobs(workspaceId: string, client: LoxoClient): Pro
       if (!fresh.length) break;
       report.scanned += fresh.length;
 
+      // Skip jobs whose Loxo updated_at matches what we stored last time: no
+      // detail fetch, no upsert. This is what keeps the every-15-min tick to a
+      // handful of list requests instead of re-reading the whole agency.
+      const work = fresh.filter((item) => {
+        const id = String(item.id);
+        const itemUpdated = firstString(item?.updated_at, item?.updatedAt);
+        const existing = getJdByProvider(workspaceId, id);
+        const sameStatus = existing ? (jobIsOpen(item) ? "open" : "closed") === existing.status : false;
+        if (existing && itemUpdated && existing.providerUpdatedAt === itemUpdated && sameStatus) {
+          report.unchanged++;
+          return false;
+        }
+        return true;
+      });
+
       // The list may omit the description; hydrate those from the detail
       // endpoint (bounded concurrency, the client's rate gate does the pacing).
-      const full = await hydrateJobs(fresh, client);
+      const full = await hydrateJobs(work, client);
       for (const job of full) {
         const mapped = mapLoxoJob(job);
         if (!mapped) continue;
@@ -59,12 +79,21 @@ export async function syncLoxoJobs(workspaceId: string, client: LoxoClient): Pro
         else if (r.changed) report.updated++;
       }
 
+      scrollId = res.scrollId;
       pageSize = Math.max(pageSize, res.items.length);
-      if (res.items.length < pageSize) break; // short page = last page on any page size
+      if (!scrollId && res.items.length < pageSize) break; // short page = last page on any page size
+    }
+    // One line when something actually happened (or broke), so prod logs show
+    // the pull working without narrating every quiet tick.
+    if (report.added || report.updated || report.error) {
+      console.log(
+        `[jobs] loxo sync ws=${workspaceId}: ${report.scanned} scanned, ${report.added} new, ${report.updated} updated, ${report.unchanged} unchanged${report.error ? `, error: ${report.error}` : ""}`,
+      );
     }
     return report;
   } catch (e: any) {
     report.error = e?.message ?? "jobs_sync_failed";
+    console.error(`[jobs] loxo sync failed ws=${workspaceId}:`, report.error);
     return report;
   }
 }
@@ -91,9 +120,10 @@ export async function closeLoxoJob(workspaceId: string, jobId: string): Promise<
 
 /* ---------------- mapping ---------------- */
 
-function mapLoxoJob(job: any): { providerId: string; title?: string; company?: string; text: string; open: boolean } | null {
+function mapLoxoJob(job: any): { providerId: string; title?: string; company?: string; text: string; open: boolean; providerUpdatedAt?: string } | null {
   const id = job?.id != null ? String(job.id) : "";
   if (!id) return null;
+  const providerUpdatedAt = firstString(job?.updated_at, job?.updatedAt) || undefined;
   const title = firstString(job?.title, job?.published_name, job?.name);
   const company = firstString(job?.company?.name, job?.company_name, typeof job?.company === "string" ? job.company : "");
   const city = firstString(job?.city, job?.macro_address);
@@ -101,6 +131,7 @@ function mapLoxoJob(job: any): { providerId: string; title?: string; company?: s
   const loc = [city, state].filter(Boolean).join(", ");
 
   let text = stripHtml(firstString(job?.description, job?.description_text, job?.public_description, job?.internal_notes));
+  const hadBody = Boolean(text);
   if (!text) {
     // Keep the record even when Loxo has no description yet: the header lines
     // make it usable, and the next sync fills the body in once it's written.
@@ -112,7 +143,10 @@ function mapLoxoJob(job: any): { providerId: string; title?: string; company?: s
     text = [title, company, loc].filter(Boolean).join("\n") + "\n\n" + text;
   }
 
-  return { providerId: id, title, company, text, open: jobIsOpen(job) };
+  // A job stored WITHOUT a real description gets no skip stamp, so every tick
+  // re-checks it until the JD is written in Loxo (or a failed detail fetch
+  // succeeds): the placeholder must heal on its own, not wait for a job edit.
+  return { providerId: id, title, company, text, open: jobIsOpen(job), providerUpdatedAt: hadBody ? providerUpdatedAt : undefined };
 }
 
 function jobIsOpen(job: any): boolean {

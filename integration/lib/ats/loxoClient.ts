@@ -97,13 +97,16 @@ export class LoxoClient {
   /* ---------------- jobs ---------------- */
 
   /**
-   * One page of Jobs (GET /jobs). Unlike people/companies (scroll-only), the
-   * jobs endpoint is page-numbered and documents `per_page`; we still fall back
-   * per-resource on a 422 so a stricter account pages small instead of failing.
+   * One page of Jobs (GET /jobs). Loxo documents page-numbered pagination with
+   * `per_page` here (unlike people/companies), but some accounts serve the
+   * scroll-cursor style instead, so we speak BOTH: when the previous page
+   * returned a scroll cursor the caller passes it and it wins; otherwise we
+   * send the page number. The per-resource 422 fallback covers `per_page`.
    */
-  async listJobs(opts: { page?: number } = {}): Promise<LoxoPage<any>> {
+  async listJobs(opts: { page?: number; scrollId?: string } = {}): Promise<LoxoPage<any>> {
     const p = new URLSearchParams();
-    if (opts.page && opts.page > 1) p.set("page", String(opts.page));
+    if (opts.scrollId) p.set("scroll_id", opts.scrollId);
+    else if (opts.page && opts.page > 1) p.set("page", String(opts.page));
     return this.getActivityPage("jobs", p, "jobs");
   }
 
