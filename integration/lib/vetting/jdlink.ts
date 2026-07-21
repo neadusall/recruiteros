@@ -13,12 +13,17 @@
 
 import { ensureJobsReady, upsertJd, recordPairing, type PairingSource } from "../jobs";
 import type { VettingDesk } from "./types";
-import { upsertDesk } from "./store";
+import { upsertDesk, listCandidates } from "./store";
 
 /**
  * Make sure this desk's JD is registered in the Job Library and the desk
  * carries its jdId. Content-hash dedupe upstream means calling this on every
  * save is free; an edited JD re-registers as its new canonical record.
+ *
+ * BACKFILL: the first time a desk gains its jdId, every candidate ALREADY
+ * opted in to that desk is paired retroactively, so desks that predate the
+ * Job Library (and their people) join the ledger on their next save instead
+ * of waiting for a fresh event. recordPairing dedupes, so re-running is free.
  */
 export async function ensureDeskJdRegistered(desk: VettingDesk): Promise<string | undefined> {
   try {
@@ -33,6 +38,17 @@ export async function ensureDeskJdRegistered(desk: VettingDesk): Promise<string 
     if (desk.jdId !== jd.id) {
       upsertDesk(desk.workspaceId, { id: desk.id, jdId: jd.id });
       desk.jdId = jd.id;
+      for (const c of listCandidates(desk.workspaceId, desk.id)) {
+        if (!c.email && !c.phone) continue;
+        recordPairing(desk.workspaceId, {
+          jdId: jd.id,
+          email: c.email,
+          phone: c.phone,
+          name: `${c.firstName} ${c.lastName}`.trim(),
+          source: "vetting",
+          note: `AI Vetting: ${desk.name}`,
+        });
+      }
     }
     return jd.id;
   } catch (e: any) {

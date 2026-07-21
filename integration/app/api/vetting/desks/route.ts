@@ -47,6 +47,12 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
   const motion = asMotion(new URL(req.url).searchParams.get("motion"));
+  // Self-heal: any desk that predates the Job Library registers its JD (and
+  // backfills its candidates' pairings) the moment the tab is opened, no Save
+  // needed. Fire-and-forget; content-hash + pairing dedupe make repeats free.
+  for (const d of listDesks(ws, motion)) {
+    if (!d.jdId && (d.jobDescription || "").trim().length >= 40) void ensureDeskJdRegistered(d);
+  }
   const desks = listDesks(ws, motion).map((d) => {
     const calls = listCalls(ws, d.id);
     const candidates = listCandidates(ws, d.id);
