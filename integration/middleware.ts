@@ -29,6 +29,16 @@ export function middleware(req: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
+  // Internal engineering dashboards (dev console, project map) enumerate the
+  // whole vendor stack. They are never part of the product on ANY host, so the
+  // static files are unreachable: every request bounces to the sign-in page.
+  if (/^\/(dev-console|project-map)(\.html)?\/?$/.test(pathname)) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   // White-label root guard (unchanged): a customer's white-label root shows their product, not our pitch.
   const host = (req.headers.get("host") || "").toLowerCase().split(":")[0];
   const isHouse = /(^|\.)recruitersos\.co$|^localhost$|^127\.0\.0\.1$|^$/.test(host);
@@ -44,5 +54,5 @@ export function middleware(req: NextRequest) {
 export const config = {
   // The marketing landing entry points (root guard) + short video watch links (/v/<code>).
   // The rest of the app (/login, /admin, /recruiter, /signup, assets, API…) is untouched.
-  matcher: ["/", "/home", "/index.html", "/v/:code*"],
+  matcher: ["/", "/home", "/index.html", "/v/:code*", "/dev-console", "/dev-console.html", "/project-map", "/project-map.html"],
 };

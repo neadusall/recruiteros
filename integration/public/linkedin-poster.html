@@ -231,11 +231,11 @@
           <div class="btnrow"><button class="btn" id="btnAyrRefresh">Refresh status</button></div>
         </div>
         <div class="card" style="margin-bottom:16px">
-          <h3>Ayrshare (optional alternative)</h3>
+          <h3>Backup publisher (optional alternative)</h3>
           <p class="hint">Official LinkedIn API partner, used only if you set AYRSHARE_API_KEY. Not required: the internal engine above is the default path.</p>
           <div id="ayrInfo"></div>
-          <label>Ayrshare profile key (Business plan, one per workspace)</label>
-          <input type="text" id="setProfileKey" placeholder="Blank uses the primary Ayrshare account" />
+          <label>Backup publisher profile key (one per workspace)</label>
+          <input type="text" id="setProfileKey" placeholder="Blank uses the primary publisher account" />
           <div class="btnrow">
             <button class="btn" id="btnAyrProfile">Create linked profile</button>
             <button class="btn" id="btnAyrLink">Get LinkedIn connect link</button>
@@ -311,7 +311,7 @@
       conn.className = "conn on";
       txt.textContent = "LinkedIn engine ready" + (eng.account && eng.account.displayName ? " (" + eng.account.displayName + ")" : "");
     } else if (S.publishVia === "ayrshare") {
-      conn.className = "conn on"; txt.textContent = "Ayrshare connected";
+      conn.className = "conn on"; txt.textContent = "Backup publisher connected";
     } else if (eng.configured && !eng.account) {
       conn.className = "conn off"; txt.textContent = "Link LinkedIn in the LinkedIn tool";
     } else {
@@ -377,7 +377,7 @@
     var el = document.getElementById("draftList");
     var list = S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; });
     var n = document.getElementById("draftNotices");
-    n.innerHTML = !S.anthropicConfigured ? '<div class="notice">ANTHROPIC_API_KEY is not set on the server, so the rewriter is offline. You can still write and publish posts manually.</div>' : "";
+    n.innerHTML = !S.anthropicConfigured ? '<div class="notice">AI is not enabled on the server yet, so the rewriter is offline. You can still write and publish posts manually.</div>' : "";
     el.innerHTML = list.length ? list.map(draftCard).join("") :
       '<div class="empty"><b>No drafts</b>Rewrite something from your inbox, and review it here before it can ever post.</div>';
   }
@@ -428,13 +428,13 @@
     document.getElementById("setProfileKey").value = st.ayrshareProfileKey || "";
     var eng = S.engine || {};
     var erows = "";
-    erows += '<div class="kv"><b>Engine (Unipile)</b>' + (eng.configured ? "configured" : "not set (UNIPILE_API_KEY)") + "</div>";
+    erows += '<div class="kv"><b>Engine</b>' + (eng.configured ? "configured" : "not connected yet") + "</div>";
     erows += '<div class="kv"><b>LinkedIn account</b>' + (eng.account ? "linked" + (eng.account.displayName ? " (" + esc(eng.account.displayName) + ")" : "") : "not linked: connect it in the LinkedIn tool") + "</div>";
-    erows += '<div class="kv"><b>Active publish path</b>' + (S.publishVia === "engine" ? "internal engine" : S.publishVia === "ayrshare" ? "Ayrshare" : "none yet") + "</div>";
+    erows += '<div class="kv"><b>Active publish path</b>' + (S.publishVia === "engine" ? "internal engine" : S.publishVia === "ayrshare" ? "backup publisher" : "none yet") + "</div>";
     document.getElementById("engineInfo").innerHTML = erows;
     var a = S.ayrshare || {};
     var rows = "";
-    rows += '<div class="kv"><b>Ayrshare API key</b>' + (a.configured ? "configured" : "not set (AYRSHARE_API_KEY)") + "</div>";
+    rows += '<div class="kv"><b>Backup publisher key</b>' + (a.configured ? "configured" : "not connected yet") + "</div>";
     rows += '<div class="kv"><b>LinkedIn account</b>' + (a.linkedinConnected ? "linked" + ((a.displayNames && a.displayNames[0] && a.displayNames[0].displayName) ? " (" + esc(a.displayNames[0].displayName) + ")" : "") : "not linked") + "</div>";
     if (a.activeSocialAccounts && a.activeSocialAccounts.length) rows += '<div class="kv"><b>Linked platforms</b>' + esc(a.activeSocialAccounts.join(", ")) + "</div>";
     if (a.error && a.configured) rows += '<div class="errbox">' + esc(a.error) + "</div>";

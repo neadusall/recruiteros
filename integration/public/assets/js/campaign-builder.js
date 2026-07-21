@@ -435,7 +435,7 @@
       $("#costBig").textContent = "$" + d.cost.total.toFixed(2);
       $("#costBreak").innerHTML = `${d.cost.emailsToFind} emails ~$${d.cost.estEmail.toFixed(2)}` +
         (state.wantPhone ? ` · ${d.cost.phonesToFind} phones ~$${d.cost.estPhone.toFixed(2)}` : "") +
-        `<br>cheapest-first waterfall (Icypeas/RapidAPI + verify)`;
+        `<br>cheapest-first waterfall + verify`;
     } else { $("#costPanel").style.display = "none"; $("#launchBtn").style.display = "none"; }
   }
 

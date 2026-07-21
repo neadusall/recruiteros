@@ -15,7 +15,7 @@
  * Sensitive infrastructure (Telnyx especially) is owner/admin only.
  */
 
-import type { Role } from "./types";
+import type { Plan, Role } from "./types";
 
 export type Capability =
   // operate (recruiters included)
@@ -69,14 +69,31 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
   owner: OWNER,
 };
 
-/** All capabilities a role holds. */
-export function capabilitiesFor(role: Role): Capability[] {
-  return ROLE_CAPABILITIES[role] ?? MEMBER;
+/**
+ * Capabilities WITHHELD from a demo-plan workspace, whatever the role. Demo is
+ * the self-serve signup tier on the house site: a look-around portal with the
+ * pipeline, campaigns drafting, analytics and content, but none of the live
+ * data-network feature sets (sourcing, texting, dialing, LinkedIn sends) and
+ * none of the credential/integration surfaces. Activating the workspace to a
+ * real plan (owner console or payment) restores the full matrix instantly:
+ * capabilities are computed per-request, never stored on the session.
+ */
+const DEMO_WITHHELD: Capability[] = [
+  "sourcing:run", "outreach:send", "voice:dial",
+  "campaigns:activate", "accounts:manage", "apikeys:manage",
+  "telnyx:manage", "integrations:manage", "ats:manage",
+];
+
+/** All capabilities a role holds on a given plan (plan omitted = full matrix). */
+export function capabilitiesFor(role: Role, plan?: Plan): Capability[] {
+  const base = ROLE_CAPABILITIES[role] ?? MEMBER;
+  if (plan !== "demo") return base;
+  return base.filter((c) => !DEMO_WITHHELD.includes(c));
 }
 
 /** Can this role perform this capability? */
-export function can(role: Role, cap: Capability): boolean {
-  return capabilitiesFor(role).includes(cap);
+export function can(role: Role, cap: Capability, plan?: Plan): boolean {
+  return capabilitiesFor(role, plan).includes(cap);
 }
 
 /** Map a sensitive Connected integration id to the capability that gates it. */

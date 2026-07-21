@@ -13,6 +13,7 @@ import {
   hardReset,
 } from "../../../../../lib/owner";
 import type { SpendWindow } from "../../../../../lib/billing/ledger";
+import { setWorkspacePlan } from "../../../../../lib/auth";
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   const g = requireOwner(req);
@@ -29,12 +30,18 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if ("response" in g) return g.response;
   const b = await body<{
     monthlyPriceUsd?: number; tier?: string; notes?: string; suspended?: boolean; atCost?: boolean;
+    plan?: "demo" | "trial" | "team" | "enterprise";
   }>(req);
   if (!b) return fail("bad_request", 400);
 
   if (typeof b.suspended === "boolean") {
     const okSet = setAccountSuspended(params.id, b.suspended);
     if (!okSet) return fail("not_found", 404);
+  }
+  // Plan flip: "demo" parks a workspace on the walk-around tier; any other plan
+  // activates the full feature matrix on the customer's next request.
+  if (b.plan && ["demo", "trial", "team", "enterprise"].includes(b.plan)) {
+    if (!setWorkspacePlan(params.id, b.plan)) return fail("not_found", 404);
   }
   const metaPatch: Record<string, unknown> = {};
   if (typeof b.monthlyPriceUsd === "number") metaPatch.monthlyPriceUsd = b.monthlyPriceUsd;

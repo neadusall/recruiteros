@@ -895,7 +895,7 @@
       row("Mode", '<select id="vMode" class="lio-input"><option value="ai"' + (a.mode === "ai" ? " selected" : "") + '>AI Personalized</option><option value="static"' + (a.mode !== "ai" ? " selected" : "") + ">Static recording</option></select>") +
       row("Script", '<textarea id="vScript" class="lio-input lio-area" rows="4" placeholder="Hey {first_name}, Ryan here. I noticed {signal}...">' + esc(a.script || "") + "</textarea>") +
       '<div class="lio-dim" style="margin:4px 0 10px">Variables: ' + esc(VOICE_VARS) + "</div>" +
-      row("Voice provider", '<select id="vProv" class="lio-input"><option value="">Default (configured provider)</option><option value="elevenlabs"' + (a.provider === "elevenlabs" ? " selected" : "") + '>ElevenLabs</option><option value="cartesia"' + (a.provider === "cartesia" ? " selected" : "") + '>Cartesia</option><option value="hume"' + (a.provider === "hume" ? " selected" : "") + '>Hume</option><option value="manual"' + (a.provider === "manual" ? " selected" : "") + ">Manual recording</option></select>") +
+      row("Voice provider", '<select id="vProv" class="lio-input"><option value="">Default (configured provider)</option><option value="elevenlabs"' + (a.provider === "elevenlabs" ? " selected" : "") + '>Voice engine A</option><option value="cartesia"' + (a.provider === "cartesia" ? " selected" : "") + '>Voice engine B</option><option value="hume"' + (a.provider === "hume" ? " selected" : "") + '>Voice engine C</option><option value="manual"' + (a.provider === "manual" ? " selected" : "") + ">Manual recording</option></select>") +
       row("Voice id", '<input id="vVoice" class="lio-input" value="' + esc(a.voiceId || "") + '" placeholder="Provider voice id (optional)">') +
       row("Tags", '<input id="vTags" class="lio-input" value="' + esc((a.tags || []).join(", ")) + '" placeholder="opener, finance">') +
       '<div id="vPreview"></div>' +
@@ -1020,7 +1020,7 @@
         '<button class="btn btn-ghost" id="lioAccRefresh">Refresh status</button>' +
         '<button class="btn btn-primary" id="lioAccAdd">+ Connect account</button></div>' +
         (cards ? '<div class="lio-vgrid">' + cards + "</div>"
-          : '<div class="empty">No LinkedIn account is registered with the engine yet. Connect one to start. Unipile credentials (UNIPILE_DSN and UNIPILE_API_KEY) power live execution; without them the engine still plans and paces safely.</div>');
+          : '<div class="empty">No LinkedIn account is registered with the engine yet. Connect one to start. Once your account team connects the engine credentials, execution goes live; until then the engine still plans and paces safely.</div>');
       body.querySelector("#lioAccAdd").onclick = function () { accountModal(body); };
       body.querySelector("#lioAccRefresh").onclick = function () {
         act("account_refresh").then(function () { toastMsg("Status refreshed"); tabAccounts(body); });
@@ -1046,11 +1046,11 @@
       '<div class="lio-wiz-body">' +
       row("Display name", '<input id="accName" class="lio-input" placeholder="Ryan Nead">') +
       row("Account id", '<input id="accId" class="lio-input" placeholder="ryan (stable internal id)">') +
-      row("Unipile account id", '<input id="accProv" class="lio-input" placeholder="From the Unipile dashboard (optional now)">') +
+      row("Engine account id", '<input id="accProv" class="lio-input" placeholder="From the engine dashboard (optional now)">') +
       row("Timezone", '<input id="accTz" class="lio-input" placeholder="America/New_York" value="UTC">') +
       '<label class="lio-radio"><input type="checkbox" id="accSn"><div><b>Sales Navigator detected</b></div></label>' +
       '<label class="lio-radio"><input type="checkbox" id="accRec"><div><b>Recruiter detected</b></div></label>' +
-      '<div class="lio-dim">The account itself connects through Unipile; this registers it with the shared engine so policies, utilization and health apply.</div>' +
+      '<div class="lio-dim">The account itself connects through the engine; this registers it with the shared engine so policies, utilization and health apply.</div>' +
       "</div>" +
       '<div class="modal-foot"><button class="btn btn-primary" id="accSave">Connect</button></div></div></div>');
     document.body.appendChild(m);

@@ -472,7 +472,7 @@
     act.innerHTML =
       '<button class="primary small cta" data-email title="Copy a clickable GIF for your email">Copy email</button>' +
       '<div class="grid">' +
-        '<button data-opener title="Draft an AI email opener (Claude) that wraps this video">Opener</button>' +
+        '<button data-opener title="Draft an AI email opener (AI) that wraps this video">Opener</button>' +
         '<a class="lk" href="' + esc(w) + '" target="_blank" title="Open the watch page">Watch</a>' +
         '<button data-link title="Copy the watch link (LinkedIn, SMS)">Link</button>' +
         '<button class="out" data-out title="Attach to the hiring-manager prospects at this company">→ Outreach</button>' +
@@ -803,7 +803,7 @@
     if (!vs) return;
     var hasVoice = !!(j.voice && j.voice.voiceId);
     if (!j.providerConfigured) {
-      vs.innerHTML = '<span style="color:#ffe0a3">Voice not configured.</span> Set VOICE_CLONE_API_KEY (ElevenLabs) to clone your voice.';
+      vs.innerHTML = '<span style="color:#ffe0a3">Voice not configured.</span> Ask your account team to connect the voice engine and clone your voice.';
     } else if (hasVoice) {
       vs.innerHTML = '<span style="color:#3fb950">✓ Your voice is cloned.</span> Every "Hey {name}," sounds like you.';
     } else {

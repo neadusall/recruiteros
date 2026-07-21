@@ -25,6 +25,10 @@ export async function POST(req: Request) {
   const g = requireCapability(req, "billing:manage");
   if ("response" in g) return g.response;
   const b = await body<{ action?: string }>(req);
+  // Demo workspaces cannot self-activate: the paid flip promotes the plan and
+  // unlocks the live feature sets, and that step belongs to the operator (owner
+  // console) until a real payment processor is wired in.
+  if (g.ctx.workspace.plan === "demo") return fail("activation_required", 403);
   if (b?.action === "subscribe") {
     const status = setWorkspacePaid(g.ctx.workspace.id, true);
     return status ? ok(status) : fail("not_found", 404);

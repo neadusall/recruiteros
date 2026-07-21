@@ -623,9 +623,23 @@ export function setWorkspacePaid(workspaceId: string, paid: boolean): TrialStatu
   const ws = store.workspaces.get(workspaceId);
   if (!ws) return null;
   ws.paid = paid;
-  if (paid && ws.plan === "trial") ws.plan = "team";
+  if (paid && (ws.plan === "trial" || ws.plan === "demo")) ws.plan = "team";
   persist();
   return trialStatus(ws);
+}
+
+/**
+ * Owner-console seam: move a workspace between plans. Activating a demo
+ * workspace (demo -> team/enterprise) is how the operator turns on the live
+ * feature sets after setting the customer up; capabilities are computed
+ * per-request from the plan, so the change is live on the customer's next call.
+ */
+export function setWorkspacePlan(workspaceId: string, plan: Workspace["plan"]): Workspace | null {
+  const ws = store.workspaces.get(workspaceId);
+  if (!ws) return null;
+  ws.plan = plan;
+  persist();
+  return ws;
 }
 
 /* ---------------- internals ---------------- */
@@ -641,6 +655,11 @@ function provisionWorkspace(user: User): { workspace: Workspace; role: Role } {
     return { workspace: ws, role };
   }
 
+  // Self-serve signups land on the DEMO plan: they can walk the portal, but the
+  // live data-network feature sets stay dark until the operator activates the
+  // workspace from the owner console (or it converts to a paid plan). Only the
+  // operator's own allow-listed email provisions at full strength.
+  const selfServe = !isOwnerEmail(user.email);
   const ws: Workspace = {
     id: rid("ws"),
     // Personal (free-email) workspaces are named after the person who created it,
@@ -648,7 +667,7 @@ function provisionWorkspace(user: User): { workspace: Workspace; role: Role } {
     // Corporate-domain workspaces keep the company name.
     name: corporate ? titleCase(domain.split(".")[0]) : `${titleCase(firstName(user.name))}'s Workspace`,
     domain: corporate ? domain : undefined,
-    plan: corporate ? "enterprise" : "trial",
+    plan: selfServe ? "demo" : corporate ? "enterprise" : "trial",
     createdAt: nowIso(),
     // Every new admin workspace starts a 14-day free trial — full access, no card
     // required until it ends.
@@ -779,7 +798,7 @@ function primaryMembership(userId: string): Membership {
 function result(user: User, workspace: Workspace, role: Role, session: Session): AuthResult {
   // Never expose the password hash OR the 2FA secret/recovery hashes to clients.
   const { passwordHash: _omit, twoFactor: _tf, ...safe } = user;
-  return { user: safe, workspace, role, capabilities: capabilitiesFor(role), session };
+  return { user: safe, workspace, role, capabilities: capabilitiesFor(role, workspace.plan), session };
 }
 
 /** Issue a session for a known user+workspace and return the authed context. */

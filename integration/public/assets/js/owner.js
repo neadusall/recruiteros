@@ -745,6 +745,19 @@
     }
 
     // billing edit
+    // Plan control: "demo" is the walk-around tier every self-serve signup lands
+    // on (live feature sets dark). Flipping to any other plan activates the full
+    // matrix on the customer's next request; back to demo parks them again.
+    var planOpts = ["demo", "trial", "team", "enterprise"].map(function (p) {
+      return '<option value="' + p + '"' + (a.plan === p ? " selected" : "") + '>' + p + '</option>';
+    }).join("");
+    html += '<h3 style="font-size:13px;margin:16px 0 6px">Plan &amp; activation</h3>' +
+      (a.plan === "demo"
+        ? '<div class="note" style="margin-bottom:8px">This is a <b>demo</b> workspace: sourcing, texting, calling and outreach are switched off. Activate it once you have set the customer up on your end.</div>' +
+          '<div class="btn-row" style="margin-bottom:10px"><a class="btn btn-primary btn-sm" id="dwActivate">Activate full platform (team plan)</a></div>'
+        : '') +
+      '<div class="calc">' + fld("Plan", '<select id="dwPlan">' + planOpts + '</select>') + '</div>';
+
     html += '<h3 style="font-size:13px;margin:16px 0 6px">Billing</h3>' +
       '<div class="calc">' +
       fld("Monthly price ($)", '<input id="dwPrice" type="number" min="0" step="10" value="' + (a.monthlyPriceUsd || 0) + '">') +
@@ -825,11 +838,20 @@
     loadGrants(id);
     $("#dwClose").addEventListener("click", closeDrawer);
     $("#dwSave").addEventListener("click", function () {
+      var planSel = $("#dwPlan");
       send("/owner/accounts/" + id, "PATCH", {
         monthlyPriceUsd: Number($("#dwPrice").value) || 0,
         tier: $("#dwTier").value, notes: $("#dwNotes").value,
-        atCost: $("#dwAtCost").checked
+        atCost: $("#dwAtCost").checked,
+        plan: planSel ? planSel.value : undefined
       }).then(function (res) { if (res.ok) { toast("Billing saved"); openAccount(id); refreshList(); } else toast("Save failed"); });
+    });
+    var actBtn = $("#dwActivate");
+    if (actBtn) actBtn.addEventListener("click", function () {
+      send("/owner/accounts/" + id, "PATCH", { plan: "team" }).then(function (res) {
+        if (res.ok) { toast("Activated: full platform is live for this customer"); openAccount(id); refreshList(); }
+        else toast("Activation failed");
+      });
     });
     $("#dwSuspend").addEventListener("click", function () {
       send("/owner/accounts/" + id, "PATCH", { suspended: !a.suspended }).then(function (res) {

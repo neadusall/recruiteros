@@ -9,6 +9,11 @@
 
 export type Role = "owner" | "admin" | "member";
 
+/** Workspace plan. "demo" = self-serve signup on the house site: a walk-around
+ *  portal with the live data-network feature sets withheld until the operator
+ *  activates the workspace (or it converts to a paid plan). */
+export type Plan = "demo" | "trial" | "team" | "enterprise";
+
 export interface User {
   id: string;
   email: string;
@@ -39,7 +44,7 @@ export interface Workspace {
   name: string;
   /** Email domain that auto-joins this workspace (enterprise SSO-lite). */
   domain?: string;
-  plan: "trial" | "team" | "enterprise";
+  plan: Plan;
   createdAt: string;
   /** When the free 14-day admin trial ends (ISO). Admin sign-up needs no card
    *  until this date; after it, the workspace must be on a paid plan. Unset for

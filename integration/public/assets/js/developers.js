@@ -24,11 +24,11 @@
     // The enrichment waterfall, cheapest-first (mirrors rapidapi.ts ordering)
     providers: [
       { providerId: "email_pattern", label: "Email permutation (local)", cost: "$0", status: "on", order: 0 },
-      { providerId: "icypeas_email", label: "Icypeas email finder", cost: "~$0.003/email", status: "on", order: 1 },
-      { providerId: "rapidapi_email", label: "RapidAPI email finder", cost: "~$0.008/call", status: "key-needed", order: 2 },
+      { providerId: "icypeas_email", label: "Primary email finder", cost: "~$0.003/email", status: "on", order: 1 },
+      { providerId: "rapidapi_email", label: "email finder network", cost: "~$0.008/call", status: "key-needed", order: 2 },
       { providerId: "email_verify", label: "Email verification", cost: "~$0.0025/check", status: "on", order: 3 },
-      { providerId: "rapidapi_phone", label: "RapidAPI phone lookup", cost: "~$0.01/call", status: "key-needed", order: 4 },
-      { providerId: "apollo", label: "Apollo (premium backup)", cost: "~$0.10/credit", status: "off", order: 5 },
+      { providerId: "rapidapi_phone", label: "phone lookup network", cost: "~$0.01/call", status: "key-needed", order: 4 },
+      { providerId: "apollo", label: "premium backup network", cost: "~$0.10/credit", status: "off", order: 5 },
     ],
     hooks: [],
   };

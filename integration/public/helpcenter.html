@@ -369,73 +369,41 @@
           <li><strong>Stays current</strong>: ongoing sync (plus webhooks where your ATS supports them) keeps both
             sides up to date automatically, no manual exports.</li>
         </ul>
-        <div class="callout note">Loxo is the verified primary ATS. Others connect the same way; the screen tells
-          you what each needs.</div>
+        <div class="callout note">Your ATS connects during onboarding. The Setup screen tells you what your
+          vendor needs; your account team verifies the sync end to end before you go live.</div>
       </section>
 
       <!-- TELEPHONY -->
       <section id="telephony">
         <h2>Phone &amp; texting</h2>
         <p>
-          Voice (Voice Drops, AI Vetting, the dialer) and SMS (OS Text and AI texting) run on your own
-          <strong>Telnyx</strong> account. You bring your Telnyx API key and a phone number; the platform
-          does the calling and texting through it. Before US carriers will deliver your business texts you
-          must complete a one-time <strong>10DLC registration</strong> (also called A2P) in Telnyx. Voice
-          calls don't need 10DLC, but you set the number up in the same place, so do both at once.
+          Voice (Voice Drops, AI Vetting, the dialer) and SMS (OS Text and AI texting) run on the platform's
+          carrier-grade phone network, on <strong>your own dedicated business number</strong>. Your account
+          team provisions the number and completes the carrier registration during onboarding, so there is
+          nothing to install or configure yourself.
         </p>
 
-        <h3>What 10DLC is (and why it's required)</h3>
+        <h3>Carrier registration (why your number needs approval)</h3>
         <p>
-          10DLC = <em>Application-to-Person messaging over a 10-digit long code</em>. US carriers (AT&amp;T,
-          Verizon, T-Mobile) only deliver business SMS from numbers tied to a registered <strong>Brand</strong>
-          (your company) and <strong>Campaign</strong> (your use case). Until that's approved, texts are
-          filtered or blocked. You register once; then every number on that campaign sends reliably.
+          US carriers (AT&amp;T, Verizon, T-Mobile) only deliver business SMS from numbers tied to a
+          registered <strong>brand</strong> (your company) and an approved <strong>use case</strong>. Until
+          that approval lands, texts are filtered or blocked. Registration happens once, during your
+          onboarding; after that, every number on your account sends reliably. To register your brand we
+          need your <strong>legal business name, EIN / Tax ID, business address, and website</strong>, so
+          have those ready. Carrier approval typically takes <strong>1-3 business days</strong>.
         </p>
-
-        <h3>Set it up in Telnyx, step by step</h3>
-        <ol>
-          <li><strong>Create your Telnyx account</strong> at <code>telnyx.com</code> and add a payment method
-            (Billing → Payments). 10DLC registration and numbers require billing to be active.</li>
-          <li><strong>Create an API key</strong>: <em>Account → API Keys → Create API Key</em>. Copy it
-            somewhere safe, you'll paste it into the platform at the end.</li>
-          <li><strong>Register your Brand</strong>: <em>Messaging → 10DLC → Brands → Create Brand</em>. Enter
-            your <strong>legal business name, EIN / Tax ID, business address, website, and a contact</strong>.
-            These must match your real registered business, mismatches are the #1 cause of rejection.</li>
-          <li><strong>Register a Campaign</strong> under that brand: <em>10DLC → Campaigns → Create Campaign</em>.
-            Pick the use case that fits recruiting outreach (commonly <strong>Mixed</strong> or
-            <strong>Low Volume Mixed</strong>), provide 2-3 <strong>sample messages</strong>, describe how
-            people <strong>opt in</strong>, and confirm you honor <strong>STOP / HELP</strong> keywords.</li>
-          <li><strong>Buy a number</strong>: <em>Numbers → Buy Numbers</em> → choose a local long-code number
-            with both <strong>SMS and Voice</strong> features.</li>
-          <li><strong>Create a Messaging Profile</strong> (<em>Messaging → Messaging Profiles</em>), assign
-            your number to it, and link the number to your <strong>approved campaign</strong>.</li>
-          <li><strong>Enable voice on the number</strong> so calls work too: assign it to a Voice / Call-Control
-            connection (<em>Voice → Programmable Voice</em>). For best answer rates, also set your
-            <strong>caller-ID name (CNAM)</strong> on the number.</li>
-          <li><strong>Connect it to the platform</strong>: in <em>Setup → Integrations → Telnyx</em>, paste your
-            <strong>API key</strong> and your <strong>from-number</strong> (E.164, e.g. <code>+13105551234</code>),
-            then <strong>Save</strong> and <strong>Test</strong>. Pick that number for each feature in
-            <em>Setup → Voice Drops / AI Vetting</em> and in <em>OS Text</em>.</li>
-        </ol>
-
-        <div class="callout note">
-          <b>Timeline &amp; cost.</b> Brand approval is usually minutes to a day; campaign approval by the
-          carriers typically takes <strong>1-3 business days</strong>. Telnyx charges a small one-time brand
-          fee and a low monthly campaign fee, plus per-message carrier fees, all billed by Telnyx to your
-          account. Don't launch SMS campaigns until your campaign shows <strong>Approved</strong>.
-        </div>
 
         <div class="callout warn">
           <b>Stay compliant, it protects your delivery.</b> Only text people who opted in, include your
           business name in messages, and always honor <strong>STOP</strong> (opt-out) and <strong>HELP</strong>.
-          Carriers police this; violations get a campaign suspended. Voice calls follow calling-hour and
+          Carriers police this; violations get a number suspended. Voice calls follow calling-hour and
           consent rules in your region.
         </div>
 
         <p>
-          Once your Telnyx key is connected and your number is on an approved campaign, <strong>all calls and
-          SMS</strong> across Voice Drops, AI Vetting, the dialer, and OS Text run through your own number. You
-          can swap the number a feature uses at any time without re-registering.
+          Once your number is registered and approved, <strong>all calls and SMS</strong> across Voice Drops,
+          AI Vetting, the dialer, and OS Text run through it. Need an extra number or a caller-ID name
+          change? Ask your account team, it is handled for you without re-registering.
         </p>
       </section>
 
@@ -722,8 +690,8 @@
             every few scored calls, pushing the improved version straight to your live number. Every revision
             is kept and can be rolled back.</li>
         </ul>
-        <div class="callout note">Requires Telnyx and a consented cloned voice, stand both up in
-          <em>Setup → AI Vetting</em>.</div>
+        <div class="callout note">Requires a provisioned phone number and a consented cloned voice; both are
+          set up with your account team in <em>Setup → AI Vetting</em>.</div>
       </section>
 
       <!-- VOICE DROPS -->
@@ -745,37 +713,23 @@
         </ul>
         <div class="callout note">Set up your phone tool and cloned voice in <em>Setup → Voice Drops</em>.</div>
 
-        <h3>Connecting your cloned voice (ElevenLabs, Cartesia, or Hume)</h3>
+        <h3>Setting up your cloned voice</h3>
         <p>
-          The voice itself comes from one of three interchangeable providers, <strong>ElevenLabs</strong>,
-          <strong>Cartesia</strong>, or <strong>Hume</strong> (Octave). Pick whichever you already use, you only
-          need one, and you can mix them across voices. It's <em>bring-your-own-voice</em>: you create and clone
-          the voice in the provider's own portal, then paste its voice id here. No cloning or approval happens on
-          RecruitersOS.
+          The voice is cloned from a short recording of you, with your written consent, and saved to your
+          account. Your account team runs the cloning during onboarding; you record a couple of minutes of
+          natural speech, approve the result, and the voice is ready to use across Voice Drops and AI Vetting.
         </p>
         <ol>
-          <li><strong>Add your API key.</strong> In <em>Setup → Voice Drops</em> (or <em>Connected</em>), choose
-            your provider, paste its API key, and hit <strong>Save &amp; test</strong>. The row turns green the
-            moment the key verifies, so you know it'll deploy instead of running silent.
-            <ul>
-              <li>ElevenLabs, profile → <em>API Keys</em> (key stored as <code>VOICE_CLONE_API_KEY</code>).</li>
-              <li>Cartesia, <em>API Keys</em> (stored as <code>CARTESIA_API_KEY</code>).</li>
-              <li>Hume, <em>Settings → API keys</em> at platform.hume.ai (stored as <code>HUME_API_KEY</code>).</li>
-            </ul>
-          </li>
-          <li><strong>Paste a voice id.</strong> Create or pick a voice in the provider's portal and copy its id,
-            ElevenLabs <em>Voice Lab</em>, Cartesia <em>play.cartesia.ai</em>, or Hume's voice library. Back in
-            <em>Setup → Voice Drops</em>, select the matching <strong>Provider</strong>, paste the <strong>Voice
-            ID</strong>, give it a name, and add it.</li>
+          <li><strong>Record and approve.</strong> Provide the sample recording and consent attestation; once
+            the clone is generated you listen and approve it before it can ever be used.</li>
+          <li><strong>Pick it in Setup.</strong> In <em>Setup → Voice Drops</em>, select your approved voice,
+            give it a display name, and add it.</li>
           <li><strong>Hear it before you send.</strong> Hit <strong>Listen</strong> on any script to preview the
             drop in that voice, then attach the voice to a campaign.</li>
         </ol>
         <div class="callout note">
-          <strong>Hume note:</strong> if your Hume id is a preset from Hume's shared Voice Library (rather than a
-          custom voice you saved to your own account), set <code>HUME_VOICE_SOURCE=HUME_AI</code>, it defaults to
-          <code>CUSTOM_VOICE</code>. To make any provider the default for new voices, set
-          <code>VOICE_CLONE_PROVIDER</code> to <code>elevenlabs</code>, <code>cartesia</code>, or
-          <code>hume</code>.
+          Want more than one voice (say, one per recruiter)? Each teammate records their own sample and
+          approves their own clone; ask your account team to add them.
         </div>
 
         <h3>Writing scripts that sound human</h3>

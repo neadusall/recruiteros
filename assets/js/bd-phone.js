@@ -179,7 +179,7 @@
   function connect() {
     if (!S.leader) return;
     send("/phone/token", {}).then(function (t) {
-      if (!t || !t.token) { setPhase("error-conn", "Telnyx is not configured yet. An admin can connect it in BD Phone, Numbers."); return; }
+      if (!t || !t.token) { setPhase("error-conn", "Calling is not configured yet. An admin can connect it in BD Phone, Numbers."); return; }
       try {
         var TelnyxRTC = window.TelnyxWebRTC.TelnyxRTC;
         client = new TelnyxRTC({ login_token: t.token });
@@ -192,7 +192,7 @@
     }).catch(function (e) {
       var msg = String((e && e.message) || "");
       setPhase("error-conn", msg.indexOf("telnyx") >= 0 || msg.indexOf("409") >= 0
-        ? "Telnyx is not configured yet. An admin can connect it in BD Phone, Numbers."
+        ? "Calling is not configured yet. An admin can connect it in BD Phone, Numbers."
         : "Could not get a calling token.");
     });
   }

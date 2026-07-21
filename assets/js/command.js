@@ -474,6 +474,17 @@
     // domain (app.lumesp.com) and any own-branded workspace, which the old inline
     // ws.domain-only check missed, so those accounts still saw the "14 days left" bar.
     if (isWhiteLabelWorkspace() || isLumeWorkspace()) return;
+    // Demo workspaces (self-serve signups) are never on the trial clock and can
+    // never self-subscribe: they explore the portal, and the live feature sets
+    // switch on only when the operator activates the account.
+    if (ws.plan === "demo") {
+      var db = document.createElement("div");
+      db.className = "trial-banner";
+      db.innerHTML = "<span><b>Demo workspace.</b> You are exploring the portal. Sourcing, texting, calling and outreach go live once your account is activated. Reply to your welcome email or use the contact page to get set up.</span>";
+      var dm = document.querySelector(".main");
+      if (dm) dm.insertBefore(db, dm.firstChild);
+      return;
+    }
     var tr;
     if (ws.paid) tr = { onTrial: false, expired: false, daysLeft: 0 };
     else if (!ws.trialEndsAt) tr = { onTrial: false, expired: false, daysLeft: 0 };
@@ -666,7 +677,7 @@
       var body = '<div style="margin-bottom:14px">' + chip(dm.status, sKind) + (dm.lastError ? ' <span style="color:var(--danger);font-size:12px">' + esc(dm.lastError) + "</span>" : "") + "</div>";
       body += '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Nameservers · set these at your registrar</div>';
       if (ns.length) body += '<div style="font-family:var(--mono,monospace);font-size:12.5px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:16px">' + ns.map(esc).join("<br>") + "</div>";
-      else body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Nameservers appear after DNS is provisioned (needs the Hetzner DNS token). Until then this domain cannot verify or send.</div>';
+      else body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Nameservers appear after DNS is provisioned (needs the DNS automation token). Until then this domain cannot verify or send.</div>';
       body += '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">DNS records</div>';
       if (chk.length) {
         body += '<div style="margin-bottom:16px">' + chk.map(function (c) {
@@ -710,7 +721,7 @@
         var ad = q("#mbAddDomains"); if (ad) ad.addEventListener("click", addDomains);
         var ea = q("#mbEmptyAdd"); if (ea) ea.addEventListener("click", addDomains);
         var rf = q("#mbRefresh"); if (rf) rf.addEventListener("click", load);
-        var sy = q("#mbSync"); if (sy) sy.addEventListener("click", function () { act({ action: "sync-smartlead" }, "Warm-up health synced from Smartlead"); });
+        var sy = q("#mbSync"); if (sy) sy.addEventListener("click", function () { act({ action: "sync-smartlead" }, "Warm-up health synced"); });
         var lv = q("#mbLive"); if (lv) lv.addEventListener("click", function () { liveOn = !liveOn; lv.textContent = liveOn ? "Live: on" : "Live: off"; if (liveOn) startLive(); else stopLive(); });
         var gv = q("#mbGovernor"); if (gv) gv.addEventListener("click", function () { act({ action: "run-governor" }, "Safety check complete"); });
         view.querySelectorAll("[data-pause]").forEach(function (b) { b.addEventListener("click", function () { pauseMailbox(b.getAttribute("data-pause"), b.getAttribute("data-addr")); }); });
@@ -732,7 +743,7 @@
       // Triage first: compute the ranked list of things that need the operator.
       var alerts = [];
       if (!prov.mta) alerts.push(["info", "Sending stack configured but no live MTA yet. Connect Postal to send for real."]);
-      if (!prov.smartlead) alerts.push(["info", "Smartlead warm-up not connected. Add SMARTLEAD_API_KEY to pull warm-up health onto the fleet."]);
+      if (!prov.smartlead) alerts.push(["info", "The warm-up engine is not connected. Ask your account team to enable warm-up health on the fleet."]);
       domains.forEach(function (dm) {
         if (dm.status === "paused") alerts.push(["bad", "Domain " + dm.domain + " is paused: " + ((dm.warnings || [])[0] || dm.pausedReason || "governor")]);
         else if (dm.healthLabel === "at_risk") alerts.push(["bad", "Domain " + dm.domain + " at risk: " + ((dm.warnings || []).join("; ") || "health low")]);
@@ -741,7 +752,7 @@
       });
       mailboxes.forEach(function (m) {
         if (m.paused) alerts.push(["warn", "Mailbox " + m.address + " paused" + (m.pausedReason ? ": " + m.pausedReason : "")]);
-        else if (m.warmupExternalStatus === "paused") alerts.push(["warn", "Warm-up paused on " + m.address + " (Smartlead)"]);
+        else if (m.warmupExternalStatus === "paused") alerts.push(["warn", "Warm-up paused on " + m.address]);
         else if (typeof m.warmupReputationPct === "number" && m.warmupReputationPct < 90) alerts.push(["warn", "Low warm-up reputation on " + m.address + ": " + m.warmupReputationPct + "%"]);
       });
       var sevRank = { bad: 0, warn: 1, info: 2 };
@@ -754,7 +765,7 @@
         '<button class="btn btn-ghost btn-sm" id="mbRefresh">Refresh</button>' +
         '<button class="btn btn-ghost btn-sm" id="mbLive">' + (liveOn ? "Live: on" : "Live: off") + "</button>" +
         '<span style="flex:1"></span>' +
-        provChip("Smartlead warm-up", prov.smartlead) + provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
+        provChip("Warm-up", prov.smartlead) + provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
         "</div>";
 
       if (alerts.length) {
@@ -774,10 +785,10 @@
       // Go-live readiness: exactly what still has to be wired for submitted domains
       // to provision, verify, and actually send. Shown until everything is set.
       var steps = [
-        ["Hetzner DNS token", prov.dns, "auto-publishes SPF, DKIM, DMARC, MX per domain"],
-        ["Hetzner Cloud token", prov.cloud, "auto-provisions the Postal MTA server and rDNS"],
+        ["DNS automation token", prov.dns, "auto-publishes SPF, DKIM, DMARC, MX per domain"],
+        ["Cloud automation token", prov.cloud, "auto-provisions the Postal MTA server and rDNS"],
         ["Postal MTA routing", prov.mta, "lets real cold sends leave the system"],
-        ["Smartlead warm-up", prov.smartlead, "pulls warm-up health onto every mailbox"],
+        ["Warm-up engine", prov.smartlead, "pulls warm-up health onto every mailbox"],
       ];
       var notReady = steps.filter(function (s) { return !s[1]; }).length;
       if (notReady) {
@@ -788,7 +799,7 @@
             var col = s[1] ? "var(--ok)" : "var(--text-dim)";
             return '<div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px"><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';margin-top:4px;flex:none"></span><span><b style="color:var(--text)">' + esc(s[0]) + "</b> <span style=\"color:var(--text-dim)\">" + esc(s[2]) + "</span></span></div>";
           }).join("") +
-          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at Hetzner at your registrar (open the domain to see them), then Verify. Nothing sends until Postal MTA routing is on.</div></div>';
+          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at the assigned nameservers at your registrar (open the domain to see them), then Verify. Nothing sends until Postal MTA routing is on.</div></div>';
       }
 
       if (!domains.length && !mailboxes.length) {
@@ -809,7 +820,7 @@
         card("Sending capacity today", n(ov.capacityToday), ov.canSend ? "sends available now" : "no capacity", ov.canSend ? "var(--ok)" : "var(--warn)") +
         card("Mailboxes", n(ov.mailboxes), n(ov.activeMailboxes) + " active · " + n(ov.warmingMailboxes) + " warming · " + n(pausedMailboxes) + " paused") +
         card("Domains", n(ov.domains), n(ov.atRiskDomains) + " at risk · " + n(ov.pausedDomains) + " paused", (ov.atRiskDomains || ov.pausedDomains) ? "var(--danger)" : "var(--text)") +
-        card("Warm-up · Smartlead", prov.smartlead ? (n(ov.avgWarmupReputation || 0) + "%") : "off", prov.smartlead ? (n(ov.warmupExternalActive || 0) + " of " + n(ov.mailboxes) + " warming") : "connect Smartlead", prov.smartlead ? ((ov.avgWarmupReputation || 0) >= 90 ? "var(--ok)" : "var(--warn)") : "var(--text-dim)") +
+        card("Warm-up", prov.smartlead ? (n(ov.avgWarmupReputation || 0) + "%") : "off", prov.smartlead ? (n(ov.warmupExternalActive || 0) + " of " + n(ov.mailboxes) + " warming") : "not connected", prov.smartlead ? ((ov.avgWarmupReputation || 0) >= 90 ? "var(--ok)" : "var(--warn)") : "var(--text-dim)") +
         card("IP warmth", n(ov.ipWarmthScore || 0) + "%", "shared-IP ramp") +
         card("Human open rate", n(ov.humanOpenRatePct || 0) + "%", "machine opens removed") +
         "</div>";
@@ -891,33 +902,33 @@
     overview: { title: "Dashboard", crumb: "Operate", action: null, render: renderOverview },
     clients: { title: "Clients", crumb: "Business Development", action: null, render: renderClients, motionOnly: "bd" },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
-    inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd" },
-    sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd" },
-    senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd" },
-    mailboxops: { title: "Mailbox Ops", crumb: "Deliverability", action: null, render: renderMailboxOps, motionOnly: "bd" },
+    inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run" },
+    sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd", cap: "outreach:send" },
+    senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd", cap: "outreach:send" },
+    mailboxops: { title: "Mailbox Ops", crumb: "Deliverability", action: null, render: renderMailboxOps, motionOnly: "bd", cap: "outreach:send" },
     // Recruiting gets the unified Candidates tab (pipeline + ATS people database
     // in one table); BD keeps the classic Prospects pipeline.
     prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: function (el) { return motion === "recruiting" ? renderCandidates(el) : renderProspects(el); } },
-    autopilot: { title: "Autopilot", crumb: "Business Development", action: null, render: renderAutopilot, motionOnly: "bd" },
+    autopilot: { title: "Autopilot", crumb: "Business Development", action: null, render: renderAutopilot, motionOnly: "bd", cap: "outreach:send" },
     campaigns: { title: "Campaigns", crumb: "Build", action: "+ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
-    jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting" },
+    jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting", cap: "sourcing:run" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
-    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext, motionOnly: "recruiting" },
-    voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops },
-    email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd" },
+    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext, motionOnly: "recruiting", cap: "outreach:send" },
+    voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops, cap: "voice:dial" },
+    email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd", cap: "outreach:send" },
     pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
-    vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting" },
-    calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting" },
-    bdphone: { title: "BD Phone", crumb: "Tools", action: null, render: renderBdPhone, motionOnly: "bd" },
+    vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting", cap: "voice:dial" },
+    calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting", cap: "voice:dial" },
+    bdphone: { title: "BD Phone", crumb: "Tools", action: null, render: renderBdPhone, motionOnly: "bd", cap: "voice:dial" },
     // LinkedIn OS: ONE unified LinkedIn tool (shared engine, accounts, ledger,
     // utilization) with two contextual nav entrances. BD > Tools and
     // Recruiting > Build both open this same route; the active motion sets the
     // default context. Not motionOnly: it belongs to both business units.
-    linkedin: { title: "LinkedIn", crumb: "Tools", action: null, render: renderLinkedInOs },
-    linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd" },
-    builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd" },
-    automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation },
+    linkedin: { title: "LinkedIn", crumb: "Tools", action: null, render: renderLinkedInOs, cap: "outreach:send" },
+    linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd", cap: "outreach:send" },
+    builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run" },
+    automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation, cap: "outreach:send" },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: renderOutreachStats, cap: "team:manage" },
@@ -1009,18 +1020,18 @@
           "</div>";
 
         // 2b) KoldInfo enrichment, first rung, operator CSV round-trip.
-        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">KoldInfo enrichment ' +
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Contact-data enrichment ' +
           '<span style="font-weight:400;color:var(--text-dim)">first rung · CSV round-trip</span></h3>' +
           '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:14px 16px">' +
-          '<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Runs at the TOP of the funnel: export the highest-intent slots that have a domain but no confirmed email (named or not), enrich in KoldInfo, then import the result here. KoldInfo names + emails cold; every address is re-verified through Reoon and teaches the per-domain pattern so one hit unlocks the whole domain.</div>' +
+          '<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">Runs at the TOP of the funnel: export the highest-intent slots that have a domain but no confirmed email (named or not), enrich in the contact-data network, then import the result here. The network names + emails cold; every address is re-verified automatically and teaches the per-domain pattern so one hit unlocks the whole domain.</div>' +
           '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
           '<label style="font-size:12px;color:var(--text-dim)">Mode <select id="kiMode" style="background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text-muted);padding:5px 7px">' +
           '<option value="seed">Seed domains (1 / domain, cheapest)</option>' +
           '<option value="all">All un-confirmed rows</option></select></label>' +
           '<label style="font-size:12px;color:var(--text-dim)">Rows <input id="kiLimit" type="number" value="4000" min="1" max="20000" style="width:88px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text-muted);padding:5px 7px"></label>' +
-          '<button class="btn btn-ghost btn-sm" id="kiExport">Export CSV for KoldInfo</button>' +
+          '<button class="btn btn-ghost btn-sm" id="kiExport">Export CSV for enrichment</button>' +
           '<input id="kiFile" type="file" accept=".csv,text/csv" style="display:none">' +
-          '<button class="btn btn-ghost btn-sm" id="kiImportPick">Import KoldInfo results…</button>' +
+          '<button class="btn btn-ghost btn-sm" id="kiImportPick">Import enriched results…</button>' +
           '<span id="kiStatus" style="font-size:12px;color:var(--text-dim)"></span>' +
           "</div></div>";
 
@@ -1036,7 +1047,7 @@
           '<div style="background:var(--card,var(--surface));border:1px solid var(--border);border-radius:12px;padding:14px 16px">' +
           '<div style="margin-bottom:8px">' + (engines || '<span style="color:var(--text-dim)">no search telemetry yet</span>') + "</div>" +
           '<div style="font-size:12px;color:var(--text-dim)">' + dot(cc.status || (cc.healthy ? "ok" : "")) + "Common Crawl: " + esc(cc.status || (cc.healthy ? "ok" : "n/a")) +
-          '  ·  ' + dot(d.reoon && d.reoon.enabled ? "on" : "off") + "Reoon: " + (d.reoon && d.reoon.enabled ? "live" + (d.reoon.activeTask ? " (task running)" : "") : "OFF") +
+          '  ·  ' + dot(d.reoon && d.reoon.enabled ? "on" : "off") + "Verifier: " + (d.reoon && d.reoon.enabled ? "live" + (d.reoon.activeTask ? " (task running)" : "") : "OFF") +
           "</div></div>";
 
         // 4) Throughput dials
@@ -1091,7 +1102,7 @@
               a.href = url; a.download = r.data.filename || "koldinfo-upload.csv";
               document.body.appendChild(a); a.click(); document.body.removeChild(a);
               setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-              if (stat) stat.textContent = "Exported " + (r.data.count || 0) + " rows across " + (r.data.domains || 0) + " domains → enrich in KoldInfo, then Import the result.";
+              if (stat) stat.textContent = "Exported " + (r.data.count || 0) + " rows across " + (r.data.domains || 0) + " domains → enrich, then Import the result.";
             }).catch(function () { exp.disabled = false; if (stat) stat.textContent = "Export failed."; });
           };
           if (pick && file) {
@@ -1101,15 +1112,15 @@
               if (stat) stat.textContent = "Reading " + f.name + "…";
               var rd = new FileReader();
               rd.onload = function () {
-                if (stat) stat.textContent = "Importing + re-verifying through Reoon…";
+                if (stat) stat.textContent = "Importing + re-verifying…";
                 send("/in-market", "POST", { action: "koldinfo_import", csv: String(rd.result || "") }).then(function (r) {
                   if (!r.ok || !r.data) { if (stat) stat.textContent = "Import failed" + (r.data && r.data.detail ? ": " + r.data.detail : "."); return; }
                   var d = r.data;
                   if (stat) stat.textContent = "Imported: " + (d.found || 0) + " verified · " + (d.named || 0) + " newly named · " + (d.catchAll || 0) + " catch-all · " + (d.pending || 0) + " pending · " + (d.unmatched || 0) + " unmatched.";
                   try {
-                    alert("KoldInfo import\n" + (d.parsed || 0) + " rows parsed · " + (d.matched || 0) + " matched to prospects\n\n" +
+                    alert("Enrichment import\n" + (d.parsed || 0) + " rows parsed · " + (d.matched || 0) + " matched to prospects\n\n" +
                       "verified email     " + (d.found || 0) + "\n+ newly named      " + (d.named || 0) + "\n~ catch-all        " + (d.catchAll || 0) + "\ninvalid            " + (d.invalid || 0) + "\n" +
-                      "pending (address stored, awaiting Reoon)  " + (d.pending || 0) + "\nunmatched          " + (d.unmatched || 0));
+                      "pending (address stored, awaiting verification)  " + (d.pending || 0) + "\nunmatched          " + (d.unmatched || 0));
                   } catch (e) { /* alert blocked, status line already shows it */ }
                   load();
                 }).catch(function () { if (stat) stat.textContent = "Import failed."; });
@@ -1289,7 +1300,7 @@
 
   function renderOstextKpi(view) {
     view.innerHTML = head("OS Text Performance",
-      "The enrichment-to-text scoreboard: what JD Sourcing scraped and enriched, what Telnyx confirmed as textable, and what those texts produced. Every rate below reads against the same window.") +
+      "The enrichment-to-text scoreboard: what JD Sourcing scraped and enriched, what the line check confirmed as textable, and what those texts produced. Every rate below reads against the same window.") +
       '<div class="ob-toolbar"><div class="ob-tabs" style="margin:0" id="otkRange">' +
       [7, 14, 30, 90].map(function (dd) {
         return '<a href="javascript:void(0)" class="chip' + (dd === otkWindow ? " ob-tab-on" : "") + '" data-otk-days="' + dd + '">' + dd + " days</a>";
@@ -1333,7 +1344,7 @@
       stages.push({ label: "With a phone", v: sup.withPhone, sub: "Rows the enrichment chain filled with any phone number" });
     }
     if (fun) {
-      stages.push({ label: "Cell-verified", v: fun.cellConfirmed, sub: "Telnyx line-type checks that confirmed a textable mobile" });
+      stages.push({ label: "Cell-verified", v: fun.cellConfirmed, sub: "line-type checks that confirmed a textable mobile" });
       stages.push({ label: "Texted", v: fun.texted, sub: "Contacts sent at least one text" });
       stages.push({ label: "Delivered", v: fun.delivered, sub: "Contacts with a carrier-confirmed delivery" });
       stages.push({ label: "Replied", v: fun.replied, sub: "Contacts who texted back" });
@@ -1420,7 +1431,7 @@
     var cpr = fun.replied > 0 ? windowUsd / fun.replied : -1;
     var cpp = fun.positive > 0 ? windowUsd / fun.positive : -1;
     return '<div class="stat-grid" style="margin:0 0 14px">' +
-      obStat(cellP < 0 ? "n/a" : Math.round(cellP) + "%", "Cell rate", otkNum(fun.checked) + " numbers checked by Telnyx") +
+      obStat(cellP < 0 ? "n/a" : Math.round(cellP) + "%", "Cell rate", otkNum(fun.checked) + " numbers line-checked") +
       obStat(delP < 0 ? "n/a" : Math.round(delP) + "%", "Delivery rate", otkNum(msg.sentMsgs) + " texts sent · target 95%+", tone(delP, 95, 90, msg.sentMsgs)) +
       obStat(repP < 0 ? "n/a" : Math.round(repP) + "%", "Reply rate", otkNum(fun.replied) + " replied · cold SMS norm 20-30%", tone(repP, 20, 10, fun.delivered)) +
       obStat(triageOff ? "n/a" : (posP < 0 ? "n/a" : Math.round(posP) + "%"), "Positive reply rate", triageOff ? "AI triage is off, replies are not being classified" : otkNum(fun.positive) + " interested or asking for details") +
@@ -1527,7 +1538,7 @@
       obStat(otkRateTxt(sup.withEmail, sup.candidates), "Email fill rate", otkNum(sup.withEmail) + " with an email") +
       obStat(otkRateTxt(sup.withPhone, sup.candidates), "Phone fill rate", otkNum(sup.withPhone) + " with a phone") +
       "</div>" +
-      otkLine("Discovery requests spent", "<b>" + otkNum((u.rapidapi || 0) + (u.serper || 0) + (u.google || 0)) + "</b>", "People search " + otkNum(u.rapidapi || 0) + ", Serper " + otkNum(u.serper || 0) + ", Google " + otkNum(u.google || 0)) +
+      otkLine("Discovery requests spent", "<b>" + otkNum((u.rapidapi || 0) + (u.serper || 0) + (u.google || 0)) + "</b>", "People search " + otkNum(u.rapidapi || 0) + ", Web search " + otkNum(u.serper || 0) + ", Google " + otkNum(u.google || 0)) +
       otkLine("Boost paid lookups", "<b>" + otkNum(b.windowLookups) + "</b> <span class=\"muted\" style=\"font-size:11.5px\">" + otkNum(b.windowFound) + " phones found · " + otkUsd(b.windowUsd) + "</span>") +
       otkLine("Boost hit rate", (b.windowLookups > 0 ? "<b>" + otkRateTxt(b.windowFound, b.windowLookups) + "</b> " + otkMiniBar(otkRate(b.windowFound, b.windowLookups)) : '<span class="muted">no paid lookups this window</span>')) +
       otkLine("Boost all-time", '<span class="muted" style="font-size:12px">' + otkNum(b.allTime.calls) + " lookups · " + otkNum(b.allTime.hits) + " hits · " + otkUsd(b.allTime.spentUsd) + "</span>") +
@@ -1540,7 +1551,7 @@
       obStat(otkNum(sup.pushed.knownNonMobile), "Rejected non-cells", "landlines and VoIP, never inserted", sup.pushed.knownNonMobile > 0 ? "var(--warn)" : "") +
       "</div>" +
       (sup.pendingPush > 0 ? '<div class="ob-note">' + otkNum(sup.pendingPush) + " phone-holding list" + (sup.pendingPush === 1 ? "" : "s") + " awaiting first push; the sweeper sends them automatically within minutes of the chain finishing.</div>" : "") +
-      '<div class="ob-note">A campaign holding fewer people than its list has phones is the Telnyx cell-only gate doing its job: landlines, VoIP and toll-free numbers are dropped so texts only ever go to real mobiles.</div></div>';
+      '<div class="ob-note">A campaign holding fewer people than its list has phones is the cell-only gate doing its job: landlines, VoIP and toll-free numbers are dropped so texts only ever go to real mobiles.</div></div>';
     return html + "</div>";
   }
 
@@ -1585,10 +1596,10 @@
     var fun = d.engine && d.engine.funnel;
     var b = (d.supply && d.supply.boost) || { windowUsd: 0 };
     var items = [
-      ["Text messages (Telnyx, by segment)", costs.smsUsd || 0],
+      ["Text messages (by segment)", costs.smsUsd || 0],
       ["Cell-line checks (" + otkNum(costs.lookups || 0) + " lookups)", costs.lookupUsd || 0],
       ["AI triage, scoring and drafting", costs.llmUsd || 0],
-      ["Boost skip trace (paid phones)", b.windowUsd || 0],
+      ["Boost (paid phones)", b.windowUsd || 0],
       ["Profile enrichment (" + otkNum(costs.profilesEnriched || 0) + " profiles)", costs.enrichUsd || 0]
     ];
     var total = 0;
@@ -1765,9 +1776,9 @@
      once texted. Sources are stamped at enrichment time (JD Sourcing) and ride
      into OS Text with each push; outcomes come back from the engine. */
   var OB_PHONE_SOURCE_LABELS = {
-    skiptrace: "Boost (skip trace)",
-    koldinfo: "KoldInfo",
-    laxis: "Laxis",
+    skiptrace: "Boost (paid lookup)",
+    koldinfo: "Contact DB",
+    laxis: "Deep enrich",
     landlinedb: "In-house phone DB",
     finder: "Phone finder",
     unknown: "Unknown source"
@@ -1792,7 +1803,7 @@
     var hh = String(stamp.getHours()).padStart(2, "0") + ":" + String(stamp.getMinutes()).padStart(2, "0") + ":" + String(stamp.getSeconds()).padStart(2, "0");
     var html = '<div class="panel-card ob-card"><div class="ob-card-head" style="flex-wrap:wrap"><b>Phone number accuracy by source</b>' +
       '<span class="ob-pill" style="color:var(--ok);background:var(--ok-bg);margin-left:auto">Live · updated ' + hh + " · refreshes every 60s</span>" +
-      '<span class="muted" style="font-size:12px;flex:1 1 100%">Cell check is the Telnyx line-type gate on every push; delivery, replies and wrong-number flags come from real sends.</span></div>';
+      '<span class="muted" style="font-size:12px;flex:1 1 100%">Cell check is the line-type gate on every push; delivery, replies and wrong-number flags come from real sends.</span></div>';
     var rows = acc && acc.sources ? acc.sources : null;
     if (!rows || !rows.length) {
       html += '<div class="muted" style="font-size:12.5px">No accuracy data yet. It starts accruing as pushed numbers go through the cell check and get texted; numbers pushed before this feature shipped count under "Unknown source".</div></div>';
@@ -1849,7 +1860,7 @@
         '<td style="text-align:center">' + sparkCell(s.source) + "</td></tr>";
     });
     html += "</tbody></table></div>" +
-      '<div class="ob-note">How to read it: Confirmed cells is the share of pushed numbers Telnyx verified as textable mobiles. Delivered is of texted contacts; Replied is of delivered. Wrong number counts replies the AI triage classified as "wrong person", the direct accuracy signal that a number belonged to someone else.</div></div>';
+      '<div class="ob-note">How to read it: Confirmed cells is the share of pushed numbers verified as textable mobiles. Delivered is of texted contacts; Replied is of delivered. Wrong number counts replies the AI triage classified as "wrong person", the direct accuracy signal that a number belonged to someone else.</div></div>';
     return html;
   }
 
@@ -2569,7 +2580,11 @@
   // Prospects/Candidates nav item for the active motion.
   function syncMotionNav() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-motion-only]"), function (el) {
-      el.style.display = (el.getAttribute("data-motion-only") === motion) ? "" : "none";
+      // Motion visibility never overrides RBAC: an item whose capability the
+      // session lacks (e.g. a demo workspace) stays hidden in every motion.
+      var cap = el.getAttribute("data-cap");
+      var allowed = !cap || can(cap);
+      el.style.display = (allowed && el.getAttribute("data-motion-only") === motion) ? "" : "none";
     });
     relabelNav('prospects', prospectsLabel());
     // 'data' route has two fixed nav items (Candidates in recruiting, Companies in
@@ -3845,7 +3860,7 @@
         mission: "Bind a job description to a phone number and your cloned voice. Candidates opt in, call your line, and talk to an AI recruiter that sounds like you, it greets them by name, references their experience, asks your top qualifiers, and tells them the next step. Every call is recorded, transcribed, summarized, and scored 1 to 100.",
         stages: [
           { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mic"/></svg>', title: "Build a vetting desk", auto: "you", body: "Attach the JD and your top three or four qualifiers, with what a pass looks like for each. This is the brief the AI recruiter screens against." },
-          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-hash"/></svg>', title: "Bind a number and your voice", auto: "you", body: "Pick a real number from your Telnyx account and your consented cloned voice. The agent speaks the whole call in your voice." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-hash"/></svg>', title: "Bind a number and your voice", auto: "you", body: "Pick a real number from your connected phone lines and your consented cloned voice. The agent speaks the whole call in your voice." },
           { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', title: "Candidates opt in", auto: "you", body: "Candidates consent, then call your line on their own time. No chasing, no scheduling tag, day or night." },
           { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-bot"/></svg>', title: "The AI recruiter screens", auto: "bot", body: "It greets them by name, references their LinkedIn experience, asks your qualifiers, listens, and tells them the next step, sounding like you the whole way.",
             out: "<b>ON THE CALL</b> · greets by name · asks your 4 qualifiers · 6m 20s",
@@ -3925,7 +3940,7 @@
             out: "<b>14 advanced</b> · ranked by ICP score · 1 ATS duplicate suppressed" },
           { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>', when: "07:30", auto: "bot", title: "Enrich", body: "An enrichment waterfall resolves the right contact and channel for each prospect that made the cut.",
             out: "<b>contacts resolved</b> · Director of Eng · verified email + LinkedIn" },
-          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', when: "07:45", auto: "bot", title: "Draft, multi-channel", body: "Claude drafts the email, the LinkedIn message, and the voice note per prospect, with your A/B variants applied, every line tied to the real signal.",
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', when: "07:45", auto: "bot", title: "Draft, multi-channel", body: "AI drafts the email, the LinkedIn message, and the voice note per prospect, with your A/B variants applied, every line tied to the real signal.",
             out: "<b>3 drafts</b> · email + LinkedIn + voice note · variant A applied",
             peek: { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', title: "One prospect, three channels", sub: "variant A · touch 1 · drafted 07:45", cta: "See all three drafts",
               body: pbArt("Email", ["ok", "A"], pbMail("From you · to {first}", "the Go backend repost", "Hi {first}, saw the backend role is back up after the Series B. I've got two Go engineers who've scaled payments past ten thousand requests a second and aren't on the market. Worth a look this week?")) +
@@ -4402,7 +4417,7 @@
     var meter =
       '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +
         '<div class="lbl"><span><b>' + sqFmt(cap.coldUsedToday) + '</b> sent today</span><span><b>' + sqFmt(cap.coldRemaining) + '</b> left · ' + pct + '% of capacity used</span></div></div>';
-    var warm = '<div class="syscap-warm">+ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>Smartlead</b> (' + cap.warmingPerInbox + '/inbox), kept separate from your cold sends.</div>';
+    var warm = '<div class="syscap-warm">+ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>the warm-up engine</b> (' + cap.warmingPerInbox + '/inbox), kept separate from your cold sends.</div>';
     var rows = (cap.byRecruiter || []).map(function (r) {
       var rp = r.coldCapacity ? Math.min(100, Math.round((r.coldUsedToday / r.coldCapacity) * 100)) : 0;
       return '<tr><td><b>' + esc(r.ownerName) + '</b></td>' +
@@ -4435,7 +4450,7 @@
     if (o.shortfall > 0) {
       callout = '<div class="sq-callout"><div class="sq-callout-h">Stage ' + sqFmt(o.shortfall) + " more send-ready prospects to fill " + o.bufferDays + " days. Follow these steps:</div>" +
         '<div class="sq-steps">' +
-          '<a class="sq-step" href="#inmarket"><b>1 · Find</b><span>Run a Targeted JSearch search → scrape new prospects</span></a>' +
+          '<a class="sq-step" href="#inmarket"><b>1 · Find</b><span>Run a Targeted job search → scrape new prospects</span></a>' +
           '<a class="sq-step" href="#clients"><b>2 · Verify emails</b><span>' + (o.needsAssets.noVerifiedEmail ? sqFmt(o.needsAssets.noVerifiedEmail) + " need a verified email" : "Confirm deliverable addresses") + "</span></a>" +
           '<a class="sq-step" href="#pipstudio"><b>3 · Record / assign video</b><span>' + (o.needsAssets.noVideo ? sqFmt(o.needsAssets.noVideo) + " need a 2nd-email video" : "PiP Studio: clip + headshot") + "</span></a>" +
         "</div></div>";
@@ -4470,7 +4485,7 @@
           return '<div class="sq-camp"><div class="sq-camp-name">' + esc(c.label) + (c.status ? ' <span class="sq-cstatus">' + esc(c.status) + "</span>" : "") + "</div>" +
             '<div class="sq-camp-nums"><span class="sq-ready">' + sqFmt(c.ready) + " ready</span>" + (c.needsAssets ? ' <span class="muted">· ' + sqFmt(c.needsAssets) + " needs assets</span>" : "") + "</div></div>";
         }).join("") + "</div>"
-      : '<div class="empty">No queued prospects yet. <a href="#inmarket">Run a Targeted JSearch search</a> to start staging.</div>';
+      : '<div class="empty">No queued prospects yet. <a href="#inmarket">Run a Targeted job search</a> to start staging.</div>';
   }
   // Collapsible "secondary" section: sending capacity, the day projection, and campaigns fold away
   // so the page opens on the essentials (supply, runway, what's blocking, and the auto-fill control).
@@ -4586,7 +4601,7 @@
   function sqFillReason(r) {
     return r === "buffer_full" ? "Buffer already full: nothing more to stage right now."
       : r === "daily_target_met" ? "Today’s target is already met."
-      : r === "no_ready_supply" ? "No verified, contactable prospects waiting. Run a Targeted JSearch search + verify emails first."
+      : r === "no_ready_supply" ? "No verified, contactable prospects waiting. Run a Targeted job search + verify emails first."
       : r === "no_campaign" ? "Pick a campaign first."
       : "Nothing to stage right now.";
   }
@@ -4681,7 +4696,7 @@
               '<div class="hs-sub">Find companies hiring right now, by role, market, location, and size.</div>' +
             "</div>" +
           "</div>" +
-          '<span class="hs-badge">JSearch · live</span>' +
+          '<span class="hs-badge">Job feed · live</span>' +
         "</div>" +
         // Search MODE toggle: one box whose placeholder + behavior adapt: by job title, by
         // industry/market, or by a specific company name. JSearch takes the term as keywords.
@@ -4746,7 +4761,7 @@
     var HS_MODES = {
       title:    { ic: '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>', ph: "Job title (e.g. controller, registered nurse, backend engineer)" },
       industry: { ic: '<svg class="isvg" aria-hidden="true"><use href="#i-building"/></svg>', ph: "Industry / market (e.g. fintech, healthcare, logistics)" },
-      company:  { ic: '<svg class="isvg" aria-hidden="true"><use href="#i-building"/></svg>', ph: "Company name (e.g. Anthropic, Stripe, Ramp)" }
+      company:  { ic: '<svg class="isvg" aria-hidden="true"><use href="#i-building"/></svg>', ph: "Company name (e.g. Stripe, Ramp, Brex)" }
     };
     function applyMode() {
       var m = HS_MODES[hsMode] || HS_MODES.title;
@@ -4774,7 +4789,7 @@
     }
     function imqConfigMsg() {
       var pv = host.querySelector("#imqPreview");
-      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Job feed isn’t connected yet. Add your JSearch (RapidAPI) key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then run again.</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
+      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Job feed isn’t connected yet. Ask your account team to enable it, then run again.</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
     }
 
     function imqRun(s) {
@@ -4784,7 +4799,7 @@
       var btn = host.querySelector("#imqAdd"); var bt = btn ? btn.textContent : "";
       if (btn) { btn.disabled = true; btn.textContent = "Searching…"; }
       var pv = host.querySelector("#imqPreview");
-      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Searching “' + esc(label) + '” on JSearch… pulling fresh postings.</div></div>';
+      if (pv) pv.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">Searching “' + esc(label) + '” on the live job feed… pulling fresh postings.</div></div>';
       function done() { imQBusy = false; if (btn) { btn.disabled = false; btn.textContent = bt; } }
       // Run WITHOUT saving: the backend accepts an ad-hoc search object.
       send("/in-market", "POST", { action: "queue_run", search: s }).then(function (r) {
@@ -4926,7 +4941,7 @@
       var q = (d.apiQuota || [])[0] || null;
       var credits = "";
       if (q) {
-        var qtip = "Live monthly credit balance for the JSearch job-feed subscription, read from its most recent response" +
+        var qtip = "Live monthly credit balance for the job-feed subscription, read from its most recent response" +
           (q.updatedAt ? " on " + new Date(q.updatedAt).toLocaleString() : "") + "." +
           (q.resetAt ? " The allowance resets " + new Date(q.resetAt).toLocaleDateString() + "." : "") +
           " Every targeted search and watch poll spends these credits.";
@@ -4936,7 +4951,7 @@
       var head = '<div class="wl-head"><span class="wl-h">Watching ' + lists.length + '</span><span class="wl-meters">' + credits +
         (b ? '<span class="wl-budget">' + b.remaining + '/' + b.cap + ' feed pulls left today</span>' : '') + '</span></div>';
       if (d.feedEnabled === false) {
-        el.innerHTML = head + '<div class="wl-empty">Job feed isn’t connected yet. Add your JSearch key to <b>RAPID_JOBS_KEY</b> + <b>RAPID_JOBS_HOST</b>, then watches will start polling.</div>';
+        el.innerHTML = head + '<div class="wl-empty">Job feed isn’t connected yet. Ask your account team to enable it, then watches will start polling.</div>';
         return;
       }
       if (!lists.length) {
@@ -5099,7 +5114,7 @@
       '<div class="im-hero">' +
         '<div class="im-bar">' +
           '<h2 class="im-title">Who is hiring right now</h2>' +
-          '<span class="im-source-note muted">Powered by JSearch · nationwide by default</span>' +
+          '<span class="im-source-note muted">Live job market feed · nationwide by default</span>' +
         "</div>" +
         // The ONE control: pick a mode (title / industry / company), search, narrow by size + location,
         // then PICK which companies to pull. Rendered by renderTargetedQueue() right after innerHTML.
@@ -5186,7 +5201,7 @@
           '<div class="bq-add">' +
             '<input class="bq-kw" id="bqKw" placeholder="Job title or industry (e.g. controller fintech)" />' +
             '<input class="bq-loc" id="bqLoc" placeholder="Location (optional)" />' +
-            '<label class="bq-limwrap" title="Jobs to pull for this search (50–5000). Keep it low for a test, JSearch bills ~1 request per 10 jobs.">Jobs <input class="bq-lim" id="bqLimit" type="number" min="50" max="5000" step="50" value="50" /></label>' +
+            '<label class="bq-limwrap" title="Jobs to pull for this search (50–5000). Keep it low for a test, the feed bills ~1 request per 10 jobs.">Jobs <input class="bq-lim" id="bqLimit" type="number" min="50" max="5000" step="50" value="50" /></label>' +
             '<button class="btn btn-primary btn-sm" id="bqAdd">Add to queue</button>' +
             (searches.length ? '<button class="btn btn-ghost btn-sm" id="bqRunAll">Run all</button>' : "") +
           "</div>" +
@@ -5215,7 +5230,7 @@
         var id = r.data.search.id;
         send("/in-market", "POST", { action: "queue_enqueue", id: id }).then(function (er) {
           if (btn) { btn.disabled = false; btn.textContent = "Add to queue"; }
-          if (er && er.status === 409) { toast("Connect JSearch (RAPID_JOBS_KEY) to run searches."); }
+          if (er && er.status === 409) { toast("The job feed is not enabled for this workspace yet."); }
           var box = host.querySelector("#bqKw"); if (box) box.value = "";
           load();
         });
@@ -5228,7 +5243,7 @@
         all.disabled = true;
         send("/in-market", "POST", { action: "queue_enqueue", all: true }).then(function (r) {
           all.disabled = false;
-          if (r && r.status === 409) { toast("Connect JSearch (RAPID_JOBS_KEY) to run searches."); return; }
+          if (r && r.status === 409) { toast("The job feed is not enabled for this workspace yet."); return; }
           if (r && r.ok) toast("Queued " + ((r.data && r.data.queued) || 0) + " search" + (((r.data && r.data.queued) || 0) === 1 ? "" : "es") + ", they'll run automatically.");
           load();
         });
@@ -5532,7 +5547,7 @@
         "Today's pace → <b>~" + paceDay.toLocaleString() + "/day</b>  ·  " +
         "Fleet capacity now → <b style=\"color:var(--ok)\">~" + fleetDay.toLocaleString() + "/day</b> " +
         "<span style=\"opacity:.8\">(" + namesHr.toLocaleString() + " names/hr × " + Math.round(validPerNamed * 100) + "% verified) · " + pace + "</span>" +
-        '<br><span style="opacity:.7">Straight read: this is the rate of the boxes running right now, it climbs as the email-pattern cache warms and Reoon catches up, and dips when boxes rest. Not inflated; it\'s the realized conversion.</span>' +
+        '<br><span style="opacity:.7">Straight read: this is the rate of the boxes running right now, it climbs as the email-pattern cache warms and verification catches up, and dips when boxes rest. Not inflated; it\'s the realized conversion.</span>' +
       "</div>" +
     "</div>";
   }
@@ -6256,7 +6271,7 @@
     sndPicks = {};
     el.innerHTML = sndStyles() +
       '<div class="im-hero">' +
-        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>), about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); Smartlead warms them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
+        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>), about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); warm-up runs them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
         '<div class="btn-row">' +
           '<button class="btn btn-primary btn-sm" id="sndImport">Import inboxes (CSV)</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndAdd">+ Add one</button>' +
@@ -6414,7 +6429,7 @@
       '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="impRecr">Choose recruiter…</button> <span id="impRecrName" class="muted">Unassigned</span></div>' +
       '<label style="margin-top:10px;display:block">Provider</label>' +
       '<select id="impProv" class="cur-ind-select"><option value="own-smtp">Own SMTP server</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
-      '<div class="muted" style="margin-top:10px"><b>Sending limit (hard):</b> 2 cold emails/day per Email ID. Warming (10/day per inbox) runs in Smartlead, not here.</div>' +
+      '<div class="muted" style="margin-top:10px"><b>Sending limit (hard):</b> 2 cold emails/day per Email ID. Warming (10/day per inbox) runs in the warm-up engine, not here.</div>' +
       '<label style="margin-top:10px;display:block">Upload CSV</label>' +
       '<input id="impFile" type="file" accept=".csv,.tsv,.txt">' +
       '<label style="margin-top:10px;display:block">…or paste rows</label>' +
@@ -6446,10 +6461,10 @@
       '<label style="margin-top:8px;display:block">SMTP username</label><input id="saUser" class="cur-ind-select" placeholder="(defaults to the email)">' +
       '<label style="margin-top:8px;display:block">SMTP password</label><input id="saPass" type="password" class="cur-ind-select">' +
       '<label style="margin-top:8px;display:block">Provider</label><select id="saProv" class="cur-ind-select"><option value="own-smtp">Own SMTP</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
-      '<div class="muted" style="margin-top:8px"><b>Sending limit (hard):</b> 2 cold/day per Email ID · 10 warming/day via Smartlead.</div>' +
+      '<div class="muted" style="margin-top:8px"><b>Sending limit (hard):</b> 2 cold/day per Email ID · 10 warming/day via warm-up.</div>' +
       '<label style="margin-top:8px;display:block">Recruiter (optional)</label><div class="btn-row"><button class="btn btn-ghost btn-sm" id="saRecr">Choose recruiter…</button> <span id="saRecrName" class="muted">Unassigned</span></div>' +
       '<div class="modal-foot"><button class="btn btn-ghost btn-sm" id="saCancel">Cancel</button><button class="btn btn-primary btn-sm" id="saGo">Add inbox</button></div>';
-    openModal("Add a sending inbox", "Stored encrypted; warmed in Smartlead", body, function (root, close) {
+    openModal("Add a sending inbox", "Stored encrypted; auto-warmed", body, function (root, close) {
       root.querySelector("#saRecr").addEventListener("click", function () { pickRecruiter(function (m) { if (m) { chosen = m; root.querySelector("#saRecrName").textContent = m.name; } }); });
       root.querySelector("#saCancel").addEventListener("click", close);
       root.querySelector("#saGo").addEventListener("click", function () {
@@ -6601,7 +6616,7 @@
         '<span class="cl-tb-actions">' +
           '<button class="btn btn-ghost btn-sm" id="clRefresh" title="Refresh">↻</button>' +
           '<button class="btn btn-ghost btn-sm" id="clGenAll" title="Generate missing screen captures"><svg class="isvg" aria-hidden="true"><use href="#i-monitor"/></svg></button>' +
-          '<button class="btn btn-ghost btn-sm" id="clVerify" title="Verify emails via Reoon">Verify</button>' +
+          '<button class="btn btn-ghost btn-sm" id="clVerify" title="Verify emails">Verify</button>' +
           '<button class="btn btn-ghost btn-sm" id="clExport" title="Export CSV (selected rows, or everything shown)">Export</button>' +
         '</span>' +
       '</div>' +
@@ -7047,7 +7062,7 @@
         : '<div class="empty">' + (clFilter
           ? "No clients match “" + esc(clFilter) + "”."
           : clSeg === "signals"
-          ? "No Hire Signals contacts yet. As the engine validates decision-makers (Reoon), they land here. Switch to All leads to see every enriched contact."
+          ? "No Hire Signals contacts yet. As the engine validates decision-makers, they land here. Switch to All leads to see every enriched contact."
           : "No enriched leads with an email yet. Enrich your prospects (Prospects → Enrich all contacts).") + "</div>";
 
       // Pager: prev / numbered window / next + rows-per-page, only when it matters.
@@ -7173,7 +7188,7 @@
             '<span class="cl-bulk-n">' + n.toLocaleString() + " selected</span>" +
             '<button class="btn btn-ghost btn-sm" data-bulk="copy" title="Copy the selected email addresses">Copy emails</button>' +
             '<button class="btn btn-ghost btn-sm" data-bulk="export" title="Download the selected rows as CSV">Export selected</button>' +
-            (clSeg === "all" ? '<button class="btn btn-ghost btn-sm" data-bulk="verify" title="Run Reoon verification on the selected rows">Verify selected</button>' : "") +
+            (clSeg === "all" ? '<button class="btn btn-ghost btn-sm" data-bulk="verify" title="Run verification on the selected rows">Verify selected</button>' : "") +
             '<button class="btn btn-ghost btn-sm" data-bulk="gencap" title="Capture the hiring page for selected companies without a video">Generate captures</button>' +
             '<button class="btn btn-ghost btn-sm cl-bulk-clear" data-bulk="clear">✕ Clear</button>' +
           "</div>";
@@ -7336,7 +7351,7 @@
     // not-yet-checked ones (saves credits); when everything is settled, re-verify all.
     function verifyEmails(btn) {
       if (clSeg === "signals") {
-        toast("Hire Signals contacts are validated automatically by the Reoon engine (server-side). Hit ↻ Refresh to pull the latest verdicts. Switch to All leads to verify enriched prospects manually.");
+        toast("Hire Signals contacts are validated automatically by the verification engine. Hit ↻ Refresh to pull the latest verdicts. Switch to All leads to verify enriched prospects manually.");
         load();
         return;
       }
@@ -8142,7 +8157,7 @@
           withPhone + " of " + ids.length + " selected have a phone number; only those are pushed" +
           (withPhone < ids.length ? " (enrich phones first to include the rest)" : "") + ". " +
           "Every contact carries first_name, last_name, company, job_title, location, email and linkedin_url, so every {token} in your text fills in.</div>" +
-        '<div class="muted" style="font-size:12.5px;margin:8px 0 2px">Safeguard: Telnyx checks every number on arrival. Only numbers confirmed as cell lines are kept for texting; landlines and unverifiable numbers are removed automatically.</div>' +
+        '<div class="muted" style="font-size:12.5px;margin:8px 0 2px">Safeguard: every number is line-checked on arrival. Only numbers confirmed as cell lines are kept for texting; landlines and unverifiable numbers are removed automatically.</div>' +
         '<div class="modal-foot"><button class="btn btn-primary" id="cnOsxGo">Push to OS Text →</button></div>',
         function (card, close) {
           var nameEl = card.querySelector("#cnOsxName"); if (nameEl) nameEl.focus();
@@ -8166,7 +8181,7 @@
                 (d.protectedRecent ? "\nProtected (contacted recently): " + d.protectedRecent : "") +
                 (d.invalidPhone ? "\nInvalid phone: " + d.invalidPhone : "") +
                 (d.optedOut ? "\nOpted out (never texted): " + d.optedOut : "") +
-                (d.validation === "blocked_no_qstash" ? "\n\nWARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? "\n\nTelnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")) +
+                (d.validation === "blocked_no_qstash" ? "\n\nWARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? "\n\nThe line check is confirming cell lines now; anything that is not a cell is removed automatically." : "")) +
                 "\n\nOpen the OS Text tab to review the prefilled message and launch.");
             }).catch(function () {
               goBtn.disabled = false; goBtn.textContent = "Push to OS Text →";
@@ -8659,7 +8674,7 @@
           withPhone + " of " + ids.length + " selected have a phone number; only those are pushed" +
           (withPhone < ids.length ? " (enrich phones first to include the rest)" : "") + ". " +
           "Every contact carries first_name, last_name, company, job_title, location, email and linkedin_url, plus tag and headline as extra columns, so every {token} in your text fills in.</div>" +
-        '<div class="muted" style="font-size:12.5px;margin:8px 0 2px">Safeguard: Telnyx checks every number on arrival. Only numbers confirmed as cell lines are kept for texting; landlines and unverifiable numbers are removed automatically.</div>' +
+        '<div class="muted" style="font-size:12.5px;margin:8px 0 2px">Safeguard: every number is line-checked on arrival. Only numbers confirmed as cell lines are kept for texting; landlines and unverifiable numbers are removed automatically.</div>' +
         '<div class="modal-foot"><button class="btn btn-primary" id="osxPushGo">Push to OS Text →</button></div>',
         function (card, close) {
           var nameEl = card.querySelector("#osxPushName"); if (nameEl) nameEl.focus();
@@ -8683,7 +8698,7 @@
                 (d.protectedRecent ? "\nProtected (contacted recently): " + d.protectedRecent : "") +
                 (d.invalidPhone ? "\nInvalid phone: " + d.invalidPhone : "") +
                 (d.optedOut ? "\nOpted out (never texted): " + d.optedOut : "") +
-                (d.validation === "blocked_no_qstash" ? "\n\nWARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? "\n\nTelnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")) +
+                (d.validation === "blocked_no_qstash" ? "\n\nWARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? "\n\nThe line check is confirming cell lines now; anything that is not a cell is removed automatically." : "")) +
                 "\n\nOpen the OS Text tab to review the prefilled message and launch.");
             }).catch(function () {
               goBtn.disabled = false; goBtn.textContent = "Push to OS Text →";
@@ -10793,7 +10808,7 @@
         "Creates (or tops up) an OS Text SMS campaign from the selected candidates. You review the message and launch inside OS Text.",
         '<label class="fld"><span>Campaign name</span><input id="bsName" type="text" placeholder="e.g. Java engineers, July" /></label>' +
         '<div class="muted" style="font-size:12.5px;margin:6px 0 2px">' + withPhone.length + " of " + ids.length + " selected have a phone number; only those are sent" + (withPhone.length < ids.length ? " (run Find contact to fill in more)" : "") + '.</div>' +
-        '<div class="muted" style="font-size:12.5px;margin:8px 0 2px">Safeguard: Telnyx checks every number on arrival. Only numbers confirmed as cell lines are kept for texting; landlines and unverifiable numbers are removed automatically.</div>' +
+        '<div class="muted" style="font-size:12.5px;margin:8px 0 2px">Safeguard: every number is line-checked on arrival. Only numbers confirmed as cell lines are kept for texting; landlines and unverifiable numbers are removed automatically.</div>' +
         '<div class="modal-foot"><button class="btn btn-primary" id="bsGo">Send to OS Text →</button></div>',
         function (card, close) {
           var nameEl = card.querySelector("#bsName"); if (nameEl) nameEl.focus();
@@ -10808,7 +10823,7 @@
               }
               close();
               var d = r.data || {};
-              toast('OS Text campaign "' + (d.campaignName || nm) + '" is ready: ' + (d.added || d.pushed || 0) + " added" + (d.noPhone ? ", " + d.noPhone + " skipped (no phone)" : "") + ". Review and launch in the OS Text tab." + (d.validation === "blocked_no_qstash" ? " WARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? " Telnyx is confirming cell lines now; anything that is not a cell is removed automatically." : "")));
+              toast('OS Text campaign "' + (d.campaignName || nm) + '" is ready: ' + (d.added || d.pushed || 0) + " added" + (d.noPhone ? ", " + d.noPhone + " skipped (no phone)" : "") + ". Review and launch in the OS Text tab." + (d.validation === "blocked_no_qstash" ? " WARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed." : (d.validation === "queued" ? " The line check is confirming cell lines now; anything that is not a cell is removed automatically." : "")));
             }).catch(function () { goBtn.disabled = false; goBtn.textContent = "Send to OS Text →"; toast("Could not reach the server."); });
           });
         });
@@ -11878,7 +11893,7 @@
             laxisReset(); finishProgress("Enrichment stopped");
             var err = (r.data && r.data.error) || r.status;
             if (err === "laxis_worker_not_configured") {
-              alert("Laxis isn't connected yet.\n\nOn the server, set LAXIS_EMAIL and LAXIS_PASSWORD in .env.production (the laxis-worker logs into Laxis with them), confirm LAXIS_WORKER_URL is set on the app, then redeploy."); laxisBail(); return;
+              alert("Deep enrichment isn't connected yet. Ask your account team to enable it, then run Enrich again."); laxisBail(); return;
             }
             alert("Enrich failed: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : "")); laxisBail(); return;
           }
@@ -12745,14 +12760,14 @@
       var ok = t.status === "green";
       var color = ok ? "var(--ok)" : t.status === "yellow" ? "var(--warn)" : "var(--danger)";
       var msg = ok
-        ? "Telnyx connected" + (t.access === "granted" ? " (provided for you)" : "") + ": texting is live."
+        ? "Texting line connected" + (t.access === "granted" ? " (provided for you)" : "") + ": texting is live."
         : t.status === "yellow"
-        ? "Telnyx key saved. Press Test in Integrations to turn it green."
-        : "Plug in your Telnyx API key to power texting for this workspace.";
+        ? "Texting key saved. Press Test in Integrations to turn it green."
+        : "Connect the texting line to power texting for this workspace.";
       host.innerHTML = '<div class="card" style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin:0 0 10px">' +
         '<span style="flex:none;width:8px;height:8px;border-radius:999px;background:' + color + '"></span>' +
         '<span class="muted" style="flex:1;font-size:13px">' + esc(msg) + '</span>' +
-        '<a class="btn btn-ghost btn-sm" href="#connected">' + (ok ? "Manage" : "Connect Telnyx") + '</a></div>';
+        '<a class="btn btn-ghost btn-sm" href="#connected">' + (ok ? "Manage" : "Connect texting") + '</a></div>';
     }).catch(function () {});
   }
 
@@ -13153,7 +13168,7 @@
         if (!r.ok || !r.data) { if (out) out.textContent = "AI customize failed."; return; }
         var d = r.data;
         if (d.dryRun || !d.text) {
-          if (out) out.innerHTML = '<span class="muted">' + esc((d.warnings && d.warnings[0]) || "Connect an Anthropic API key to use AI customize.") + "</span>";
+          if (out) out.innerHTML = '<span class="muted">' + esc((d.warnings && d.warnings[0]) || "AI customize is not enabled for this workspace yet.") + "</span>";
           if (d.text) ta.value = d.text;
           if (typeof renderEstimate === "function") renderEstimate();
           return;
@@ -13291,7 +13306,7 @@
               var d = r.data || {};
               out.innerHTML = '<b style="color:var(--ok)">Rendered (~' + d.estSeconds + "s" +
                 (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
-                (d.dialError ? '<span style="color:var(--danger)">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+                (d.dialError ? '<span style="color:var(--danger)">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (phone/voice not configured, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
                 ((d.warnings && d.warnings.length) ? ' · <span style="color:var(--warn)">' + d.warnings.map(esc).join(" · ") + "</span>" : "");
             }).catch(function () { if (out) out.innerHTML = '<span style="color:var(--danger)">Could not reach the server.</span>'; });
           });
@@ -13385,7 +13400,7 @@
     /* One clean cost split, no jargon:
         · one-time, the cloned voice is set up once. In placeholder mode the whole
           script is synthesized once here and reused free for every lead.
-        · per drop, the Telnyx call minute + line check on every dial, plus, in
+        · per drop, the call minute + line check on every dial, plus, in
           AI-customize mode, a fresh LLM script and fresh synthesis per lead. */
     function computeCost(cap, sentences, minutes, ai) {
       var callMin = minutes * VD_RATE.voiceMinute;
@@ -13421,7 +13436,7 @@
       var lines =
         '<div class="muted" style="font-size:11.5px;margin-top:9px;line-height:1.6">' +
         '• One-time: cloned voice setup + first synthesis <b>' + usd(c.oneTime) + '</b> (then reused free)<br>' +
-        '• Every drop: ' + minutes + ' min Telnyx call <b>' + usd(c.callMin) + '</b> + line check <b>' + usd(VD_RATE.lineCheck) + '</b>' +
+        '• Every drop: ' + minutes + ' min call <b>' + usd(c.callMin) + '</b> + line check <b>' + usd(VD_RATE.lineCheck) + '</b>' +
         (ai ? '<br>• AI-customize adds, per lead: fresh script <b>' + usd(VD_RATE.aiDraft) + '</b> + fresh voice <b>' + usd(shape.sentences * VD_RATE.synthPerSentence) + '</b>' : '') +
         '</div>';
 
@@ -13569,7 +13584,7 @@
         field.innerHTML = "<label>Approved 10DLC caller-ID</label>" +
           '<select id="vdCaller"><option value="">- pick a number -</option>' + opts +
           '<option value="__manual__">- type a number manually -</option></select>' +
-          '<div class="vd-hint">' + nums.length + " number" + (nums.length === 1 ? "" : "s") + " on your Telnyx account.</div>";
+          '<div class="vd-hint">' + nums.length + " number" + (nums.length === 1 ? "" : "s") + " on your calling account.</div>";
         var sel = $("#vdCaller");
         if (sel) sel.addEventListener("change", function () {
           if (sel.value !== "__manual__") return;
@@ -13634,7 +13649,7 @@
         send("/voice/campaigns", "POST", { action: "run", campaignId: cid }).then(function (r) {
           if (!r.ok) { setMsg(cid, "Run failed"); return; }
           var s = r.data.summary || {};
-          setMsg(cid, "Dialed " + s.dialed + " · scheduled " + s.scheduled + " (outside window) · skipped " + s.skipped + " · synthesized " + s.synthesized + " / cached " + s.cached + (s.dryRun ? " · dry-run (no Telnyx/clone keys)" : ""));
+          setMsg(cid, "Dialed " + s.dialed + " · scheduled " + s.scheduled + " (outside window) · skipped " + s.skipped + " · synthesized " + s.synthesized + " / cached " + s.cached + (s.dryRun ? " · dry-run (phone/voice not configured)" : ""));
           paint();
         });
         return;
@@ -13684,7 +13699,7 @@
               var d = r.data || {};
               out.innerHTML = '<b style="color:var(--ok)">Rendered (~' + d.estSeconds + "s" +
                 (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
-                (d.dialError ? '<span style="color:var(--danger)">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+                (d.dialError ? '<span style="color:var(--danger)">dial failed (' + esc(d.dialError) + ")</span>" : d.dryRun ? "dry-run (phone/voice not configured, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
                 ((d.warnings && d.warnings.length) ? ' · <span style="color:var(--warn)">' + d.warnings.map(esc).join(" · ") + "</span>" : "");
             }).catch(function () { if (out) out.innerHTML = '<span style="color:var(--danger)">Could not reach the server.</span>'; });
           });
@@ -13752,7 +13767,7 @@
         function ok(id) { var p = provs.filter(function (x) { return x.id === id; })[0]; return !!(p && p.configured); }
         var elOk = ok("elevenlabs"), caOk = ok("cartesia"), huOk = ok("hume");
         var kinds = Object.keys(cache.byKind || {}).map(function (k) { return "<b>" + (cache.byKind[k]) + "</b> " + esc(k); }).join(" · ") || "none yet";
-        var provLabel = { elevenlabs: "ElevenLabs", cartesia: "Cartesia", hume: "Hume" };
+        var provLabel = { elevenlabs: "Voice engine A", cartesia: "Voice engine B", hume: "Voice engine C" };
         var provOk = { elevenlabs: elOk, cartesia: caOk, hume: huOk };
         var PROV_IDS = ["elevenlabs", "cartesia", "hume"];
         // The engine + voice explicitly chosen for tests AND sends. The PROVIDER
@@ -13822,12 +13837,12 @@
           '<p class="muted" style="font-size:13px;margin:0 0 10px">Pick which provider every test drop, “Listen first” preview, and live campaign uses (unless a campaign sets its own). Choose once and it is defined.</p>' +
           engineTiles + infoStrip + "</div>" +
           '<div class="card" style="margin-top:14px"><h3>Your voices</h3>' +
-          '<p class="muted" style="font-size:13px">Paste a voice id from ElevenLabs, Cartesia or Hume and you are ready, no cloning or approval here. Connect each provider\'s API key in <b>Setup → Voice</b>.</p>' +
+          '<p class="muted" style="font-size:13px">Add your approved cloned voice id and you are ready. The voice engine itself is connected for you in <b>Setup → Voice</b>.</p>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
-          '<div class="vd-field"><label>Provider</label><select id="vcProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></div>' +
+          '<div class="vd-field"><label>Provider</label><select id="vcProvider"><option value="elevenlabs">Voice engine A</option><option value="cartesia">Voice engine B</option><option value="hume">Voice engine C</option></select></div>' +
           inp("vcVoiceId", "Voice ID", "paste your voice id") +
           inp("vcName", "Name (whose voice)", "Ryan") + "</div>" +
-          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Create one and copy its id from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume</a>.</p>' +
+          '<p class="muted" style="font-size:12px;margin:10px 0 0">No voice id yet? Ask your account team to clone and approve one for you.</p>' +
           '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" id="vcSave">Add voice</button></div></div>' +
           '<div class="card" style="margin-top:14px"><h3>Reused audio, no re-charge</h3>' +
           '<p class="muted" style="font-size:13px">Every word, name and role is synthesized once and saved, then reused for free, you are never charged twice for the same word in the same voice. Saved segments: <b>' + (cache.total || 0) + "</b> (" + kinds + ").</p>" +
@@ -13862,7 +13877,7 @@
         Array.prototype.forEach.call(body.querySelectorAll("[data-vcdel]"), function (btn) {
           btn.addEventListener("click", function () {
             var id = btn.getAttribute("data-vcdel");
-            if (!confirm("Delete this voice from your list? It is not removed from ElevenLabs, Cartesia or Hume.")) return;
+            if (!confirm("Delete this voice from your list? The clone itself is kept by the voice engine.")) return;
             send("/voice/clones", "POST", { action: "delete", id: id }).then(function (r) {
               if (r.ok) { toast("Voice deleted"); paint(); }
               else { toast("Delete failed"); }
@@ -13937,7 +13952,7 @@
       // Voice & Consent tab where it's chosen.
       api("/voice/clones").then(function (d) {
         d = d || {}; var el = $("#vtEngine"); if (!el) return;
-        var consent = d.consent || [], pl = { elevenlabs: "ElevenLabs", cartesia: "Cartesia", hume: "Hume" };
+        var consent = d.consent || [], pl = { elevenlabs: "Voice engine A", cartesia: "Voice engine B", hume: "Voice engine C" };
         var pinned = consent.filter(function (c) { return c.id === d.activeVoiceId; })[0] || null;
         var lastV = consent.filter(function (c) { return c.voiceId; }).slice(-1)[0] || null;
         var prov = d.activeProvider || (pinned && pinned.provider) || (lastV && lastV.provider) || null;
@@ -14015,7 +14030,7 @@
           var status = d.dialError
             ? '<span style="color:var(--danger)">dial failed (' + esc(d.dialError) + ")</span>"
             : d.dryRun
-              ? '<span style="color:var(--warn)">dry-run, no Telnyx/clone keys set, nothing was dialed</span>'
+              ? '<span style="color:var(--warn)">dry-run, phone/voice not configured, nothing was dialed</span>'
               : '<span style="color:var(--ok)">dialing now → ' + esc(d.callControlId) + "</span>";
           $("#vtResult").innerHTML = '<div style="padding:10px;border-radius:8px;background:var(--surface-2)">' +
             "<div style='font-size:13px'><b>Rendered (~" + d.estSeconds + "s" + (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside the 15-25s sweet spot") + "):</b></div>" +
@@ -14101,7 +14116,7 @@
         if (r.ok && r.data && r.data.token) {
           dot.style.background = "var(--ok)";
           title.textContent = "Softphone ready";
-          sub.textContent = "Connected. In-browser audio uses the Telnyx WebRTC client, which loads automatically once calling is fully configured.";
+          sub.textContent = "Connected. In-browser audio uses the in-browser calling client, which loads automatically once calling is fully configured.";
         } else if (r.status === 404 || r.status === 409) {
           dot.style.background = "var(--warn)";
           title.textContent = "Calling not configured yet";
@@ -14441,10 +14456,10 @@
           (takenElsewhere ? " disabled" : "") + ">" + esc(n.phoneNumber) + esc(tag) + "</option>";
       });
       if (cur && !hasCur) opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + " (current)</option>";
-      var hint = vt.numbersDry ? "Dry-run: no Telnyx key, showing only bound numbers."
-        : vt.numbersErr ? ("Couldn’t reach Telnyx (" + esc(vt.numbersErr) + ").")
-        : (nums.length + " number" + (nums.length === 1 ? "" : "s") + " on your Telnyx account.");
-      return '<div class="vt-field"><label>Inbound number (from your Telnyx account)</label>' +
+      var hint = vt.numbersDry ? "Dry-run: calling is not configured, showing only bound numbers."
+        : vt.numbersErr ? ("Couldn’t reach the phone network (" + esc(vt.numbersErr) + ").")
+        : (nums.length + " number" + (nums.length === 1 ? "" : "s") + " on your calling account.");
+      return '<div class="vt-field"><label>Inbound number (from your connected lines)</label>' +
         '<select id="vtfPhone">' + opts + "</select>" +
         '<div class="vt-hint">' + hint + "</div></div>";
     }
@@ -14541,8 +14556,8 @@
         '<div class="vt-field vt-field-full" style="margin-top:14px"><label>Job description</label>' +
         '<div class="vt-gen" style="margin-bottom:10px">' +
           '<span class="vt-gen-ic"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg></span>' +
-          '<div class="vt-gen-copy"><b>Start here: one JD fills the whole desk</b>' +
-          '<span>Upload the job description (PDF, Word, or plain text) or paste it below, then Auto-fill drafts every blank field it can: role title, hiring company, desk name, qualifiers, captured data, and the role FAQ. Anything you already typed stays untouched.</span></div>' +
+          '<div class="vt-gen-copy"><b>Start here: one JD is a complete setup</b>' +
+          '<span>Upload the job description (PDF, Word, or plain text) or paste it below, then Auto-fill drafts every blank field it can: role title, hiring company, desk name, qualifiers, captured data, and the role FAQ. Anything you already typed stays untouched. The agent runs a proven ten-minute screening framework on every call regardless: rapport, motivation, money, timing, logistics, and the updated-resume ask are always covered, so everything below the JD is refinement, not required.</span></div>' +
           '<input type="file" id="vtJdFile" accept=".pdf,.docx,.doc,.txt,.md" style="display:none" aria-label="Upload job description file" />' +
           '<button type="button" class="vt-btn vt-gen-btn" id="vtJdUpload">Upload JD</button>' +
           '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtAutoFill"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Auto-fill from JD</button>' +
@@ -14561,7 +14576,7 @@
           '<div class="vt-gen">' +
             '<span class="vt-gen-ic"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg></span>' +
             '<div class="vt-gen-copy"><b>Pull qualifiers from the job description</b>' +
-            '<span>Reads the JD above and drafts the top 3-4 screening questions, each with what a pass sounds like. Review and tweak anything, or leave all four blank and they generate on save.</span></div>' +
+            '<span>Reads the JD above and drafts the top 3-4 screening questions, each with what a pass sounds like. Review and tweak anything, or leave all four blank and they generate on save. Even with none set, the agent derives the role\'s true must-haves from the JD on the call.</span></div>' +
             '<button type="button" class="vt-btn vt-btn-primary vt-gen-btn" id="vtGenQ"><svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg> Generate from JD</button>' +
           "</div>" +
           '<div class="vt-qhead"><span></span><span>Qualifier (asked on the call)</span><span>What a pass sounds like</span><span></span></div>' +
@@ -14588,7 +14603,7 @@
         '<div class="vt-field"><label>Live transfer number</label><input id="vtfTransfer" placeholder="+13105551234" value="' + esc(d.transferNumber || "") + '" /></div>' +
         "</div>" +
         '<div class="vt-section">Next step <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- auto-filled; leave blank to use the friendly defaults</span></div>' +
-        '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words, <b>if qualified:</b> tell them they\'re a strong fit, that you\'ll send the full JD, and ask for an updated resume tailored to what you discussed. <b>If not a fit:</b> let them down kindly and say you\'ll keep them in mind for roles that better suit their background.</div>' +
+        '<div class="vt-hint" style="margin:-2px 2px 8px">Leave blank and the agent will, in its own natural words, <b>if qualified:</b> tell them they\'re a strong fit and lock in their updated resume as the step that moves everything. <b>If not a fit:</b> let them down kindly and still ask for the updated resume so you can represent them when the right role lands. Either way the resume ask happens on every call, and the follow-up ladder (thank-you email + text, then a next-day email and a final text) chases it until it arrives.</div>' +
         '<div class="vt-form-grid">' +
         '<div class="vt-field"><label>If QUALIFIED</label><textarea id="vtfNextYes" rows="3" placeholder="Leave blank to use the default above, or write your own.">' + esc(d.nextStepQualified || "") + "</textarea></div>" +
         '<div class="vt-field"><label>If NOT qualified</label><textarea id="vtfNextNo" rows="3" placeholder="Leave blank to use the default above, or write your own.">' + esc(d.nextStepUnqualified || "") + "</textarea></div>" +
@@ -15020,7 +15035,7 @@
         deskMsg(id, "Provisioning the agent and binding the number…");
         send("/vetting/desks", "POST", { action: "provision", deskId: id }).then(function (r) {
           if (!r.ok) { deskMsg(id, "Could not go live: " + ((r.data && r.data.detail) || (r.data && r.data.error) || r.status), true); return; }
-          if (r.data && r.data.dryRun) deskMsg(id, "Live in dry-run (no Telnyx key, the desk is configured but won’t take real calls until TELNYX_API_KEY is set).", true);
+          if (r.data && r.data.dryRun) deskMsg(id, "Live in dry-run (calling is not configured yet; the desk is set up but won’t take real calls until it is connected).", true);
           paintDesks(body);
         });
         return;
@@ -15048,6 +15063,30 @@
       var b = band(total || 0);
       return '<span class="vt-ring" style="--pct:' + (total || 0) + ';--ring:' + b[1] + '">' + (total != null ? total : "-") + "</span>";
     }
+    /* The resume-chase + client-package state, condensed to one status chip each. */
+    function chaseChip(c) {
+      var ch = c.chase;
+      if (!ch) return "";
+      var map = {
+        active: ["paused", "Chasing resume"],
+        completed: ["live", "Resume received"],
+        exhausted: ["paused", "Resume chased, quiet"],
+        skipped: ["", ""]
+      };
+      var m = map[ch.status] || ["", ""];
+      return m[1] ? '<span class="vt-pill ' + m[0] + '" style="margin-left:6px">' + m[1] + "</span>" : "";
+    }
+    function reportChip(c) {
+      var r = c.clientReport;
+      if (!r) return "";
+      var map = {
+        awaiting_resume: ["paused", "Client draft held"],
+        ready: ["live", "Client draft ready"],
+        sent: ["live", "Client intro sent"]
+      };
+      var m = map[r.status];
+      return m ? '<span class="vt-pill ' + m[0] + '" style="margin-left:6px">' + m[1] + "</span>" : "";
+    }
     function callRow(c) {
       var b = band(c.totalScore || 0);
       var name = (c.candidate ? (c.candidate.firstName + " " + c.candidate.lastName) : (c.callerName || c.callerPhone));
@@ -15056,7 +15095,7 @@
       return '<div class="vt-call" data-call="' + c.id + '">' +
         '<div class="vt-call-top">' + scoreRing(c.totalScore) +
         '<div style="flex:1;min-width:0">' +
-        '<div class="vt-call-name">' + esc(name) + " <span>· " + esc(c.callerPhone) + "</span></div>" +
+        '<div class="vt-call-name">' + esc(name) + " <span>· " + esc(c.callerPhone) + "</span>" + chaseChip(c) + reportChip(c) + "</div>" +
         '<div class="vt-call-sub" style="color:' + b[1] + '">' + b[0] + " · " + qual + mkt + (c.durationSec ? (" · " + Math.round(c.durationSec / 60) + "m") : "") + " · " + (c.status === "scored" ? "scored" : esc(c.status)) + "</div>" +
         (c.summary ? '<div class="vt-call-summary">' + esc(c.summary) + "</div>" : "") +
         "</div></div>" +
@@ -15093,7 +15132,111 @@
       api("/vetting/calls?id=" + encodeURIComponent(id)).then(function (d) {
         var c = d && d.call; if (!c) { det.innerHTML = '<p class="muted">Not found.</p>'; return; }
         det.innerHTML = callDetail(c);
+        wireCallDetail(det, c);
       }).catch(function () { det.innerHTML = '<p class="muted">Could not load.</p>'; });
+    }
+    /* Buttons inside an open call detail (client package + chase). Re-wired on
+       every open/refresh since the detail is re-rendered from scratch. */
+    function wireCallDetail(det, c) {
+      function refresh() {
+        api("/vetting/calls?id=" + encodeURIComponent(c.id)).then(function (d) {
+          var cc = d && d.call; if (!cc) return;
+          det.innerHTML = callDetail(cc); wireCallDetail(det, cc);
+        });
+      }
+      function copyText(text, label) {
+        try { navigator.clipboard.writeText(text).then(function () { toast(label + " copied"); }); }
+        catch (e) { toast("Copy failed"); }
+      }
+      var r = c.clientReport || null;
+      var bDraft = det.querySelector("#vtCrDraft");
+      if (bDraft) bDraft.addEventListener("click", function () {
+        bDraft.disabled = true; bDraft.textContent = "Drafting…";
+        send("/vetting/client", "POST", { action: "draft", callId: c.id }).then(function (res) {
+          if (!res.ok) { toast("Draft failed"); bDraft.disabled = false; bDraft.textContent = "Draft client package"; return; }
+          toast("Client package drafted"); refresh();
+        }).catch(function () { bDraft.disabled = false; bDraft.textContent = "Draft client package"; toast("Couldn’t reach the server."); });
+      });
+      var bCopySum = det.querySelector("#vtCrCopySum");
+      if (bCopySum && r) bCopySum.addEventListener("click", function () { copyText(r.summary, "Summary"); });
+      var bCopyMail = det.querySelector("#vtCrCopyMail");
+      if (bCopyMail && r) bCopyMail.addEventListener("click", function () { copyText("Subject: " + r.emailSubject + "\n\n" + r.emailBody, "Email draft"); });
+      var bSend = det.querySelector("#vtCrSend");
+      if (bSend) bSend.addEventListener("click", function () {
+        var to = prompt("Send the client intro to (email address):", "");
+        if (!to) return;
+        bSend.disabled = true; bSend.textContent = "Sending…";
+        send("/vetting/client", "POST", { action: "send", callId: c.id, to: to.trim() }).then(function (res) {
+          if (!res.ok) { toast(res.error || "Send failed"); bSend.disabled = false; bSend.textContent = "Send to client"; return; }
+          toast("Client intro sent"); refresh();
+        }).catch(function () { bSend.disabled = false; bSend.textContent = "Send to client"; toast("Couldn’t reach the server."); });
+      });
+      var bMark = det.querySelector("#vtCrMark");
+      if (bMark) bMark.addEventListener("click", function () {
+        send("/vetting/client", "POST", { action: "mark-sent", callId: c.id }).then(function (res) {
+          if (!res.ok) { toast("Couldn’t update"); return; }
+          toast("Marked as sent"); refresh();
+        });
+      });
+    }
+    /* The resume-chase ladder, as the recruiter sees it: what went out, what's
+       next, and whether the one artifact that matters (the updated resume) is in. */
+    var CHASE_KINDS = {
+      thanks_email: "Thank-you email (coaching + where to send the resume)",
+      thanks_sms: "Thank-you text from the desk number",
+      reminder_email: "Day-after reminder email",
+      reminder_sms: "Final reminder text"
+    };
+    function chaseCard(c) {
+      var ch = c.chase;
+      if (!ch || ch.status === "skipped") return "";
+      var pill = ch.status === "completed" ? ["live", "Resume received"]
+        : ch.status === "active" ? ["paused", "Chasing"]
+        : ["paused", "Ladder complete, waiting quietly"];
+      var steps = (ch.steps || []).map(function (s) {
+        return '<div class="vt-verdict">' +
+          (s.ok ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : '<svg class="isvg" aria-hidden="true"><use href="#i-x"/></svg>') +
+          ' <span class="vt-q-ans">' + esc(CHASE_KINDS[s.kind] || s.kind) + '</span>' +
+          ' <span class="vt-q-rat">' + esc(bkWhen(s.at)) + (s.note ? " · " + esc(s.note) : "") + "</span></div>";
+      }).join("");
+      var next = "";
+      if (ch.status === "active") {
+        var hasRem = (ch.steps || []).some(function (s) { return s.kind === "reminder_email"; });
+        next = '<div class="vt-hint" style="margin-top:6px">Next: ' + (hasRem
+          ? "a final reminder text goes out a day after the reminder email, then we wait quietly."
+          : "a reminder email goes out if the resume isn’t in about a day after the call, and a final text a day after that.") + "</div>";
+      }
+      return '<div class="vt-rationale" style="margin-top:12px"><b>Resume chase</b> <span class="vt-pill ' + pill[0] + '" style="margin-left:6px">' + pill[1] + "</span>" +
+        (ch.resumeReceivedAt ? '<div class="vt-hint" style="margin-top:6px">Updated resume in ' + esc(bkWhen(ch.resumeReceivedAt)) + ".</div>" : "") +
+        (steps ? '<div style="margin-top:8px">' + steps + "</div>" : "") + next + "</div>";
+    }
+    /* The client package: working summary + intro email draft, gated on the
+       resume. Sending is always a human click; nothing here fires on its own. */
+    function clientCard(c) {
+      if (c.status !== "scored" && !c.clientReport) return "";
+      var r = c.clientReport;
+      if (!r) {
+        return '<div class="vt-rationale" style="margin-top:12px"><b>Client package</b>' +
+          '<div class="vt-hint" style="margin-top:6px">Turn this screen into a client-ready working summary and intro email draft. It stays in drafts for your review and can only be sent once the candidate’s updated resume is in.</div>' +
+          '<div style="margin-top:8px"><button class="vt-btn" id="vtCrDraft">Draft client package</button></div></div>';
+      }
+      var pill = r.status === "sent" ? ["live", "Sent" + (r.sentTo ? " to " + esc(r.sentTo) : "")]
+        : r.status === "ready" ? ["live", "Ready to send"]
+        : ["paused", "Held until the updated resume arrives"];
+      var actions = '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="vt-btn" id="vtCrCopySum">Copy summary</button>' +
+        '<button class="vt-btn" id="vtCrCopyMail">Copy email draft</button>' +
+        '<button class="vt-btn" id="vtCrDraft">Regenerate</button>' +
+        (r.status === "ready" ? '<button class="vt-btn vt-btn-primary" id="vtCrSend">Send to client</button>' : "") +
+        (r.status !== "sent" ? '<button class="vt-btn" id="vtCrMark">Mark as sent</button>' : "") +
+        "</div>" +
+        (r.status === "awaiting_resume" ? '<div class="vt-hint" style="margin-top:6px">The send button unlocks the moment the candidate’s updated resume lands (the chase above is on it). You can still copy and edit the draft meanwhile.</div>' : "");
+      return '<div class="vt-rationale" style="margin-top:12px"><b>Client package</b> <span class="vt-pill ' + pill[0] + '" style="margin-left:6px">' + pill[1] + "</span>" +
+        '<div class="vt-tr-h" style="margin-top:10px">Working summary</div>' +
+        '<div class="vt-tr-body" style="white-space:pre-wrap">' + esc(r.summary) + "</div>" +
+        '<div class="vt-tr-h" style="margin-top:10px">Intro email draft</div>' +
+        '<div class="vt-tr-body" style="white-space:pre-wrap"><b>Subject:</b> ' + esc(r.emailSubject) + "\n\n" + esc(r.emailBody) + "</div>" +
+        actions + "</div>";
     }
     function bar(label, v, max) {
       var pct = max ? Math.round((v / max) * 100) : 0;
@@ -15129,6 +15272,8 @@
         }).join("") + "</div>";
       }
       if (c.nextStepGiven) html += '<div class="vt-next"><b>Next step told to candidate:</b> ' + esc(c.nextStepGiven) + "</div>";
+      html += chaseCard(c);
+      html += clientCard(c);
       if (c.recordingUrl) html += '<div style="margin-top:12px"><a class="vt-btn" href="' + esc(c.recordingUrl) + '" target="_blank" rel="noopener">Recording</a></div>';
       if (c.transcript && c.transcript.length) {
         html += '<div class="vt-transcript"><div class="vt-tr-h">Transcript</div><div class="vt-tr-body">' +
@@ -15266,14 +15411,14 @@
       var chips =
         chip(r.llm, "AI brain", "AI brain: add server key", "Set ANTHROPIC_API_KEY on the server. Powers scoring, optimizing, stress tests, and prompt checks.") +
         chip(r.voiceId, "Cloned voice", "Pick a cloned voice", "Edit the desk and choose your cloned voice. The agent speaks every call in it.") +
-        chip(r.voiceKey, "Voice previews", "Voice previews: add key", "Set VOICE_CLONE_API_KEY (your ElevenLabs key) to hear tuning previews and rehearsals.") +
+        chip(r.voiceKey, "Voice previews", "Voice previews: add key", "Connect the voice engine key to hear tuning previews and rehearsals.") +
         chip(r.live && r.phone, "Taking calls", desk.status === "live" ? "Bind a number" : "Desk not live", "Go live on the Vetting Desks tab so candidates can call in.");
       // The single most useful next action, given the state. One banner, one CTA.
       var t = (o && o.trend) || {}; var l = (o && o.learning) || {};
       var hasEvidence = (t.scoredCalls || 0) > 0 || (l.lastSimulation && l.lastSimulation.results && l.lastSimulation.results.length);
       var hasProposal = (l.revisions || []).some(function (x) { return x.status === "proposed"; });
       var banner = null; // [text, ctaLabel, ctaAction]
-      if (!r.llm) banner = ["The optimizer’s brain is off: everything on this page needs the server’s Anthropic key.", null, null];
+      if (!r.llm) banner = ["The optimizer’s brain is off: AI is not enabled on the server yet.", null, null];
       else if (!hasEvidence) banner = ["Nothing to learn from yet. Run a stress test: five synthetic candidates call your agent right now, no phone needed.", "Run first stress test", "sim"];
       else if (hasProposal) banner = ["A proposed revision is waiting below. Read the changelog and apply it to push the improved agent live.", "Review proposals", "history"];
       else if (!l.autoLearn) banner = ["Turn on self-learning and the agent keeps improving from every few scored calls, hands off.", "Turn it on", "learn"];
@@ -15354,7 +15499,7 @@
           (act ? '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>' : "") + esc(p.label) + "</button>";
       }).join("");
       return '<div class="vt-card">' + cardHead("mic", "Voice delivery") +
-        '<div class="vt-hint" style="margin-top:6px">How your cloned voice is rendered on the call. These are the ElevenLabs settings that decide whether the same voice reads as a person or a machine; the defaults are the documented phone-realism sweet spot.</div>' +
+        '<div class="vt-hint" style="margin-top:6px">How your cloned voice is rendered on the call. These are the delivery settings that decide whether the same voice reads as a person or a machine; the defaults are the documented phone-realism sweet spot.</div>' +
         '<div class="vt-presets">' + chips + "</div>" +
         '<div class="vt-sliders">' +
         sliderRow("vtStab", "Expressiveness (stability)", v.stability, 0, 1, 0.01,
@@ -15746,7 +15891,7 @@
           if (d.dryRun) {
             if (msg) msg.textContent = d.hint === "no_voice_id"
               ? "Pick the desk’s cloned voice first (edit the desk)."
-              : "Add your ElevenLabs key in Setup to hear previews.";
+              : "Connect the voice engine in Setup to hear previews.";
             return;
           }
           if (!d.clips || !d.clips.length) { if (msg) msg.textContent = "Synthesis failed, check the voice id and key."; return; }
@@ -15842,7 +15987,7 @@
               var d = r.data || {};
               if (!r.ok) { if (msg) msg.textContent = "Couldn’t render the audio."; return; }
               if (d.dryRun) {
-                if (msg) msg.textContent = d.hint === "no_voice_id" ? "Pick the desk’s cloned voice first." : "Add your ElevenLabs key in Setup to hear this.";
+                if (msg) msg.textContent = d.hint === "no_voice_id" ? "Pick the desk’s cloned voice first." : "Connect the voice engine in Setup to hear this.";
                 return;
               }
               if (!d.clips || !d.clips.length) { if (msg) msg.textContent = "Synthesis failed."; return; }
@@ -16619,7 +16764,7 @@
             var d = r.data || {};
             out.innerHTML = '<b style="color:var(--ok)">Rendered (~' + d.estSeconds + "s" +
               (d.withinSweetSpot ? ", in the 15-25s sweet spot" : ", outside sweet spot") + "):</b> “" + esc(d.rendered || "") + "” · " +
-              (d.dryRun ? "dry-run (no Telnyx/clone keys, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
+              (d.dryRun ? "dry-run (phone/voice not configured, nothing dialed)" : "dialing " + esc(d.callControlId || "")) +
               ((d.warnings && d.warnings.length) ? ' · <span style="color:var(--warn)">' + d.warnings.map(esc).join(" · ") + "</span>" : "");
           }).catch(function () { if (out) out.innerHTML = '<span style="color:var(--danger)">Could not reach the server.</span>'; });
         });
@@ -17443,7 +17588,7 @@
 
     Array.prototype.forEach.call(el.querySelectorAll("[data-add]"), function (btn) {
       btn.addEventListener("click", function () {
-        var svc = prompt("Service (Instantly, Telnyx, Loxo, ...):"); if (!svc) return;
+        var svc = prompt("Service name (phone, ATS, data, ...):"); if (!svc) return;
         var key = prompt("API key for " + svc + ":"); if (!key) return;
         var payload = { type: "apikey", service: svc, key: key };
         send("/accounts", "POST", payload).then(function (r) {
@@ -18019,21 +18164,21 @@
   function renderVoiceSetup(el, which) {
     var cfg = which === "vetting"
       ? { title: "AI Vetting setup", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', featureRoute: "vetting", featureLabel: "Open AI Vetting →",
-          intro: "AI Vetting answers inbound candidate calls with an AI recruiter in your cloned voice. It needs Telnyx for the phone number + call handling, and a consented cloned voice. Bind a job description to a number inside AI Vetting once both are green.",
-          extra: "Each vetting desk binds one job description to one of your Telnyx numbers and this voice, set that up per-desk in AI Vetting." }
+          intro: "AI Vetting answers inbound candidate calls with an AI recruiter in your cloned voice. It needs your provisioned phone number + call handling, and a consented cloned voice. Bind a job description to a number inside AI Vetting once both are green.",
+          extra: "Each vetting desk binds one job description to one of your numbers and this voice, set that up per-desk in AI Vetting." }
       : { title: "Voice Drops setup", icon: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>', featureRoute: "voicedrops", featureLabel: "Open Voice Drops →",
-          intro: "Voice Drops leaves a personalized cloned-voice voicemail on verified business landlines/VoIP. It needs Telnyx (Premium AMD + outbound calling) and a consented cloned voice. Mobiles are filtered and never dialed.",
+          intro: "Voice Drops leaves a personalized cloned-voice voicemail on verified business landlines/VoIP. It needs your calling line (voicemail detection + outbound calling) and a consented cloned voice. Mobiles are filtered and never dialed.",
           extra: "Launching a drop also requires a per-campaign consent attestation and an identifying script, done inside Voice Drops." };
 
     el.innerHTML =
       '<div class="sx-hero"><div class="sx-ic">' + cfg.icon + '</div><div><h2>' + esc(cfg.title.replace(" setup", "")) + '</h2>' +
       '<p>' + esc(cfg.intro) + '</p></div></div>' +
       '<div id="vsReady" style="margin-bottom:16px"></div>' +
-      '<div class="sx-card"><div class="sx-eyebrow">Step 1 · Telephony</div><h3>Telnyx</h3>' +
-      '<p class="sx-sub">The calling engine behind Voice Drops, it places the calls and uses Premium AMD to find the voicemail. Connect your Telnyx API key and a caller-ID number, then Test. New to Telnyx? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">10DLC setup guide</a> to register your brand &amp; campaign so your calls connect.</p>' +
+      '<div class="sx-card"><div class="sx-eyebrow">Step 1 · Telephony</div><h3>Calling line</h3>' +
+      '<p class="sx-sub">The calling engine behind Voice Drops, it places the calls and detects the voicemail. Your line and caller-ID number are provisioned during onboarding, then Test. New here? Follow the <a href="/helpcenter#telephony" target="_blank" rel="noopener" style="color:var(--brand-2)">phone setup guide</a> to see how your brand registration keeps calls connecting.</p>' +
       '<div id="vsTel">' + loading() + '</div></div>' +
       '<div class="sx-card"><div class="sx-eyebrow">Step 2 · Voice</div><h3>Your voice</h3>' +
-      '<p class="sx-sub">Two quick steps: connect a voice provider (ElevenLabs, Cartesia or Hume) with its API key, then add the voice id you cloned in that provider\'s portal and mark it as the one to use.</p>' +
+      '<p class="sx-sub">Two quick steps: connect the voice engine with its key, then add your approved cloned voice id and mark it as the one to use.</p>' +
       '<div id="vsVoice">' + loading() + '</div></div>' +
       '<div class="sx-card"><p class="sx-sub" style="margin:0">' + esc(cfg.extra) + '</p>' +
       '<div style="margin-top:12px"><a class="btn btn-primary btn-sm" href="#' + cfg.featureRoute + '">' + esc(cfg.featureLabel) + '</a></div></div>';
@@ -18060,9 +18205,9 @@
       b.innerHTML = '<div class="sx-card" style="' + (ready ? "border-color:color-mix(in srgb, var(--ok) 40%, transparent)" : "border-color:color-mix(in srgb, var(--warn) 40%, transparent)") + '">' +
         '<div class="sx-status"><span class="dot ' + (ready ? "ok" : "warn") + '"></span>' +
         '<div><div class="lab">' + (ready ? cfg.title.replace(" setup", "") + " is ready" : "Almost there, " + done + " of 2 done") + '</div>' +
-        '<div class="sub">' + (ready ? "Telnyx connected and a voice provider in place." : "Finish both steps below to go live.") + '</div></div>' +
+        '<div class="sub">' + (ready ? "Calling line connected and a voice in place." : "Finish both steps below to go live.") + '</div></div>' +
         '<span class="s-pill ' + (ready ? "ready" : "progress") + '" style="margin-left:auto">' + (ready ? "Ready" : done + "/2") + '</span></div>' +
-        '<div class="sx-checks" style="margin-top:14px">' + chk(telOk, "Telnyx connected & tested") + chk(voiceOk, "Voice provider connected + voice on file") + '</div>' +
+        '<div class="sx-checks" style="margin-top:14px">' + chk(telOk, "Calling line connected & tested") + chk(voiceOk, "Cloned voice on file") + '</div>' +
         '</div>';
     }
     function loadTelnyx() {
@@ -18070,11 +18215,11 @@
         var ints = (d && d.integrations) || [];
         st.telnyx = ints.filter(function (x) { return x.id === "telnyx"; })[0] || null;
         var box = $("#vsTel"); if (!box) return;
-        if (!st.telnyx) { box.innerHTML = '<p class="muted">Telnyx integration unavailable.</p>'; return; }
+        if (!st.telnyx) { box.innerHTML = '<p class="muted">Calling integration unavailable.</p>'; return; }
         var sm = cnStatusMeta(st.telnyx.status);
         box.innerHTML = '<div class="cn-grid"><button class="cn-v" id="vsTelBtn">' +
           '<span class="dot3" style="background:' + sm.color + '"></span>' +
-          '<div class="meta"><b>Telnyx</b><small>' + (st.telnyx.error ? esc(st.telnyx.error) : "Outbound calling + Premium AMD voicemail detection") + '</small></div>' +
+          '<div class="meta"><b>Calling line</b><small>' + (st.telnyx.error ? esc(st.telnyx.error) : "Outbound calling + voicemail detection") + '</small></div>' +
           '<span class="cn-badge" style="' + sm.badge + '">' + sm.label + '</span><span class="cn-go">›</span></button></div>';
         $("#vsTelBtn").addEventListener("click", function () { openIntegrationSetup(st.telnyx, loadTelnyx); });
         paintReady();
@@ -18083,18 +18228,18 @@
     // The three cloned-voice providers. Each is set up on its own card: paste the
     // key, Save & test, and the card reflects its real verified state.
     var VOICE_PROVS = [
-      { id: "elevenlabs", label: "ElevenLabs", env: "VOICE_CLONE_API_KEY", ph: "sk_…", docs: "https://elevenlabs.io/app/settings/api-keys", lab: "https://elevenlabs.io/app/voice-lab" },
-      { id: "cartesia", label: "Cartesia", env: "CARTESIA_API_KEY", ph: "sk_car_…", docs: "https://play.cartesia.ai/keys", lab: "https://play.cartesia.ai" },
-      { id: "hume", label: "Hume", env: "HUME_API_KEY", ph: "paste your Hume API key", docs: "https://platform.hume.ai/settings/keys", lab: "https://platform.hume.ai" },
+      { id: "elevenlabs", label: "Voice engine A", env: "VOICE_CLONE_API_KEY", ph: "sk_…", docs: "https://elevenlabs.io/app/settings/api-keys", lab: "https://elevenlabs.io/app/voice-lab" },
+      { id: "cartesia", label: "Voice engine B", env: "CARTESIA_API_KEY", ph: "sk_car_…", docs: "https://play.cartesia.ai/keys", lab: "https://play.cartesia.ai" },
+      { id: "hume", label: "Voice engine C", env: "HUME_API_KEY", ph: "paste the engine API key", docs: "https://platform.hume.ai/settings/keys", lab: "https://platform.hume.ai" },
     ];
     // Turn a raw verify error code into a plain-English fix. The most common one
     // is a scope-restricted ElevenLabs key: valid for TTS but missing read access.
     function voiceErrText(code) {
       if (!code) return "the key was rejected";
       if (code === "elevenlabs_invalid_key")
-        return "ElevenLabs rejected this key, it's invalid or revoked. Copy it again from your ElevenLabs profile → API Keys (and check it's the right account).";
+        return "The voice engine rejected this key, it's invalid or revoked. Copy it again from the engine dashboard (and check it's the right account).";
       if (code === "elevenlabs_unauthorized" || code === "elevenlabs_401" || code === "elevenlabs_403")
-        return "key rejected or missing read access, in ElevenLabs, give the key permission to read User or Voices (or create a key with full access), then paste it again";
+        return "key rejected or missing read access; give the key permission to read User or Voices (or create a key with full access), then paste it again";
       if (code === "no_api_key") return "no key saved yet";
       return code;
     }
@@ -18181,11 +18326,11 @@
           '<div class="sx-eyebrow" style="margin:20px 0 9px">Your voice</div>' +
           '<p class="muted" style="font-size:12.5px;margin:0 0 10px">Add a cloned voice id, then pick which one is used for drops with <b>Use this</b>. The voice in use must have its provider connected above.</p>' +
           '<div class="vd-grid" style="display:grid;grid-template-columns:0.9fr 1.4fr 1fr auto;gap:10px;align-items:end">' +
-          '<label class="cn-fld"><span class="lab">Provider</span><select id="vsProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option><option value="hume">Hume</option></select></label>' +
+          '<label class="cn-fld"><span class="lab">Provider</span><select id="vsProvider"><option value="elevenlabs">Voice engine A</option><option value="cartesia">Voice engine B</option><option value="hume">Voice engine C</option></select></label>' +
           '<label class="cn-fld"><span class="lab">Voice ID</span><input id="vsVoiceId" type="text" placeholder="paste your voice id"></label>' +
           '<label class="cn-fld"><span class="lab">Name (whose voice)</span><input id="vsName" type="text" placeholder="Josh"></label>' +
           '<button class="btn btn-primary btn-sm" id="vsSave">Add voice</button></div>' +
-          '<p class="muted" style="font-size:11.5px;margin:8px 0 0">No voice id yet? Copy it from <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener" style="color:var(--brand-2)">ElevenLabs</a>, <a href="https://play.cartesia.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Cartesia</a> or <a href="https://platform.hume.ai" target="_blank" rel="noopener" style="color:var(--brand-2)">Hume</a>.</p>' +
+          '<p class="muted" style="font-size:11.5px;margin:8px 0 0">No voice id yet? Ask your account team to clone and approve one for you.</p>' +
           '<div style="margin-top:12px">' + voices + '</div>';
 
         // Per-provider Save & test: save the key as a workspace credential, then
@@ -18278,7 +18423,7 @@
         Array.prototype.forEach.call(box.querySelectorAll("[data-vsdel]"), function (btn) {
           btn.addEventListener("click", function () {
             var id = btn.getAttribute("data-vsdel");
-            if (!confirm("Remove this voice from your list? It is not deleted from ElevenLabs, Cartesia or Hume.")) return;
+            if (!confirm("Remove this voice from your list? The clone itself is kept by the voice engine.")) return;
             send("/voice/clones", "POST", { action: "delete", id: id }).then(function (r) {
               if (r.ok) { toast("Voice removed"); loadVoice(); }
               else toast("Delete failed");
@@ -18306,7 +18451,7 @@
     // step's "Set up →" jumps (a sub-tab for infra, a route for the rest).
     var META = {
       connected: { title: "Connect your tools", desc: "Integration pre-flight, every required tool must turn green before campaigns can activate.",
-        track: ["Each integration green", "API keys valid", "Telnyx / SMS reachable"], link: "setup/connected" },
+        track: ["Each integration green", "API keys valid", "Phone / SMS reachable"], link: "setup/connected" },
       email: { title: "Stand up email sending", desc: "Add your sending domains, each is auto-provisioned (DKIM, DNS, PTR), warmed, and placement-tested before it sends.",
         track: ["≥1 MTA server active", "Domains provisioned", "Mailboxes warming"], link: "setup/email" },
       ats: { title: "Connect your ATS", desc: "Pick your system of record (Loxo is the verified primary). Replies, touches and placements sync once it's live.",
@@ -18527,8 +18672,8 @@
     if (res.error === "not_configured") return "Add the required key(s) above and Save before testing.";
     if (res.error === "no_client") return "No client available for this integration.";
     if (res.error === "connect_on_ats_tab") return "Connect Loxo on the ATS tab.";
-    if (res.error === "elevenlabs_invalid_key") return "ElevenLabs rejected this key, it's invalid or revoked. Copy it again from elevenlabs.io → Profile → API Keys (make sure it's from the right account).";
-    if (res.error === "elevenlabs_unauthorized") return "ElevenLabs rejected this key. If the key is correct, give it read access to User or Voices (or use a key with no restrictions), then paste it again.";
+    if (res.error === "elevenlabs_invalid_key") return "The voice engine rejected this key, it's invalid or revoked. Copy it again from the engine dashboard (make sure it's from the right account).";
+    if (res.error === "elevenlabs_unauthorized") return "The voice engine rejected this key. If the key is correct, give it read access to User or Voices (or use a key with no restrictions), then paste it again.";
     return "Connection failed" + (res.error ? ", " + res.error : "") + ". Check the key and try again.";
   }
 
@@ -18706,7 +18851,7 @@
   /* ---------------- Team (admin sub-accounts) ---------------- */
   function renderTeam(el) {
     el.innerHTML = head("Team",
-      "Add recruiters to this workspace and set what they can touch. Recruiters work the inbox, pipeline, sourcing, outreach and the dialer, but never see the Telnyx account, API keys, sending domains, the ATS connection, billing, or the team.");
+      "Add recruiters to this workspace and set what they can touch. Recruiters work the inbox, pipeline, sourcing, outreach and the dialer, but never see the phone account, API keys, sending domains, the ATS connection, billing, or the team.");
 
     // Permission matrix, so an admin sees exactly where the wall is.
     var caps = [
@@ -18714,7 +18859,7 @@
       ["Sourcing + outreach", true, true, true], ["Voice dialer (use)", true, true, true],
       ["Create campaigns", true, true, true], ["Activate campaigns", true, true, false],
       ["LinkedIn accounts + domains", true, true, false], ["API keys", true, true, false],
-      ["Telnyx / SMS account", true, true, false], ["Integrations (Connected)", true, true, false],
+      ["Phone / SMS account", true, true, false], ["Integrations (Connected)", true, true, false],
       ["ATS connection", true, true, false], ["Manage team", true, true, false],
       ["Billing", true, false, false]
     ];
@@ -19102,7 +19247,7 @@
       campField +
       '<label>Engine</label>' +
       '<select id="liEngine">' +
-        '<option value="unipile">Unipile API, paste a people-search URL</option>' +
+        '<option value="unipile">LinkedIn engine, paste a people-search URL</option>' +
         '<option value="scraper">Open-source scraper, li_at cookie, profile or search URL</option>' +
       '</select>' +
       '<label>Sales Navigator or LinkedIn search URL</label>' +
@@ -19235,7 +19380,7 @@
         var isUnavail = /^search_unavailable|^search_failed/.test(err || "");
         var isScrape = /^scrape_/.test(err || "");
         errorLinkedInPull(box, err === "no_linkedin_account" ? "Connect a LinkedIn account first (Accounts → LinkedIn)."
-          : err === "scraper_not_configured" ? "The scraper engine needs a LinkedIn session cookie. Set LINKEDIN_LI_AT (and SCRAPER_TOKEN) in the server env, or switch the engine to Unipile."
+          : err === "scraper_not_configured" ? "The scraper engine needs a LinkedIn session cookie. Ask your account team to connect it, or switch the engine mode."
           : /^scrape_429/.test(err || "") ? "LinkedIn rate-limited the scraper, it cools down automatically. Try again later or pull fewer profiles."
           : /^scrape_401/.test(err || "") ? "The li_at cookie was rejected (expired or invalid). Refresh it from a logged-in browser."
           : /^scrape_503/.test(err || "") ? "The scraper service is unreachable (still booting or not deployed). Try again shortly."
@@ -21152,7 +21297,7 @@
   function bdpNumbersView(el) {
     if (!can("telnyx:manage")) { el.innerHTML = head("BD Phone", "") + bdpTabs("") + emptyCard("Managing phone numbers needs an admin."); return; }
     el.innerHTML = head("BD Phone",
-      "Connect Telnyx numbers as BD lines, assign them to your team, and control which number each person dials out from.") +
+      "Connect phone numbers as BD lines, assign them to your team, and control which number each person dials out from.") +
       bdpTabs("numbers") +
       '<div id="bdpNumBody">' + loading() + "</div>";
 
@@ -21169,9 +21314,9 @@
 
       // Setup status.
       if (!d.telnyxConfigured) {
-        html += '<div class="bdp-banner err">Telnyx is not connected. Add your Telnyx API key under <a href="#setup" style="color:var(--brand);margin-left:4px">Setup</a> first.</div>';
+        html += '<div class="bdp-banner err">Calling is not connected yet. Set it up under <a href="#setup" style="color:var(--brand);margin-left:4px">Setup</a> first.</div>';
       } else if (!d.infra || !d.infra.provisioned) {
-        html += '<div class="bdp-banner warn">Telnyx is connected but the phone system is not provisioned yet.' +
+        html += '<div class="bdp-banner warn">Calling is connected but the phone system is not provisioned yet.' +
           (d.infra && d.infra.lastError ? ' <span style="color:var(--danger)">' + esc(d.infra.lastError) + "</span>" : "") +
           '<button class="btn btn-sm btn-primary" id="bdpProvision">Set up calling</button></div>';
       } else {
@@ -21197,7 +21342,7 @@
           "</div>";
         }).join("");
       } else {
-        html += '<div class="empty">No numbers connected yet. Connect one of your Telnyx numbers to start calling.</div>';
+        html += '<div class="empty">No numbers connected yet. Connect one of your phone numbers to start calling.</div>';
       }
       html += "</div>";
       host.innerHTML = html;
@@ -21233,10 +21378,10 @@
       (data.lines || []).forEach(function (l) { connectedKeys[String(l.e164).replace(/\D/g, "").slice(-10)] = 1; });
       var avail = owned.filter(function (n) { return !connectedKeys[String(n.e164).replace(/\D/g, "").slice(-10)]; });
       var body = (avail.length
-        ? '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Telnyx number</label>' +
+        ? '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Phone number</label>' +
           '<select id="bdpCnNum" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px">' +
           avail.map(function (n) { return '<option value="' + esc(n.e164) + '" data-id="' + esc(n.id) + '">' + esc(bdpFmtNum(n.e164)) + "</option>"; }).join("") + "</select></div>"
-        : '<p class="sub" style="margin:0 0 8px">No unconnected numbers found on your Telnyx account. Enter a number manually or buy one in the Telnyx portal first.</p>' +
+        : '<p class="sub" style="margin:0 0 8px">No unconnected numbers found on your calling account. Enter a number manually or ask your account team to add one.</p>' +
           '<div class="field"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Number (E.164)</label>' +
           '<input id="bdpCnManual" placeholder="+13105551234" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;font:400 13px var(--font);color:var(--text);padding:8px 10px"></div>') +
         '<div class="field" style="margin-top:10px"><label style="font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Label</label>' +
@@ -21249,7 +21394,7 @@
           : "") +
         '<p class="sub" style="margin:10px 0 0">Whoever you assign this to calls from this number, receives its calls, and sends their OS Text messages from it. You can change the owner later under Manage.</p>' +
         '<div class="modal-foot"><button class="btn" id="bdpCnCancel">Cancel</button><button class="btn btn-primary" id="bdpCnGo">Connect</button></div>';
-      openModal("Connect a number", "Add a Telnyx number as a BD line.", body, function (root, close) {
+      openModal("Connect a number", "Add a phone number as a BD line.", body, function (root, close) {
         root.querySelector("#bdpCnCancel").addEventListener("click", close);
         root.querySelector("#bdpCnGo").addEventListener("click", function () {
           var sel = root.querySelector("#bdpCnNum");
@@ -21301,7 +21446,7 @@
           close();
         });
         root.querySelector("#bdpMlDisc").addEventListener("click", function () {
-          if (!confirm("Disconnect " + bdpFmtNum(line.e164) + " from RecruitersOS? The number stays on your Telnyx account.")) return;
+          if (!confirm("Disconnect " + bdpFmtNum(line.e164) + " from RecruitersOS? The number stays on your calling account.")) return;
           send("/phone/numbers", "POST", { action: "disconnect", lineId: line.id }).then(function () {
             var P = bdpEngine(); if (P) P.refreshSummary();
             load();
@@ -21398,7 +21543,7 @@
         { status: "nurture", bd: "Nurture", recruiting: "Nurture" }
       ],
       phases: [
-        { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "Job Search signal feed", "Enrichment waterfall", "ATS connected", "OS Text + Telnyx 10DLC"] },
+        { n: 1, title: "Infrastructure pre-flight", time: "one-time", done: "Overview capacity strip is green", items: ["≥1 warmed LinkedIn account", "≥5 warmed domains", "Job Search signal feed", "Enrichment waterfall", "ATS connected", "OS Text + 10DLC"] },
         { n: 2, title: "Create campaign shell", time: "5 min", done: "Draft with ICP + signals", items: ["Name + one-line goal", "ICP definition", "≥1 signal enabled"] },
         { n: 3, title: "Search & discovery", time: "5 min", done: "Preview shows the right people", items: ["Role hiring for", "Persona title", "Decision-maker target", "Live query preview"] },
         { n: 4, title: "Connect channels", time: "3 min", done: "All channels show connected", items: ["Instantly campaign id", "LinkedIn account", "OS Text toggle", "Loxo list id"] },
@@ -21434,9 +21579,9 @@
         { at: "07:00", name: "Pull signals", automated: true, detail: "Run enabled signal sources (last 24h)." },
         { at: "07:15", name: "Score & dedupe", automated: true, detail: "Composite score per ICP; dedupe vs ATS; the day's top scorers advance." },
         { at: "07:30", name: "Enrich", automated: true, detail: "Enrichment waterfall finds work emails and direct dials." },
-        { at: "07:45", name: "LLM draft", automated: true, detail: "Claude drafts email + LinkedIn + voice; A/B applied." },
+        { at: "07:45", name: "AI draft", automated: true, detail: "AI drafts email + LinkedIn + voice; A/B applied." },
         { at: "08:30", name: "Approval queue", automated: false, detail: "Edit / kill / approve; record HOT voice notes." },
-        { at: "09:00", name: "Push to channels", automated: true, detail: "Instantly / Unipile / OS Text; person_events logged." }
+        { at: "09:00", name: "Push to channels", automated: true, detail: "Email / LinkedIn / OS Text; person_events logged." }
       ],
       assets: [
         { name: "Fintech placement case study", type: "case_study", campaignIds: ["c1"] },
@@ -21456,13 +21601,13 @@
       },
       integrations: [
         { id: "instantly", label: "Instantly (email)", status: "green", requiredFor: ["bd", "recruiting"] },
-        { id: "unipile", label: "Unipile (LinkedIn)", status: "green", requiredFor: ["bd", "recruiting"] },
+        { id: "unipile", label: "LinkedIn engine", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "rapidapi", label: "Job Search (signal feed)", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "fresh_linkedin", label: "Profile enrichment", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "tomba", label: "Email finder", status: "yellow", requiredFor: ["bd"] },
         { id: "loxo", label: "Loxo (ATS)", status: "green", requiredFor: ["bd", "recruiting"] },
         { id: "taltxt", label: "OS Text (SMS)", status: "green", requiredFor: ["recruiting"] },
-        { id: "telnyx", label: "Telnyx 10DLC", status: "green", requiredFor: ["recruiting"] }
+        { id: "telnyx", label: "SMS 10DLC", status: "green", requiredFor: ["recruiting"] }
       ],
       atsVendors: [
         { vendor: "loxo", label: "Loxo", status: "verified" }, { vendor: "bullhorn", label: "Bullhorn", status: "placeholder" },
