@@ -364,7 +364,7 @@ export async function requestMagicLink(email: string): Promise<{ sent: true }> {
   store.emailTokens.set(token.token, token);
   const brand = await mailBrandForRecipient(key);
   await sendWorkspaceEmail(key, `Your ${brand.name} sign-in link`,
-    `Sign in: ${brand.base}/login?token=${token.token}`, brand.workspaceId);
+    `Sign in: ${brand.base}/login?token=${token.token}`, brand.workspaceId, { critical: true });
   return { sent: true };
 }
 
@@ -381,7 +381,7 @@ export async function requestPasswordReset(email: string): Promise<{ sent: true 
     store.emailTokens.set(token.token, token);
     const brand = await mailBrandForRecipient(key);
     await sendWorkspaceEmail(key, `Reset your ${brand.name} password`,
-      `Reset your password: ${brand.base}/reset-password.html?token=${token.token}`, brand.workspaceId);
+      `Reset your password: ${brand.base}/reset-password.html?token=${token.token}`, brand.workspaceId, { critical: true });
   }
   return { sent: true };
 }
@@ -732,7 +732,7 @@ async function sendVerificationEmail(user: User): Promise<void> {
   store.emailTokens.set(t.token, t);
   const brand = await mailBrandForRecipient(user.email);
   await sendWorkspaceEmail(user.email, `Verify your ${brand.name} email`,
-    `Confirm your email: ${brand.base}/verify?token=${t.token}`, brand.workspaceId);
+    `Confirm your email: ${brand.base}/verify?token=${t.token}`, brand.workspaceId, { critical: true });
 }
 
 /** Email seam. Wire SMTP / Resend / SES here; logs in the reference build. */
@@ -868,14 +868,26 @@ export async function sendWorkspaceEmail(
   subject: string,
   body: string,
   workspaceId?: string,
+  opts?: { critical?: boolean },
 ): Promise<void> {
   if (workspaceId) {
     try {
       const { notifyBrand } = await import("../outbound/brand");
       const brand = await notifyBrand(workspaceId);
       if (brand.whiteLabel) {
-        await sendBrandedEmail(workspaceId, brand.name, to, subject, body);
-        return;
+        const sent = await sendBrandedEmail(workspaceId, brand.name, to, subject, body);
+        if (sent) return;
+        // FAIL-SAFE: the tenant's own mailbox is broken or unconfigured. Routine
+        // mail is dropped here (a white-label send is never silently rebranded).
+        // But AUTH-CRITICAL mail (password reset, sign-in link, email verify)
+        // must NEVER be lost: a lost auth email is a permanent lockout, which is
+        // strictly worse than the reset arriving from the house address. So we
+        // fail over to the house sender. The link inside still points at the
+        // tenant's own domain, so the flow is correct; only the From differs.
+        if (!opts?.critical) return;
+        console.error(
+          `[email] FAIL-SAFE: white-label mailbox for workspace ${workspaceId} could not send an auth email to ${to} :: "${subject}". Delivering via the house sender so the user is not locked out. Fix the tenant's BRAND_SMTP/RESUME_INBOX creds in Setup.`,
+        );
       }
     } catch (e) {
       console.error("[email] brand resolve failed, using house sender:", (e as Error).message);
@@ -903,8 +915,14 @@ function smtpHostFor(imapHost: string, user: string): string {
  * White-label transport: the workspace's own mailbox over SMTP. Creds come from
  * the workspace credential store (Setup): BRAND_SMTP_USER/PASS/HOST/PORT plus
  * BRAND_MAIL_FROM, falling back to the RESUME_INBOX_* mailbox (the same app
- * password works for SMTP on Gmail/Outlook). Failures are logged and the mail
- * is dropped; a white-label send is never downgraded to the house sender.
+ * password works for SMTP on Gmail/Outlook).
+ *
+ * Returns TRUE only when the mail was actually handed to the tenant's SMTP.
+ * Missing creds or a send failure return FALSE (and are logged) so the caller
+ * can decide what to do: routine mail is still dropped (a white-label send is
+ * never SILENTLY downgraded to the house brand), but AUTH-CRITICAL mail uses
+ * the returned flag to fail over to the house sender rather than lock the user
+ * out. See sendWorkspaceEmail's `critical` option.
  */
 async function sendBrandedEmail(
   workspaceId: string,
@@ -912,7 +930,7 @@ async function sendBrandedEmail(
   to: string,
   subject: string,
   body: string,
-): Promise<void> {
+): Promise<boolean> {
   const { withWorkspaceCreds } = await import("../connected");
   const { cred } = await import("../providers/http");
   const c = await withWorkspaceCreds(workspaceId, () => ({
@@ -925,9 +943,9 @@ async function sendBrandedEmail(
   }));
   if (!c.user || !c.pass) {
     console.error(
-      `[email] BLOCKED off-brand send -> ${to} :: "${subject}": white-label workspace ${workspaceId} has no mailbox creds (set BRAND_SMTP_USER/PASS or RESUME_INBOX_USER/PASS in Setup). The house sender is never used for white-label mail.`,
+      `[email] white-label workspace ${workspaceId} has no mailbox creds (set BRAND_SMTP_USER/PASS or RESUME_INBOX_USER/PASS in Setup) -> ${to} :: "${subject}"`,
     );
-    return;
+    return false;
   }
   const host = c.host || smtpHostFor(c.imapHost, c.user);
   const port = c.port || 587;
@@ -950,8 +968,40 @@ async function sendBrandedEmail(
         .join("<br>"),
     });
     console.info(`[email] white-label send via ${host} as ${c.user} -> ${to} :: ${subject}`);
+    return true;
   } catch (e) {
     console.error(`[email] white-label SMTP send failed (${host}, ${c.user} -> ${to}):`, (e as Error).message);
+    return false;
+  }
+}
+
+/**
+ * Probe a white-label workspace's mailbox transport WITHOUT sending mail, so the
+ * owner console can flag a broken tenant sender BEFORE it silently drops a
+ * password reset. Verifies creds exist and the SMTP server accepts the login.
+ */
+export async function checkWorkspaceMailbox(
+  workspaceId: string,
+): Promise<{ configured: boolean; ok: boolean; host?: string; user?: string; detail?: string }> {
+  const { withWorkspaceCreds } = await import("../connected");
+  const { cred } = await import("../providers/http");
+  const c = await withWorkspaceCreds(workspaceId, () => ({
+    user: (cred("BRAND_SMTP_USER") || cred("RESUME_INBOX_USER")).trim(),
+    pass: (cred("BRAND_SMTP_PASS") || cred("RESUME_INBOX_PASS")).trim(),
+    host: cred("BRAND_SMTP_HOST").trim(),
+    port: Number(cred("BRAND_SMTP_PORT")) || 0,
+    imapHost: cred("RESUME_INBOX_HOST").trim(),
+  }));
+  if (!c.user || !c.pass) return { configured: false, ok: false, detail: "No BRAND_SMTP/RESUME_INBOX mailbox creds saved in Setup." };
+  const host = c.host || smtpHostFor(c.imapHost, c.user);
+  const port = c.port || 587;
+  try {
+    const nodemailer = (await import("nodemailer")).default;
+    const transport = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user: c.user, pass: c.pass } });
+    await transport.verify();
+    return { configured: true, ok: true, host, user: c.user };
+  } catch (e) {
+    return { configured: true, ok: false, host, user: c.user, detail: (e as Error).message.slice(0, 200) };
   }
 }
 
