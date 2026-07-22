@@ -956,6 +956,12 @@ async function sendBrandedEmail(
       port,
       secure: port === 465,
       auth: { user: c.user, pass: c.pass },
+      // Bound every stage so a dead/hung tenant SMTP host fails FAST and the
+      // auth-email fail-safe (house fallback) kicks in promptly, instead of the
+      // reset request stalling on a black-hole mailbox.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
     await transport.sendMail({
       from: c.from || `${brandName} <${c.user}>`,
@@ -997,7 +1003,11 @@ export async function checkWorkspaceMailbox(
   const port = c.port || 587;
   try {
     const nodemailer = (await import("nodemailer")).default;
-    const transport = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user: c.user, pass: c.pass } });
+    const transport = nodemailer.createTransport({
+      host, port, secure: port === 465, auth: { user: c.user, pass: c.pass },
+      // Bounded so the owner drawer's health check can't hang on a dead host.
+      connectionTimeout: 8000, greetingTimeout: 8000, socketTimeout: 8000,
+    });
     await transport.verify();
     return { configured: true, ok: true, host, user: c.user };
   } catch (e) {
