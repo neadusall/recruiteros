@@ -22311,6 +22311,70 @@
     });
   })();
 
+  // Self-serve password change for the signed-in user. Opens a modal: current
+  // password (skipped for a passwordless account setting its first one), new
+  // password, and confirm. On success other devices are logged out server-side
+  // but this session stays live. No email is involved, so it works for
+  // white-label tenants whose branded reset mail can't send.
+  function openChangePassword() {
+    var hasPw = !(ctx.user && ctx.user.hasPassword === false);
+    var lblCss = "display:block;font-size:12px;font-weight:600;color:var(--text-dim);margin:0 0 14px";
+    var inCss = "display:block;width:100%;margin-top:5px;font-weight:400";
+    var curRow = hasPw
+      ? '<label style="' + lblCss + '">Current password' +
+          '<input id="cpCur" type="password" autocomplete="current-password" placeholder="Your current password" style="' + inCss + '" /></label>'
+      : '<div style="font-size:13px;color:var(--text-dim);margin:0 0 14px">Your account has no password yet. Set one below and you can sign in with it from now on.</div>';
+    var bodyHtml =
+      '<div>' +
+        curRow +
+        '<label style="' + lblCss + '">New password' +
+          '<input id="cpNew" type="password" autocomplete="new-password" placeholder="At least 8 characters" style="' + inCss + '" /></label>' +
+        '<label style="' + lblCss + '">Confirm new password' +
+          '<input id="cpConf" type="password" autocomplete="new-password" placeholder="Re-type the new password" style="' + inCss + '" /></label>' +
+        '<div id="cpErr" role="alert" hidden style="color:var(--accent-red,#d64545);font-size:12.5px;margin:0 0 12px"></div>' +
+      '</div>' +
+      '<div class="modal-foot">' +
+        '<button class="btn btn-ghost" id="cpCancel" type="button">Cancel</button>' +
+        '<button class="btn btn-primary" id="cpSave" type="button">Update password</button>' +
+      '</div>';
+    openModal("Change password", "Set a new password for " + ((ctx.user && ctx.user.email) || "your account") + ".", bodyHtml, function (root, close) {
+      var errEl = root.querySelector("#cpErr");
+      function showErr(m) { errEl.textContent = m; errEl.hidden = false; }
+      function clearErr() { errEl.hidden = true; }
+      root.querySelector("#cpCancel").addEventListener("click", close);
+      var saveBtn = root.querySelector("#cpSave");
+      saveBtn.addEventListener("click", function () {
+        clearErr();
+        var cur = hasPw ? (root.querySelector("#cpCur").value || "") : "";
+        var next = root.querySelector("#cpNew").value || "";
+        var conf = root.querySelector("#cpConf").value || "";
+        if (hasPw && !cur) { showErr("Enter your current password."); return; }
+        if (next.length < 8) { showErr("New password must be at least 8 characters."); return; }
+        if (next !== conf) { showErr("The new passwords do not match."); return; }
+        saveBtn.disabled = true; saveBtn.textContent = "Updating...";
+        send("/auth/change-password", "POST", { currentPassword: cur, newPassword: next }).then(function (r) {
+          if (r.ok && r.data && r.data.changed) {
+            // Reflect the account now having a password for this session.
+            if (ctx.user) ctx.user.hasPassword = true;
+            close();
+            toast("Password updated. Other devices have been signed out.");
+            return;
+          }
+          var code = (r.data && r.data.error) || "";
+          var msg = code === "wrong_password" ? "That current password is not correct."
+            : code === "weak_password" ? "New password must be at least 8 characters."
+            : code === "password_unchanged" ? "Choose a password different from your current one."
+            : "Could not update the password. Please try again.";
+          showErr(msg);
+          saveBtn.disabled = false; saveBtn.textContent = "Update password";
+        }).catch(function () {
+          showErr("Could not reach the server. Please try again.");
+          saveBtn.disabled = false; saveBtn.textContent = "Update password";
+        });
+      });
+    });
+  }
+
   (function accountMenu() {
     var btn = $("#acctBtn"), menu = $("#acctMenu"), acct = $("#acct");
     if (!btn || !menu) return;
@@ -22402,6 +22466,15 @@
     }
     var so = $("#acctSignOut");
     if (so) so.addEventListener("click", signOut);
+
+    // Change password, in-portal, no email round-trip. This is the self-serve
+    // path white-label tenants (e.g. Lume) need because their branded reset mail
+    // can't send; it hits POST /api/auth/change-password (session-gated).
+    var changePw = $("#acctChangePw");
+    if (changePw) changePw.addEventListener("click", function () {
+      setOpen(false);
+      openChangePassword();
+    });
 
     // Appearance: light/dark theme toggle. Persists + applies to <html> (the
     // pre-paint script in command.html sets it on load so there's no flash).

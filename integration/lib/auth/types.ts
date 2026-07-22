@@ -82,7 +82,9 @@ export interface EmailToken {
 }
 
 export interface AuthResult {
-  user: Omit<User, "passwordHash" | "twoFactor">;
+  /** hasPassword lets the portal decide whether to ask for a current password
+   *  when the user changes it (a passwordless invited/OAuth user has none). */
+  user: Omit<User, "passwordHash" | "twoFactor"> & { hasPassword: boolean };
   workspace: Workspace;
   role: Role;
   /** Capabilities granted to this role, so the UI shows only what they can use. */

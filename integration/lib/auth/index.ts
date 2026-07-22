@@ -420,6 +420,47 @@ export async function resetPassword(token: string, newPassword: string): Promise
   return result(user, store.workspaces.get(m.workspaceId)!, m.role, session);
 }
 
+/**
+ * Change a signed-in user's own password. Verifies the current password first
+ * (so a hijacked session can't silently rotate it), then sets the new one and
+ * revokes every OTHER session for the user. The caller's current session token
+ * is preserved so they stay signed in on this device; pass it as keepToken.
+ *
+ * Passwordless accounts (invited / magic-link / OAuth users who never set a
+ * password) have no current password to check: when the user has no
+ * passwordHash, currentPassword is ignored and this simply sets the first one.
+ */
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+  keepToken?: string,
+): Promise<{ ok: true }> {
+  await ensureAuthReady();
+  const user = store.users.get(userId);
+  if (!user) throw authError("not_found", 404);
+  if (newPassword.length < 8) throw authError("weak_password", 422);
+  // Only verify the current password when the account actually has one; a
+  // passwordless user is setting their first password here.
+  if (user.passwordHash) {
+    if (!currentPassword || !verifyPassword(currentPassword, user.passwordHash)) {
+      throw authError("wrong_password", 403);
+    }
+    if (verifyPassword(newPassword, user.passwordHash)) {
+      throw authError("password_unchanged", 422);
+    }
+  }
+  user.passwordHash = hashPassword(newPassword);
+  user.emailVerified = true;
+  // Revoke every session for this user EXCEPT the one making the change, so a
+  // password rotation logs out other devices without booting the current one.
+  for (const [tok, s] of store.sessions) {
+    if (s.userId === userId && tok !== keepToken) store.sessions.delete(tok);
+  }
+  persist();
+  return { ok: true };
+}
+
 export async function consumeMagicLink(token: string): Promise<AuthResult> {
   await ensureAuthReady();
   const t = store.emailTokens.get(token);
@@ -797,8 +838,9 @@ function primaryMembership(userId: string): Membership {
 }
 function result(user: User, workspace: Workspace, role: Role, session: Session): AuthResult {
   // Never expose the password hash OR the 2FA secret/recovery hashes to clients.
+  // hasPassword is a safe boolean the portal uses to drive the change-password UI.
   const { passwordHash: _omit, twoFactor: _tf, ...safe } = user;
-  return { user: safe, workspace, role, capabilities: capabilitiesFor(role, workspace.plan), session };
+  return { user: { ...safe, hasPassword: Boolean(user.passwordHash) }, workspace, role, capabilities: capabilitiesFor(role, workspace.plan), session };
 }
 
 /** Issue a session for a known user+workspace and return the authed context. */
