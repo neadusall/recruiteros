@@ -37,6 +37,41 @@ function voiceSelector(desk: VettingDesk): string {
 }
 
 /**
+ * Identifier of the Telnyx integration secret that holds the ElevenLabs API
+ * key. Telnyx only speaks in an ElevenLabs voice when that key is stored on
+ * the SAME Telnyx account the assistant runs on, referenced by this handle.
+ */
+const ELEVEN_SECRET_IDENTIFIER = "recruitersos_elevenlabs";
+
+/**
+ * Resolve the api_key_ref the assistant's voice_settings needs for ElevenLabs
+ * voices. An explicit TELNYX_ELEVENLABS_KEY_REF always wins; otherwise the
+ * secret is ensured idempotently from VOICE_CLONE_API_KEY (the same key the
+ * previews and Voice Drops use), so pasting the ElevenLabs key in Setup is the
+ * ONLY manual step. Must run inside the workspace credential context so the
+ * secret lands on the workspace's own Telnyx account. Best-effort: any failure
+ * returns undefined instead of blocking provisioning.
+ */
+async function ensureElevenLabsKeyRef(): Promise<string | undefined> {
+  const explicit = cred("TELNYX_ELEVENLABS_KEY_REF").trim();
+  if (explicit) return explicit;
+  const apiKey = cred("VOICE_CLONE_API_KEY").trim();
+  if (!apiKey) return undefined;
+  try {
+    const list: any = await telnyx.listIntegrationSecrets(100);
+    if (list?.dryRun) return ELEVEN_SECRET_IDENTIFIER; // dry-run: keep config shape stable in dev
+    const rows: any[] = Array.isArray(list?.data) ? list.data : [];
+    if (!rows.some((s) => s?.identifier === ELEVEN_SECRET_IDENTIFIER)) {
+      await telnyx.createIntegrationSecret(ELEVEN_SECRET_IDENTIFIER, apiKey);
+    }
+    return ELEVEN_SECRET_IDENTIFIER;
+  } catch (e: any) {
+    console.error(`[vetting] elevenlabs key ref ensure failed: ${e?.message || e}`);
+    return undefined;
+  }
+}
+
+/**
  * The desk's mid-call tools, all Telnyx-native so the single-stack contract
  * holds (no third vendor in the call path):
  *   - send_scheduling_text: a Telnyx webhook tool that hits our /api/vetting/tools
@@ -179,6 +214,16 @@ export async function provisionDesk(desk: VettingDesk): Promise<ProvisionResult>
     // Isolation: a customer's AI Vetting desk is provisioned on THEIR Telnyx
     // account, never the operator's env key.
     return await withWorkspaceCreds(desk.workspaceId, async () => {
+      // ElevenLabs voices only speak when the key is stored on THIS Telnyx
+      // account as an integration secret, referenced by voice_settings.api_key_ref.
+      // Ensure it (idempotently, from the workspace's own VOICE_CLONE_API_KEY) and
+      // stamp the reference — without it Telnyx rejects the create with a 10004
+      // "required parameter missing". Runs inside the creds context so the secret
+      // lands on the workspace's Telnyx account.
+      if ((config.voice || "").startsWith("ElevenLabs.")) {
+        const ref = await ensureElevenLabsKeyRef();
+        if (ref) (config.voice_settings as Record<string, unknown>).api_key_ref = ref;
+      }
       let assistantId = desk.assistantId;
       let dryRun = false;
 

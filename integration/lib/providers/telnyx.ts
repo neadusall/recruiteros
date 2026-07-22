@@ -423,6 +423,28 @@ export class TelnyxClient extends ProviderClient {
     return this.request({ method: "DELETE", path: `/ai/assistants/${encodeURIComponent(assistantId)}` });
   }
 
+  /* =====================================================================
+   *  Integration secrets — the store the AI Assistant references for its
+   *  ElevenLabs key. An assistant speaks in an ElevenLabs voice only when the
+   *  ElevenLabs API key is stored on the SAME Telnyx account as an integration
+   *  secret, referenced by identifier via voice_settings.api_key_ref (see
+   *  vetting/assistant.ts). Without it Telnyx rejects the create with a 10004
+   *  "required parameter missing".
+   * ===================================================================== */
+
+  listIntegrationSecrets(pageSize = 50) {
+    return this.request({ path: "/integration_secrets", query: { "page[size]": pageSize } });
+  }
+
+  /** Store a bearer secret (e.g. the ElevenLabs API key) under `identifier`. */
+  createIntegrationSecret(identifier: string, token: string) {
+    return this.request({
+      method: "POST",
+      path: "/integration_secrets",
+      body: { identifier, type: "bearer", token },
+    });
+  }
+
   /**
    * Bind an inbound phone number to an assistant so calls to it are answered by
    * the agent. Telnyx exposes this as the assistant's phone-numbers collection.
