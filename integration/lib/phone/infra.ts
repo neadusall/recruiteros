@@ -78,24 +78,47 @@ async function findOrCreateApp(): Promise<string> {
   return String(id);
 }
 
-/** The app must carry an outbound voice profile to dial PSTN destinations.
- *  Best-effort: adopt the account's first profile, else create one. */
+/** Resolve the account's outbound voice profile, adopting the first that
+ *  exists or creating one. Both the Call Control app AND the WebRTC credential
+ *  connection must carry it to place PSTN calls (Telnyx rejects the leg
+ *  otherwise). Best-effort. */
+async function ensureOutboundProfileId(): Promise<string | undefined> {
+  const profiles = await telnyx.listOutboundVoiceProfiles();
+  let profileId = profiles?.data?.[0]?.id;
+  if (!profileId) {
+    const created = await telnyx.createOutboundVoiceProfile(APP_NAME);
+    profileId = created?.data?.id;
+  }
+  return profileId ? String(profileId) : undefined;
+}
+
 async function attachOutboundProfile(appId: string): Promise<void> {
   try {
-    const profiles = await telnyx.listOutboundVoiceProfiles();
-    let profileId = profiles?.data?.[0]?.id;
-    if (!profileId) {
-      const created = await telnyx.createOutboundVoiceProfile(APP_NAME);
-      profileId = created?.data?.id;
-    }
+    const profileId = await ensureOutboundProfileId();
     if (profileId) {
       await telnyx.updateCallControlApp(appId, {
-        outbound: { outbound_voice_profile_id: String(profileId) },
+        outbound: { outbound_voice_profile_id: profileId },
       });
     }
   } catch {
     // Leave unattached; outbound dialing will surface a clear Telnyx error
     // and the setup panel shows the remedy. Inbound still works.
+  }
+}
+
+/** The WebRTC credential connection also needs an outbound voice profile:
+ *  browser legs dial PSTN through the credential connection, and Telnyx
+ *  rejects the call outright without one. Mirrors attachOutboundProfile. */
+async function attachConnectionOutboundProfile(connectionId: string): Promise<void> {
+  try {
+    const profileId = await ensureOutboundProfileId();
+    if (profileId) {
+      await telnyx.updateCredentialConnection(connectionId, {
+        outbound: { outbound_voice_profile_id: profileId },
+      });
+    }
+  } catch {
+    // Leave unattached; browser dialing surfaces a clear Telnyx error.
   }
 }
 
@@ -105,7 +128,15 @@ async function findOrCreateCredentialConnection(): Promise<string> {
     const existing = (list?.data ?? []).find(
       (c: any) => c?.connection_name === CRED_CONN_NAME,
     );
-    if (existing?.id) return String(existing.id);
+    if (existing?.id) {
+      // Reconcile: connections created before this fix carry no outbound voice
+      // profile, so browser PSTN calls are rejected. Attach one if missing
+      // (idempotent: a redundant PATCH when already set is harmless).
+      if (!existing?.outbound?.outbound_voice_profile_id) {
+        await attachConnectionOutboundProfile(String(existing.id));
+      }
+      return String(existing.id);
+    }
   }
   // Connection-level SIP username must be globally unique on Telnyx.
   const userName = `roswebrtc${randomBytes(6).toString("hex")}`;
@@ -113,6 +144,7 @@ async function findOrCreateCredentialConnection(): Promise<string> {
   const created = await telnyx.createCredentialConnection(CRED_CONN_NAME, userName, password);
   const id = created?.data?.id;
   if (!id) throw new Error("telnyx_provision: could not create the credential connection");
+  await attachConnectionOutboundProfile(String(id));
   return String(id);
 }
 

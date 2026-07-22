@@ -238,6 +238,14 @@ export class TelnyxClient extends ProviderClient {
     return this.request({ path: "/credential_connections", query: { "page[size]": pageSize } });
   }
 
+  updateCredentialConnection(connectionId: string, body: Record<string, unknown>) {
+    return this.request({
+      method: "PATCH",
+      path: `/credential_connections/${encodeURIComponent(connectionId)}`,
+      body,
+    });
+  }
+
   /** Mint a per-user telephony credential on the credential connection. */
   createTelephonyCredential(connectionId: string, name: string) {
     return this.request({
