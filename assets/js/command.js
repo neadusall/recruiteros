@@ -15303,9 +15303,15 @@
             if (!r.ok) { panel.innerHTML = '<div class="vt-vb-msg">Couldn’t reach ElevenLabs. Check the key in Setup → Voice.</div>'; return; }
             allVoices = (r.data && r.data.voices) || [];
             if (!allVoices.length) {
-              panel.innerHTML = '<div class="vt-vb-msg">' + (r.data && r.data.dryRun
+              var err = r.data && r.data.error;
+              var msg = err === "elevenlabs_missing_voices_read"
+                ? "Your ElevenLabs key can’t list voices. In ElevenLabs → Settings → API Keys, enable the <b>Voices: Read</b> permission on this key, then reopen this."
+                : err
+                ? "ElevenLabs couldn’t list voices (" + esc(String(err)) + "). Check the key in Setup → Voice."
+                : (r.data && r.data.dryRun)
                 ? "Add your ElevenLabs API key in Setup → Voice to browse voices."
-                : "No voices on this ElevenLabs account yet.") + "</div>";
+                : "No voices on this ElevenLabs account yet.";
+              panel.innerHTML = '<div class="vt-vb-msg">' + msg + "</div>";
               return;
             }
             loaded = true;

@@ -226,7 +226,14 @@ class ElevenLabsClient implements VoiceCloneClient {
       return { voices: [], dryRun: false, error: e?.message || "elevenlabs_error" };
     }
     if (!res.ok) {
-      return { voices: [], dryRun: false, error: `elevenlabs_${res.status}` };
+      // A key scoped for text-to-speech only (no voices_read) 401s here even
+      // though it synthesizes fine. Surface THAT precisely so the UI can tell the
+      // operator to enable the permission, instead of a bare "no voices".
+      const raw = await res.text().catch(() => "");
+      const err = /voices_read|missing the permission/i.test(raw)
+        ? "elevenlabs_missing_voices_read"
+        : `elevenlabs_${res.status}`;
+      return { voices: [], dryRun: false, error: err };
     }
     const data: any = await res.json().catch(() => ({}));
     const voices: ProviderVoice[] = (Array.isArray(data?.voices) ? data.voices : [])
