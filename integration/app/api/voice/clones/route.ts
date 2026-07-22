@@ -56,6 +56,20 @@ export async function POST(req: Request) {
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);
 
+  // Browse the voices ON the account (the desk-form "Browse voices" picker).
+  // Isolation-correct: a customer lists against its OWN (or granted) key, never
+  // the operator's env. Returns [] cleanly when the provider can't list or the
+  // key is missing, so the picker degrades to the paste-an-id path.
+  if (b?.action === "list-voices") {
+    const provider: VoiceProvider =
+      b?.provider === "cartesia" || b?.provider === "hume" ? b.provider : "elevenlabs";
+    const result = await withWorkspaceCreds(ws, () => {
+      const client = getVoiceClientFor(provider);
+      return client.listVoices ? client.listVoices() : Promise.resolve({ voices: [], dryRun: false });
+    });
+    return ok({ provider, ...result });
+  }
+
   // Live-test a clone provider's key (the "Test" button) — isolation-correct so a
   // customer tests their OWN key. Proves it'll deploy instead of dry-running.
   if (b?.action === "test") {

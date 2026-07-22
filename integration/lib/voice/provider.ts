@@ -73,6 +73,22 @@ export interface CreateVoiceResult {
   error?: string;
 }
 
+/** One selectable voice on the provider account (for the pick-a-voice browser). */
+export interface ProviderVoice {
+  voiceId: string;
+  name: string;
+  /** e.g. "cloned" | "professional" | "premade" | "generated" (provider-specific). */
+  category?: string;
+  /** Short public MP3 URL the UI can play as a sample, when the provider gives one. */
+  previewUrl?: string;
+}
+
+export interface ListVoicesResult {
+  voices: ProviderVoice[];
+  dryRun: boolean;
+  error?: string;
+}
+
 export interface VoiceCloneClient {
   id: string;
   configured(): boolean;
@@ -82,6 +98,9 @@ export interface VoiceCloneClient {
   synthesize(text: string, voiceId?: string): Promise<SynthResult>;
   /** Mint a cloned voice from a consent recording (operator's own voice only). */
   createVoice(input: { name: string; sample: Buffer; contentType?: string }): Promise<CreateVoiceResult>;
+  /** The voices on this account, for the desk-form voice browser. Optional: not
+   *  every provider exposes a listing, and callers must handle its absence. */
+  listVoices?(): Promise<ListVoicesResult>;
 }
 
 /** ElevenLabs-class adapter (text-to-speech + instant voice clone). */
@@ -193,6 +212,36 @@ class ElevenLabsClient implements VoiceCloneClient {
     if (!res.ok) return { dryRun: false, error: `voice_clone_${res.status}` };
     const data: any = await res.json().catch(() => ({}));
     return { voiceId: data?.voice_id, dryRun: false };
+  }
+
+  async listVoices(): Promise<ListVoicesResult> {
+    if (!this.configured()) return { voices: [], dryRun: true };
+    let res: Response;
+    try {
+      // /v1/voices returns every voice on the account: cloned, professional,
+      // library-added, and the premade set. One call, no pagination for a normal
+      // account. (v2 adds search/paging; not needed for a single-account picker.)
+      res = await fetch(`${this.base}/voices`, { headers: { "xi-api-key": this.key() } });
+    } catch (e: any) {
+      return { voices: [], dryRun: false, error: e?.message || "elevenlabs_error" };
+    }
+    if (!res.ok) {
+      return { voices: [], dryRun: false, error: `elevenlabs_${res.status}` };
+    }
+    const data: any = await res.json().catch(() => ({}));
+    const voices: ProviderVoice[] = (Array.isArray(data?.voices) ? data.voices : [])
+      .map((v: any): ProviderVoice => ({
+        voiceId: String(v?.voice_id || ""),
+        name: String(v?.name || v?.voice_id || "Unnamed voice"),
+        category: v?.category ? String(v.category) : undefined,
+        previewUrl: v?.preview_url ? String(v.preview_url) : undefined,
+      }))
+      .filter((v: ProviderVoice) => v.voiceId);
+    // Surface the operator's OWN voices first (cloned/professional/generated),
+    // premade set last — the picker leads with what they actually made.
+    const rank = (c?: string) => (c === "premade" ? 1 : 0);
+    voices.sort((a, b) => rank(a.category) - rank(b.category) || a.name.localeCompare(b.name));
+    return { voices, dryRun: false };
   }
 }
 

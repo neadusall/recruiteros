@@ -14809,10 +14809,12 @@
         ? "Speaks in " + esc(dname) + " unless you pick a different voice here."
         : voices.length
         ? "Required, the voice the agent speaks in on every call."
-        : "No cloned voices yet. Record one in Voice Drops → Voice &amp; Consent, then pick it here.";
+        : "Pick any voice from your ElevenLabs account below, or paste an id in Voice Drops → Voice &amp; Consent.";
       return '<div class="vt-field"><label>Agent voice' + (dflt ? "" : ' <span style="color:var(--vt-bad)">*</span>') + "</label>" +
         '<select id="vtfVoice">' + opts + "</select>" +
-        '<div class="vt-hint">' + hint + "</div></div>";
+        '<div class="vt-hint">' + hint + "</div>" +
+        '<button type="button" class="vt-linkbtn" id="vtVoiceBrowseBtn" style="margin-top:6px">' +
+          '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg> Browse ElevenLabs voices</button></div>';
     }
 
     /* ============ Desks tab ============ */
@@ -14904,6 +14906,7 @@
         voiceSelect(d) +
         fld("vtfThreshold", "Pass threshold (0-100)", "70", "number", d.passThreshold) +
         "</div>" +
+        '<div id="vtVoiceBrowser" class="vt-voicebrowser" style="display:none"></div>' +
         '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- what the agent screens for on the call</span></div>' +
         '<div class="vt-quals">' +
           '<div class="vt-gen">' +
@@ -15230,6 +15233,94 @@
       });
       var cancel = $("#vtCancel");
       if (cancel) cancel.addEventListener("click", function () { vt.editing = null; vt.creating = false; paintDesks(body); });
+
+      // ---- Agent-voice browser: pick any voice from the ElevenLabs account ----
+      (function wireVoiceBrowser() {
+        var trigger = $("#vtVoiceBrowseBtn"), panel = $("#vtVoiceBrowser");
+        if (!trigger || !panel) return;
+        var loaded = false, allVoices = [], preview = null, playingId = null;
+
+        function selectedId() { var s = $("#vtfVoice"); return s ? s.value : ""; }
+        function catLabel(c) { return c ? (c === "premade" ? "stock" : c) : "voice"; }
+
+        function useVoice(v) {
+          var s = $("#vtfVoice");
+          if (!s) return;
+          if (!Array.prototype.some.call(s.options, function (o) { return o.value === v.voiceId; })) {
+            var o = document.createElement("option");
+            o.value = v.voiceId; o.textContent = v.name;
+            s.appendChild(o);
+          }
+          s.value = v.voiceId;
+          render();
+          toast("Agent will speak in " + v.name + ".");
+        }
+
+        function togglePreview(v, btn) {
+          if (!v.previewUrl) { toast("No sample available for this voice."); return; }
+          if (preview) { preview.pause(); }
+          if (playingId === v.voiceId) { playingId = null; render(); return; }
+          preview = new Audio(v.previewUrl);
+          playingId = v.voiceId;
+          preview.addEventListener("ended", function () { playingId = null; render(); });
+          preview.play().catch(function () { toast("Couldn’t play the sample."); playingId = null; render(); });
+          render();
+        }
+
+        function render() {
+          var term = ($("#vtVbSearch") ? $("#vtVbSearch").value : "").toLowerCase().trim();
+          var cur = selectedId();
+          var rows = allVoices.filter(function (v) { return !term || v.name.toLowerCase().indexOf(term) >= 0; });
+          var listHtml = rows.length
+            ? rows.map(function (v) {
+                var playing = playingId === v.voiceId;
+                return '<div class="vt-vb-row' + (v.voiceId === cur ? " sel" : "") + '" data-vid="' + esc(v.voiceId) + '">' +
+                  '<span class="vt-vb-name">' + esc(v.name) + "</span>" +
+                  '<span class="vt-vb-cat">' + esc(catLabel(v.category)) + "</span>" +
+                  '<button type="button" class="vt-vb-prev" data-vbact="prev"' + (v.previewUrl ? "" : " disabled") + '>' +
+                    '<svg class="isvg" aria-hidden="true"><use href="#i-play"/></svg>' + (playing ? "Playing" : "Preview") + "</button>" +
+                  '<button type="button" class="vt-vb-use" data-vbact="use">' + (v.voiceId === cur ? "Selected" : "Use") + "</button>" +
+                "</div>";
+              }).join("")
+            : '<div class="vt-vb-msg">No voices match “' + esc(term) + "”.</div>";
+          panel.innerHTML =
+            '<div class="vt-vb-search"><input id="vtVbSearch" type="text" placeholder="Search your ElevenLabs voices…" value="' + esc(term) + '" /></div>' +
+            '<div class="vt-vb-list">' + listHtml + "</div>";
+          var sb = $("#vtVbSearch");
+          if (sb) { sb.addEventListener("input", render); if (term) { sb.focus(); sb.setSelectionRange(term.length, term.length); } }
+          Array.prototype.forEach.call(panel.querySelectorAll(".vt-vb-row"), function (row) {
+            var v = allVoices.filter(function (x) { return x.voiceId === row.getAttribute("data-vid"); })[0];
+            if (!v) return;
+            row.querySelector('[data-vbact="use"]').addEventListener("click", function () { useVoice(v); });
+            var pv = row.querySelector('[data-vbact="prev"]');
+            if (pv) pv.addEventListener("click", function () { togglePreview(v, pv); });
+          });
+        }
+
+        function load() {
+          panel.innerHTML = '<div class="vt-vb-msg"><span class="spinner"></span> Loading your ElevenLabs voices…</div>';
+          send("/voice/clones", "POST", { action: "list-voices", provider: "elevenlabs" }).then(function (r) {
+            if (!r.ok) { panel.innerHTML = '<div class="vt-vb-msg">Couldn’t reach ElevenLabs. Check the key in Setup → Voice.</div>'; return; }
+            allVoices = (r.data && r.data.voices) || [];
+            if (!allVoices.length) {
+              panel.innerHTML = '<div class="vt-vb-msg">' + (r.data && r.data.dryRun
+                ? "Add your ElevenLabs API key in Setup → Voice to browse voices."
+                : "No voices on this ElevenLabs account yet.") + "</div>";
+              return;
+            }
+            loaded = true;
+            render();
+          }).catch(function () { panel.innerHTML = '<div class="vt-vb-msg">Couldn’t reach the server.</div>'; });
+        }
+
+        trigger.addEventListener("click", function () {
+          var open = panel.style.display !== "none";
+          if (open) { panel.style.display = "none"; if (preview) { preview.pause(); playingId = null; } return; }
+          panel.style.display = "block";
+          if (!loaded) load(); else render();
+        });
+      })();
+
       var genQ = $("#vtGenQ");
       if (genQ) genQ.addEventListener("click", function () {
         var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
