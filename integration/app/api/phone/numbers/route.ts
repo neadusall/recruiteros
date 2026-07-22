@@ -18,7 +18,7 @@ import { telnyx } from "../../../../lib/providers";
 import { toE164 } from "../../../../lib/voice/phone";
 import {
   listLines, linesForUser, upsertLine, patchLine, deleteLine, getLine,
-  getUserState, patchUserState, getInfra, ensurePhoneReady,
+  getUserState, patchUserState, getInfra, resetInfra, ensurePhoneReady,
 } from "../../../../lib/phone/store";
 import { ensureInfra, phoneWebhookUrl } from "../../../../lib/phone/infra";
 import { listMembers } from "../../../../lib/auth/team";
@@ -109,6 +109,25 @@ export async function POST(req: Request) {
         });
       } catch (e: any) {
         return fail(String(e?.message ?? "provision_failed").slice(0, 300), Number(e?.status) || 502);
+      }
+    }
+
+    case "reset-calling": {
+      // Move calling to the workspace's current Telnyx account: drop the cached
+      // app + credential connection and every user's cached credential, then
+      // rebuild immediately so the app/connection land on the account the key
+      // now points at. Recruiters re-mint their own credential on next connect.
+      try {
+        resetInfra(ws);
+        const infra = await withWorkspaceCreds(ws, () => ensureInfra(ws));
+        return ok({
+          reset: true,
+          provisioned: Boolean(infra.appId && infra.credentialConnectionId),
+          appId: infra.appId,
+          webhookUrl: phoneWebhookUrl(),
+        });
+      } catch (e: any) {
+        return fail(String(e?.message ?? "reset_failed").slice(0, 300), Number(e?.status) || 502);
       }
     }
 

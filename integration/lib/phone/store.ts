@@ -84,6 +84,27 @@ export function patchInfra(workspaceId: string, patch: Partial<PhoneInfra>): Pho
   return inf;
 }
 
+/**
+ * Wipe a workspace's phone provisioning so the next ensureInfra rebuilds the
+ * Call Control app + Credential Connection on whatever Telnyx account the
+ * workspace key now resolves to. Also clears every user's cached WebRTC
+ * credential so their next token re-mints against the fresh connection.
+ * Used when a workspace moves to a different Telnyx account: the old account's
+ * connection/credentials are left orphaned (a different key owns them), and the
+ * numbers, which are pointed at the app by the connect flow, are untouched.
+ */
+export function resetInfra(workspaceId: string): void {
+  delete store.infra[workspaceId];
+  for (const st of Object.values(store.userState)) {
+    if (st.workspaceId === workspaceId) {
+      st.credentialId = undefined;
+      st.sipUsername = undefined;
+      st.updatedAt = nowIso();
+    }
+  }
+  persist();
+}
+
 /* ---------------- lines ---------------- */
 
 export function listLines(workspaceId: string, motion?: Motion): PhoneLine[] {

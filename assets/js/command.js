@@ -21959,7 +21959,8 @@
           (d.infra && d.infra.lastError ? ' <span style="color:var(--danger)">' + esc(d.infra.lastError) + "</span>" : "") +
           '<button class="btn btn-sm btn-primary" id="bdpProvision">Set up calling</button></div>';
       } else {
-        html += '<div class="bdp-banner okay">Calling infrastructure is ready. Webhooks: <code style="font:500 11.5px var(--mono)">' + esc(d.infra.webhookUrl || "") + "</code></div>";
+        html += '<div class="bdp-banner okay">Calling infrastructure is ready. Webhooks: <code style="font:500 11.5px var(--mono)">' + esc(d.infra.webhookUrl || "") + "</code>" +
+          '<button class="btn btn-sm" id="bdpResetInfra" style="margin-left:auto">Reset calling setup</button></div>';
       }
 
       // Connected lines.
@@ -21992,6 +21993,16 @@
         send("/phone/numbers", "POST", { action: "provision" }).then(function (r) {
           if (!r.ok) toast((r.data && r.data.error) || "Provisioning failed");
           else toast("Calling is set up");
+          load();
+        });
+      });
+      var reset = $("#bdpResetInfra");
+      if (reset) reset.addEventListener("click", function () {
+        if (!window.confirm("Reset calling setup and rebuild it on this workspace's current phone account? Use this after switching phone accounts. Numbers, texts, and call history are untouched; each recruiter just reconnects their phone once afterward.")) return;
+        reset.disabled = true; reset.textContent = "Resetting";
+        send("/phone/numbers", "POST", { action: "reset-calling" }).then(function (r) {
+          if (!r.ok) toast((r.data && r.data.error) || "Reset failed");
+          else toast("Calling rebuilt on your current account. Recruiters reload the phone to reconnect.");
           load();
         });
       });
