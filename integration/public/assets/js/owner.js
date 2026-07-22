@@ -780,11 +780,6 @@
       '<div class="note" style="margin-bottom:8px">Lend your house API keys to this customer. When on, they use YOUR key for that tool; set the markup % and/or monthly fee your billing applies.</div>' +
       '<div id="dwGrants">Loading…</div>';
 
-    // Deliverability: the tenant's own mailbox (white-label sender) health. A
-    // broken one silently dropped password resets before the house fail-safe;
-    // this shows the owner exactly what to fix. Hidden for house accounts.
-    html += '<div id="dwMailbox" style="margin-top:14px"></div>';
-
     // recent usage
     if (d.recentUsage && d.recentUsage.length) {
       html += '<h3 style="font-size:13px;margin:16px 0 6px">Recent cost events</h3><table class="otable"><tbody>';
@@ -838,35 +833,9 @@
     }).catch(function () { var box = $("#dwGrants"); if (box) box.innerHTML = '<div class="note">Could not load grants.</div>'; });
   }
 
-  // Tenant mailbox (white-label sender) health: green when the tenant's own SMTP
-  // logs in, red with the fix when it doesn't. House accounts show nothing.
-  function loadMailbox(wsId) {
-    var box = $("#dwMailbox"); if (!box) return;
-    box.innerHTML = '<div class="note">Checking deliverability…</div>';
-    api("/owner/accounts/" + encodeURIComponent(wsId) + "/mailbox").then(function (d) {
-      box = $("#dwMailbox"); if (!box) return;
-      if (!d || !d.whiteLabel) { box.innerHTML = ""; return; }
-      var head = '<h3 style="font-size:13px;margin:16px 0 6px">Deliverability · tenant mailbox</h3>';
-      if (d.ok) {
-        box.innerHTML = head +
-          '<div class="note" style="color:var(--ok,#1a7f52)"><b>Sending healthy.</b> ' + esc(d.user || "") +
-          ' signs in over ' + esc(d.host || "SMTP") + '. Auth and candidate mail send from the tenant’s own address.</div>';
-        return;
-      }
-      var why = d.configured
-        ? 'The tenant’s mailbox <b>' + esc(d.user || "") + '</b> is not accepting logins on ' + esc(d.host || "SMTP") +
-          (d.detail ? ' (' + esc(d.detail) + ')' : '') + '. Most often the Gmail app password was rotated or revoked.'
-        : 'No mailbox credentials are saved for this tenant yet.';
-      box.innerHTML = head +
-        '<div class="note" style="color:var(--danger,#c0392b)"><b>Sending broken.</b> ' + why + '</div>' +
-        '<div class="note" style="margin-top:6px">Auth mail (password resets, sign-in links) now fails over to your house sender so no one is locked out, but the tenant’s own outbound stays down until this is fixed. Fix: open this account’s portal → Setup → paste a fresh app password into BRAND_SMTP_PASS (or RESUME_INBOX_PASS).</div>';
-    }).catch(function () { var b = $("#dwMailbox"); if (b) b.innerHTML = ""; });
-  }
-
   function wireDrawer(a) {
     var id = a.workspaceId;
     loadGrants(id);
-    loadMailbox(id);
     $("#dwClose").addEventListener("click", closeDrawer);
     $("#dwSave").addEventListener("click", function () {
       var planSel = $("#dwPlan");

@@ -28,42 +28,6 @@ function appUrl(): string {
   return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
 }
 
-/**
- * Identifier of the Telnyx integration secret that holds the ElevenLabs API
- * key. Telnyx only speaks in an ElevenLabs voice when that key is stored on
- * the SAME Telnyx account the assistant runs on, referenced by this handle.
- */
-const ELEVEN_SECRET_IDENTIFIER = "recruitersos_elevenlabs";
-
-/**
- * Resolve the api_key_ref the assistant's voice_settings needs for ElevenLabs
- * voices. An explicit TELNYX_ELEVENLABS_KEY_REF always wins; otherwise the
- * secret is ensured idempotently from VOICE_CLONE_API_KEY (the same key the
- * previews and Voice Drops use), so pasting the ElevenLabs key in Setup is the
- * ONLY manual step. Must run inside the workspace credential context so the
- * secret lands on the workspace's own Telnyx account. Best-effort: any failure
- * returns undefined instead of blocking provisioning (the desk still goes
- * live; the voice falls back per Telnyx behavior).
- */
-async function ensureElevenLabsKeyRef(): Promise<string | undefined> {
-  const explicit = cred("TELNYX_ELEVENLABS_KEY_REF").trim();
-  if (explicit) return explicit;
-  const apiKey = cred("VOICE_CLONE_API_KEY").trim();
-  if (!apiKey) return undefined;
-  try {
-    const list: any = await telnyx.listIntegrationSecrets(100);
-    if (list?.dryRun) return ELEVEN_SECRET_IDENTIFIER; // dry-run: keep config shape stable in dev
-    const rows: any[] = Array.isArray(list?.data) ? list.data : [];
-    if (!rows.some((s) => s?.identifier === ELEVEN_SECRET_IDENTIFIER)) {
-      await telnyx.createIntegrationSecret(ELEVEN_SECRET_IDENTIFIER, apiKey);
-    }
-    return ELEVEN_SECRET_IDENTIFIER;
-  } catch (e: any) {
-    console.error(`[vetting] elevenlabs key ref ensure failed: ${e?.message || e}`);
-    return undefined;
-  }
-}
-
 /** Telnyx voice selector for the recruiter's cloned ElevenLabs voice. */
 function voiceSelector(desk: VettingDesk): string {
   const vid = desk.voiceId || cred("VOICE_CLONE_VOICE_ID");
@@ -209,19 +173,12 @@ export interface ProvisionResult {
  * an error string the route can surface — so a Telnyx hiccup can't 500 the UI.
  */
 export async function provisionDesk(desk: VettingDesk): Promise<ProvisionResult> {
+  const config = buildAssistantConfig(desk);
+
   try {
     // Isolation: a customer's AI Vetting desk is provisioned on THEIR Telnyx
-    // account, never the operator's env key. The config builds INSIDE this
-    // context so its cred() reads (voice fallback, ElevenLabs key) resolve to
-    // the workspace's own credentials, not the house env.
+    // account, never the operator's env key.
     return await withWorkspaceCreds(desk.workspaceId, async () => {
-      const config = buildAssistantConfig(desk);
-      // ElevenLabs voices only speak when the key is stored on this Telnyx
-      // account as an integration secret; ensure it and stamp the reference.
-      if ((config.voice || "").startsWith("ElevenLabs.")) {
-        const ref = await ensureElevenLabsKeyRef();
-        if (ref) (config.voice_settings as Record<string, unknown>).api_key_ref = ref;
-      }
       let assistantId = desk.assistantId;
       let dryRun = false;
 

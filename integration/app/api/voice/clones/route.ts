@@ -37,11 +37,6 @@ export async function GET(req: Request) {
       provider: { id: client.id, configured: client.configured() }, // default (back-compat)
       providers: voiceProviderStatuses(),                            // [{ id, configured }] per vendor
       defaultVoiceConfigured: Boolean(cred("VOICE_CLONE_VOICE_ID")),
-      // The workspace-default ElevenLabs voice id (env or Setup field). Desks
-      // and campaigns with no explicit pick speak in this voice, so pickers
-      // can offer it as a first-class "default" option.
-      defaultVoiceId: cred("VOICE_CLONE_VOICE_ID").trim() || null,
-      defaultVoiceName: cred("VOICE_CLONE_VOICE_NAME").trim() || null,
     };
   });
   return ok({

@@ -17,8 +17,7 @@
 import { NextResponse } from "next/server";
 import {
   findDeskByNumber, findCandidate, createCall, buildCallContext, inboxConfig,
-  latestResumeReview, setCandidateScreen, refreshPersonalPrep, getTestInterview,
-  type CandidateProfile,
+  latestResumeReview, setCandidateScreen, refreshPersonalPrep,
 } from "../../../../lib/vetting";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 
@@ -93,12 +92,7 @@ export async function POST(req: Request) {
     });
   }
 
-  // An armed mock interview (Test drive full-dress mode) wins over any stored
-  // candidate for this number: the operator just handed us a fresh resume and
-  // wants THAT interview, and nothing about the rehearsal may touch real
-  // candidate state (no chase, no scheduling settle, no prep refresh).
-  const test = caller ? getTestInterview(desk.id, caller) : undefined;
-  const candidate = !test && caller ? findCandidate(desk.id, caller) : undefined;
+  const candidate = caller ? findCandidate(desk.id, caller) : undefined;
 
   // A scheduled screen connecting NOW: settle the scheduling loop and open
   // with the outbound line instead of "glad you called in".
@@ -113,15 +107,11 @@ export async function POST(req: Request) {
   }
 
   // Open the call record now so the post-call webhook can attach the transcript.
-  // A mock interview still gets a record (transcript + scoring is how the
-  // operator judges the campaign), labeled so it's unmistakably a rehearsal.
   createCall({
     workspaceId: desk.workspaceId,
     deskId: desk.id,
     candidateId: candidate?.id,
-    callerName: test
-      ? `${[test.firstName, test.lastName].filter(Boolean).join(" ") || "Tester"} (interview test)`
-      : candidate ? `${candidate.firstName} ${candidate.lastName}` : undefined,
+    callerName: candidate ? `${candidate.firstName} ${candidate.lastName}` : undefined,
     callerPhone: caller || "unknown",
     engineCallId,
   });
@@ -138,19 +128,10 @@ export async function POST(req: Request) {
   // background so the NEXT call has it; never make the greeting wait on a model.
   if (candidate) void refreshPersonalPrep(desk, candidate);
 
-  const resumeGaps = test ? test.resumeGaps : candidate ? resumeGapLines(candidate.id) : "";
-  // For a mock interview, rebuild the same synthetic caller the test route
-  // prepared (resume + prepared questions), so connect-time resolution returns
-  // the full interview instead of unknown-caller blanks.
-  const who = test
-    ? ({
-        firstName: test.firstName, lastName: test.lastName, resumeText: test.resumeText,
-        prequal: test.questions.length ? { questions: test.questions, generatedAt: "", basis: "" } : undefined,
-      } as unknown as CandidateProfile)
-    : candidate;
-  const vars = buildCallContext(desk, who, {
+  const resumeGaps = candidate ? resumeGapLines(candidate.id) : "";
+  const vars = buildCallContext(desk, candidate, {
     resumeEmail, resumeGaps,
-    callOpening: (isScheduled || test) ? "Thanks for making time, calling like we set up." : undefined,
+    callOpening: isScheduled ? "Thanks for making time, calling like we set up." : undefined,
   });
   // Return both the canonical Telnyx key and a flat copy for forward-compat.
   return NextResponse.json({ dynamic_variables: vars, ...vars });
