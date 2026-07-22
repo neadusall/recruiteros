@@ -465,3 +465,18 @@
 }
 .vt-testbox input::placeholder { color: var(--text-dim); }
 .vt-testbox .vt-hint { flex-basis: 100%; font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
+/* Full mock interview: the dress-rehearsal half of the test panel. */
+.vt-test-divider {
+  flex-basis: 100%; margin-top: 4px; padding-top: 10px;
+  border-top: 1px dashed var(--border-strong);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.vt-testbox .vt-test-resume {
+  flex-basis: 100%; resize: vertical; min-height: 88px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--vt-r-sm); font: inherit; font-size: 13px;
+  color: var(--text); padding: 8px 10px; line-height: 1.45;
+}
+.vt-testbox .vt-test-resume::placeholder { color: var(--text-dim); }
+.vt-test-filebtn { cursor: pointer; }

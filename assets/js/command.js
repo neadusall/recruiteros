@@ -15054,6 +15054,11 @@
             '<button class="vt-btn vt-btn-primary" data-vttest="call" data-id="' + d.id + '">Call this number</button>' +
             '<button class="vt-btn" data-vttest="text" data-id="' + d.id + '">Text this number</button>' +
             '<div class="vt-hint">The live agent reaches whoever you put here and runs the real screening conversation. Use it for demos, or to test the agent yourself.</div>' +
+            '<div class="vt-test-divider">Full mock interview</div>' +
+            '<textarea class="vt-test-resume" rows="5" placeholder="Paste a resume here (or attach the file) and the agent studies it against this desk\'s job description before it calls" aria-label="Resume for the mock interview"></textarea>' +
+            '<label class="vt-btn vt-test-filebtn">Attach resume file<input class="vt-test-file" type="file" accept=".pdf,.doc,.docx,.txt" style="display:none" /></label>' +
+            '<button class="vt-btn vt-btn-primary" data-vttest="interview" data-id="' + d.id + '">Call me for the full interview</button>' +
+            '<div class="vt-hint">The dress rehearsal for approving this desk: the agent reviews the resume against the job description, prepares personalized questions and resume gaps to probe, then calls the number above and runs the complete vetting interview. The call lands in Calls with the transcript and scoring. Nothing is saved as a candidate.</div>' +
           "</div>"
         : "";
       return '<div class="vt-desk" data-id="' + d.id + '">' +
@@ -15444,6 +15449,7 @@
         b.addEventListener("click", function () { deskAction(b.getAttribute("data-vtact"), b.getAttribute("data-id"), b, body); });
       });
       // Test drive: the agent calls or texts the typed number in ~15 seconds.
+      // "interview" is the full-dress mode: resume in, real vetting interview out.
       Array.prototype.forEach.call(body.querySelectorAll("[data-vttest]"), function (b) {
         b.addEventListener("click", function () {
           var id = b.getAttribute("data-id");
@@ -15452,18 +15458,61 @@
           var phone = boxEl ? (boxEl.querySelector(".vt-test-phone").value || "").trim() : "";
           var name = boxEl ? (boxEl.querySelector(".vt-test-name").value || "").trim() : "";
           if (!phone) { toast("Type the number the agent should reach first."); return; }
-          deskMsg(id, mode === "text" ? "Opening the text conversation…" : "Queuing the call…");
-          send("/vetting/test", "POST", { deskId: id, phone: phone, mode: mode, name: name }).then(function (r) {
-            if (!r.ok) { deskMsg(id, (r.data && r.data.detail) || "Couldn't start the test.", true); return; }
-            var d = r.data || {};
-            if (d.dryRun) {
-              deskMsg(id, "Dry-run: calling isn't connected on this account yet, so nothing was sent.", true);
-              return;
-            }
-            deskMsg(id, mode === "text"
-              ? "The agent texts " + (d.phone || phone) + " from " + (d.from || "the desk number") + " in about 15 seconds. Reply and chat with it."
-              : "The agent calls " + (d.phone || phone) + " from " + (d.from || "the desk number") + " in about 15 seconds. Pick up and put it through its paces.");
-          }).catch(function () { deskMsg(id, "Couldn't reach the server.", true); });
+
+          function fire(payload, waitMsg) {
+            deskMsg(id, waitMsg);
+            b.disabled = true;
+            send("/vetting/test", "POST", payload).then(function (r) {
+              b.disabled = false;
+              if (!r.ok) { deskMsg(id, (r.data && r.data.detail) || "Couldn't start the test.", true); return; }
+              var d = r.data || {};
+              if (d.dryRun) {
+                deskMsg(id, "Dry-run: calling isn't connected on this account yet, so nothing was sent.", true);
+                return;
+              }
+              if (mode === "interview") {
+                var prep = "Interview prepped: " + (d.questions || 0) + " personalized question" + (d.questions === 1 ? "" : "s") +
+                  " and " + (d.gaps || 0) + " resume gap" + (d.gaps === 1 ? "" : "s") + " to probe. ";
+                deskMsg(id, prep + "The agent calls " + (d.phone || phone) + " from " + (d.from || "the desk number") +
+                  " in about 15 seconds. Pick up and take the interview." + (d.prepNote ? " Note: " + d.prepNote : ""));
+                return;
+              }
+              deskMsg(id, mode === "text"
+                ? "The agent texts " + (d.phone || phone) + " from " + (d.from || "the desk number") + " in about 15 seconds. Reply and chat with it."
+                : "The agent calls " + (d.phone || phone) + " from " + (d.from || "the desk number") + " in about 15 seconds. Pick up and put it through its paces.");
+            }).catch(function () { b.disabled = false; deskMsg(id, "Couldn't reach the server.", true); });
+          }
+
+          if (mode !== "interview") {
+            fire({ deskId: id, phone: phone, mode: mode, name: name },
+              mode === "text" ? "Opening the text conversation…" : "Queuing the call…");
+            return;
+          }
+
+          var waitMsg = "Preparing the interview: reviewing the resume against the job description and writing personalized questions. This can take up to a minute, keep this tab open…";
+          var resume = boxEl ? (boxEl.querySelector(".vt-test-resume").value || "").trim() : "";
+          var fileEl = boxEl ? boxEl.querySelector(".vt-test-file") : null;
+          var f = fileEl && fileEl.files && fileEl.files[0];
+          if (resume.length >= 80) {
+            fire({ deskId: id, phone: phone, mode: mode, name: name, resumeText: resume }, waitMsg);
+          } else if (f) {
+            var rd = new FileReader();
+            rd.onload = function () {
+              var b64 = String(rd.result || "").split(",")[1] || "";
+              fire({ deskId: id, phone: phone, mode: mode, name: name, filename: f.name, contentType: f.type, dataBase64: b64 }, waitMsg);
+            };
+            rd.readAsDataURL(f);
+          } else {
+            toast("Paste the resume text or attach the file first.");
+          }
+        });
+      });
+      // Show the picked resume file's name on the attach button.
+      Array.prototype.forEach.call(body.querySelectorAll(".vt-test-file"), function (fi) {
+        fi.addEventListener("change", function () {
+          var lbl = fi.closest(".vt-test-filebtn");
+          var f = fi.files && fi.files[0];
+          if (lbl) lbl.firstChild.textContent = f ? f.name : "Attach resume file";
         });
       });
     }
