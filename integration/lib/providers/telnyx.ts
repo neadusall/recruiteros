@@ -386,6 +386,33 @@ export class TelnyxClient extends ProviderClient {
   }
 
   /* ===================================================================== *
+   *  Integration secrets (Telnyx's stored-credential vault)
+   *
+   *  An AI Assistant speaks in an ElevenLabs voice only when the ElevenLabs
+   *  API key is stored on the SAME Telnyx account as an integration secret;
+   *  the assistant then references it by identifier via
+   *  voice_settings.api_key_ref (see vetting/assistant.ts).
+   * ===================================================================== */
+
+  listIntegrationSecrets(pageSize = 50) {
+    return this.request({ path: "/integration_secrets", query: { "page[size]": pageSize } });
+  }
+
+  /** Store a bearer secret (e.g. the ElevenLabs API key) under `identifier`. */
+  createIntegrationSecret(identifier: string, token: string) {
+    return this.request({
+      method: "POST",
+      path: "/integration_secrets",
+      body: { identifier, type: "bearer", token },
+    });
+  }
+
+  /** Remove a stored secret by its resource id (NOT its identifier). */
+  deleteIntegrationSecret(secretId: string) {
+    return this.request({ method: "DELETE", path: `/integration_secrets/${encodeURIComponent(secretId)}` });
+  }
+
+  /* ===================================================================== *
    *  AI Assistants (the INBOUND conversational agent — AI Vetting)
    *
    *  Telnyx's managed Voice-AI runs the real-time STT -> LLM -> TTS loop with

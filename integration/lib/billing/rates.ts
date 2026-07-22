@@ -130,9 +130,9 @@ export const DEFAULT_RATES: CostRate[] = [
     id: "premium_phone_boost",
     label: "Premium phone boost (skip-trace, recruiter-triggered)",
     category: "enrichment",
-    unitCostUsd: 0.1,
-    unit: "per lookup",
-    note: "The JD Sourcing 'Boost phones' rung: a RapidAPI skip-trace / people-search listing keyed on name + city/state (RAPIDAPI_SKIPTRACE_HOST/PATH; per-lookup price Setup-tunable via RAPIDAPI_SKIPTRACE_COST_USD, default $0.10). NEVER automatic: the recruiter triggers it per list after the free chain finishes, sees an estimate first (rolling workspace hit rate), and the actual spend is ledger-attributed to that recruiter (type premium_phone_boost). Numbers still pass the forced Telnyx cell check at OS Text push.",
+    unitCostUsd: 0.00267,
+    unit: "per request",
+    note: "The JD Sourcing 'Boost phones' rung: a RapidAPI skip-trace / people-search listing keyed on name + city/state (RAPIDAPI_SKIPTRACE_HOST/PATH). Per-REQUEST cost, corrected against the real invoice 2026-07-21: $60/mo plan / 22,500 requests = $0.00267/request (the prior $0.10 flat was a shipped guess, 37.5x too high). Skiptrace.ts is authoritative and Setup-tunable via RAPIDAPI_SKIPTRACE_COST_USD or PLAN_USD/PLAN_REQUESTS. NOTE two-step directory listings (Skip Tracing Working API) bill 2 requests per completed lookup (~$0.0053). NEVER automatic: recruiter triggers per list after the free chain, sees an estimate first, spend ledger-attributed (type premium_phone_boost). Numbers still pass the forced Telnyx cell check at OS Text push.",
     scales: "per_prospect",
   },
   {
