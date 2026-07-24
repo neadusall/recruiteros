@@ -43,6 +43,16 @@ const WEB3FORMS_KEY = process.env.LUME_WEB3FORMS_KEY || '';
 const NOTIFY_EMAILS = (process.env.LUME_NOTIFY_EMAILS || 'ryan@lumesp.com')
   .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
 
+// OS Text (taltxt) bridge: every SMS-opted-in applicant is pushed into the OS
+// Text SMS app so consented numbers flow straight into an outreach campaign,
+// not just an email. Server-to-server over the internal Docker network
+// (http://taltxt:3000/api/ingest/opt-in), authenticated by a shared secret that
+// MUST match taltxt's INGEST_SECRET. Leave OS_TEXT_INGEST_SECRET unset to keep
+// the bridge off (applications still store + email exactly as before).
+const OS_TEXT_INGEST_URL = process.env.OS_TEXT_INGEST_URL || '';
+const OS_TEXT_INGEST_SECRET = process.env.OS_TEXT_INGEST_SECRET || '';
+const OS_TEXT_CAMPAIGN_ID = process.env.OS_TEXT_CAMPAIGN_ID || '';
+
 /* ----------------------------------------------------------------- storage -- */
 function ensureDataDir() {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (_) {}
@@ -253,6 +263,38 @@ async function forwardApplication(app) {
   }
 }
 
+// Push one opted-in applicant into OS Text (taltxt). Best-effort and isolated:
+// returns a small result object and never throws, so a bridge hiccup can never
+// break the apply flow (the application is already stored + emailed). Only fires
+// for applicants who ticked SMS consent AND have a phone number.
+async function forwardOptInToOsText(app) {
+  if (!OS_TEXT_INGEST_URL || !OS_TEXT_INGEST_SECRET) return { ok: false, reason: 'not_configured' };
+  if (!app.smsConsent || !app.phone) return { ok: false, reason: 'no_consent_or_phone' };
+  if (typeof fetch !== 'function') return { ok: false, reason: 'no_fetch' };
+  try {
+    const res = await fetch(OS_TEXT_INGEST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-ingest-secret': OS_TEXT_INGEST_SECRET },
+      body: JSON.stringify({
+        phone: app.phone,
+        name: app.name || '',
+        email: app.email || '',
+        company: app.company || '',
+        source: app.source || app.consentUrl || 'lumesp.com',
+        consentText: app.consentText || '',
+        consentUrl: app.consentUrl || '',
+        consentAt: new Date(app.createdAt || Date.now()).toISOString(),
+        campaignId: OS_TEXT_CAMPAIGN_ID || undefined,
+      }),
+    });
+    if (!res.ok) return { ok: false, reason: 'http_' + res.status };
+    const data = await res.json().catch(function () { return {}; });
+    return { ok: true, status: data.status };
+  } catch (e) {
+    return { ok: false, reason: (e && e.message) || 'error' };
+  }
+}
+
 /* -------------------------------------------------------------------- routes -- */
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -321,6 +363,12 @@ const server = http.createServer(async (req, res) => {
       apps.push(app);
       saveApps(apps);
       forwardApplication(app); // fire-and-forget email
+      // fire-and-forget: push consented numbers into OS Text (taltxt)
+      forwardOptInToOsText(app).then(function (r) {
+        if (!r.ok && r.reason !== 'not_configured' && r.reason !== 'no_consent_or_phone') {
+          console.error('[os-text] opt-in forward failed: ' + r.reason);
+        }
+      });
       return send(res, 200, { ok: true });
     }
 
@@ -353,6 +401,24 @@ const server = http.createServer(async (req, res) => {
       if (!isAuthed(req)) return send(res, 401, { error: 'Not authorized' });
       const apps = loadApps().slice().sort((a, b) => b.createdAt - a.createdAt);
       return send(res, 200, { applications: apps });
+    }
+    // Backfill: replay every stored, consented application into OS Text. Safe to
+    // run repeatedly — the ingest endpoint dedupes on (campaign, phone), so
+    // already-imported numbers come back as "duplicate", not a second contact.
+    // Use it once to carry over opt-ins collected before the bridge was wired.
+    if (p === '/api/sync-optins' && method === 'POST') {
+      if (!isAuthed(req)) return send(res, 401, { error: 'Not authorized' });
+      if (!OS_TEXT_INGEST_URL || !OS_TEXT_INGEST_SECRET) {
+        return send(res, 400, { error: 'OS Text ingest not configured (set OS_TEXT_INGEST_URL + OS_TEXT_INGEST_SECRET).' });
+      }
+      const eligible = loadApps().filter((a) => a.smsConsent && a.phone);
+      const tally = { total: eligible.length, created: 0, duplicate: 0, opted_out: 0, suppressed: 0, failed: 0 };
+      for (const a of eligible) {
+        const r = await forwardOptInToOsText(a);
+        if (!r.ok) { tally.failed++; continue; }
+        if (Object.prototype.hasOwnProperty.call(tally, r.status)) tally[r.status]++;
+      }
+      return send(res, 200, { ok: true, ...tally });
     }
     if (p.startsWith('/api/applications/') && method === 'DELETE') {
       if (!isAuthed(req)) return send(res, 401, { error: 'Not authorized' });

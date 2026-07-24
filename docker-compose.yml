@@ -105,6 +105,14 @@ services:
     env_file:
       - path: ./money-maker-sms/.env.production
         required: false
+    environment:
+      # Website opt-in ingest: SMS-opted-in numbers captured on lumesp.com are
+      # pushed here by the lume-jobs service and land as contacts in this
+      # campaign (created as a DRAFT on first use, so nothing sends until you
+      # write the template and activate it). To turn the bridge ON, set
+      # INGEST_SECRET in money-maker-sms/.env.production to the SAME value as
+      # lume-jobs' OS_TEXT_INGEST_SECRET.
+      INGEST_CAMPAIGN_NAME: "Website Opt-Ins"
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
@@ -125,6 +133,14 @@ services:
     env_file:
       - path: .env.production
         required: false
+    environment:
+      # OS Text bridge: push each SMS-opted-in applicant into OS Text (taltxt)
+      # over the internal network, so consented numbers flow straight into an
+      # outreach campaign instead of only emailing Ryan. This URL is the internal
+      # service address; to turn the bridge ON set OS_TEXT_INGEST_SECRET in
+      # .env.production to the SAME value as taltxt's INGEST_SECRET. Optionally set
+      # OS_TEXT_CAMPAIGN_ID to target a specific campaign instead of the default.
+      OS_TEXT_INGEST_URL: http://taltxt:3000/api/ingest/opt-in
     volumes:
       - lume_jobs_data:/data
     expose:
