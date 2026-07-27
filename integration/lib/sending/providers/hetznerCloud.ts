@@ -6,11 +6,12 @@
  */
 
 import { HetznerNotConfigured } from "./hetznerDns";
+import { cloudToken } from "../config";
 
 const BASE = "https://api.hetzner.cloud/v1";
 
 function token(): string {
-  const t = process.env.HCLOUD_TOKEN;
+  const t = cloudToken();
   if (!t) throw new HetznerNotConfigured("HCLOUD_TOKEN");
   return t;
 }
@@ -71,5 +72,5 @@ export async function setReverseDns(serverId: number, ip: string, ptr: string): 
 }
 
 export function cloudConfigured(): boolean {
-  return !!process.env.HCLOUD_TOKEN;
+  return !!cloudToken();
 }

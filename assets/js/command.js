@@ -568,6 +568,7 @@
     var liveOn = false;
     var liveTimer = null;
     var rawDomById = {}; // raw domain records (nameservers + DNS checklist) for the detail view
+    var lastConfig = {}; // portal-managed connection status from GET /api/sending
     view.innerHTML = '<div class="empty">Loading fleet vitals…</div>';
 
     function stopLive() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
@@ -665,6 +666,39 @@
         });
     }
 
+    // Connections: configure the whole sending stack from the portal (no SSH).
+    // Owner-gated (integrations:manage). Secret fields are write-only; a blank
+    // field leaves the stored value unchanged, so we show "connected" vs "not set".
+    function openConnections() {
+      var c = lastConfig || {};
+      function field(id, label, isSet, src, hint) {
+        var status = isSet ? '<span style="color:var(--ok);font-size:11px;font-weight:600">connected' + (src && src !== "portal" ? " (" + esc(src) + ")" : "") + "</span>" : '<span style="color:var(--text-dim);font-size:11px">not set</span>';
+        return '<label style="display:block;margin-bottom:12px;font-size:12px;color:var(--text-dim)"><span style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' + esc(label) + " " + status + "</span>" +
+          '<input id="' + id + '" type="password" autocomplete="new-password" placeholder="' + (isSet ? "leave blank to keep" : "paste token") + '" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"></label>' +
+          (hint ? '<div style="font-size:11px;color:var(--text-dim);margin:-6px 0 12px">' + esc(hint) + "</div>" : "");
+      }
+      var src = c.source || {};
+      var body = "";
+      if (!c.secretsEncrypted) body += '<div style="border:1px solid var(--warn-bg);border-left:3px solid var(--warn);background:var(--warn-bg);border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:12px;color:var(--text-muted)">Secrets are stored unencrypted until SENDING_SECRET_KEY is set on the server. Set it to encrypt these at rest.</div>';
+      body += field("cxDns", "Hetzner DNS token", c.dns, src.dns, "Publishes SPF, DKIM, DMARC, MX for each domain automatically.");
+      body += field("cxCloud", "Hetzner Cloud token", c.cloud, src.cloud, "Provisions the Postal MTA server and sets reverse DNS.");
+      body += field("cxSmart", "Smartlead API key", c.smartlead, src.smartlead, "Pulls warm-up health onto every mailbox.");
+      body += '<label style="display:flex;gap:9px;align-items:center;margin:6px 0 4px;font-size:13px;cursor:pointer"><input id="cxMta" type="checkbox"' + (c.mtaEnabled ? " checked" : "") + '> Route real cold sends through the owned MTA</label>';
+      body += '<div style="font-size:11px;color:var(--text-dim);margin:0 0 16px 24px">Keep off until a Postal server is live and verified. Nothing sends while this is off.</div>';
+      body += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="cxCancel">Cancel</button><button class="btn btn-primary btn-sm" id="cxSave">Save connections</button></div>';
+      openModal("Connections", "Configure the sending stack from the portal", body, function (cardEl, close) {
+        cardEl.querySelector("#cxCancel").addEventListener("click", close);
+        cardEl.querySelector("#cxSave").addEventListener("click", function () {
+          var payload = { action: "set-connections", mtaEnabled: cardEl.querySelector("#cxMta").checked };
+          var dnsv = cardEl.querySelector("#cxDns").value.trim(); if (dnsv) payload.hetznerDnsToken = dnsv;
+          var clv = cardEl.querySelector("#cxCloud").value.trim(); if (clv) payload.hcloudToken = clv;
+          var smv = cardEl.querySelector("#cxSmart").value.trim(); if (smv) payload.smartleadApiKey = smv;
+          close();
+          act(payload, "Connections saved");
+        });
+      });
+    }
+
     // Domain detail: the missing lifecycle surface. Shows the nameservers to set
     // at the registrar, the live/pending DNS record checklist, and the actions to
     // complete setup (verify, re-provision, pull the Postal config to paste).
@@ -723,6 +757,8 @@
         var rf = q("#mbRefresh"); if (rf) rf.addEventListener("click", load);
         var sy = q("#mbSync"); if (sy) sy.addEventListener("click", function () { act({ action: "sync-smartlead" }, "Warm-up health synced"); });
         var lv = q("#mbLive"); if (lv) lv.addEventListener("click", function () { liveOn = !liveOn; lv.textContent = liveOn ? "Live: on" : "Live: off"; if (liveOn) startLive(); else stopLive(); });
+        var cn = q("#mbConnect"); if (cn) cn.addEventListener("click", openConnections);
+        var cn2 = q("#mbConnect2"); if (cn2) cn2.addEventListener("click", openConnections);
         var gv = q("#mbGovernor"); if (gv) gv.addEventListener("click", function () { act({ action: "run-governor" }, "Safety check complete"); });
         view.querySelectorAll("[data-pause]").forEach(function (b) { b.addEventListener("click", function () { pauseMailbox(b.getAttribute("data-pause"), b.getAttribute("data-addr")); }); });
         view.querySelectorAll("[data-resume]").forEach(function (b) { b.addEventListener("click", function () { resumeMailbox(b.getAttribute("data-resume"), b.getAttribute("data-addr")); }); });
@@ -735,6 +771,7 @@
       var domains = health.domains || [];
       var mailboxes = health.mailboxes || [];
       var prov = d.providers || {};
+      lastConfig = d.config || {};
       var domName = {};
       rawDomById = {};
       (d.domains || []).forEach(function (dm) { domName[dm.id] = dm.domain; rawDomById[dm.id] = dm; });
@@ -764,6 +801,7 @@
         '<button class="btn btn-ghost btn-sm" id="mbGovernor">Run safety check</button>' +
         '<button class="btn btn-ghost btn-sm" id="mbRefresh">Refresh</button>' +
         '<button class="btn btn-ghost btn-sm" id="mbLive">' + (liveOn ? "Live: on" : "Live: off") + "</button>" +
+        (can("integrations:manage") ? '<button class="btn btn-ghost btn-sm" id="mbConnect">Connections</button>' : "") +
         '<span style="flex:1"></span>' +
         provChip("Warm-up", prov.smartlead) + provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
         "</div>";
@@ -799,7 +837,8 @@
             var col = s[1] ? "var(--ok)" : "var(--text-dim)";
             return '<div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px"><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';margin-top:4px;flex:none"></span><span><b style="color:var(--text)">' + esc(s[0]) + "</b> <span style=\"color:var(--text-dim)\">" + esc(s[2]) + "</span></span></div>";
           }).join("") +
-          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at the assigned nameservers at your registrar (open the domain to see them), then Verify. Nothing sends until Postal MTA routing is on.</div></div>';
+          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at the assigned nameservers at your registrar (open the domain to see them), then Verify. Nothing sends until MTA routing is on.</div>' +
+          (can("integrations:manage") ? '<div style="margin-top:12px"><button class="btn btn-primary btn-sm" id="mbConnect2">Set up connections</button></div>' : "") + "</div>";
       }
 
       if (!domains.length && !mailboxes.length) {
