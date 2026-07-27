@@ -447,14 +447,31 @@ export class TelnyxClient extends ProviderClient {
 
   /**
    * Bind an inbound phone number to an assistant so calls to it are answered by
-   * the agent. Telnyx exposes this as the assistant's phone-numbers collection.
+   * the agent. Telnyx removed the assistant phone-numbers collection (POST
+   * /ai/assistants/:id/phone_numbers now 404s, code 10005, observed
+   * 2026-07-27); the current model is the TeXML app auto-created with the
+   * assistant: read its id off the assistant, then point the number's
+   * connection at it.
    */
-  assignNumberToAssistant(assistantId: string, phoneNumber: string) {
-    return this.request({
-      method: "POST",
-      path: `/ai/assistants/${encodeURIComponent(assistantId)}/phone_numbers`,
-      body: { phone_number: phoneNumber },
+  async assignNumberToAssistant(assistantId: string, phoneNumber: string) {
+    const a: any = await this.request({ path: `/ai/assistants/${encodeURIComponent(assistantId)}` });
+    if (a?.dryRun) return a;
+    const texmlAppId =
+      a?.data?.telephony_settings?.default_texml_app_id ??
+      a?.telephony_settings?.default_texml_app_id;
+    if (!texmlAppId) {
+      throw new Error("telnyx_bind: assistant has no default_texml_app_id to route the number to");
+    }
+    const found: any = await this.request({
+      path: "/phone_numbers",
+      query: { "filter[phone_number]": phoneNumber },
     });
+    const rows: any[] = Array.isArray(found?.data) ? found.data : [];
+    const num = rows.find((n) => n?.phone_number === phoneNumber) ?? rows[0];
+    if (!num?.id) {
+      throw new Error(`telnyx_bind: ${phoneNumber} is not on this Telnyx account`);
+    }
+    return this.updateNumberConnection(String(num.id), String(texmlAppId));
   }
 
   /**
