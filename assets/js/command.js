@@ -2635,6 +2635,87 @@
     api("/linkedin/dailyops").then(paint).catch(function () { mount.innerHTML = ""; });
   }
 
+  // BD engagement queue: AI-drafted comments + connection notes for emailed BD
+  // prospects, approval-gated. Standby until email sending is live and a
+  // LinkedIn seat is connected; then a fresh queue builds every morning.
+  function liEngagePanel(mount) {
+    if (!mount) return;
+    mount.innerHTML = loading();
+    function statusChip(t) {
+      if (t.status === "approved") return '<span class="lie-chip ok">Approved, sending from your account</span>';
+      if (t.status === "skipped") return '<span class="lie-chip mut">Skipped</span>';
+      if (t.status === "blocked") return '<span class="lie-chip bad">' + esc(t.reason || "Blocked") + "</span>";
+      return "";
+    }
+    function row(t) {
+      var who = esc(t.fullName) +
+        (t.title || t.company ? ' <span class="muted">' + esc([t.title, t.company].filter(Boolean).join(" · ")) + "</span>" : "");
+      var kind = t.kind === "comment" ? "Comment on their latest post" : "Connection note";
+      var open = t.status === "suggested";
+      return '<div class="lie-row' + (open ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
+        '<div class="lie-who">' + who + ' <span class="lie-kind">' + kind + "</span></div>" +
+        (t.postExcerpt ? '<div class="lie-post muted">' + esc(t.postExcerpt.slice(0, 260)) + (t.postExcerpt.length > 260 ? "..." : "") + "</div>" : "") +
+        (open
+          ? '<textarea class="lie-text" rows="2">' + esc(t.text) + "</textarea>" +
+            '<div class="lie-actions">' +
+              '<button class="btn btn-sm btn-primary" data-lie="approve">Approve and send</button> ' +
+              '<button class="btn btn-sm btn-ghost" data-lie="skip">Skip</button>' +
+            "</div>"
+          : '<div class="lie-post">' + esc(t.text) + "</div><div>" + statusChip(t) + "</div>") +
+        "</div>";
+    }
+    function paint(d) {
+      if (!document.body.contains(mount)) return;
+      var st = (d && d.status) || {};
+      var items = (d && d.items) || [];
+      if (!st.active) {
+        mount.innerHTML =
+          '<div class="card liops-card">' +
+            '<div class="liops-head"><div><b>BD engagement queue</b>' +
+              '<div class="muted liops-sub">Daily AI-drafted comments and connection notes for the BD prospects your emails already reached. Nothing sends without your approval.</div></div>' +
+              '<span class="lie-chip mut">Standby</span></div>' +
+            ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join("") || "") +
+          "</div>";
+        return;
+      }
+      var open = items.filter(function (t) { return t.status === "suggested"; }).length;
+      mount.innerHTML =
+        '<div class="card liops-card">' +
+          '<div class="liops-head"><div><b>BD engagement queue</b>' +
+            '<div class="muted liops-sub">Approve or edit each draft; approved items send from your connected account and count toward today\'s tasks.</div></div>' +
+            '<span class="liops-progress' + (open ? "" : " ok") + '">' + (open ? open + " to review" : "Queue clear") + "</span></div>" +
+          (items.length
+            ? items.map(row).join("")
+            : '<div class="lie-post muted">No drafts yet today. New emailed BD prospects with LinkedIn profiles feed the queue each morning.</div>' +
+              '<div class="lie-actions"><button class="btn btn-sm" data-lie-build>Build today\'s queue</button></div>') +
+        "</div>";
+      Array.prototype.forEach.call(mount.querySelectorAll("[data-lie]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var rowEl = btn.closest(".lie-row");
+          var id = rowEl.getAttribute("data-id");
+          var act = btn.getAttribute("data-lie");
+          var ta = rowEl.querySelector(".lie-text");
+          btn.disabled = true;
+          send("/linkedin/engage", "POST", act === "approve"
+            ? { action: "approve", id: id, text: ta ? ta.value : undefined }
+            : { action: "skip", id: id })
+            .then(function (r) {
+              if (r.ok && r.data && r.data.view) paint(r.data.view);
+              if (act === "approve" && r.data && r.data.accepted === false && r.data.reason) toast(r.data.reason);
+            });
+        });
+      });
+      var buildBtn = mount.querySelector("[data-lie-build]");
+      if (buildBtn) buildBtn.addEventListener("click", function () {
+        buildBtn.disabled = true; buildBtn.textContent = "Building...";
+        send("/linkedin/engage", "POST", { action: "build" }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      });
+    }
+    api("/linkedin/engage").then(paint).catch(function () { mount.innerHTML = ""; });
+  }
+
   // Aliases. #builder stays the BD-branded entry (it forces BD via its own
   // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
   var HASH_ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email" };
@@ -21208,8 +21289,9 @@
     // The daily-ops worksheet mounts as a sibling ABOVE the tool host: the
     // LinkedIn OS renderer owns its element's innerHTML entirely (and repaints
     // it on internal tab switches), so the panel must live outside that host.
-    el.innerHTML = '<div class="liops-mount"></div><div class="liops-host"></div>';
+    el.innerHTML = '<div class="liops-mount"></div><div class="lie-mount"></div><div class="liops-host"></div>';
     liOpsPanel($(".liops-mount", el), "outreach");
+    if (motion === "bd") liEngagePanel($(".lie-mount", el));
     var host = $(".liops-host", el);
     var tries = 0;
     (function mount() {

@@ -115,6 +115,13 @@ async function tickLinkedinPosts(): Promise<void> {
   await tickDuePosts(new Date());
 }
 
+/** Build the daily LinkedIn BD engagement queue (idempotent per day; standby
+ *  until email sending is live and a LinkedIn seat is connected). */
+async function tickLinkedinEngage(): Promise<void> {
+  const { tickEngageQueues } = await import("../linkedin/engage");
+  await tickEngageQueues();
+}
+
 /** Advance the 24-month BD nurture drip (due touches + triggers + dormant floor). */
 async function tickNurture(): Promise<void> {
   const { runNurtureTick } = await import("../bd/nurtureCron");
@@ -191,6 +198,7 @@ const TICKS: TickSpec[] = [
   { key: "linkedin", label: "LinkedIn cadence", env: "RECRUITEROS_LINKEDIN_TICK_MS", defaultMs: 3 * 60_000, firstDelayMs: 30_000, fn: tickLinkedin },
   { key: "linkedin_os", label: "LinkedIn OS shared engine", env: "RECRUITEROS_LINKEDIN_OS_TICK_MS", defaultMs: 2 * 60_000, firstDelayMs: 40_000, fn: tickLinkedinOs },
   { key: "linkedin_posts", label: "LinkedIn Poster scheduled posts", env: "RECRUITEROS_LINKEDIN_POSTS_TICK_MS", defaultMs: 60_000, firstDelayMs: 35_000, fn: tickLinkedinPosts },
+  { key: "linkedin_engage", label: "LinkedIn BD engagement queue (daily drafts)", env: "RECRUITEROS_LINKEDIN_ENGAGE_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 110_000, fn: tickLinkedinEngage },
   { key: "voice", label: "Voicemail drops", env: "RECRUITEROS_VOICE_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 45_000, fn: tickVoice },
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },
   { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },

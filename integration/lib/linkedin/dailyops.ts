@@ -188,7 +188,7 @@ export async function buildDailyOps(workspaceId: string, userId: string, authRol
     current: `${commentsToday} tracked today`,
     action: commentsToday >= 10
       ? "Comment target met."
-      : "Spend 15 minutes leaving real comments on posts from your addressable market (owners, TA leaders, hiring managers). Comments made directly on LinkedIn count too; tick this off when you have done 10.",
+      : "Approve comment drafts in the BD engagement queue below, or spend 15 minutes commenting directly on LinkedIn (those count too; tick this off when you have done 10).",
     met: commentsToday >= 10,
     link: "#linkedin",
   });
@@ -201,7 +201,7 @@ export async function buildDailyOps(workspaceId: string, userId: string, authRol
     current: `${touchesToday} sent today`,
     action: touchesToday >= 10
       ? "Touch target met."
-      : "Send connection requests and messages to your addressable market from the LinkedIn tool, or tick this off for touches made directly on LinkedIn.",
+      : "Approve connection notes in the BD engagement queue below, or send from the LinkedIn tool; touches made directly on LinkedIn count too.",
     met: touchesToday >= 10,
     link: "#linkedin",
   });
