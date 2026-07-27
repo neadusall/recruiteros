@@ -1,17 +1,20 @@
 /**
- * AI Vetting · Inbound SMS webhook  (PUBLIC, called by the messaging engine)
+ * AI Vetting · Inbound SMS webhook + router  (PUBLIC, called by the messaging engine)
  *   POST /api/vetting/sms
  *
- * Texts TO a vetting desk's own number land here. The load-bearing case is the
- * scheduling loop: we asked a candidate "what day and time works for a call?"
- * and this is their answer ("today at 4pm EST", "tomorrow morning", "can we do
- * 6 instead"). We resolve the desk by the dialed number, the candidate by the
- * sender's number, parse the reply, and book / rebook / clarify, and the whole
- * exchange stays on the desk's one number.
+ * ONE number can serve both AI Vetting and OS Text: point the number's
+ * messaging-profile inbound webhook here and this route dispatches. A text TO a
+ * vetting desk's number FROM a known vetting candidate is handled here (the
+ * scheduling loop: we asked "what day and time works?", this is the answer).
+ * EVERYTHING else is forwarded byte-for-byte to the OS Text engine over the
+ * internal docker network: campaign replies, unknown senders, non-desk numbers,
+ * and every non-message.received event (delivery receipts feed OS Text stats).
+ * Forwarding preserves the raw body + Telnyx signature headers, so the engine's
+ * own ed25519 verification still passes.
  *
- * Point the desk numbers' messaging-profile inbound webhook at this route.
- * Unknown senders and non-message events are acknowledged and ignored (never
- * an error back to the engine, that would retry-spam us).
+ * Opt-out keywords (STOP etc.) from a vetting candidate are ALSO forwarded so
+ * the engine's compliance ledger always sees them, even when the scheduling
+ * loop treats the same text as a decline.
  *
  * Hardening:
  *  - Delivery retries are DEDUPED by message id, so the engine re-posting the
@@ -20,6 +23,8 @@
  *    signature is REQUIRED and verified over `timestamp|rawBody`; a bad or
  *    stale (>5 min) signature is dropped. No key saved = accepted as-is, the
  *    same trust model as the existing voice webhooks.
+ *  - A failed forward answers 502 so Telnyx retries; nothing is lost to a
+ *    momentary engine restart.
  */
 
 import crypto from "crypto";
@@ -45,6 +50,40 @@ function signatureValid(publicKeyB64: string, signatureB64: string, timestamp: s
   }
 }
 
+/** OS Text engine webhook, reachable on the compose-internal network. */
+const OSTEXT_FORWARD_URL =
+  process.env.OSTEXT_WEBHOOK_FORWARD_URL || "http://taltxt:3000/ostext-app/api/webhooks/telnyx";
+
+/** Carrier opt-out keywords must reach the engine's compliance ledger too. */
+const OPT_OUT = /^\s*(stop|stopall|unsubscribe|cancel|end|quit)\s*$/i;
+
+/**
+ * Relay the untouched event to the OS Text engine. Raw body + the Telnyx
+ * signature headers pass through so the engine verifies exactly what Telnyx
+ * signed. Non-2xx (or an unreachable engine) answers 502 so Telnyx retries.
+ */
+async function forwardToOsText(req: Request, rawBody: string): Promise<NextResponse> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    for (const h of ["telnyx-signature-ed25519", "telnyx-timestamp", "x-telnyx-shared-secret"]) {
+      const v = req.headers.get(h);
+      if (v) headers[h] = v;
+    }
+    const res = await fetch(OSTEXT_FORWARD_URL, {
+      method: "POST",
+      headers,
+      body: rawBody,
+      signal: AbortSignal.timeout(10_000),
+    });
+    return NextResponse.json(
+      { ok: res.ok, forwarded: "ostext", engineStatus: res.status },
+      { status: res.ok ? 200 : 502 },
+    );
+  } catch {
+    return NextResponse.json({ ok: false, forwarded: "ostext", error: "engine_unreachable" }, { status: 502 });
+  }
+}
+
 /** Message ids we've already acted on (bounded; webhook retries are frequent). */
 const seenMessages = new Set<string>();
 
@@ -61,7 +100,8 @@ export async function POST(req: Request) {
   const event = payload?.data ?? payload;
   const type = event?.event_type ?? event?.type;
   if (type && type !== "message.received") {
-    return NextResponse.json({ ok: true, ignored: type });
+    // Delivery receipts and every other message event belong to OS Text.
+    return forwardToOsText(req, rawBody);
   }
 
   const msg = event?.payload ?? event;
@@ -70,11 +110,11 @@ export async function POST(req: Request) {
     Array.isArray(msg?.to) ? (msg.to[0]?.phone_number ?? msg.to[0] ?? "") : (msg?.to?.phone_number ?? msg?.to ?? ""),
   );
   const text = String(msg?.text ?? "").trim();
-  if (!from || !to || !text) return NextResponse.json({ ok: true, ignored: "no_text" });
+  if (!from || !to || !text) return forwardToOsText(req, rawBody);
 
   await ensureVettingReady();
   const desk = findDeskByNumber(to);
-  if (!desk) return NextResponse.json({ ok: true, ignored: "no_desk" });
+  if (!desk) return forwardToOsText(req, rawBody);
 
   // Signature check, fail-closed only when the workspace opted in with a key.
   const sigOk = await withWorkspaceCreds(desk.workspaceId, async () => {
@@ -88,7 +128,15 @@ export async function POST(req: Request) {
   }).catch(() => true);
   if (!sigOk) return NextResponse.json({ ok: true, ignored: "bad_signature" });
 
-  // Dedupe delivery retries: same message id = already handled.
+  // The desk's own candidate first; a workspace-wide phone match covers a
+  // candidate answering from the number on their OTHER desk's file. A sender
+  // vetting doesn't know is OS Text's message, not ours.
+  const candidate =
+    findCandidate(desk.id, from) ?? findCandidateByPhone(desk.workspaceId, from);
+  if (!candidate) return forwardToOsText(req, rawBody);
+
+  // Dedupe delivery retries: same message id = already handled. Marked only on
+  // the handled path so forwarded events always reach the engine.
   const msgId = String(msg?.id ?? event?.id ?? "");
   if (msgId) {
     if (seenMessages.has(msgId)) return NextResponse.json({ ok: true, ignored: "duplicate" });
@@ -96,11 +144,9 @@ export async function POST(req: Request) {
     seenMessages.add(msgId);
   }
 
-  // The desk's own candidate first; a workspace-wide phone match covers a
-  // candidate answering from the number on their OTHER desk's file.
-  const candidate =
-    findCandidate(desk.id, from) ?? findCandidateByPhone(desk.workspaceId, from);
-  if (!candidate) return NextResponse.json({ ok: true, ignored: "unknown_sender" });
+  // STOP and friends: vetting reads it as a decline, the engine's opt-out
+  // ledger must record it too. Fire-and-forget; our own reply still goes out.
+  if (OPT_OUT.test(text)) void forwardToOsText(req, rawBody).catch(() => {});
 
   const res = await handleScheduleReply(candidate.id, text, "sms");
   const fresh = getCandidateById(candidate.id);
