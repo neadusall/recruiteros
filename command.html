@@ -118,16 +118,15 @@
         <!-- Business Development: shown only in BD motion (the toggle is available to
              recruiters too), so a recruiter can run BD from their own portal. Hire Signals
              is the entry point, live who's-hiring market, promote to Prospects and Campaigns. -->
+        <!-- The BD funnel reads top to bottom: find who's hiring (Hire Signals),
+             work them in Pipeline (Clients + Prospects + Companies in one hub),
+             reach out (Email, with Send Queue inside), or let Autopilot run it.
+             Sending infrastructure (Senders, Mailbox Ops) lives under Admin >
+             Infrastructure; old #sendqueue/#senders/#mailboxops links redirect. -->
         <div class="nav-group" data-motion-only="bd">Business development</div>
         <a class="nav-item" data-route="inmarket" data-motion-only="bd" data-cap="sourcing:run"><span class="ni"><svg><use href="#i-radar"/></svg></span> Hire Signals</a>
-        <a class="nav-item" data-route="clients" data-motion-only="bd"><span class="ni"><svg><use href="#i-briefcase"/></svg></span> Clients</a>
+        <a class="nav-item" data-route="clients" data-motion-only="bd"><span class="ni"><svg><use href="#i-briefcase"/></svg></span> Pipeline</a>
         <a class="nav-item" data-route="email" data-motion-only="bd" data-cap="outreach:send"><span class="ni"><svg><use href="#i-mail"/></svg></span> Email</a>
-        <a class="nav-item" data-route="sendqueue" data-motion-only="bd" data-cap="outreach:send"><span class="ni"><svg><use href="#i-layers"/></svg></span> Send Queue</a>
-        <a class="nav-item" data-route="senders" data-motion-only="bd" data-cap="outreach:send"><span class="ni"><svg><use href="#i-send"/></svg></span> Senders</a>
-        <!-- Mailbox Ops: the deliverability command center. Live fleet vitals +
-             the operator "doctor" controls (pause/revive a mailbox on the
-             protocol) over the owned sending stack (lib/sending). -->
-        <a class="nav-item" data-route="mailboxops" data-motion-only="bd" data-cap="outreach:send"><span class="ni"><svg><use href="#i-shield"/></svg></span> Mailbox Ops</a>
         <a class="nav-item" data-route="autopilot" data-motion-only="bd" data-cap="outreach:send"><span class="ni"><svg><use href="#i-zap"/></svg></span> Autopilot</a>
 
         <!-- Tools: the hands-on working instruments (the BD Phone lives here;
@@ -155,18 +154,19 @@
         <a class="nav-item" data-route="calls" data-motion-only="recruiting" data-cap="voice:dial"><span class="ni"><svg><use href="#i-phone"/></svg></span> Calls</a>
         <a class="nav-item" data-route="ostext" data-motion-only="recruiting" data-cap="outreach:send"><span class="ni"><svg><use href="#i-message"/></svg></span> OS Text</a>
         <a class="nav-item" data-route="pipstudio"><span class="ni"><svg><use href="#i-video"/></svg></span> PiP Studio</a>
-        <a class="nav-item" data-route="voicedrops" data-motion-only="bd" data-cap="voice:dial"><span class="ni"><svg><use href="#i-phone"/></svg></span> Voice Drops</a>
-        <a class="nav-item" data-route="voicedrops" data-motion-only="recruiting" data-cap="voice:dial"><span class="ni"><svg><use href="#i-phone"/></svg></span> Voice Drops</a>
+        <!-- Voice Drops: one tool, both motions (the route was never motion-gated). -->
+        <a class="nav-item" data-route="voicedrops" data-cap="voice:dial"><span class="ni"><svg><use href="#i-phone"/></svg></span> Voice Drops</a>
 
         <div class="nav-group" data-cap="team:manage">Admin</div>
         <!-- Outbound Performance: the utilization + accountability command center.
-             Per-user capacity, scores, heatmap, triggers, goals, reports. -->
+             Per-user capacity, scores, heatmap, triggers, goals, reports, plus the
+             OS Text tab (the enrichment-to-SMS KPI tracker; old #ostextkpi links
+             redirect there). Outcome analytics live under Analytics, whose
+             Statistics tab absorbed the old Outreach Statistics page. -->
         <a class="nav-item" data-route="outbound" data-cap="team:manage"><span class="ni"><svg><use href="#i-monitor"/></svg></span> Outbound Performance</a>
-        <!-- OS Text Performance: the enrichment-to-SMS KPI tracker. JD Sourcing
-             scraping/enriching supply paired with Telnyx send-and-response outcomes. -->
-        <a class="nav-item" data-route="ostextkpi" data-cap="team:manage"><span class="ni"><svg><use href="#i-message"/></svg></span> OS Text Performance</a>
-        <a class="nav-item" data-route="outreach-stats" data-cap="team:manage"><span class="ni"><svg><use href="#i-trend"/></svg></span> Outreach Statistics</a>
-        <a class="nav-item" data-route="engine" data-cap="team:manage"><span class="ni"><svg><use href="#i-activity"/></svg></span> Engine / Throughput</a>
+        <!-- Infrastructure: system plumbing in one hub. Engine / Throughput,
+             Senders and Mailbox Ops as tabs; old hashes redirect. -->
+        <a class="nav-item" data-route="infrastructure" data-cap="team:manage"><span class="ni"><svg><use href="#i-activity"/></svg></span> Infrastructure</a>
         <a class="nav-item" data-route="nurture" data-cap="team:manage" data-motion-only="bd"><span class="ni"><svg><use href="#i-loop"/></svg></span> Nurture</a>
         <a class="nav-item" data-route="team" data-cap="team:manage"><span class="ni"><svg><use href="#i-users"/></svg></span> Team</a>
         <a class="nav-item" data-route="setup" data-cap="integrations:manage"><span class="ni"><svg><use href="#i-sliders"/></svg></span> Setup</a>
