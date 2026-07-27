@@ -6552,6 +6552,20 @@
       '.snd-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
       '.snd-actions{display:flex;gap:6px;justify-content:flex-end}' +
       '.snd-grid2{display:flex;gap:10px}.snd-grid2>div{flex:1}' +
+      '.snd-cap{white-space:nowrap}' +
+      '.snd-capinput{width:52px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;background:var(--bg,var(--surface));color:var(--text);font-size:12px;margin:0 4px}' +
+      '.snd-capsave{padding:2px 8px}' +
+      '.snd-health{margin:0 0 16px}' +
+      '.snd-health-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));margin-bottom:8px}' +
+      '.snd-hrow{display:flex;flex-wrap:wrap;gap:10px}' +
+      '.snd-hcard{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:10px 12px;min-width:210px;flex:1}' +
+      '.snd-hname{font-weight:600;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}' +
+      '.snd-hname .muted{font-weight:400;font-size:11px}' +
+      '.snd-hchips{display:flex;flex-wrap:wrap;gap:5px}' +
+      '.snd-hchip{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:999px}' +
+      '.snd-hchip.ok{color:var(--ok);background:var(--ok-bg,rgba(34,197,94,.12))}' +
+      '.snd-hchip.bad{color:var(--danger);background:var(--danger-bg,rgba(239,68,68,.12))}' +
+      '.snd-hchip.warn{color:var(--warn);background:var(--warn-bg,rgba(234,179,8,.14))}' +
       '</style>';
   }
 
@@ -6568,6 +6582,7 @@
       '</div>' +
       '<div id="sndStatsBox" class="snd-stats"></div>' +
       '<div id="sndPoolsBox"></div>' +
+      '<div id="sndHealthBox"></div>' +
       '<div class="snd-toolbar">' +
         '<input id="sndFilter" class="cur-ind-select" placeholder="Filter by recruiter or email…" style="min-width:240px">' +
         '<span id="sndSel" class="muted"></span>' +
@@ -6590,7 +6605,33 @@
     send("/senders", "GET").then(function (r) {
       if (!r.ok) { if (box) box.innerHTML = '<div class="empty">Could not load senders.</div>'; return; }
       sndData = r.data || {};
-      renderSenderStats(); renderSenderPools(); renderSenderRows();
+      renderSenderStats(); renderSenderPools(); renderSenderRows(); loadSenderHealth();
+    });
+  }
+
+  // Per-domain deliverability (SPF/DKIM/DMARC/MX + bounce), live DNS on the server.
+  function loadSenderHealth() {
+    var box = $("#sndHealthBox"); if (!box) return;
+    var inboxes = sndData.inboxes || [];
+    if (!inboxes.length) { box.innerHTML = ""; return; }
+    box.innerHTML = '<div class="snd-health"><div class="snd-health-title">Domain deliverability</div><div class="muted" style="font-size:12px">Checking DNS…</div></div>';
+    send("/senders", "POST", { action: "domainHealth" }).then(function (r) {
+      if (!$("#sndHealthBox")) return;
+      var doms = (r.ok && r.data && r.data.domains) || [];
+      if (!doms.length) { box.innerHTML = ""; return; }
+      function chip(label, on) { return '<span class="snd-hchip ' + (on ? "ok" : "bad") + '">' + esc(label) + (on ? " ✓" : " ✕") + '</span>'; }
+      function bounceChip(pct, sent) {
+        if (!sent) return '<span class="snd-hchip warn">no sends yet</span>';
+        var kind = pct >= 5 ? "bad" : pct >= 2 ? "warn" : "ok";
+        return '<span class="snd-hchip ' + kind + '">bounce ' + esc(pct) + '%</span>';
+      }
+      box.innerHTML = '<div class="snd-health"><div class="snd-health-title">Domain deliverability</div><div class="snd-hrow">' +
+        doms.map(function (d) {
+          return '<div class="snd-hcard">' +
+            '<div class="snd-hname">' + esc(d.domain) + '<span class="muted">' + d.inboxCount + ' inbox' + (d.inboxCount === 1 ? "" : "es") + '</span></div>' +
+            '<div class="snd-hchips">' + chip("SPF", d.spf) + chip("DKIM", d.dkim) + chip("DMARC", d.dmarc) + chip("MX", d.mx) + bounceChip(d.bounceRatePct, d.sent) + '</div>' +
+          '</div>';
+        }).join("") + '</div></div>';
     });
   }
 
@@ -6625,7 +6666,7 @@
       '<td>' + (m.ownerName ? esc(m.ownerName) : '<span class="muted">Unassigned</span>') + '</td>' +
       '<td>' + esc(m.provider) + '</td>' +
       '<td class="muted">' + esc(m.smtpHost) + ':' + esc(m.smtpPort) + '</td>' +
-      '<td>' + esc(m.sentToday) + '/' + esc(m.dailyCap) + '</td>' +
+      '<td class="snd-cap">' + esc(m.sentToday) + ' / <input type="number" class="snd-capinput" min="1" max="30" step="1" value="' + esc(m.dailyCap) + '" data-cap-id="' + esc(m.id) + '" title="Cold emails/day (max 30)"><button class="btn btn-ghost btn-sm snd-capsave" data-cap-id="' + esc(m.id) + '">Save</button></td>' +
       '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '"><svg class="isvg" aria-hidden="true"><use href="#i-alert"/></svg></span>' : '') + '</td>' +
       '<td class="snd-actions"><button class="btn btn-ghost btn-sm" data-snd-act="test" data-id="' + esc(m.id) + '">Test</button>' + toggle + '<button class="btn btn-ghost btn-sm" data-snd-act="delete" data-id="' + esc(m.id) + '">✕</button></td>' +
     '</tr>';
@@ -6643,12 +6684,26 @@
       box.innerHTML = '<div class="empty">' + (inboxes.length ? "No inboxes match that filter." : "No inboxes yet. Click <b>Import inboxes</b> to bulk-load your Email IDs.") + '</div>';
       updateSndSel(); return;
     }
-    box.innerHTML = '<table class="snd-table"><thead><tr><th></th><th>Email ID</th><th>Recruiter</th><th>Provider</th><th>SMTP host</th><th>Cold today</th><th>Status</th><th></th></tr></thead><tbody>' + rows.map(senderRow).join("") + '</tbody></table>';
+    box.innerHTML = '<table class="snd-table"><thead><tr><th></th><th>Email ID</th><th>Recruiter</th><th>Provider</th><th>SMTP host</th><th>Cold / cap</th><th>Status</th><th></th></tr></thead><tbody>' + rows.map(senderRow).join("") + '</tbody></table>';
     Array.prototype.forEach.call(box.querySelectorAll(".snd-pick"), function (cb) {
       cb.addEventListener("change", function () { var id = cb.getAttribute("data-id"); if (cb.checked) sndPicks[id] = true; else delete sndPicks[id]; updateSndSel(); });
     });
     Array.prototype.forEach.call(box.querySelectorAll("[data-snd-act]"), function (b) {
       b.addEventListener("click", function () { sndAction(b.getAttribute("data-id"), b.getAttribute("data-snd-act")); });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll(".snd-capsave"), function (b) {
+      b.addEventListener("click", function () {
+        var id = b.getAttribute("data-cap-id");
+        var inp = box.querySelector('.snd-capinput[data-cap-id="' + id + '"]');
+        var v = inp ? Math.round(Number(inp.value)) : NaN;
+        if (!v || v < 1 || v > 30) { toast("Cap must be between 1 and 30"); return; }
+        b.disabled = true;
+        send("/senders", "POST", { action: "setCap", id: id, dailyCap: v }).then(function (r) {
+          b.disabled = false;
+          if (r.ok) { toast("Daily cap updated"); loadSenders(); }
+          else toast("Update failed: " + ((r.data && r.data.error) || r.status));
+        }).catch(function () { b.disabled = false; });
+      });
     });
     updateSndSel();
   }
