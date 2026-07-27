@@ -12,8 +12,16 @@ import { loadSnapshot, debouncedSaver } from "../db";
 import { encryptSecret } from "./crypto";
 import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap, clampCap } from "./limits";
 import type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, RecruiterPool } from "./types";
+import type { SenderDomainHealth } from "./health";
 
-interface SendersState { inboxes: SenderInbox[]; lastResetDay?: string; }
+/** Cached per-workspace domain-health result (so the tab renders instantly). */
+export interface HealthCacheEntry { checkedAt: string; domains: SenderDomainHealth[]; }
+
+interface SendersState {
+  inboxes: SenderInbox[];
+  lastResetDay?: string;
+  health?: Record<string, HealthCacheEntry>;   // workspaceId -> last domain-health sweep
+}
 
 const KEY = "senders_v1";
 let state: SendersState = { inboxes: [] };
@@ -27,7 +35,7 @@ async function hydrate(): Promise<void> {
   if (!hydrating) {
     hydrating = (async () => {
       const snap = await loadSnapshot<SendersState>(KEY);
-      if (snap && Array.isArray(snap.inboxes)) state = { inboxes: snap.inboxes, lastResetDay: snap.lastResetDay };
+      if (snap && Array.isArray(snap.inboxes)) state = { inboxes: snap.inboxes, lastResetDay: snap.lastResetDay, health: snap.health };
       hydrated = true;
     })();
   }
@@ -86,6 +94,24 @@ export async function getInbox(workspaceId: string, id: string): Promise<SenderI
   return state.inboxes.find((m) => m.id === id && m.workspaceId === workspaceId);
 }
 
+/** Every workspace that has at least one inbox (for fleet-wide health sweeps). */
+export async function workspacesWithInboxes(): Promise<string[]> {
+  await hydrate();
+  return [...new Set(state.inboxes.map((m) => m.workspaceId))];
+}
+
+export async function getHealthCache(workspaceId: string): Promise<HealthCacheEntry | undefined> {
+  await hydrate();
+  return state.health?.[workspaceId];
+}
+
+export async function setHealthCache(workspaceId: string, entry: HealthCacheEntry): Promise<void> {
+  await hydrate();
+  if (!state.health) state.health = {};
+  state.health[workspaceId] = entry;
+  save();
+}
+
 export async function findInboxByEmail(workspaceId: string, email: string): Promise<SenderInbox | undefined> {
   await hydrate();
   const e = email.toLowerCase().trim();
@@ -136,8 +162,14 @@ export async function addInbox(workspaceId: string, input: NewInboxInput): Promi
     m.bounced = prev.bounced;
     m.sentToday = prev.sentToday;
     m.createdAt = prev.createdAt;
+    m.lastSendAt = prev.lastSendAt;
     // keep the prior owner if the re-import didn't specify one
     if (!m.ownerId && prev.ownerId) { m.ownerId = prev.ownerId; m.ownerName = prev.ownerName; }
+    // A re-import refreshes credentials; it must not silently undo manual tuning.
+    // Keep the stored cap unless the import explicitly provides one, and keep the
+    // current status (an "active" inbox must not drop back to "warming").
+    if (input.dailyCap == null) m.dailyCap = prev.dailyCap;
+    if (!input.status) { m.status = prev.status; m.pausedReason = prev.pausedReason; }
     state.inboxes[existingIdx] = m;
   } else {
     state.inboxes.push(m);
@@ -223,19 +255,29 @@ export async function recruiterPools(workspaceId: string): Promise<RecruiterPool
   return [...map.values()].sort((a, b) => b.inboxes - a.inboxes);
 }
 
-export async function stats(workspaceId: string): Promise<{ inboxes: number; active: number; recruiters: number; dailyCapacity: number; remainingToday: number }> {
+export interface ProviderRollup { provider: SenderProvider; inboxes: number; active: number; dailyCapacity: number; remainingToday: number; }
+
+export async function stats(workspaceId: string): Promise<{ inboxes: number; active: number; recruiters: number; dailyCapacity: number; remainingToday: number; providers: ProviderRollup[] }> {
   await hydrate();
   const mine = state.inboxes.filter((m) => m.workspaceId === workspaceId);
   const owners = new Set(mine.filter((m) => m.ownerId).map((m) => m.ownerId));
   let cap = 0, rem = 0, active = 0;
+  const byProvider = new Map<SenderProvider, ProviderRollup>();
   for (const m of mine) {
+    let p = byProvider.get(m.provider);
+    if (!p) { p = { provider: m.provider, inboxes: 0, active: 0, dailyCapacity: 0, remainingToday: 0 }; byProvider.set(m.provider, p); }
+    p.inboxes++;
     if (m.status === "active" || m.status === "warming") {
       active++;
       cap += m.dailyCap;
       rem += Math.max(0, m.dailyCap - m.sentToday);
+      p.active++;
+      p.dailyCapacity += m.dailyCap;
+      p.remainingToday += Math.max(0, m.dailyCap - m.sentToday);
     }
   }
-  return { inboxes: mine.length, active, recruiters: owners.size, dailyCapacity: cap, remainingToday: rem };
+  const providers = [...byProvider.values()].sort((a, b) => b.inboxes - a.inboxes || a.provider.localeCompare(b.provider));
+  return { inboxes: mine.length, active, recruiters: owners.size, dailyCapacity: cap, remainingToday: rem, providers };
 }
 
 /** Record a send against an inbox's daily cap + lifetime counter. */

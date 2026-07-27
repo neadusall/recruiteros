@@ -18,8 +18,8 @@ export { pickSender, poolCapacity } from "./pool";
 
 export { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, MAX_COLD_PER_INBOX, coldCap, clampCap } from "./limits";
 
-export { sendersDomainHealth } from "./health";
-export type { SenderDomainHealth } from "./health";
+export { sendersDomainHealth, ensureSendersHealth, peekSendersHealth, sweepSendersHealth } from "./health";
+export type { SenderDomainHealth, SendersHealthSnapshot } from "./health";
 
 export { sendViaInbox, verifyInbox } from "./smtp";
 export type { SmtpMessage, SmtpResult } from "./smtp";

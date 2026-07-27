@@ -6553,10 +6553,16 @@
       '.snd-actions{display:flex;gap:6px;justify-content:flex-end}' +
       '.snd-grid2{display:flex;gap:10px}.snd-grid2>div{flex:1}' +
       '.snd-cap{white-space:nowrap}' +
+      '#sndBody{overflow-x:auto}' +
       '.snd-capinput{width:52px;padding:3px 5px;border:1px solid var(--border);border-radius:6px;background:var(--bg,var(--surface));color:var(--text);font-size:12px;margin:0 4px}' +
       '.snd-capsave{padding:2px 8px}' +
       '.snd-health{margin:0 0 16px}' +
-      '.snd-health-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));margin-bottom:8px}' +
+      '.snd-hhead{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}' +
+      '.snd-health-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim))}' +
+      '.snd-hmeta{font-size:11px;color:var(--muted,var(--text-dim))}' +
+      '.snd-provrow{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 14px}' +
+      '.snd-provchip{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid var(--border);color:var(--muted,var(--text-dim));background:var(--surface)}' +
+      '.snd-provchip b{color:var(--text);font-weight:700}' +
       '.snd-hrow{display:flex;flex-wrap:wrap;gap:10px}' +
       '.snd-hcard{border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:10px 12px;min-width:210px;flex:1}' +
       '.snd-hname{font-weight:600;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}' +
@@ -6573,7 +6579,7 @@
     sndPicks = {};
     el.innerHTML = sndStyles() +
       '<div class="im-hero">' +
-        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>), about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); warm-up runs them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
+        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>), about <b>50 per domain</b>, each owned by a recruiter. Each Email ID starts at <b>2 cold emails/day</b>; raise its cap per inbox (up to 30/day) as it matures. Warm-up runs them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
         '<div class="btn-row">' +
           '<button class="btn btn-primary btn-sm" id="sndImport">Import inboxes (CSV)</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndAdd">+ Add one</button>' +
@@ -6587,6 +6593,7 @@
         '<input id="sndFilter" class="cur-ind-select" placeholder="Filter by recruiter or email…" style="min-width:240px">' +
         '<span id="sndSel" class="muted"></span>' +
         '<button class="btn btn-ghost btn-sm" id="sndAssignSel" disabled>Assign selected to recruiter…</button>' +
+        '<button class="btn btn-ghost btn-sm" id="sndCapSel" disabled>Set daily cap…</button>' +
       '</div>' +
       '<div id="sndBody"><div class="empty">Loading…</div></div>';
     $("#sndImport").addEventListener("click", openSenderImport);
@@ -6597,6 +6604,17 @@
       var ids = Object.keys(sndPicks); if (!ids.length) return;
       pickRecruiter(function (m) { if (m) doAssign(ids, m); });
     });
+    $("#sndCapSel").addEventListener("click", function () {
+      var ids = Object.keys(sndPicks); if (!ids.length) return;
+      var v = window.prompt("Daily cold emails per inbox for the " + ids.length + " selected (1-30):", "2");
+      if (v === null) return;
+      var cap = Math.round(Number(v));
+      if (!cap || cap < 1 || cap > 30) { toast("Cap must be between 1 and 30"); return; }
+      send("/senders", "POST", { action: "setCap", ids: ids, dailyCap: cap }).then(function (r) {
+        if (r.ok) { toast("Cap set to " + cap + "/day on " + ((r.data && r.data.updated) || ids.length) + " inboxes"); sndPicks = {}; loadSenders(); }
+        else toast("Update failed: " + ((r.data && r.data.error) || r.status));
+      });
+    });
     loadSenders();
   }
 
@@ -6605,40 +6623,76 @@
     send("/senders", "GET").then(function (r) {
       if (!r.ok) { if (box) box.innerHTML = '<div class="empty">Could not load senders.</div>'; return; }
       sndData = r.data || {};
-      renderSenderStats(); renderSenderPools(); renderSenderRows(); loadSenderHealth();
+      renderSenderStats(); renderSenderPools(); renderSenderRows();
+      // Health rides the GET payload (cached server-side); first-ever view has no
+      // cache yet, so fall back to one live check.
+      if (sndData.health) renderSenderHealth(sndData.health);
+      else refreshSenderHealth(false);
     });
   }
 
-  // Per-domain deliverability (SPF/DKIM/DMARC/MX + bounce), live DNS on the server.
-  function loadSenderHealth() {
+  // Per-domain deliverability (SPF/DKIM/DMARC/MX + bounce). Server caches the DNS
+  // sweep; force=true re-checks live (the Re-check button).
+  function refreshSenderHealth(force) {
     var box = $("#sndHealthBox"); if (!box) return;
     var inboxes = sndData.inboxes || [];
     if (!inboxes.length) { box.innerHTML = ""; return; }
-    box.innerHTML = '<div class="snd-health"><div class="snd-health-title">Domain deliverability</div><div class="muted" style="font-size:12px">Checking DNS…</div></div>';
-    send("/senders", "POST", { action: "domainHealth" }).then(function (r) {
+    box.innerHTML = '<div class="snd-health"><div class="snd-hhead"><div class="snd-health-title">Domain deliverability</div><span class="snd-hmeta">Checking DNS…</span></div></div>';
+    send("/senders", "POST", { action: "domainHealth", refresh: !!force }).then(function (r) {
       if (!$("#sndHealthBox")) return;
-      var doms = (r.ok && r.data && r.data.domains) || [];
-      if (!doms.length) { box.innerHTML = ""; return; }
-      function chip(label, on) { return '<span class="snd-hchip ' + (on ? "ok" : "bad") + '">' + esc(label) + (on ? " ✓" : " ✕") + '</span>'; }
-      function bounceChip(pct, sent) {
-        if (!sent) return '<span class="snd-hchip warn">no sends yet</span>';
-        var kind = pct >= 5 ? "bad" : pct >= 2 ? "warn" : "ok";
-        return '<span class="snd-hchip ' + kind + '">bounce ' + esc(pct) + '%</span>';
-      }
-      box.innerHTML = '<div class="snd-health"><div class="snd-health-title">Domain deliverability</div><div class="snd-hrow">' +
-        doms.map(function (d) {
-          return '<div class="snd-hcard">' +
-            '<div class="snd-hname">' + esc(d.domain) + '<span class="muted">' + d.inboxCount + ' inbox' + (d.inboxCount === 1 ? "" : "es") + '</span></div>' +
-            '<div class="snd-hchips">' + chip("SPF", d.spf) + chip("DKIM", d.dkim) + chip("DMARC", d.dmarc) + chip("MX", d.mx) + bounceChip(d.bounceRatePct, d.sent) + '</div>' +
-          '</div>';
-        }).join("") + '</div></div>';
+      if (r.ok && r.data) renderSenderHealth(r.data);
+      else box.innerHTML = "";
     });
+  }
+
+  function senderHealthAge(checkedAt) {
+    var t = Date.parse(checkedAt || "");
+    if (!isFinite(t)) return "";
+    var mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (mins < 1) return "checked just now";
+    if (mins < 60) return "checked " + mins + "m ago";
+    var hrs = Math.round(mins / 60);
+    if (hrs < 48) return "checked " + hrs + "h ago";
+    return "checked " + Math.round(hrs / 24) + "d ago";
+  }
+
+  function renderSenderHealth(h) {
+    var box = $("#sndHealthBox"); if (!box) return;
+    var doms = (h && h.domains) || [];
+    if (!doms.length) { box.innerHTML = ""; return; }
+    function chip(label, on) { return '<span class="snd-hchip ' + (on ? "ok" : "bad") + '">' + esc(label) + (on ? " ✓" : " ✕") + '</span>'; }
+    function bounceChip(pct, sent) {
+      if (!sent) return '<span class="snd-hchip warn">no sends yet</span>';
+      var kind = pct >= 5 ? "bad" : pct >= 2 ? "warn" : "ok";
+      return '<span class="snd-hchip ' + kind + '">bounce ' + esc(pct) + '%</span>';
+    }
+    box.innerHTML = '<div class="snd-health"><div class="snd-hhead">' +
+      '<div class="snd-health-title">Domain deliverability</div>' +
+      '<span class="snd-hmeta">' + esc(senderHealthAge(h.checkedAt)) + (h.stale ? " · refreshing…" : "") + '</span>' +
+      '<button class="btn btn-ghost btn-sm" id="sndHealthRe">Re-check</button>' +
+      '</div><div class="snd-hrow">' +
+      doms.map(function (d) {
+        return '<div class="snd-hcard">' +
+          '<div class="snd-hname">' + esc(d.domain) + '<span class="muted">' + d.inboxCount + ' inbox' + (d.inboxCount === 1 ? "" : "es") + '</span></div>' +
+          '<div class="snd-hchips">' + chip("SPF", d.spf) + chip("DKIM", d.dkim) + chip("DMARC", d.dmarc) + chip("MX", d.mx) + bounceChip(d.bounceRatePct, d.sent) + '</div>' +
+        '</div>';
+      }).join("") + '</div></div>';
+    var re = $("#sndHealthRe"); if (re) re.addEventListener("click", function () { refreshSenderHealth(true); });
   }
 
   function renderSenderStats() {
     var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
     function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
     box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
+    // Sending power by source: every connected mail source rolls up in one strip.
+    var old = $("#sndProvRow"); if (old && old.parentNode) old.parentNode.removeChild(old);
+    var provs = s.providers || [];
+    if (provs.length) {
+      box.insertAdjacentHTML("afterend",
+        '<div class="snd-provrow" id="sndProvRow">' + provs.map(function (p) {
+          return '<span class="snd-provchip"><b>' + esc(p.provider) + '</b> · ' + esc(p.inboxes) + ' inbox' + (p.inboxes === 1 ? "" : "es") + ' · ' + esc(p.dailyCapacity) + '/day</span>';
+        }).join("") + '</div>');
+    }
   }
 
   function renderSenderPools() {
@@ -6712,6 +6766,7 @@
     var n = Object.keys(sndPicks).length;
     var s = $("#sndSel"); if (s) s.textContent = n ? (n + " selected") : "";
     var b = $("#sndAssignSel"); if (b) b.disabled = !n;
+    var c = $("#sndCapSel"); if (c) c.disabled = !n;
   }
 
   function sndAction(id, action) {
@@ -6772,7 +6827,7 @@
       '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="impRecr">Choose recruiter…</button> <span id="impRecrName" class="muted">Unassigned</span></div>' +
       '<label style="margin-top:10px;display:block">Provider</label>' +
       '<select id="impProv" class="cur-ind-select"><option value="own-smtp">Own SMTP server</option><option value="sending-ac">Sending.ac</option><option value="google">Google</option><option value="outlook">Outlook</option><option value="other">Other</option></select>' +
-      '<div class="muted" style="margin-top:10px"><b>Sending limit (hard):</b> 2 cold emails/day per Email ID. Warming (10/day per inbox) runs in the warm-up engine, not here.</div>' +
+      '<div class="muted" style="margin-top:10px"><b>Sending limit:</b> each Email ID starts at 2 cold emails/day; raise it per inbox (max 30) once it has matured. Warming (10/day per inbox) runs in the warm-up engine, not here.</div>' +
       '<label style="margin-top:10px;display:block">Upload CSV</label>' +
       '<input id="impFile" type="file" accept=".csv,.tsv,.txt">' +
       '<label style="margin-top:10px;display:block">…or paste rows</label>' +
