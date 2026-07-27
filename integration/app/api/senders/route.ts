@@ -7,6 +7,8 @@
  *   { action: "assign", ids:[], ownerId, ownerName? }     bulk assign a pool to a recruiter
  *   { action: "setStatus", ids:[], status, pausedReason? }
  *   { action: "test", id }                                verify SMTP login
+ *   { action: "setCap", id, dailyCap }                    set one inbox's daily cold cap (clamped 1..MAX)
+ *   { action: "domainHealth" }                            per-domain SPF/DKIM/DMARC/MX + bounce rate
  *
  * Inboxes are scoped to the caller's workspace (= portal), so RecruitersOS and Lume
  * pools never mix. Secrets are encrypted at rest and never returned.
@@ -15,6 +17,7 @@ import { requireSession, requireCapability, body, ok, fail } from "../../../lib/
 import {
   listInboxes, toPublic, addInbox, deleteInbox, getInbox, saveInbox,
   assignOwner, setStatus, recruiterPools, stats, verifyInbox,
+  clampCap, sendersDomainHealth,
 } from "../../../lib/senders";
 import type { SenderProvider, SenderStatus } from "../../../lib/senders";
 
@@ -79,6 +82,18 @@ export async function POST(req: Request) {
         m.lastError = r.ok ? undefined : r.error;
         await saveInbox(m);
         return ok({ ok: r.ok, error: r.error });
+      }
+      case "setCap": {
+        if (!b.id) return fail("missing_id", 422);
+        const m = await getInbox(ws, b.id);
+        if (!m) return fail("not_found", 404);
+        m.dailyCap = clampCap(b.dailyCap);   // never above the absolute hard ceiling
+        await saveInbox(m);
+        return ok({ inbox: toPublic(m) });
+      }
+      case "domainHealth": {
+        const inboxes = await listInboxes(ws);
+        return ok({ domains: await sendersDomainHealth(inboxes) });
       }
       default:
         return fail("unknown_action", 400);

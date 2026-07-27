@@ -10,7 +10,7 @@
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { encryptSecret } from "./crypto";
-import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap } from "./limits";
+import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap, clampCap } from "./limits";
 import type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, RecruiterPool } from "./types";
 
 interface SendersState { inboxes: SenderInbox[]; lastResetDay?: string; }
@@ -119,7 +119,7 @@ export async function addInbox(workspaceId: string, input: NewInboxInput): Promi
     imapPort: input.imapHost ? normalizePort(input.imapPort, 993) : undefined,
     imapUser: input.imapHost ? (input.imapUser || input.email).trim() : undefined,
     imapPassEnc: input.imapHost ? encryptSecret(input.imapPass || input.smtpPass || "") : undefined,
-    dailyCap: COLD_PER_INBOX,   // HARD cap: 2 cold emails/day per Email ID (limits.ts)
+    dailyCap: clampCap(input.dailyCap),   // honors an explicit cap up to MAX_COLD_PER_INBOX; defaults to COLD_PER_INBOX (limits.ts)
     sentToday: 0,
     status: input.status || "warming",
     warmExternal: input.warmExternal ?? true,
