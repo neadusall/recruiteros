@@ -123,7 +123,10 @@ function buildTools(desk: VettingDesk): unknown[] {
 export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
   return {
     name: `AI Vetting · ${desk.roleTitle || desk.name}`.slice(0, 120),
-    model: process.env.RECRUITEROS_VETTING_ENGINE_MODEL || "meta-llama/Llama-3.3-70B-Instruct",
+    // Telnyx dropped the Llama models from AI Assistants (422 code 10027,
+    // observed 2026-07-27); gpt-5.4-mini is their GA voice-assistant model,
+    // verified accepted on a live account the same day.
+    model: process.env.RECRUITEROS_VETTING_ENGINE_MODEL || "openai/gpt-5.4-mini",
     instructions: buildAssistantInstructions(desk),
     greeting: buildGreeting(desk),
     voice: voiceSelector(desk),
