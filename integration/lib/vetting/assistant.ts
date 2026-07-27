@@ -71,6 +71,50 @@ async function ensureElevenLabsKeyRef(): Promise<string | undefined> {
   }
 }
 
+/** Name of the per-account Insight Group whose webhook returns our transcripts. */
+const INSIGHT_GROUP_NAME = "RecruitersOS Vetting";
+
+/**
+ * Resolve the insight_group_id for insight_settings. Telnyx's current surface
+ * delivers post-call data ONLY through an Insight Group's webhook
+ * (conversation.insights.completed) — the old insight_settings.webhook_url is
+ * silently ignored. Ensured idempotently per Telnyx account, with one tiny
+ * summary insight attached so the group always has something to run (a group
+ * fires its webhook after insights complete). Must run inside the workspace
+ * credential context. Best-effort: failures return undefined and the desk
+ * still provisions (calls then simply produce no transcript until re-synced).
+ */
+async function ensureInsightGroupId(): Promise<string | undefined> {
+  try {
+    const list: any = await telnyx.listInsightGroups(50);
+    if (list?.dryRun) return undefined;
+    const rows: any[] = Array.isArray(list?.data) ? list.data : [];
+    const existing = rows.find((g) => g?.name === INSIGHT_GROUP_NAME);
+    if (existing?.id) return String(existing.id);
+
+    const webhook = `${appUrl()}/api/vetting/webhook`;
+    const created: any = await telnyx.createInsightGroup(
+      INSIGHT_GROUP_NAME, webhook, "Post-call delivery for AI Vetting scoring (managed by RecruitersOS)",
+    );
+    const groupId = created?.data?.id ?? created?.id;
+    if (!groupId) return undefined;
+
+    // One minimal insight so the group runs (and its webhook fires) per call.
+    // The real scoring stays in-app off the fetched transcript.
+    const ins: any = await telnyx.createInsight({
+      name: "recruitersos_call_summary",
+      instructions: "Summarize this phone screen in two factual sentences: who was screened for what role, and how the call ended.",
+      json_schema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] },
+    });
+    const insightId = ins?.data?.id ?? ins?.id;
+    if (insightId) await telnyx.assignInsightToGroup(String(groupId), String(insightId));
+    return String(groupId);
+  } catch (e: any) {
+    console.error(`[vetting] insight group ensure failed: ${e?.message || e}`);
+    return undefined;
+  }
+}
+
 /**
  * The desk's mid-call tools, all Telnyx-native so the single-stack contract
  * holds (no third vendor in the call path):
@@ -149,6 +193,11 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
         style: t.style,
         speed: t.speed,
         use_speaker_boost: t.speakerBoost,
+        // A quiet office ambience under the whole call. Total digital silence
+        // between turns is itself a bot tell, and the bed masks tool-call gaps.
+        // Telnyx defaults volume to 1.0 which is far too loud; 0.1 is the
+        // barely-registers level practitioners recommend.
+        background_audio: { type: "predefined_media", value: "office", volume: 0.1 },
       };
     })(),
     // Barge-in + turn pacing from the desk's TurnTuning (Optimizer tab). Telnyx
@@ -167,8 +216,16 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
       return {
         enable: tt.interruptions,
         disable_greeting_interruption: false,
+        // Semantic interruption prediction (deepgram/flux only): the agent
+        // keeps talking through backchannels ("mm-hmm", "yeah") instead of
+        // stopping dead — one of the top ranked bot tells. 0.4 is Telnyx's
+        // recommended starting point; 0 disables.
+        interrupt_prediction_threshold: 0.4,
         start_speaking_plan: {
-          wait_seconds: r2(Math.min(2, Math.max(0.2, 0.7 - 0.5 * s) + pause)),
+          // Anchored so the default sensitivity slider (0.6) lands on 0.3s —
+          // Telnyx's own customer-service recommendation now that flux's
+          // semantic end-of-turn does the heavy lifting (was 0.4s).
+          wait_seconds: r2(Math.min(2, Math.max(0.15, 0.6 - 0.5 * s) + pause)),
           transcription_endpointing_plan: {
             on_punctuation_seconds: 0.1,
             on_no_punctuation_seconds: r2(Math.max(0.8, 2.1 - 1.0 * s)),
@@ -183,9 +240,25 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
     tools: buildTools(desk),
     // Resolve who's calling (name + LinkedIn talking points) by caller ID.
     dynamic_variables_webhook_url: `${appUrl()}/api/vetting/context`,
-    // Record + transcribe, and post the finished call to us for scoring.
-    transcription: { model: "distil-whisper/distil-large-v3" },
-    insight_settings: { webhook_url: `${appUrl()}/api/vetting/webhook` },
+    // Default 1500ms is tight for a cold route; Telnyx proceeds best-effort on
+    // timeout (no retry), which silently strips the caller's whole context.
+    dynamic_variables_webhook_timeout_ms: 5000,
+    // deepgram/flux: transcription + SEMANTIC end-of-turn in one model
+    // (~260ms turn detection, 250-600ms faster than silence-timer endpointing)
+    // and the only model that supports interruption prediction above. The old
+    // distil-whisper is legacy on the current Telnyx surface. eot 0.7 =
+    // Deepgram's default (snappy; raise toward 0.8 if it clips callers),
+    // eager 0.4 starts LLM work speculatively ~200ms early, timeout 3s caps
+    // the wait on short screen answers.
+    transcription: {
+      model: "deepgram/flux",
+      language: "en",
+      settings: { eot_threshold: 0.7, eager_eot_threshold: 0.4, eot_timeout_ms: 3000 },
+    },
+    // insight_settings.webhook_url is IGNORED on the current surface; the
+    // post-call pipe is the Insight Group's webhook (see ensureInsightGroupId,
+    // wired inside provisionDesk's creds context).
+    insight_settings: {},
     telephony_settings: (() => {
       const tt = clampTurnTuning(desk.turnTuning);
       return {
@@ -215,12 +288,13 @@ export interface ProvisionResult {
  * an error string the route can surface — so a Telnyx hiccup can't 500 the UI.
  */
 export async function provisionDesk(desk: VettingDesk): Promise<ProvisionResult> {
-  const config = buildAssistantConfig(desk);
-
   try {
     // Isolation: a customer's AI Vetting desk is provisioned on THEIR Telnyx
-    // account, never the operator's env key.
+    // account, never the operator's env key. The config builds INSIDE this
+    // context so its cred() reads (default voice, ElevenLabs key ref) resolve
+    // to the workspace's own credentials, not the house env.
     return await withWorkspaceCreds(desk.workspaceId, async () => {
+      const config = buildAssistantConfig(desk);
       // ElevenLabs voices only speak when the key is stored on THIS Telnyx
       // account as an integration secret, referenced by voice_settings.api_key_ref.
       // Ensure it (idempotently, from the workspace's own VOICE_CLONE_API_KEY) and
@@ -231,6 +305,11 @@ export async function provisionDesk(desk: VettingDesk): Promise<ProvisionResult>
         const ref = await ensureElevenLabsKeyRef();
         if (ref) (config.voice_settings as Record<string, unknown>).api_key_ref = ref;
       }
+      // Post-call transcripts + scoring arrive via the Insight Group webhook
+      // on the current Telnyx surface; ensure the group on THIS account and
+      // reference it. Best-effort: a desk still goes live without it.
+      const groupId = await ensureInsightGroupId();
+      if (groupId) (config.insight_settings as Record<string, unknown>).insight_group_id = groupId;
       let assistantId = desk.assistantId;
       let dryRun = false;
 

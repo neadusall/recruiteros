@@ -424,6 +424,56 @@ export class TelnyxClient extends ProviderClient {
   }
 
   /* =====================================================================
+   *  Conversations + Insight Groups (the post-call data plane)
+   *
+   *  Telnyx's current assistants surface no longer posts transcripts to an
+   *  insight_settings.webhook_url; instead the assistant references an
+   *  Insight Group (insight_settings.insight_group_id) whose own `webhook`
+   *  fires conversation.insights.completed after each call. The webhook
+   *  payload carries only ids + insight results, so the transcript is
+   *  fetched from the conversations API here.
+   * ===================================================================== */
+
+  listInsightGroups(pageSize = 50) {
+    return this.request({ path: "/ai/conversations/insight-groups", query: { "page[size]": pageSize } });
+  }
+
+  /** Create an insight group; `webhook` is POSTed insights after each call. */
+  createInsightGroup(name: string, webhook: string, description?: string) {
+    return this.request({
+      method: "POST",
+      path: "/ai/conversations/insight-groups",
+      body: { name, webhook, ...(description ? { description } : {}) },
+    });
+  }
+
+  /** Create an insight (an LLM pass Telnyx runs over each conversation). */
+  createInsight(body: { name: string; instructions: string; json_schema?: unknown; webhook?: string }) {
+    return this.request({ method: "POST", path: "/ai/conversations/insights", body });
+  }
+
+  listInsights(pageSize = 50) {
+    return this.request({ path: "/ai/conversations/insights", query: { "page[size]": pageSize } });
+  }
+
+  assignInsightToGroup(groupId: string, insightId: string) {
+    return this.request({
+      method: "POST",
+      path: `/ai/conversations/insight-groups/${encodeURIComponent(groupId)}/insights/${encodeURIComponent(insightId)}/assign`,
+    });
+  }
+
+  /** Conversation metadata: telnyx_agent_target / telnyx_end_user_target / assistant_id. */
+  getConversation(conversationId: string) {
+    return this.request({ path: `/ai/conversations/${encodeURIComponent(conversationId)}` });
+  }
+
+  /** Ordered conversation turns ({ role, text, created_at }); transcript source. */
+  getConversationMessages(conversationId: string) {
+    return this.request({ path: `/ai/conversations/${encodeURIComponent(conversationId)}/messages` });
+  }
+
+  /* =====================================================================
    *  Integration secrets — the store the AI Assistant references for its
    *  ElevenLabs key. An assistant speaks in an ElevenLabs voice only when the
    *  ElevenLabs API key is stored on the SAME Telnyx account as an integration
@@ -543,9 +593,11 @@ export interface AssistantConfig {
   interruption_settings?: Record<string, unknown>;
   /** Called per-call to resolve {{dynamic_variables}} (caller identity/context). */
   dynamic_variables_webhook_url?: string;
+  /** How long Telnyx waits on that webhook before best-effort defaults (ms, max 10000). */
+  dynamic_variables_webhook_timeout_ms?: number;
   /** Mid-call tools (Telnyx-native: webhook tools, transfer; hangup is built in). */
   tools?: unknown[];
-  /** Where Telnyx posts the finished transcript + recording for scoring. */
+  /** References the Insight Group whose webhook delivers post-call results. */
   insight_settings?: Record<string, unknown>;
   transcription?: Record<string, unknown>;
   telephony_settings?: Record<string, unknown>;
