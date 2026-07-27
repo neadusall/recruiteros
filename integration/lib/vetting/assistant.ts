@@ -136,6 +136,10 @@ export function buildAssistantConfig(desk: VettingDesk): AssistantConfig {
     voice_settings: (() => {
       const t = clampVoiceTuning(desk.voiceTuning);
       return {
+        // Telnyx now REQUIRES the voice inside voice_settings too (400 code
+        // 10004, source pointer /body/voice_settings/voice, observed
+        // 2026-07-27); the top-level `voice` alone no longer satisfies it.
+        voice: voiceSelector(desk),
         api_key_ref: cred("TELNYX_ELEVENLABS_KEY_REF") || undefined,
         temperature: Math.round((1 - t.stability) * 100) / 100,
         similarity_boost: t.similarityBoost,
