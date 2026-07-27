@@ -14,6 +14,7 @@
  */
 
 import type { SenderInbox } from "./types";
+import { getHealthCache, setHealthCache, listInboxes, workspacesWithInboxes } from "./store";
 
 export interface SenderDomainHealth {
   domain: string;
@@ -96,4 +97,74 @@ export async function sendersDomainHealth(inboxes: SenderInbox[]): Promise<Sende
   }
   const out = await Promise.all([...byDomain.entries()].map(([d, ms]) => checkDomain(d, ms)));
   return out.sort((a, b) => b.inboxCount - a.inboxCount || a.domain.localeCompare(b.domain));
+}
+
+/* ------------------------------------------------------------------------- *
+ * Cached health: the tab renders instantly from the last sweep instead of
+ * hammering DNS on every view; a stale cache self-heals in the background,
+ * and a cron-authed sweep can keep every workspace fresh on a timer.
+ * ------------------------------------------------------------------------- */
+
+export interface SendersHealthSnapshot {
+  checkedAt: string;
+  domains: SenderDomainHealth[];
+  stale: boolean;
+}
+
+const HEALTH_TTL_MS = 6 * 60 * 60 * 1000;   // consider a sweep fresh for 6 hours
+
+/** One live check per workspace at a time — concurrent viewers share the run. */
+const inFlight = new Map<string, Promise<SendersHealthSnapshot>>();
+
+function isFresh(checkedAt: string): boolean {
+  const t = Date.parse(checkedAt);
+  return Number.isFinite(t) && Date.now() - t < HEALTH_TTL_MS;
+}
+
+/**
+ * Run (or join) a live DNS sweep for the workspace and cache the result.
+ * `force` re-checks even when the cache is fresh (the UI's Refresh button).
+ */
+export async function ensureSendersHealth(workspaceId: string, force = false): Promise<SendersHealthSnapshot> {
+  const cached = await getHealthCache(workspaceId);
+  if (cached && !force && isFresh(cached.checkedAt)) return { ...cached, stale: false };
+  const running = inFlight.get(workspaceId);
+  if (running) return running;
+  const run = (async () => {
+    try {
+      const inboxes = await listInboxes(workspaceId);
+      const domains = await sendersDomainHealth(inboxes);
+      const checkedAt = new Date().toISOString();
+      await setHealthCache(workspaceId, { checkedAt, domains });
+      return { checkedAt, domains, stale: false };
+    } finally {
+      inFlight.delete(workspaceId);
+    }
+  })();
+  inFlight.set(workspaceId, run);
+  return run;
+}
+
+/**
+ * Cache-first read for GET: returns the last sweep immediately (flagged stale
+ * when past TTL) and kicks a background refresh so the next view is fresh.
+ * Null when no sweep has ever run for the workspace.
+ */
+export async function peekSendersHealth(workspaceId: string): Promise<SendersHealthSnapshot | null> {
+  const cached = await getHealthCache(workspaceId);
+  if (!cached) return null;
+  const fresh = isFresh(cached.checkedAt);
+  if (!fresh) void ensureSendersHealth(workspaceId).catch(() => {});
+  return { ...cached, stale: !fresh };
+}
+
+/** Refresh every workspace that has inboxes (cron-authed timer endpoint). */
+export async function sweepSendersHealth(): Promise<{ workspaces: number; domains: number }> {
+  const ids = await workspacesWithInboxes();
+  let domains = 0;
+  for (const ws of ids) {
+    const s = await ensureSendersHealth(ws, true);
+    domains += s.domains.length;
+  }
+  return { workspaces: ids.length, domains };
 }

@@ -7,32 +7,45 @@
  *   { action: "assign", ids:[], ownerId, ownerName? }     bulk assign a pool to a recruiter
  *   { action: "setStatus", ids:[], status, pausedReason? }
  *   { action: "test", id }                                verify SMTP login
- *   { action: "setCap", id, dailyCap }                    set one inbox's daily cold cap (clamped 1..MAX)
- *   { action: "domainHealth" }                            per-domain SPF/DKIM/DMARC/MX + bounce rate
+ *   { action: "setCap", id|ids, dailyCap }                set daily cold cap, single or bulk (clamped 1..MAX)
+ *   { action: "domainHealth", refresh? }                  per-domain SPF/DKIM/DMARC/MX + bounce (cached; refresh forces live DNS)
+ *
+ * GET ?health=1&secret=<cron>  -> refresh every workspace's domain-health cache (timer endpoint)
  *
  * Inboxes are scoped to the caller's workspace (= portal), so RecruitersOS and Lume
  * pools never mix. Secrets are encrypted at rest and never returned.
  */
 import { requireSession, requireCapability, body, ok, fail } from "../../../lib/api";
+import { requireCronAuth } from "../../../lib/linkedin/auth";
 import {
   listInboxes, toPublic, addInbox, deleteInbox, getInbox, saveInbox,
   assignOwner, setStatus, recruiterPools, stats, verifyInbox,
-  clampCap, sendersDomainHealth,
+  clampCap, ensureSendersHealth, peekSendersHealth, sweepSendersHealth,
 } from "../../../lib/senders";
 import type { SenderProvider, SenderStatus } from "../../../lib/senders";
 
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+
+  // Cron-authed fleet-wide health sweep (?health=1&secret=...) so a timer can
+  // keep every workspace's domain-health cache fresh without a session.
+  if (url.searchParams.get("health") === "1") {
+    const c = requireCronAuth(req);
+    if (!c.ok) return c.response;
+    return ok(await sweepSendersHealth());
+  }
+
   const g = requireSession(req);
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
-  const url = new URL(req.url);
   const ownerId = url.searchParams.get("ownerId") || undefined;
-  const [inboxes, pools, s] = await Promise.all([
+  const [inboxes, pools, s, health] = await Promise.all([
     listInboxes(ws, { ownerId }),
     recruiterPools(ws),
     stats(ws),
+    peekSendersHealth(ws),   // cache-first; kicks a background refresh when stale
   ]);
-  return ok({ inboxes: inboxes.map(toPublic), pools, stats: s });
+  return ok({ inboxes: inboxes.map(toPublic), pools, stats: s, health });
 }
 
 interface SenderBody {
@@ -42,6 +55,7 @@ interface SenderBody {
   imapHost?: string; imapPort?: number; imapUser?: string; imapPass?: string;
   dailyCap?: number; ownerId?: string; ownerName?: string;
   id?: string; ids?: string[]; status?: SenderStatus; pausedReason?: string;
+  refresh?: boolean;
 }
 
 export async function POST(req: Request) {
@@ -84,16 +98,25 @@ export async function POST(req: Request) {
         return ok({ ok: r.ok, error: r.error });
       }
       case "setCap": {
-        if (!b.id) return fail("missing_id", 422);
-        const m = await getInbox(ws, b.id);
-        if (!m) return fail("not_found", 404);
-        m.dailyCap = clampCap(b.dailyCap);   // never above the absolute hard ceiling
-        await saveInbox(m);
-        return ok({ inbox: toPublic(m) });
+        // Single inbox (id) or bulk (ids) — a 75-inbox fleet is one call, not 75.
+        const ids = Array.isArray(b.ids) && b.ids.length ? b.ids : b.id ? [b.id] : [];
+        if (!ids.length) return fail("missing_id", 422);
+        const cap = clampCap(b.dailyCap);   // never above the absolute hard ceiling
+        const updated = [];
+        for (const id of ids) {
+          const m = await getInbox(ws, id);
+          if (!m) continue;
+          m.dailyCap = cap;
+          await saveInbox(m);
+          updated.push(toPublic(m));
+        }
+        if (!updated.length) return fail("not_found", 404);
+        return ok({ updated: updated.length, dailyCap: cap, inboxes: updated });
       }
       case "domainHealth": {
-        const inboxes = await listInboxes(ws);
-        return ok({ domains: await sendersDomainHealth(inboxes) });
+        // Cache-first with TTL; { refresh: true } forces a live DNS re-check.
+        const h = await ensureSendersHealth(ws, !!b.refresh);
+        return ok({ checkedAt: h.checkedAt, domains: h.domains });
       }
       default:
         return fail("unknown_action", 400);
