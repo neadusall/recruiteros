@@ -108,7 +108,21 @@ services:
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net
-    healthcheck: *node-health
+    #
+    # OS Text-specific healthcheck, NOT the shared node-health anchor: the engine
+    # redirects signed-out requests to the public login URL, and the shared probe
+    # follows redirects, so it depended on external DNS + the edge and flapped a
+    # WORKING container through autoheal for days (2026-07-27 incident). Probe
+    # the basePath health route locally with redirects disabled: any answer below
+    # 500 means the process is serving. Wrong-build detection and repair belong
+    # to the deploy-tick converge + standalone watchdog, never to a restart loop
+    # (a restart cannot fix a wrong image, it can only flap it).
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/ostext-app/api/health',{redirect:'manual'}).then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 60s
     labels:
       autoheal: "true"   # restart this container if it goes unhealthy
 

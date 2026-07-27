@@ -159,27 +159,82 @@ for SVC in taltxt lume-jobs app db caddy searxng; do
   fi
 done
 
-# Deeper OS Text probe: the engine can be "running" yet unreachable through the
-# edge (stale Caddy config mount, wedged process the healthcheck misses). Probe
-# the REAL serving path recruiters use; any app-level answer (2xx/3xx/401/403)
-# counts as alive. On failure restart the engine then force-recreate Caddy, but
-# at most once per 10 minutes so a genuinely broken engine cannot restart-flap.
-OSTEXT_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -k \
-  --resolve recruitersos.co:443:127.0.0.1 https://recruitersos.co/ostext-app/ || echo 000)
-case "$OSTEXT_CODE" in
-  2*|3*|401|403) : ;;
-  *)
-    STAMP="$DIR/.ostext-probe-restart"
-    if [ -z "$(find "$STAMP" -mmin -10 2>/dev/null)" ]; then
-      touch "$STAMP"
-      echo "$(date -u) FAIL-SAFE: /ostext-app probe got $OSTEXT_CODE, restarting engine + caddy..." >> "$LOG"
-      docker compose restart taltxt >> "$LOG" 2>&1 || true
-      docker compose up -d --force-recreate caddy >> "$LOG" 2>&1 || true
+# ------------------------------------------------------------------------------
+# SUBMODULE CONVERGE (2026-07-27 outage: "OS Text 404"). The money-maker-sms
+# checkout silently froze 43 commits behind the superproject's recorded pointer:
+# a dirty tracked file (package-lock.json, left by a stray session on the box)
+# made every `git submodule update` below fail, and that failure is deliberately
+# tolerated so it never blocks the main app deploy. Result: Caddy moved to the
+# /ostext-app same-origin scheme while the engine image kept building from
+# pre-basePath code, and every request 307-looped. This block runs on EVERY
+# tick, BEFORE the up-to-date early-exit: if the checkout is not exactly at the
+# recorded commit, stash whatever made it dirty (recoverable, never destroyed),
+# force-sync it, and rebuild the engine so the image can never drift from the
+# pointer for more than one tick. A prod checkout is a deploy target, not a
+# workspace: anything uncommitted in it is drift by definition. Never fatal.
+CONVERGE_WANT=$(git ls-tree HEAD money-maker-sms 2>/dev/null | awk '{print $3}')
+CONVERGE_HAVE=$(git -C money-maker-sms rev-parse HEAD 2>/dev/null || echo none)
+if [ -n "$CONVERGE_WANT" ] && [ "$CONVERGE_WANT" != "$CONVERGE_HAVE" ]; then
+  echo "$(date -u) CONVERGE: money-maker-sms checkout at $CONVERGE_HAVE, superproject records $CONVERGE_WANT; forcing sync..." >> "$LOG"
+  git -C money-maker-sms stash push --include-untracked -m "auto-converge $(date -u +%Y%m%dT%H%M%S)" >> "$LOG" 2>&1 || true
+  git submodule sync -- money-maker-sms >> "$LOG" 2>&1 || true
+  if git submodule update --init --force money-maker-sms >> "$LOG" 2>&1 \
+     && [ "$(git -C money-maker-sms rev-parse HEAD 2>/dev/null)" = "$CONVERGE_WANT" ]; then
+    echo "$(date -u) CONVERGE: checkout synced to $CONVERGE_WANT, rebuilding engine..." >> "$LOG"
+    if docker compose build taltxt >> "$LOG" 2>&1 && docker compose up -d --no-deps taltxt >> "$LOG" 2>&1; then
+      echo "$(date -u) CONVERGE: engine rebuilt and up on $CONVERGE_WANT" >> "$LOG"
     else
-      echo "$(date -u) FAIL-SAFE: /ostext-app probe got $OSTEXT_CODE (restart cooldown active)" >> "$LOG"
+      echo "$(date -u) CONVERGE: engine rebuild failed, previous image keeps serving; will retry next tick" >> "$LOG"
     fi
-    ;;
-esac
+  else
+    echo "$(date -u) CONVERGE FAILED: submodule still not at $CONVERGE_WANT, will retry next tick" >> "$LOG"
+  fi
+fi
+
+# Deeper OS Text probe, two tiers (upgraded 2026-07-27; the old single probe
+# counted ANY 3xx as alive, so a redirect-looping wrong build looked healthy):
+#   deep    = /ostext-app/api/health, which ONLY the correct build answers 200
+#   shallow = /ostext-app/, any app-level answer (2xx/3xx/401/403)
+# deep 200         -> healthy, nothing to do.
+# deep!=200 + shallow alive -> WRONG-SERVING: the converge above handles pointer
+#   drift, so this means the IMAGE is stale even though the checkout is right
+#   (e.g. a skipped rebuild). Rebuild from the current checkout, at most once
+#   per 30 minutes so an unfixable build cannot rebuild-flap the box.
+# both dark        -> engine restart + Caddy force-recreate (10-min cooldown),
+#   same as before.
+OSTEXT_DEEP=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -k \
+  --resolve recruitersos.co:443:127.0.0.1 https://recruitersos.co/ostext-app/api/health || echo 000)
+if [ "$OSTEXT_DEEP" != "200" ]; then
+  OSTEXT_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -k \
+    --resolve recruitersos.co:443:127.0.0.1 https://recruitersos.co/ostext-app/ || echo 000)
+  case "$OSTEXT_CODE" in
+    2*|3*|401|403)
+      STAMP="$DIR/.ostext-wrongbuild-rebuild"
+      if [ -z "$(find "$STAMP" -mmin -30 2>/dev/null)" ]; then
+        touch "$STAMP"
+        echo "$(date -u) FAIL-SAFE: health probe got $OSTEXT_DEEP but the path serves ($OSTEXT_CODE): stale image, rebuilding engine..." >> "$LOG"
+        if docker compose build taltxt >> "$LOG" 2>&1 && docker compose up -d --no-deps taltxt >> "$LOG" 2>&1; then
+          echo "$(date -u) FAIL-SAFE: engine rebuilt from current checkout" >> "$LOG"
+        else
+          echo "$(date -u) FAIL-SAFE: engine rebuild failed, previous image keeps serving" >> "$LOG"
+        fi
+      else
+        echo "$(date -u) FAIL-SAFE: health probe got $OSTEXT_DEEP, serving-but-wrong (rebuild cooldown active)" >> "$LOG"
+      fi
+      ;;
+    *)
+      STAMP="$DIR/.ostext-probe-restart"
+      if [ -z "$(find "$STAMP" -mmin -10 2>/dev/null)" ]; then
+        touch "$STAMP"
+        echo "$(date -u) FAIL-SAFE: /ostext-app probe got $OSTEXT_CODE (health $OSTEXT_DEEP), restarting engine + caddy..." >> "$LOG"
+        docker compose restart taltxt >> "$LOG" 2>&1 || true
+        docker compose up -d --force-recreate caddy >> "$LOG" 2>&1 || true
+      else
+        echo "$(date -u) FAIL-SAFE: /ostext-app probe got $OSTEXT_CODE (restart cooldown active)" >> "$LOG"
+      fi
+      ;;
+  esac
+fi
 
 # One-time: install the standalone OS Text watchdog (systemd timer, every 3 min).
 # Second, independent layer: if a future commit ever breaks THIS script (syntax
@@ -200,6 +255,29 @@ if [ ! -f "$DIR/.ostext-watchdog-v1" ] && [ -f "$DIR/ostext-watchdog.sh" ]; then
     echo "$(date -u) OS Text watchdog installed and armed" >> "$LOG"
   else
     echo "$(date -u) OS Text watchdog install failed, will retry next cycle" >> "$LOG"
+  fi
+fi
+
+# One-time(v2): reinstall the watchdog with the 2026-07-27 upgrade (deep
+# /ostext-app/api/health probe, DOWN vs WRONG-SERVING distinction, submodule
+# converge + rebuild escalation, owner-cell SMS on any action). The v1 block
+# above only ever runs once, so /usr/local/bin kept the old copy; this bumps it.
+# Timer/service files are rewritten idempotently. Marker-guarded.
+if [ ! -f "$DIR/.ostext-watchdog-v2" ] && [ -f "$DIR/ostext-watchdog.sh" ] \
+   && grep -q 'WRONG-SERVING' "$DIR/ostext-watchdog.sh"; then
+  echo "$(date -u) one-time(v2): upgrading standalone OS Text watchdog..." >> "$LOG"
+  if install -m 755 "$DIR/ostext-watchdog.sh" /usr/local/bin/ostext-watchdog.sh \
+     && printf '%s\n' '[Unit]' 'Description=OS Text never-down watchdog' \
+          '[Service]' 'Type=oneshot' 'ExecStart=/usr/local/bin/ostext-watchdog.sh' \
+          > /etc/systemd/system/ostext-watchdog.service \
+     && printf '%s\n' '[Unit]' 'Description=Run OS Text watchdog every 3 minutes' \
+          '[Timer]' 'OnBootSec=2min' 'OnUnitActiveSec=3min' '[Install]' 'WantedBy=timers.target' \
+          > /etc/systemd/system/ostext-watchdog.timer \
+     && systemctl daemon-reload && systemctl enable --now ostext-watchdog.timer >> "$LOG" 2>&1; then
+    touch "$DIR/.ostext-watchdog-v2"
+    echo "$(date -u) OS Text watchdog v2 installed and armed" >> "$LOG"
+  else
+    echo "$(date -u) OS Text watchdog v2 install failed, will retry next cycle" >> "$LOG"
   fi
 fi
 
