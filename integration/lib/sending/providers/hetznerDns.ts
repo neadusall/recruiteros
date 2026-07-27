@@ -8,6 +8,7 @@
  */
 
 import type { DesiredRecord } from "../types";
+import { dnsToken } from "../config";
 
 const BASE = "https://dns.hetzner.com/api/v1";
 
@@ -17,7 +18,7 @@ export class HetznerNotConfigured extends Error {
 }
 
 function token(): string {
-  const t = process.env.HETZNER_DNS_TOKEN;
+  const t = dnsToken();
   if (!t) throw new HetznerNotConfigured("HETZNER_DNS_TOKEN");
   return t;
 }
@@ -78,5 +79,5 @@ export async function upsertRecord(zoneId: string, rec: DesiredRecord, existing:
 }
 
 export function dnsConfigured(): boolean {
-  return !!process.env.HETZNER_DNS_TOKEN;
+  return !!dnsToken();
 }

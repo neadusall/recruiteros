@@ -16,11 +16,12 @@
 import { allMailboxes, saveMailbox } from "./store";
 import type { WarmupSnapshot } from "./types";
 import { nowIso } from "../core/ids";
+import { smartleadKey, ensureConfig } from "./config";
 
 const BASE = (process.env.SMARTLEAD_API_BASE || "https://server.smartlead.ai/api/v1").replace(/\/+$/, "");
 
 export function smartleadConfigured(): boolean {
-  return !!(process.env.SMARTLEAD_API_KEY || "").trim();
+  return !!smartleadKey();
 }
 
 export interface SmartleadAccount {
@@ -48,7 +49,7 @@ function normStatus(s: unknown): "active" | "paused" | "unknown" {
 }
 
 async function getJson(path: string): Promise<unknown> {
-  const apiKey = (process.env.SMARTLEAD_API_KEY || "").trim();
+  const apiKey = smartleadKey() || "";
   const sep = path.includes("?") ? "&" : "?";
   const url = `${BASE}${path}${sep}api_key=${encodeURIComponent(apiKey)}`;
   const ctrl = new AbortController();
@@ -109,6 +110,7 @@ export interface WarmupSyncReport {
  * (matched by email address). Best-effort: returns a report, never throws.
  */
 export async function syncSmartleadWarmup(workspaceId: string): Promise<WarmupSyncReport> {
+  await ensureConfig();
   const at = nowIso();
   if (!smartleadConfigured()) return { configured: false, accounts: 0, matched: 0, unmatched: [], at };
   let accounts: SmartleadAccount[] = [];

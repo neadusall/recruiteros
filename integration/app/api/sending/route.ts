@@ -29,6 +29,7 @@ import {
   runSeedTest, runSendingDaily, runGovernor, domainSetup, sendingHealth,
   listWarmupThreads, engagementSummary, engagementEnabled, runEngagement,
   syncSmartleadWarmup,
+  ensureConfig, setSendingConfig, sendingConfigStatus,
   verifySeedLogin, reverifyAllSeeds, readDuePlacements, seedDrivable, encryptionEnabled,
   startAutoSetup, advanceAutoSetup, setupStatus, pauseAutoSetup,
 } from "../../../lib/sending";
@@ -44,6 +45,7 @@ export async function GET(req: Request) {
   const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
+  await ensureConfig(); // portal-set connections must be loaded before providerStatus()
   const domains = await listDomains(ws);
   const mailboxes = await listMailboxes(ws);
   const servers = await listServers(ws);
@@ -75,6 +77,8 @@ export async function GET(req: Request) {
     seedTests,
     // One-click setup progress (server → DNS → verify → mailboxes) + remaining gates.
     setup: await setupStatus(ws),
+    // Portal-managed connection status (Hetzner DNS/Cloud, Smartlead, MTA toggle).
+    config: sendingConfigStatus(),
     // Computed warmth (per mailbox + shared IP) + health (per domain) + roll-up.
     health: sendingHealth(domains, mailboxes, seedTests, servers),
     // Warm-up engagement loop status (B): always-running inbox-to-inbox warming.
@@ -263,6 +267,21 @@ export async function POST(req: Request) {
   // Pull the latest external warm-up health from Smartlead onto our mailboxes.
   if (b?.action === "sync-smartlead") {
     return ok({ report: await syncSmartleadWarmup(ws) });
+  }
+
+  // Portal-managed connections: store the provider credentials + MTA toggle so
+  // the whole stack is configured from the console, not server env. Setting
+  // credentials is a higher bar than sending, so it needs integrations:manage.
+  if (b?.action === "set-connections") {
+    const gc = requireCapability(req, "integrations:manage");
+    if ("response" in gc) return gc.response;
+    await setSendingConfig({
+      hetznerDnsToken: b.hetznerDnsToken,
+      hcloudToken: b.hcloudToken,
+      smartleadApiKey: b.smartleadApiKey,
+      mtaEnabled: typeof b.mtaEnabled === "boolean" ? b.mtaEnabled : undefined,
+    });
+    return ok({ config: sendingConfigStatus() });
   }
 
   return fail("unknown_action", 400);

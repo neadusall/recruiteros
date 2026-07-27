@@ -11,6 +11,7 @@
 import { pickMailbox, recordSend, serverHasCapacity, recordServerSend } from "../sending/caps";
 import { getServer, getDomain, recordEvent, isSuppressed, saveServer } from "../sending/store";
 import { sendMessage, postalConfigured } from "../sending/postal";
+import { mtaEnabled } from "../sending/config";
 
 export interface MtaSendInput {
   to: string;
@@ -31,9 +32,9 @@ export interface MtaSendResult {
   skipped?: "suppressed" | "no_capacity" | "not_ready";
 }
 
-/** True when the owned MTA should handle email (env opt-in). */
+/** True when the owned MTA should handle email (portal toggle, else env opt-in). */
 export function mtaPreferred(): boolean {
-  return (process.env.SENDING_EMAIL_PROVIDER || "").toLowerCase() === "mta";
+  return mtaEnabled();
 }
 
 /**

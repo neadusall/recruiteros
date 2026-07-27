@@ -4,6 +4,9 @@
  * DNS automation). Import from here.
  */
 
+// Local import so providerStatus() below can read portal-set connections.
+import { dnsToken, cloudToken, smartleadKey, mtaEnabled } from "./config";
+
 export type {
   SendingDomain, DomainStatus, MtaServer, ServerStatus, Mailbox, MailboxStatus,
   DesiredRecord, DnsRecordType, DnsPurpose,
@@ -44,6 +47,8 @@ export { advanceWarmup, runWarmupRound } from "./warmup";
 export { runEngagement, engagementEnabled, engagementSummary } from "./engagement";
 export { smartleadConfigured, listSmartleadAccounts, syncSmartleadWarmup } from "./smartlead";
 export type { SmartleadAccount, WarmupSyncReport } from "./smartlead";
+export { ensureConfig, setSendingConfig, sendingConfigStatus } from "./config";
+export type { SendingConfigPatch, SendingConfigStatus } from "./config";
 export { listWarmupThreads } from "./store";
 export { pickMailbox, serverCapForDay, serverDailyCap, serverHasCapacity } from "./caps";
 export { runSendingDaily } from "./daily";
@@ -53,12 +58,13 @@ export type { SendingHealthSummary, DomainHealthScore, MailboxHealth, ServerHeal
 
 /** One call for the UI: which automations are wired? */
 export function providerStatus(): { dns: boolean; cloud: boolean; snds: boolean; postmaster: boolean; mta: boolean; smartlead: boolean } {
+  // Portal-set connections (config.ts) take precedence; env is the fallback.
   return {
-    dns: !!process.env.HETZNER_DNS_TOKEN,
-    cloud: !!process.env.HCLOUD_TOKEN,
+    dns: !!dnsToken(),
+    cloud: !!cloudToken(),
     snds: !!process.env.SNDS_KEY,
     postmaster: !!(process.env.POSTMASTER_CLIENT_ID && process.env.POSTMASTER_REFRESH_TOKEN),
-    mta: (process.env.SENDING_EMAIL_PROVIDER || "").toLowerCase() === "mta",
-    smartlead: !!(process.env.SMARTLEAD_API_KEY || "").trim(),
+    mta: mtaEnabled(),
+    smartlead: !!smartleadKey(),
   };
 }
