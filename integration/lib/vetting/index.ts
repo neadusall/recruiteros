@@ -24,3 +24,4 @@ export * from "./qa";
 export * from "./chase";
 export * from "./clientReport";
 export * from "./jdlink";
+export * from "./testSession";
