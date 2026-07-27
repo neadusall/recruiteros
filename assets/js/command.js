@@ -2564,6 +2564,77 @@
   obRefreshBadge();
   setInterval(obRefreshBadge, 180000);
 
+  // LinkedIn Daily Ops: the daily non-negotiables behind the LinkedIn tabs.
+  // Open tasks light up the LinkedIn and LinkedIn Poster nav items (red count)
+  // until the day's work is done; the panels inside both tabs carry the list.
+  function liOpsSetBadges(d) {
+    function setB(name, n) {
+      Array.prototype.forEach.call(document.querySelectorAll('.ni-badge[data-badge="' + name + '"]'), function (bd) {
+        bd.textContent = n > 0 ? String(n) : "";
+        bd.classList.add("due");
+        bd.classList.toggle("show", n > 0);
+      });
+    }
+    setB("linkedin", (d && d.openOutreach) || 0);
+    setB("linkedinposter", (d && d.openContent) || 0);
+  }
+  function liOpsRefreshBadges() {
+    if (!can("outreach:send")) return;
+    api("/linkedin/dailyops").then(liOpsSetBadges).catch(function () {});
+  }
+  liOpsRefreshBadges();
+  setInterval(liOpsRefreshBadges, 180000);
+
+  // The in-tab worksheet. `group` picks which half of the day renders here:
+  // "content" (LinkedIn Poster) or "outreach" (LinkedIn).
+  function liOpsPanel(mount, group) {
+    if (!mount) return;
+    var intro = group === "content"
+      ? "Content deployment. The tab stays lit until today's content work is done."
+      : "Market outreach. The tab stays lit until today's touches are done.";
+    mount.innerHTML = loading();
+    function checkSvg(on) {
+      return on
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/></svg>';
+    }
+    function paint(d) {
+      if (!document.body.contains(mount)) return;
+      var rows = ((d && d.tasks) || []).filter(function (t) { return t.group === group; });
+      if (!rows.length) { mount.innerHTML = ""; return; }
+      var open = rows.filter(function (t) { return !t.done; }).length;
+      mount.innerHTML =
+        '<div class="card liops-card">' +
+          '<div class="liops-head">' +
+            '<div><b>Today on LinkedIn</b><div class="muted liops-sub">' + intro + "</div></div>" +
+            '<span class="liops-progress' + (open ? "" : " ok") + '">' +
+              (open ? open + " to do" : "Done for today") + "</span>" +
+          "</div>" +
+          rows.map(function (t) {
+            return '<div class="liops-row' + (t.done ? " done" : "") + '">' +
+              '<button class="liops-check" data-task="' + esc(t.id) + '" data-done="' + (t.done ? "1" : "0") + '"' +
+                (t.met ? ' disabled title="Completed automatically from tracked activity"' : ' title="Mark done"') + ">" +
+                checkSvg(t.done) + "</button>" +
+              '<div class="liops-main">' +
+                '<div class="liops-title">' + esc(t.title) +
+                  ' <span class="liops-count">' + esc(t.current) + " · target " + esc(t.target) + "</span></div>" +
+                '<div class="liops-action muted">' + esc(t.action) + "</div>" +
+              "</div>" +
+            "</div>";
+          }).join("") +
+        "</div>";
+      liOpsSetBadges(d);
+      Array.prototype.forEach.call(mount.querySelectorAll(".liops-check"), function (btn) {
+        btn.addEventListener("click", function () {
+          var was = btn.getAttribute("data-done") === "1";
+          send("/linkedin/dailyops", "POST", { action: "check", taskId: btn.getAttribute("data-task"), done: !was })
+            .then(function (r) { if (r.ok && r.data) paint(r.data); });
+        });
+      });
+    }
+    api("/linkedin/dailyops").then(paint).catch(function () { mount.innerHTML = ""; });
+  }
+
   // Aliases. #builder stays the BD-branded entry (it forces BD via its own
   // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
   var HASH_ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email" };
@@ -13182,8 +13253,10 @@
       st.textContent = ".lp-embed{width:100%;height:calc(100vh - 138px);min-height:560px;border:0;border-radius:var(--radius);background:var(--bg);display:block;box-shadow:0 1px 0 var(--border) inset}";
       document.head.appendChild(st);
     }
-    el.innerHTML = '<iframe class="lp-embed" src="/linkedin-poster?embed=1" title="LinkedIn Poster" ' +
+    el.innerHTML = '<div class="liops-mount"></div>' +
+      '<iframe class="lp-embed" src="/linkedin-poster?embed=1" title="LinkedIn Poster" ' +
       'allow="clipboard-write" allowfullscreen></iframe>';
+    liOpsPanel($(".liops-mount", el), "content");
   }
 
   function renderVoiceDrops(el) {
@@ -21132,16 +21205,23 @@
   function renderLinkedInOs(el) {
     var crumbEl = $("#crumb");
     if (crumbEl) crumbEl.textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + (motion === "recruiting" ? "Build" : "Tools");
+    // The daily-ops worksheet mounts as a sibling ABOVE the tool host: the
+    // LinkedIn OS renderer owns its element's innerHTML entirely (and repaints
+    // it on internal tab switches), so the panel must live outside that host.
+    el.innerHTML = '<div class="liops-mount"></div><div class="liops-host"></div>';
+    liOpsPanel($(".liops-mount", el), "outreach");
+    var host = $(".liops-host", el);
     var tries = 0;
     (function mount() {
+      if (!document.body.contains(host)) return;
       if (window.__LinkedInOS && window.__LinkedInOS.render) {
-        window.__LinkedInOS.render(el, { motion: motion });
+        window.__LinkedInOS.render(host, { motion: motion });
         return;
       }
       // Cold deep link: linkedin-os.js loads after command.js; wait briefly.
       tries++;
       if (tries > 40) {
-        el.innerHTML = '<div class="empty">The LinkedIn tool failed to load. Refresh the page.</div>';
+        host.innerHTML = '<div class="empty">The LinkedIn tool failed to load. Refresh the page.</div>';
         return;
       }
       setTimeout(mount, 125);
