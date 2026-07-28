@@ -51,6 +51,7 @@ import { sendRunNow } from "../../../lib/sourcing/autoflow";
 import { pickSameRoleMaster } from "../../../lib/sourcing/sameRole";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { withWorkspaceCreds } from "../../../lib/connected";
+import { listLinkedInAccounts } from "../../../lib/accounts";
 import { cred } from "../../../lib/providers/http";
 import { nowIso } from "../../../lib/core/ids";
 import { dbEnabled } from "../../../lib/db";
@@ -158,6 +159,20 @@ export async function POST(req: Request) {
           freeWeb: googleSearchConfigured() || searxSearchConfigured(),
           peopleApi: rapidApiSearchConfigured(),
         },
+        // LinkedIn seat readout for the Sales Nav card: same resolution order as
+        // fetchSearchMembers (connected account first, then a Unipile seat), so the
+        // pill tells the truth about whether a pasted search will pull its members.
+        linkedinSeat: (() => {
+          const seat = listLinkedInAccounts(ws).find((a) => a.active && a.warmup !== "flagged");
+          const unipileReady = Boolean(
+            cred("UNIPILE_DSN") && cred("UNIPILE_API_KEY")
+            && (cred("UNIPILE_ACCOUNT_ID") || process.env.UNIPILE_ACCOUNT_ID),
+          );
+          return {
+            connected: Boolean(seat) || unipileReady,
+            label: seat?.handle || (unipileReady ? "automation seat" : ""),
+          };
+        })(),
         // Phone-source readout: which of the phone rungs can actually fire right now.
         // Same honesty rule as the search pills: a recruiter should see a dead phone
         // source here, not discover it from a list with 0 phones.

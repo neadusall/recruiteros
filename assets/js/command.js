@@ -11769,6 +11769,7 @@
             '<select id="jdSnavTarget" title="Where the results land. Pick a past search (from any search type) to add to it without creating duplicates, or keep New list to save under a new name."><option value="">New list…</option></select>' +
             '<input id="jdSnavName" type="text" placeholder="Name the new list" /></div></div>' +
         '</div>' +
+        '<div id="jdSnavSeat" class="muted" style="display:none;font-size:12.5px;margin:2px 0 8px"></div>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary" id="jdSnavGo">Search &amp; Enrich</button>' +
           '<span class="muted" style="font-size:12.5px;max-width:560px">Adding to an existing list never creates duplicates: people already on it are kept once, anything the new pull knows (title, company, location, contact info) fills in their blanks, and the list re-enriches and re-sends on its own. Re-using an existing name does the same instead of creating a second list.</span>' +
@@ -13129,6 +13130,21 @@
           pill(p.vendorEnrich, "Contact enrichment", "Off: the enrichment service is not reachable right now, so the passes that fill emails and phones are skipped.") +
           pill(p.inHouseDb, "In-house phone database", "Off: the in-house phone database is not reachable right now.") +
           pill(p.paidFinder, "Paid phone finder", "Off: optional top-up. Ask your admin to fill in the phone-lookup fields in Setup under JD Sourcing; it then runs only on candidates the free phone sources could not fill.");
+        /* LinkedIn-seat readout on the Sales Nav card: says up front whether a
+           pasted search will pull its own members or run waterfall-only, and gives
+           the admin a place to plug a Sales Navigator seat in. */
+        var seat = (r.data && r.data.linkedinSeat) || null;
+        var seatHost = $("#jdSnavSeat");
+        if (seatHost) {
+          seatHost.style.display = "";
+          if (seat && seat.connected) {
+            seatHost.innerHTML = '<span class="jd-eng on"><span class="jd-eng-dot"></span>LinkedIn seat connected</span> ' +
+              '<span class="muted">Pasted searches pull their own members' + (seat.label ? " through " + esc(seat.label) : "") + ", then the search waterfall expands the list.</span>";
+          } else {
+            seatHost.innerHTML = '<span class="jd-eng off"><span class="jd-eng-dot"></span>LinkedIn seat · not connected</span> ' +
+              '<span class="muted">Pasted searches run on the URL\'s filters through the search waterfall. To also pull the exact members the search shows on LinkedIn, an admin can connect a Sales Navigator seat under <a href="#connected">Connected → LinkedIn Automation</a>.</span>';
+          }
+        }
       }).catch(function () {});
     }
     loadEngines();

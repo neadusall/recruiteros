@@ -96,20 +96,24 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "unipile",
     label: "LinkedIn Automation",
-    blurb: "Sends connection invites, DMs and voice notes from your LinkedIn seats, fully managed for you, no API key to set up.",
+    blurb: "Connects a LinkedIn seat (Sales Navigator supported). Powers invites, DMs, and pulling the actual members of a pasted Sales Navigator or Recruiter search in JD Sourcing.",
     requiredFor: ["bd", "recruiting"],
-    // Managed: RecruitersOS provides the underlying automation account (server-side
-    // UNIPILE_API_KEY), so the admin never enters a key. They only connect their
-    // own LinkedIn seat through the hosted sign-in. The optional account id lets a
-    // workspace pin a specific connected seat once linked.
+    // The seat rides the operator's Unipile instance: DSN + API key identify the
+    // instance, the account id pins WHICH connected LinkedIn login searches and
+    // sends run as. All three are portal-saved (no redeploy) and flow to the
+    // engine via the workspace credential store + env mirror.
     fields: [
-      { key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional: leave blank to use the seat you connect in LinkedIn Automation." },
+      { key: "UNIPILE_DSN", label: "Automation server (DSN)", required: true, placeholder: "api48.unipile.com:17846", hint: "From your Unipile dashboard: the API host shown for your instance (host:port, no https://)." },
+      { key: "UNIPILE_API_KEY", label: "API key", required: true, secret: true, placeholder: "paste your Unipile access token" },
+      { key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "the connected seat's account id", hint: "Which connected LinkedIn login to search and send as. Copy it from the Unipile dashboard after connecting the seat; leave blank if only one seat is connected." },
     ],
     steps: [
-      "LinkedIn Automation is provided for you on a managed account, so there's no Unipile key to enter.",
-      "Open LinkedIn Automation in the sidebar and connect your LinkedIn profile through the secure hosted sign-in.",
-      "Come back here and hit Test to confirm your seat is linked and ready to send.",
+      "Create an account at unipile.com and note your instance's DSN (host:port) and access token.",
+      "On the Unipile dashboard, connect the LinkedIn profile that holds the Sales Navigator seat searches should run as.",
+      "Paste the DSN and API key below (plus that seat's account id if you connected more than one), Save, then Test.",
     ],
+    docsUrl: "https://www.unipile.com/",
+    docsLabel: "Unipile ↗",
   },
   {
     id: "rapidapi",

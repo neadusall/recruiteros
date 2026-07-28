@@ -58,6 +58,45 @@
 .vt-field .vt-hint { font-size: 11.5px; color: var(--text-dim); margin-top: 5px; line-height: 1.5; }
 .vt-field-full { grid-column: 1 / -1; }
 
+/* ---- agent-voice browser (pick a voice from the ElevenLabs account) ---- */
+.vt-linkbtn {
+  appearance: none; border: 0; background: none; padding: 0; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--brand);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.vt-linkbtn:hover { text-decoration: underline; }
+.vt-linkbtn .isvg { width: 13px; height: 13px; }
+.vt-voicebrowser {
+  margin-top: 8px; border: 1px solid var(--border); border-radius: var(--vt-r-sm);
+  background: var(--surface); overflow: hidden;
+}
+.vt-vb-search { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+.vt-vb-search input { width: 100%; }
+.vt-vb-list { max-height: 240px; overflow-y: auto; }
+.vt-vb-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 11px;
+  border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.vt-vb-row:last-child { border-bottom: 0; }
+.vt-vb-row.sel { background: var(--brand-soft); }
+.vt-vb-name { flex: 1; min-width: 0; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vt-vb-cat {
+  flex: none; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--text-muted); background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 8px;
+}
+.vt-vb-prev, .vt-vb-use {
+  flex: none; appearance: none; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  border-radius: var(--vt-r-sm); padding: 5px 10px; display: inline-flex; align-items: center; gap: 5px;
+}
+.vt-vb-prev { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-muted); }
+.vt-vb-prev:hover { border-color: var(--brand); color: var(--brand); }
+.vt-vb-prev .isvg { width: 12px; height: 12px; }
+.vt-vb-use { border: 0; background: var(--brand); color: #fff; }
+.vt-vb-use:hover { background: var(--brand-2); }
+.vt-vb-row.sel .vt-vb-use { background: var(--surface); color: var(--brand); border: 1px solid var(--brand); }
+.vt-vb-msg { padding: 12px; font-size: 12.5px; color: var(--text-muted); text-align: center; }
+
 /* qualifier rows */
 /* ---- qualifiers: AI-assist panel + numbered rows ---- */
 .vt-quals { border: 1px solid var(--border); border-radius: var(--vt-r); background: var(--bg-soft); padding: 14px; }

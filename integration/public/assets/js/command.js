@@ -26,9 +26,12 @@
  *           #vetting       renderVetting
  *           #automation    renderAutomation
  *           #content       renderContent         (Sequences Library)
- *           (outreach)     renderOutreach        (#outreach), renderSending
- *  Measure  #analytics     renderAnalytics       (detail: renderAnalyticsDetail)
- *           #outreach-stats renderOutreachStats  (+ renderSpending)
+ *  Hubs     #clients       renderPipelineHub     (Clients/Prospects/Companies)
+ *           #email         renderEmailHub        (renderEmail + Send Queue)
+ *           #infrastructure renderInfraHub       (Engine/Senders/Mailbox Ops)
+ *  Measure  #analytics     renderAnalyticsHub    (renderAnalytics + Statistics
+ *                                                 tab = renderOutreachStats;
+ *                                                 detail: renderAnalyticsDetail)
  *  Connect  #accounts      renderAccounts
  *           #setup         renderSetup           (→ renderBranding/renderDomain/
  *                                                   renderVoiceSetup/…Overview)
@@ -568,6 +571,7 @@
     var liveOn = false;
     var liveTimer = null;
     var rawDomById = {}; // raw domain records (nameservers + DNS checklist) for the detail view
+    var lastConfig = {}; // portal-managed connection status from GET /api/sending
     view.innerHTML = '<div class="empty">Loading fleet vitals…</div>';
 
     function stopLive() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
@@ -665,6 +669,39 @@
         });
     }
 
+    // Connections: configure the whole sending stack from the portal (no SSH).
+    // Owner-gated (integrations:manage). Secret fields are write-only; a blank
+    // field leaves the stored value unchanged, so we show "connected" vs "not set".
+    function openConnections() {
+      var c = lastConfig || {};
+      function field(id, label, isSet, src, hint) {
+        var status = isSet ? '<span style="color:var(--ok);font-size:11px;font-weight:600">connected' + (src && src !== "portal" ? " (" + esc(src) + ")" : "") + "</span>" : '<span style="color:var(--text-dim);font-size:11px">not set</span>';
+        return '<label style="display:block;margin-bottom:12px;font-size:12px;color:var(--text-dim)"><span style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' + esc(label) + " " + status + "</span>" +
+          '<input id="' + id + '" type="password" autocomplete="new-password" placeholder="' + (isSet ? "leave blank to keep" : "paste token") + '" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"></label>' +
+          (hint ? '<div style="font-size:11px;color:var(--text-dim);margin:-6px 0 12px">' + esc(hint) + "</div>" : "");
+      }
+      var src = c.source || {};
+      var body = "";
+      if (!c.secretsEncrypted) body += '<div style="border:1px solid var(--warn-bg);border-left:3px solid var(--warn);background:var(--warn-bg);border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:12px;color:var(--text-muted)">Secrets are stored unencrypted until SENDING_SECRET_KEY is set on the server. Set it to encrypt these at rest.</div>';
+      body += field("cxDns", "Hetzner DNS token", c.dns, src.dns, "Publishes SPF, DKIM, DMARC, MX for each domain automatically.");
+      body += field("cxCloud", "Hetzner Cloud token", c.cloud, src.cloud, "Provisions the Postal MTA server and sets reverse DNS.");
+      body += field("cxSmart", "Smartlead API key", c.smartlead, src.smartlead, "Pulls warm-up health onto every mailbox.");
+      body += '<label style="display:flex;gap:9px;align-items:center;margin:6px 0 4px;font-size:13px;cursor:pointer"><input id="cxMta" type="checkbox"' + (c.mtaEnabled ? " checked" : "") + '> Route real cold sends through the owned MTA</label>';
+      body += '<div style="font-size:11px;color:var(--text-dim);margin:0 0 16px 24px">Keep off until a Postal server is live and verified. Nothing sends while this is off.</div>';
+      body += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="cxCancel">Cancel</button><button class="btn btn-primary btn-sm" id="cxSave">Save connections</button></div>';
+      openModal("Connections", "Configure the sending stack from the portal", body, function (cardEl, close) {
+        cardEl.querySelector("#cxCancel").addEventListener("click", close);
+        cardEl.querySelector("#cxSave").addEventListener("click", function () {
+          var payload = { action: "set-connections", mtaEnabled: cardEl.querySelector("#cxMta").checked };
+          var dnsv = cardEl.querySelector("#cxDns").value.trim(); if (dnsv) payload.hetznerDnsToken = dnsv;
+          var clv = cardEl.querySelector("#cxCloud").value.trim(); if (clv) payload.hcloudToken = clv;
+          var smv = cardEl.querySelector("#cxSmart").value.trim(); if (smv) payload.smartleadApiKey = smv;
+          close();
+          act(payload, "Connections saved");
+        });
+      });
+    }
+
     // Domain detail: the missing lifecycle surface. Shows the nameservers to set
     // at the registrar, the live/pending DNS record checklist, and the actions to
     // complete setup (verify, re-provision, pull the Postal config to paste).
@@ -723,6 +760,8 @@
         var rf = q("#mbRefresh"); if (rf) rf.addEventListener("click", load);
         var sy = q("#mbSync"); if (sy) sy.addEventListener("click", function () { act({ action: "sync-smartlead" }, "Warm-up health synced"); });
         var lv = q("#mbLive"); if (lv) lv.addEventListener("click", function () { liveOn = !liveOn; lv.textContent = liveOn ? "Live: on" : "Live: off"; if (liveOn) startLive(); else stopLive(); });
+        var cn = q("#mbConnect"); if (cn) cn.addEventListener("click", openConnections);
+        var cn2 = q("#mbConnect2"); if (cn2) cn2.addEventListener("click", openConnections);
         var gv = q("#mbGovernor"); if (gv) gv.addEventListener("click", function () { act({ action: "run-governor" }, "Safety check complete"); });
         view.querySelectorAll("[data-pause]").forEach(function (b) { b.addEventListener("click", function () { pauseMailbox(b.getAttribute("data-pause"), b.getAttribute("data-addr")); }); });
         view.querySelectorAll("[data-resume]").forEach(function (b) { b.addEventListener("click", function () { resumeMailbox(b.getAttribute("data-resume"), b.getAttribute("data-addr")); }); });
@@ -735,6 +774,7 @@
       var domains = health.domains || [];
       var mailboxes = health.mailboxes || [];
       var prov = d.providers || {};
+      lastConfig = d.config || {};
       var domName = {};
       rawDomById = {};
       (d.domains || []).forEach(function (dm) { domName[dm.id] = dm.domain; rawDomById[dm.id] = dm; });
@@ -764,6 +804,7 @@
         '<button class="btn btn-ghost btn-sm" id="mbGovernor">Run safety check</button>' +
         '<button class="btn btn-ghost btn-sm" id="mbRefresh">Refresh</button>' +
         '<button class="btn btn-ghost btn-sm" id="mbLive">' + (liveOn ? "Live: on" : "Live: off") + "</button>" +
+        (can("integrations:manage") ? '<button class="btn btn-ghost btn-sm" id="mbConnect">Connections</button>' : "") +
         '<span style="flex:1"></span>' +
         provChip("Warm-up", prov.smartlead) + provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
         "</div>";
@@ -799,7 +840,8 @@
             var col = s[1] ? "var(--ok)" : "var(--text-dim)";
             return '<div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px"><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';margin-top:4px;flex:none"></span><span><b style="color:var(--text)">' + esc(s[0]) + "</b> <span style=\"color:var(--text-dim)\">" + esc(s[2]) + "</span></span></div>";
           }).join("") +
-          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at the assigned nameservers at your registrar (open the domain to see them), then Verify. Nothing sends until Postal MTA routing is on.</div></div>';
+          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at the assigned nameservers at your registrar (open the domain to see them), then Verify. Nothing sends until MTA routing is on.</div>' +
+          (can("integrations:manage") ? '<div style="margin-top:12px"><button class="btn btn-primary btn-sm" id="mbConnect2">Set up connections</button></div>' : "") + "</div>";
       }
 
       if (!domains.length && !mailboxes.length) {
@@ -900,12 +942,18 @@
 
   var ROUTES = {
     overview: { title: "Dashboard", crumb: "Operate", action: null, render: renderOverview },
-    clients: { title: "Clients", crumb: "Business Development", action: null, render: renderClients, motionOnly: "bd" },
+    // Pipeline: the BD book of business in ONE hub. Clients (decision-makers
+    // from Hire Signals), Prospects (the working pipeline) and Companies as
+    // tabs; before this hub the last two had no nav entrance at all.
+    clients: { title: "Pipeline", crumb: "Business Development", action: null, render: renderPipelineHub, motionOnly: "bd" },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run" },
-    sendqueue: { title: "Send Queue", crumb: "Operate", action: null, render: renderSendQueue, motionOnly: "bd", cap: "outreach:send" },
-    senders: { title: "Senders", crumb: "Operate", action: null, render: renderSenders, motionOnly: "bd", cap: "outreach:send" },
-    mailboxops: { title: "Mailbox Ops", crumb: "Deliverability", action: null, render: renderMailboxOps, motionOnly: "bd", cap: "outreach:send" },
+    // Consolidation redirects: these screens moved into hubs (Send Queue into
+    // Email, the sending fleet into Admin > Infrastructure). The routes stay
+    // registered so every old hash and cross-link keeps resolving.
+    sendqueue: { title: "Send Queue", crumb: "Business Development", action: null, render: function () { location.hash = "#email/sendqueue"; }, motionOnly: "bd", cap: "outreach:send" },
+    senders: { title: "Senders", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure/senders"; }, cap: "team:manage" },
+    mailboxops: { title: "Mailbox Ops", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure/mailboxes"; }, cap: "team:manage" },
     // Recruiting gets the unified Candidates tab (pipeline + ATS people database
     // in one table); BD keeps the classic Prospects pipeline.
     prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: function (el) { return motion === "recruiting" ? renderCandidates(el) : renderProspects(el); } },
@@ -916,7 +964,8 @@
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
     ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext, motionOnly: "recruiting", cap: "outreach:send" },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops, cap: "voice:dial" },
-    email: { title: "Email", crumb: "Business Development", action: null, render: renderEmail, motionOnly: "bd", cap: "outreach:send" },
+    // Email: the prep workbench plus the Send Queue supply gauge as a tab.
+    email: { title: "Email", crumb: "Business Development", action: null, render: renderEmailHub, motionOnly: "bd", cap: "outreach:send" },
     pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
     vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting", cap: "voice:dial" },
     joblibrary: { title: "Job Library", crumb: "Build", action: null, render: renderJobLibrary, motionOnly: "recruiting", cap: "prospects:view" },
@@ -931,19 +980,24 @@
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation, cap: "outreach:send" },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
-    analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalytics },
-    "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: renderOutreachStats, cap: "team:manage" },
+    // Analytics: the live operational view, with the deep Outreach Statistics
+    // engine as a cap-gated Statistics tab (the two built the same funnel and
+    // leaderboards twice; recruiters without team:manage see plain Analytics).
+    analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalyticsHub },
+    "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: function () { location.hash = "#analytics/stats"; }, cap: "team:manage" },
     // Outbound Performance: the admin utilization + accountability command
     // center (capacity engine, scores, heatmap, triggers, goals, reports).
     outbound: { title: "Outbound Performance", crumb: "Admin", action: null, render: renderOutbound, cap: "team:manage" },
-    // OS Text Performance: the enrichment-to-SMS KPI tracker. Pairs the JD
-    // Sourcing scraping/enriching supply with the OS Text engine's Telnyx
-    // send-and-response outcomes over one shared window.
-    ostextkpi: { title: "OS Text Performance", crumb: "Admin", action: null, render: renderOstextKpi, cap: "team:manage" },
+    // OS Text Performance moved into Outbound Performance as its OS Text tab
+    // (one accountability center; the phone-source scoreboard lived in both).
+    ostextkpi: { title: "OS Text Performance", crumb: "Admin", action: null, render: function () { location.hash = "#outbound/ostext"; }, cap: "team:manage" },
     // My Outbound: the personal performance view + the 10-15 minute Daily
     // Checklist worksheet. Self-scoped; available in both portals.
     myoutbound: { title: "My Outbound", crumb: "Operate", action: null, render: renderMyOutbound },
-    engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: renderEngine, cap: "team:manage" },
+    engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure"; }, cap: "team:manage" },
+    // Infrastructure: every piece of system plumbing in one admin hub. Engine /
+    // Throughput, the Senders fleet and Mailbox Ops as tabs.
+    infrastructure: { title: "Infrastructure", crumb: "Admin", action: null, render: renderInfraHub, cap: "team:manage" },
     nurture: { title: "Nurture", crumb: "Measure", action: null, render: renderNurture, cap: "team:manage", motionOnly: "bd" },
     accounts: { title: "Accounts", crumb: "Connect", action: null, render: renderAccounts, cap: "accounts:manage" },
     // Admin launch-setup hub. Consolidates Integrations and ATS behind one tab
@@ -960,6 +1014,78 @@
     // vision. Deep links like #playbooks/jd-sourcing open a single walkthrough.
     playbooks: { title: "Playbooks", crumb: "Learn", action: null, render: renderPlaybooks }
   };
+
+  /* ---------------- Consolidated hubs ----------------
+     Small wrappers that group screens which used to be separate sidebar tabs.
+     Each hub is a setup-tabs bar over the untouched original render functions,
+     driven by the in-route detail segment, so every screen keeps its own
+     endpoints, timers and drill-downs and old deep links land on the right tab
+     via the redirect routes above. */
+  function hubTabsHtml(base, tabs, active) {
+    return '<div class="setup-tabs">' + tabs.map(function (t) {
+      return '<a class="setup-tab' + ((active || "") === t.key ? " active" : "") + '" href="#' + base + (t.key ? "/" + t.key : "") + '">' +
+        '<span class="ni"><svg class="isvg" aria-hidden="true"><use href="#' + t.icon + '"/></svg></span> ' + esc(t.label) + '</a>';
+    }).join("") + "</div>";
+  }
+  function hubMount(el, base, tabs, active) {
+    el.innerHTML = setupStyles() + hubTabsHtml(base, tabs, active) + '<div class="hub-body"></div>';
+    return el.querySelector(".hub-body");
+  }
+
+  // Analytics hub: live Analytics + the Outreach Statistics engine as one tab
+  // set. Recruiters without team:manage get plain Analytics, no tab bar.
+  var AN_HUB_TABS = [
+    { key: "", label: "Overview", icon: "i-chart" },
+    { key: "stats", label: "Statistics", icon: "i-trend" }
+  ];
+  function renderAnalyticsHub(el) {
+    if (!can("team:manage")) return renderAnalytics(el);
+    var stats = currentDetail() === "stats";
+    var body = hubMount(el, "analytics", AN_HUB_TABS, stats ? "stats" : "");
+    return stats ? renderOutreachStats(body) : renderAnalytics(body);
+  }
+
+  // Email hub: the prep workbench plus the Send Queue supply gauge.
+  var EMAIL_HUB_TABS = [
+    { key: "", label: "Email", icon: "i-mail" },
+    { key: "sendqueue", label: "Send Queue", icon: "i-layers" }
+  ];
+  function renderEmailHub(el) {
+    var q = currentDetail() === "sendqueue";
+    var body = hubMount(el, "email", EMAIL_HUB_TABS, q ? "sendqueue" : "");
+    return q ? renderSendQueue(body) : renderEmail(body);
+  }
+
+  // Pipeline hub: the whole BD book of business behind one sidebar entry.
+  var PIPE_HUB_TABS = [
+    { key: "", label: "Clients", icon: "i-briefcase" },
+    { key: "prospects", label: "Prospects", icon: "i-users" },
+    { key: "companies", label: "Companies", icon: "i-building" }
+  ];
+  function renderPipelineHub(el) {
+    var d = currentDetail();
+    var key = (d === "prospects" || d === "companies") ? d : "";
+    var body = hubMount(el, "clients", PIPE_HUB_TABS, key);
+    if (key === "prospects") return renderProspects(body);
+    if (key === "companies") return renderCompanies(body);
+    return renderClients(body);
+  }
+
+  // Infrastructure hub: system plumbing (curation engine telemetry, the
+  // sending fleet, deliverability doctoring) in one admin tab.
+  var INFRA_HUB_TABS = [
+    { key: "", label: "Engine / Throughput", icon: "i-activity" },
+    { key: "senders", label: "Senders", icon: "i-send" },
+    { key: "mailboxes", label: "Mailbox Ops", icon: "i-shield" }
+  ];
+  function renderInfraHub(el) {
+    var d = currentDetail();
+    var key = (d === "senders" || d === "mailboxes") ? d : "";
+    var body = hubMount(el, "infrastructure", INFRA_HUB_TABS, key);
+    if (key === "senders") return renderSenders(body);
+    if (key === "mailboxes") return renderMailboxOps(body);
+    return renderEngine(body);
+  }
 
   /* ---------------- Engine / Throughput (admin) ----------------
      A live, auto-refreshing read on the whole curation pipeline: the daily-target
@@ -1665,7 +1791,7 @@
       (s ? '<div style="font-size:11px;color:var(--text-dim);margin-top:3px">' + esc(s) + "</div>" : "") + "</div>";
   }
   function obTabs(active) {
-    var tabs = [["", "Overview"], ["team", "Team"], ["capacity", "Channels & Capacity"], ["alerts", "Alerts & Triggers"], ["goals", "Goals"], ["reports", "Reports"]];
+    var tabs = [["", "Overview"], ["team", "Team"], ["capacity", "Channels & Capacity"], ["ostext", "OS Text"], ["alerts", "Alerts & Triggers"], ["goals", "Goals"], ["reports", "Reports"]];
     return '<div class="ob-tabs">' + tabs.map(function (t) {
       return '<a href="#outbound' + (t[0] ? "/" + t[0] : "") + '" class="chip' + ((active || "") === t[0] ? " ob-tab-on" : "") + '">' + t[1] + "</a>";
     }).join("") + "</div>";
@@ -1677,10 +1803,18 @@
     if (detail === "user") return obUserView(view, obHashArg());
     if (detail === "team") return obTeamView(view);
     if (detail === "capacity") return obCapacityView(view);
+    if (detail === "ostext") return obOstextView(view);
     if (detail === "alerts") return obAlertsView(view);
     if (detail === "goals") return obGoalsView(view);
     if (detail === "reports") return obReportsView(view);
     return obOverviewView(view);
+  }
+
+  // OS Text tab: the whole enrichment-to-SMS KPI tracker (formerly the
+  // standalone OS Text Performance page) inside the accountability center.
+  function obOstextView(view) {
+    view.innerHTML = obTabs("ostext") + '<div id="obBody"></div>';
+    renderOstextKpi(view.querySelector("#obBody"));
   }
 
   /* ------------------------------ overview ------------------------------ */
@@ -2525,6 +2659,158 @@
   obRefreshBadge();
   setInterval(obRefreshBadge, 180000);
 
+  // LinkedIn Daily Ops: the daily non-negotiables behind the LinkedIn tabs.
+  // Open tasks light up the LinkedIn and LinkedIn Poster nav items (red count)
+  // until the day's work is done; the panels inside both tabs carry the list.
+  function liOpsSetBadges(d) {
+    function setB(name, n) {
+      Array.prototype.forEach.call(document.querySelectorAll('.ni-badge[data-badge="' + name + '"]'), function (bd) {
+        bd.textContent = n > 0 ? String(n) : "";
+        bd.classList.add("due");
+        bd.classList.toggle("show", n > 0);
+      });
+    }
+    setB("linkedin", (d && d.openOutreach) || 0);
+    setB("linkedinposter", (d && d.openContent) || 0);
+  }
+  function liOpsRefreshBadges() {
+    if (!can("outreach:send")) return;
+    api("/linkedin/dailyops").then(liOpsSetBadges).catch(function () {});
+  }
+  liOpsRefreshBadges();
+  setInterval(liOpsRefreshBadges, 180000);
+
+  // The in-tab worksheet. `group` picks which half of the day renders here:
+  // "content" (LinkedIn Poster) or "outreach" (LinkedIn).
+  function liOpsPanel(mount, group) {
+    if (!mount) return;
+    var intro = group === "content"
+      ? "Content deployment. The tab stays lit until today's content work is done."
+      : "Market outreach. The tab stays lit until today's touches are done.";
+    mount.innerHTML = loading();
+    function checkSvg(on) {
+      return on
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/></svg>';
+    }
+    function paint(d) {
+      if (!document.body.contains(mount)) return;
+      var rows = ((d && d.tasks) || []).filter(function (t) { return t.group === group; });
+      if (!rows.length) { mount.innerHTML = ""; return; }
+      var open = rows.filter(function (t) { return !t.done; }).length;
+      mount.innerHTML =
+        '<div class="card liops-card">' +
+          '<div class="liops-head">' +
+            '<div><b>Today on LinkedIn</b><div class="muted liops-sub">' + intro + "</div></div>" +
+            '<span class="liops-progress' + (open ? "" : " ok") + '">' +
+              (open ? open + " to do" : "Done for today") + "</span>" +
+          "</div>" +
+          rows.map(function (t) {
+            return '<div class="liops-row' + (t.done ? " done" : "") + '">' +
+              '<button class="liops-check" data-task="' + esc(t.id) + '" data-done="' + (t.done ? "1" : "0") + '"' +
+                (t.met ? ' disabled title="Completed automatically from tracked activity"' : ' title="Mark done"') + ">" +
+                checkSvg(t.done) + "</button>" +
+              '<div class="liops-main">' +
+                '<div class="liops-title">' + esc(t.title) +
+                  ' <span class="liops-count">' + esc(t.current) + " · target " + esc(t.target) + "</span></div>" +
+                '<div class="liops-action muted">' + esc(t.action) + "</div>" +
+              "</div>" +
+            "</div>";
+          }).join("") +
+        "</div>";
+      liOpsSetBadges(d);
+      Array.prototype.forEach.call(mount.querySelectorAll(".liops-check"), function (btn) {
+        btn.addEventListener("click", function () {
+          var was = btn.getAttribute("data-done") === "1";
+          send("/linkedin/dailyops", "POST", { action: "check", taskId: btn.getAttribute("data-task"), done: !was })
+            .then(function (r) { if (r.ok && r.data) paint(r.data); });
+        });
+      });
+    }
+    api("/linkedin/dailyops").then(paint).catch(function () { mount.innerHTML = ""; });
+  }
+
+  // BD engagement queue: AI-drafted comments + connection notes for emailed BD
+  // prospects, approval-gated. Standby until email sending is live and a
+  // LinkedIn seat is connected; then a fresh queue builds every morning.
+  function liEngagePanel(mount) {
+    if (!mount) return;
+    mount.innerHTML = loading();
+    function statusChip(t) {
+      if (t.status === "approved") return '<span class="lie-chip ok">Approved, sending from your account</span>';
+      if (t.status === "skipped") return '<span class="lie-chip mut">Skipped</span>';
+      if (t.status === "blocked") return '<span class="lie-chip bad">' + esc(t.reason || "Blocked") + "</span>";
+      return "";
+    }
+    function row(t) {
+      var who = esc(t.fullName) +
+        (t.title || t.company ? ' <span class="muted">' + esc([t.title, t.company].filter(Boolean).join(" · ")) + "</span>" : "");
+      var kind = t.kind === "comment" ? "Comment on their latest post" : "Connection note";
+      var open = t.status === "suggested";
+      return '<div class="lie-row' + (open ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
+        '<div class="lie-who">' + who + ' <span class="lie-kind">' + kind + "</span></div>" +
+        (t.postExcerpt ? '<div class="lie-post muted">' + esc(t.postExcerpt.slice(0, 260)) + (t.postExcerpt.length > 260 ? "..." : "") + "</div>" : "") +
+        (open
+          ? '<textarea class="lie-text" rows="2">' + esc(t.text) + "</textarea>" +
+            '<div class="lie-actions">' +
+              '<button class="btn btn-sm btn-primary" data-lie="approve">Approve and send</button> ' +
+              '<button class="btn btn-sm btn-ghost" data-lie="skip">Skip</button>' +
+            "</div>"
+          : '<div class="lie-post">' + esc(t.text) + "</div><div>" + statusChip(t) + "</div>") +
+        "</div>";
+    }
+    function paint(d) {
+      if (!document.body.contains(mount)) return;
+      var st = (d && d.status) || {};
+      var items = (d && d.items) || [];
+      if (!st.active) {
+        mount.innerHTML =
+          '<div class="card liops-card">' +
+            '<div class="liops-head"><div><b>BD engagement queue</b>' +
+              '<div class="muted liops-sub">Daily AI-drafted comments and connection notes for the BD prospects your emails already reached. Nothing sends without your approval.</div></div>' +
+              '<span class="lie-chip mut">Standby</span></div>' +
+            ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join("") || "") +
+          "</div>";
+        return;
+      }
+      var open = items.filter(function (t) { return t.status === "suggested"; }).length;
+      mount.innerHTML =
+        '<div class="card liops-card">' +
+          '<div class="liops-head"><div><b>BD engagement queue</b>' +
+            '<div class="muted liops-sub">Approve or edit each draft; approved items send from your connected account and count toward today\'s tasks.</div></div>' +
+            '<span class="liops-progress' + (open ? "" : " ok") + '">' + (open ? open + " to review" : "Queue clear") + "</span></div>" +
+          (items.length
+            ? items.map(row).join("")
+            : '<div class="lie-post muted">No drafts yet today. New emailed BD prospects with LinkedIn profiles feed the queue each morning.</div>' +
+              '<div class="lie-actions"><button class="btn btn-sm" data-lie-build>Build today\'s queue</button></div>') +
+        "</div>";
+      Array.prototype.forEach.call(mount.querySelectorAll("[data-lie]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var rowEl = btn.closest(".lie-row");
+          var id = rowEl.getAttribute("data-id");
+          var act = btn.getAttribute("data-lie");
+          var ta = rowEl.querySelector(".lie-text");
+          btn.disabled = true;
+          send("/linkedin/engage", "POST", act === "approve"
+            ? { action: "approve", id: id, text: ta ? ta.value : undefined }
+            : { action: "skip", id: id })
+            .then(function (r) {
+              if (r.ok && r.data && r.data.view) paint(r.data.view);
+              if (act === "approve" && r.data && r.data.accepted === false && r.data.reason) toast(r.data.reason);
+            });
+        });
+      });
+      var buildBtn = mount.querySelector("[data-lie-build]");
+      if (buildBtn) buildBtn.addEventListener("click", function () {
+        buildBtn.disabled = true; buildBtn.textContent = "Building...";
+        send("/linkedin/engage", "POST", { action: "build" }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      });
+    }
+    api("/linkedin/engage").then(paint).catch(function () { mount.innerHTML = ""; });
+  }
+
   // Aliases. #builder stays the BD-branded entry (it forces BD via its own
   // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
   var HASH_ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email" };
@@ -2802,30 +3088,27 @@
     });
   }
 
-  // The "All recruiters" roster: one row per recruiter with their high-level
-  // stats for the active motion (so an admin can compare BD efforts and recruiting
-  // efforts per person). Driven by o.recruiters from /overview, which the backend
-  // keys to the real team members and scopes by motion. Clicking a row scopes the
-  // whole dashboard to that recruiter.
+  // The "All recruiters" roster: one row per recruiter with their sending
+  // activity for the active motion. Driven by o.recruiters from /overview,
+  // which the backend keys to the real team members and scopes by motion.
+  // Clicking a row scopes the whole dashboard to that recruiter. Sending
+  // activity ONLY, per the Dashboard charter (the engine, not what it
+  // produced); replies, meetings and wins live under Analytics.
   function recruiterRosterHtml(o) {
     var recs = o.recruiters || [];
-    var winLabel = motion === "bd" ? "Job orders" : "Placements";
     var hd = '<div class="card" style="margin:0 0 18px"><div class="lr-sub" style="margin-bottom:8px">' +
       esc(motion === "bd" ? "Business Development" : "Recruiting") +
-      ', every recruiter’s stats. Click a recruiter to scope the dashboard to them.</div>';
+      ', every recruiter’s sending activity. Click a recruiter to scope the dashboard to them; outcomes live under <a class="clickable" data-go="analytics">Analytics</a>.</div>';
     if (!recs.length) return hd + '<div class="empty">No recruiters on this workspace yet. Invite recruiters under Team.</div></div>';
     var rows = recs.map(function (r) {
       return '<tr class="clickable" data-rec="' + esc(r.userId || "") + '">' +
         '<td><b>' + esc(r.name) + "</b></td>" +
         "<td>" + (r.activeCampaigns || 0) + "</td>" +
         "<td>" + (r.sentToday || 0) + "</td>" +
-        "<td>" + (r.connects || 0) + "</td>" +
-        "<td>" + (r.replies || 0) + "</td>" +
-        "<td>" + (r.meetings || 0) + "</td>" +
-        "<td><b>" + (r.wins || 0) + "</b></td></tr>";
+        "<td>" + (r.connects || 0) + "</td></tr>";
     }).join("");
     return hd + '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
-      "<th>Recruiter</th><th>Active campaigns</th><th>Sent today</th><th>Connects</th><th>Replies</th><th>Meetings</th><th>" + esc(winLabel) + "</th>" +
+      "<th>Recruiter</th><th>Active campaigns</th><th>Sent today</th><th>Connects</th>" +
       "</tr></thead><tbody>" + rows + "</tbody></table></div></div>";
   }
 
@@ -11486,6 +11769,7 @@
             '<select id="jdSnavTarget" title="Where the results land. Pick a past search (from any search type) to add to it without creating duplicates, or keep New list to save under a new name."><option value="">New list…</option></select>' +
             '<input id="jdSnavName" type="text" placeholder="Name the new list" /></div></div>' +
         '</div>' +
+        '<div id="jdSnavSeat" class="muted" style="display:none;font-size:12.5px;margin:2px 0 8px"></div>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary" id="jdSnavGo">Search &amp; Enrich</button>' +
           '<span class="muted" style="font-size:12.5px;max-width:560px">Adding to an existing list never creates duplicates: people already on it are kept once, anything the new pull knows (title, company, location, contact info) fills in their blanks, and the list re-enriches and re-sends on its own. Re-using an existing name does the same instead of creating a second list.</span>' +
@@ -12846,6 +13130,21 @@
           pill(p.vendorEnrich, "Contact enrichment", "Off: the enrichment service is not reachable right now, so the passes that fill emails and phones are skipped.") +
           pill(p.inHouseDb, "In-house phone database", "Off: the in-house phone database is not reachable right now.") +
           pill(p.paidFinder, "Paid phone finder", "Off: optional top-up. Ask your admin to fill in the phone-lookup fields in Setup under JD Sourcing; it then runs only on candidates the free phone sources could not fill.");
+        /* LinkedIn-seat readout on the Sales Nav card: says up front whether a
+           pasted search will pull its own members or run waterfall-only, and gives
+           the admin a place to plug a Sales Navigator seat in. */
+        var seat = (r.data && r.data.linkedinSeat) || null;
+        var seatHost = $("#jdSnavSeat");
+        if (seatHost) {
+          seatHost.style.display = "";
+          if (seat && seat.connected) {
+            seatHost.innerHTML = '<span class="jd-eng on"><span class="jd-eng-dot"></span>LinkedIn seat connected</span> ' +
+              '<span class="muted">Pasted searches pull their own members' + (seat.label ? " through " + esc(seat.label) : "") + ", then the search waterfall expands the list.</span>";
+          } else {
+            seatHost.innerHTML = '<span class="jd-eng off"><span class="jd-eng-dot"></span>LinkedIn seat · not connected</span> ' +
+              '<span class="muted">Pasted searches run on the URL\'s filters through the search waterfall. To also pull the exact members the search shows on LinkedIn, an admin can connect a Sales Navigator seat under <a href="#connected">Connected → LinkedIn Automation</a>.</span>';
+          }
+        }
       }).catch(function () {});
     }
     loadEngines();
@@ -13143,8 +13442,10 @@
       st.textContent = ".lp-embed{width:100%;height:calc(100vh - 138px);min-height:560px;border:0;border-radius:var(--radius);background:var(--bg);display:block;box-shadow:0 1px 0 var(--border) inset}";
       document.head.appendChild(st);
     }
-    el.innerHTML = '<iframe class="lp-embed" src="/linkedin-poster?embed=1" title="LinkedIn Poster" ' +
+    el.innerHTML = '<div class="liops-mount"></div>' +
+      '<iframe class="lp-embed" src="/linkedin-poster?embed=1" title="LinkedIn Poster" ' +
       'allow="clipboard-write" allowfullscreen></iframe>';
+    liOpsPanel($(".liops-mount", el), "content");
   }
 
   function renderVoiceDrops(el) {
@@ -14809,10 +15110,12 @@
         ? "Speaks in " + esc(dname) + " unless you pick a different voice here."
         : voices.length
         ? "Required, the voice the agent speaks in on every call."
-        : "No cloned voices yet. Record one in Voice Drops → Voice &amp; Consent, then pick it here.";
+        : "Pick any voice from your ElevenLabs account below, or paste an id in Voice Drops → Voice &amp; Consent.";
       return '<div class="vt-field"><label>Agent voice' + (dflt ? "" : ' <span style="color:var(--vt-bad)">*</span>') + "</label>" +
         '<select id="vtfVoice">' + opts + "</select>" +
-        '<div class="vt-hint">' + hint + "</div></div>";
+        '<div class="vt-hint">' + hint + "</div>" +
+        '<button type="button" class="vt-linkbtn" id="vtVoiceBrowseBtn" style="margin-top:6px">' +
+          '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg> Browse ElevenLabs voices</button></div>';
     }
 
     /* ============ Desks tab ============ */
@@ -14904,6 +15207,7 @@
         voiceSelect(d) +
         fld("vtfThreshold", "Pass threshold (0-100)", "70", "number", d.passThreshold) +
         "</div>" +
+        '<div id="vtVoiceBrowser" class="vt-voicebrowser" style="display:none"></div>' +
         '<div class="vt-section">Top qualifiers <span style="color:var(--text-dim);font-weight:500;text-transform:none;letter-spacing:0">- what the agent screens for on the call</span></div>' +
         '<div class="vt-quals">' +
           '<div class="vt-gen">' +
@@ -15230,6 +15534,100 @@
       });
       var cancel = $("#vtCancel");
       if (cancel) cancel.addEventListener("click", function () { vt.editing = null; vt.creating = false; paintDesks(body); });
+
+      // ---- Agent-voice browser: pick any voice from the ElevenLabs account ----
+      (function wireVoiceBrowser() {
+        var trigger = $("#vtVoiceBrowseBtn"), panel = $("#vtVoiceBrowser");
+        if (!trigger || !panel) return;
+        var loaded = false, allVoices = [], preview = null, playingId = null;
+
+        function selectedId() { var s = $("#vtfVoice"); return s ? s.value : ""; }
+        function catLabel(c) { return c ? (c === "premade" ? "stock" : c) : "voice"; }
+
+        function useVoice(v) {
+          var s = $("#vtfVoice");
+          if (!s) return;
+          if (!Array.prototype.some.call(s.options, function (o) { return o.value === v.voiceId; })) {
+            var o = document.createElement("option");
+            o.value = v.voiceId; o.textContent = v.name;
+            s.appendChild(o);
+          }
+          s.value = v.voiceId;
+          render();
+          toast("Agent will speak in " + v.name + ".");
+        }
+
+        function togglePreview(v, btn) {
+          if (!v.previewUrl) { toast("No sample available for this voice."); return; }
+          if (preview) { preview.pause(); }
+          if (playingId === v.voiceId) { playingId = null; render(); return; }
+          preview = new Audio(v.previewUrl);
+          playingId = v.voiceId;
+          preview.addEventListener("ended", function () { playingId = null; render(); });
+          preview.play().catch(function () { toast("Couldn’t play the sample."); playingId = null; render(); });
+          render();
+        }
+
+        function render() {
+          var term = ($("#vtVbSearch") ? $("#vtVbSearch").value : "").toLowerCase().trim();
+          var cur = selectedId();
+          var rows = allVoices.filter(function (v) { return !term || v.name.toLowerCase().indexOf(term) >= 0; });
+          var listHtml = rows.length
+            ? rows.map(function (v) {
+                var playing = playingId === v.voiceId;
+                return '<div class="vt-vb-row' + (v.voiceId === cur ? " sel" : "") + '" data-vid="' + esc(v.voiceId) + '">' +
+                  '<span class="vt-vb-name">' + esc(v.name) + "</span>" +
+                  '<span class="vt-vb-cat">' + esc(catLabel(v.category)) + "</span>" +
+                  '<button type="button" class="vt-vb-prev" data-vbact="prev"' + (v.previewUrl ? "" : " disabled") + '>' +
+                    '<svg class="isvg" aria-hidden="true"><use href="#i-play"/></svg>' + (playing ? "Playing" : "Preview") + "</button>" +
+                  '<button type="button" class="vt-vb-use" data-vbact="use">' + (v.voiceId === cur ? "Selected" : "Use") + "</button>" +
+                "</div>";
+              }).join("")
+            : '<div class="vt-vb-msg">No voices match “' + esc(term) + "”.</div>";
+          panel.innerHTML =
+            '<div class="vt-vb-search"><input id="vtVbSearch" type="text" placeholder="Search your ElevenLabs voices…" value="' + esc(term) + '" /></div>' +
+            '<div class="vt-vb-list">' + listHtml + "</div>";
+          var sb = $("#vtVbSearch");
+          if (sb) { sb.addEventListener("input", render); if (term) { sb.focus(); sb.setSelectionRange(term.length, term.length); } }
+          Array.prototype.forEach.call(panel.querySelectorAll(".vt-vb-row"), function (row) {
+            var v = allVoices.filter(function (x) { return x.voiceId === row.getAttribute("data-vid"); })[0];
+            if (!v) return;
+            row.querySelector('[data-vbact="use"]').addEventListener("click", function () { useVoice(v); });
+            var pv = row.querySelector('[data-vbact="prev"]');
+            if (pv) pv.addEventListener("click", function () { togglePreview(v, pv); });
+          });
+        }
+
+        function load() {
+          panel.innerHTML = '<div class="vt-vb-msg"><span class="spinner"></span> Loading your ElevenLabs voices…</div>';
+          send("/voice/clones", "POST", { action: "list-voices", provider: "elevenlabs" }).then(function (r) {
+            if (!r.ok) { panel.innerHTML = '<div class="vt-vb-msg">Couldn’t reach ElevenLabs. Check the key in Setup → Voice.</div>'; return; }
+            allVoices = (r.data && r.data.voices) || [];
+            if (!allVoices.length) {
+              var err = r.data && r.data.error;
+              var msg = err === "elevenlabs_missing_voices_read"
+                ? "Your ElevenLabs key can’t list voices. In ElevenLabs → Settings → API Keys, enable the <b>Voices: Read</b> permission on this key, then reopen this."
+                : err
+                ? "ElevenLabs couldn’t list voices (" + esc(String(err)) + "). Check the key in Setup → Voice."
+                : (r.data && r.data.dryRun)
+                ? "Add your ElevenLabs API key in Setup → Voice to browse voices."
+                : "No voices on this ElevenLabs account yet.";
+              panel.innerHTML = '<div class="vt-vb-msg">' + msg + "</div>";
+              return;
+            }
+            loaded = true;
+            render();
+          }).catch(function () { panel.innerHTML = '<div class="vt-vb-msg">Couldn’t reach the server.</div>'; });
+        }
+
+        trigger.addEventListener("click", function () {
+          var open = panel.style.display !== "none";
+          if (open) { panel.style.display = "none"; if (preview) { preview.pause(); playingId = null; } return; }
+          panel.style.display = "block";
+          if (!loaded) load(); else render();
+        });
+      })();
+
       var genQ = $("#vtGenQ");
       if (genQ) genQ.addEventListener("click", function () {
         var jd = $("#vtfJd") ? $("#vtfJd").value.trim() : "";
@@ -16569,253 +16967,6 @@
     }
 
     tabBar(); paint();
-  }
-
-  /* ---------------- Outreach (sending readiness control panel) ----------------
-     The working interface for everything you need wired before you can send:
-     ATS, SMS (OS Text), the enrichment waterfall + its credit balance, Job
-     Search (the white-labelled signal feed), sending domains down to each
-     inbox, and the LinkedIn accounts, each with live status, the switch to
-     turn it on, and a path to connect what's missing. Talks to /api/outreach. */
-  var orSnap = null;       // last /outreach snapshot
-  var orPanel = null;      // expanded drill-down: 'domains' | 'linkedin' | null
-
-  function renderOutreach(el) {
-    var canInteg = can("integrations:manage");
-    var canAts = can("ats:manage");
-    var canAcct = can("accounts:manage");
-
-    el.innerHTML = head("Outreach",
-      "Your sending readiness in one place. Connect what's missing, watch your domains and LinkedIn warm up, top up enrichment credits, and switch the engine on.") +
-      '<div id="orBody">' + loading() + "</div>";
-
-    // One delegated listener for the whole panel, survives repaints.
-    $("#orBody").addEventListener("click", function (e) {
-      var t;
-      if ((t = e.target.closest("[data-toggle]"))) { doToggle(t.getAttribute("data-toggle"), t); return; }
-      if ((t = e.target.closest("[data-topup]"))) { topUpModal(); return; }
-      if ((t = e.target.closest("[data-connect]"))) { howToModal(t.getAttribute("data-connect")); return; }
-      if ((t = e.target.closest("[data-panel]"))) { var p = t.getAttribute("data-panel"); orPanel = (orPanel === p ? null : p); paint(); return; }
-      if ((t = e.target.closest("[data-go]"))) {
-        var route = t.getAttribute("data-go");
-        if (ROUTES[route] && ROUTES[route].cap && !can(ROUTES[route].cap)) { toast("Ask a workspace admin to set this up."); return; }
-        location.hash = route; return;
-      }
-    });
-
-    load();
-
-    function load() {
-      api("/outreach?motion=" + encodeURIComponent(motion))
-        .then(function (d) { orSnap = d || {}; paint(); })
-        .catch(function () { var b = $("#orBody"); if (b) b.innerHTML = needsSetup(); });
-    }
-
-    function doToggle(key, btn) {
-      if (!canInteg) { toast("Ask a workspace admin to change this."); return; }
-      var action = key === "enrichment" ? "toggle-enrichment" : "toggle-jobsearch";
-      var nowOn = !btn.classList.contains("on");
-      btn.classList.toggle("on", nowOn); // optimistic
-      send("/outreach", "POST", { action: action, on: nowOn, motion: motion }).then(function (r) {
-        if (r.ok) { orSnap = r.data; paint(); toast((key === "enrichment" ? "Enrichment" : "Job Search") + (nowOn ? " turned on" : " turned off")); }
-        else { btn.classList.toggle("on", !nowOn); toast("Could not update (" + (r.data.error || r.status) + ")"); }
-      }).catch(function () { btn.classList.toggle("on", !nowOn); toast("Could not reach the server."); });
-    }
-
-    function topUpModal() {
-      if (!canInteg) { toast("Ask a workspace admin to manage credits."); return; }
-      var amts = [1000, 5000, 10000];
-      var btns = amts.map(function (a) { return '<button class="btn btn-ghost" data-amt="' + a + '">+ ' + a.toLocaleString() + " credits</button>"; }).join("");
-      openModal("Add enrichment credits", "Credits are spent finding work emails and direct dials. They top up instantly for this demo.",
-        '<div class="btn-row" style="flex-wrap:wrap;gap:10px">' + btns + "</div>" +
-        '<div class="modal-foot"><button class="btn btn-ghost btn-sm" data-x>Close</button></div>',
-        function (root, close) {
-          root.querySelector("[data-x]").addEventListener("click", close);
-          Array.prototype.forEach.call(root.querySelectorAll("[data-amt]"), function (b) {
-            b.addEventListener("click", function () {
-              b.disabled = true;
-              send("/outreach", "POST", { action: "topup-credits", amount: parseInt(b.getAttribute("data-amt"), 10), motion: motion })
-                .then(function (r) { if (r.ok) { orSnap = r.data; paint(); toast("Credits added"); close(); } else { b.disabled = false; toast("Could not add credits"); } })
-                .catch(function () { b.disabled = false; toast("Could not reach the server."); });
-            });
-          });
-        });
-    }
-
-    function howToModal(which) {
-      var ats = which === "ats";
-      var title = ats ? "Connect your ATS" : "Connect SMS (OS Text)";
-      var sub = ats ? "Loxo is the verified, primary ATS. Every reply, touch, and placement syncs once it's connected."
-        : "Add compliant post-engagement texting and opt-outs to your sequences.";
-      var steps = ats
-        ? ["Open the ATS tab and choose Loxo as your system of record.",
-           "Under Accounts → API key, add your Loxo API key (service: Loxo).",
-           "Go to Connected and press Test on Loxo until it turns green."]
-        : ["Get your API key from OS Text settings.",
-           "Under Accounts → API key, add it (service: OS Text).",
-           "Go to Connected and press Test on OS Text until it turns green."];
-      var goRoute = ats ? "ats" : "connected";
-      var goCap = ats ? canAts : canInteg;
-      var foot = goCap
-        ? '<div class="modal-foot"><button class="btn btn-ghost btn-sm" data-x>Close</button><button class="btn btn-primary btn-sm" data-open>' + (ats ? "Open ATS settings" : "Open Connected") + "</button></div>"
-        : '<div class="modal-foot"><span class="muted" style="margin-right:auto">You don\'t have access, ask a workspace admin.</span><button class="btn btn-ghost btn-sm" data-x>Close</button></div>';
-      openModal(title, sub,
-        "<ol class=\"or-steps\">" + steps.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ol>" + foot,
-        function (root, close) {
-          root.querySelector("[data-x]").addEventListener("click", close);
-          var op = root.querySelector("[data-open]");
-          if (op) op.addEventListener("click", function () { close(); location.hash = goRoute; });
-        });
-    }
-
-    function pill(state) {
-      var m = { ready: ["ready", "Ready"], warming: ["warming", "Warming up"], action: ["action", "Action needed"], off: ["off", "Off"] };
-      var x = m[state] || m.action;
-      return '<span class="or-pill ' + x[0] + '">' + x[1] + "</span>";
-    }
-    function bar(pct, cls) { return '<div class="or-bar"><span class="' + (cls || "") + '" style="width:' + Math.max(0, Math.min(100, pct || 0)) + '%"></span></div>'; }
-    function sw(on, key) { return '<button class="or-sw' + (on ? " on" : "") + '" role="switch" aria-checked="' + (on ? "true" : "false") + '" data-toggle="' + key + '"' + (canInteg ? "" : " disabled title='Admin only'") + "><span></span></button>"; }
-    function fmt(n) { return (n || 0).toLocaleString(); }
-
-    function card(opts) {
-      // opts: { icon, name, state, body, foot }
-      return '<div class="or-card or-' + (opts.state || "action") + '">' +
-        '<div class="or-card-h"><span class="or-ic">' + opts.icon + "</span>" +
-        '<div class="or-name">' + esc(opts.name) + "</div>" + pill(opts.state) + "</div>" +
-        '<div class="or-card-b">' + opts.body + "</div>" +
-        (opts.foot ? '<div class="or-card-f">' + opts.foot + "</div>" : "") + "</div>";
-    }
-
-    function paint() {
-      var body = $("#orBody"); if (!body || !orSnap) return;
-      var s = orSnap;
-      var pf = s.preflight || { ok: false, blocking: [] };
-      var gate = pf.ok
-        ? '<div class="or-gate ok">All required tools are green, you can activate ' + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>"
-        : '<div class="or-gate warn">' + ((pf.blocking || []).length) + " required tool(s) not ready yet. Connect the cards marked <b>Action needed</b> to activate " + esc(motion === "bd" ? "Business Development" : "Recruiting") + " campaigns.</div>";
-
-      // ATS
-      var ats = s.ats || {};
-      var atsCard = card({
-        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-database"/></svg>', name: ats.label || "ATS", state: ats.state,
-        body: '<p class="or-detail">' + esc(ats.detail || "") + "</p>",
-        foot: ats.connected
-          ? '<button class="btn btn-ghost btn-sm" data-go="ats">Manage ATS</button>'
-          : '<button class="btn btn-primary btn-sm" data-connect="ats">How to connect</button>'
-      });
-
-      // SMS
-      var sms = s.sms || {};
-      var smsCard = card({
-        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg>', name: sms.label || "SMS", state: sms.state,
-        body: '<p class="or-detail">' + esc(sms.detail || "") + "</p>",
-        foot: sms.connected
-          ? '<button class="btn btn-ghost btn-sm" data-go="connected">Manage</button>'
-          : '<button class="btn btn-primary btn-sm" data-connect="sms">How to connect</button>'
-      });
-
-      // Enrichment + credits
-      var en = s.enrichment || {}, cr = en.credits || {};
-      var enCard = card({
-        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-flask"/></svg>', name: "Enrichment waterfall", state: en.state,
-        body: '<p class="or-detail">' + esc(en.detail || "") + "</p>" +
-          '<div class="or-credits"><div class="or-credit-top"><b>' + fmt(cr.remaining) + "</b> <span class=\"muted\">/ " + fmt(cr.included) + " credits</span></div>" +
-          bar(cr.pct, cr.low ? "warn" : "ok") + "</div>",
-        foot: '<div class="or-foot-row"><label class="or-swrap"><span class="muted">' + (en.enabled ? "On" : "Off") + "</span>" + sw(en.enabled, "enrichment") + "</label>" +
-          '<button class="btn btn-ghost btn-sm" data-topup' + (canInteg ? "" : " disabled") + ">Top up credits</button></div>"
-      });
-
-      // Job Search (white-labelled)
-      var js = s.jobSearch || {};
-      var jsCard = card({
-        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-radar"/></svg>', name: js.label || "Job Search", state: js.state,
-        body: '<p class="or-detail">' + esc(js.detail || "") + "</p>",
-        foot: '<label class="or-swrap"><span class="muted">' + (js.enabled ? "On" : "Off") + "</span>" + sw(js.enabled, "jobSearch") + "</label>"
-      });
-
-      // Domains
-      var dm = s.domains || { list: [] };
-      var dmCard = card({
-        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', name: "Warm sending domains", state: dm.state,
-        body: '<p class="or-detail">' + (dm.total
-          ? "<b>" + dm.total + "</b> domain" + (dm.total === 1 ? "" : "s") + " · <b>" + (dm.inboxesWarm || 0) + "</b> of " + (dm.inboxesTotal || 0) + " inboxes warm" + (dm.inboxesWarming ? ", " + dm.inboxesWarming + " warming" : "")
-          : "No sending domains yet. Add one to start warming inboxes.") + "</p>",
-        foot: '<div class="or-foot-row">' +
-          (dm.total ? '<button class="btn btn-ghost btn-sm" data-panel="domains">' + (orPanel === "domains" ? "Hide details" : "Manage domains") + "</button>" : "") +
-          (canAcct ? '<button class="btn ' + (dm.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">+ Add domain</button>' : "") + "</div>"
-      });
-
-      // LinkedIn
-      var li = s.linkedin || { list: [] };
-      var liCard = card({
-        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-link"/></svg>', name: "Warm LinkedIn accounts", state: li.state,
-        body: '<p class="or-detail">' + (li.total
-          ? "<b>" + li.warmed + "</b> of " + li.total + " warmed" + (li.flagged ? ' · <span style="color:var(--accent-red)">' + li.flagged + " flagged</span>" : "")
-          : "No LinkedIn accounts yet. Connect one to start warming it.") + "</p>",
-        foot: '<div class="or-foot-row">' +
-          (li.total ? '<button class="btn btn-ghost btn-sm" data-panel="linkedin">' + (orPanel === "linkedin" ? "Hide details" : "View accounts") + "</button>" : "") +
-          (canAcct ? '<button class="btn ' + (li.total ? "btn-ghost" : "btn-primary") + ' btn-sm" data-go="accounts">+ Add account</button>' : "") + "</div>"
-      });
-
-      var panel = "";
-      if (orPanel === "domains") panel = domainsPanel(dm);
-      else if (orPanel === "linkedin") panel = linkedinPanel(li);
-
-      body.innerHTML = gate +
-        '<div class="or-grid">' + atsCard + smsCard + enCard + jsCard + dmCard + liCard + "</div>" +
-        panel + playbook();
-
-      // reflect the on/off label live as the switch is clicked (handled in doToggle repaint)
-    }
-
-    function domainsPanel(dm) {
-      var rows = (dm.list || []).map(function (d) {
-        var hp = d.state === "ready" ? "ready" : d.state === "action" ? "action" : "warming";
-        var inboxes = (d.inboxes || []).map(function (ib) {
-          var ip = ib.state === "warm" ? "ready" : ib.state === "paused" ? "action" : "warming";
-          return '<div class="or-inbox"><span class="or-dot ' + ip + '"></span><span class="or-email">' + esc(ib.email) + "</span>" +
-            '<span class="or-mini">' + (ib.state === "warm" ? "Warm" : ib.state === "paused" ? "Paused" : "Warming · " + ib.warmupPct + "%") + "</span>" +
-            '<div class="or-bar mini">' + '<span class="' + ip + '" style="width:' + ib.warmupPct + '%"></span></div></div>';
-        }).join("");
-        return '<div class="or-dom"><div class="or-dom-h"><b>' + esc(d.domain) + "</b>" + pill(d.state) +
-          '<span class="or-mini">bounce ' + ((d.bounceRate || 0) * 100).toFixed(1) + "% · " + esc(d.health) + "</span></div>" +
-          '<div class="or-inboxes">' + inboxes + "</div></div>";
-      }).join("");
-      return '<div class="card or-panel"><h3>Sending domains &amp; inboxes</h3>' +
-        '<p class="muted" style="margin-top:-4px">Each inbox warms on its own ramp. Keep volume low until every inbox is green; paused inboxes are auto-held when bounce climbs.</p>' +
-        (rows || '<div class="empty">No domains.</div>') + "</div>";
-    }
-
-    function linkedinPanel(li) {
-      var rows = (li.list || []).map(function (a) {
-        return '<div class="or-li"><div class="or-li-h"><b>' + esc(a.handle) + "</b>" + pill(a.state) +
-          '<span class="or-mini">' + a.warmupPct + "% warmed</span></div>" +
-          '<div class="or-bar">' + '<span class="' + (a.state === "ready" ? "ready" : a.state === "action" ? "action" : "warming") + '" style="width:' + a.warmupPct + '%"></span></div>' +
-          '<div class="or-mini" style="margin-top:6px">' + (a.limits.connects || 0) + " connects · " + (a.limits.dms || 0) + " DMs · " + (a.limits.profileViews || 0) + " views / day</div>" +
-          (a.issue ? '<div class="or-issue">' + esc(a.issue) + "</div>" : "") + "</div>";
-      }).join("");
-      return '<div class="card or-panel"><h3>LinkedIn accounts</h3>' +
-        '<p class="muted" style="margin-top:-4px">Daily limits ramp automatically as each account warms. Flagged accounts are paused until they recover.</p>' +
-        (rows || '<div class="empty">No accounts.</div>') + "</div>";
-    }
-
-    function playbook() {
-      var phases = REF.phases.map(function (p) {
-        return '<div class="phase"><div class="phase-h"><span class="phase-n">' + p.n + "</span><h4>" + esc(p.title) + '</h4><span class="phase-time">' + esc(p.time) + "</span></div>" +
-          "<ul>" + p.items.map(function (i) { return "<li>" + esc(i) + "</li>"; }).join("") + "</ul>" +
-          '<div class="done">Done when: ' + esc(p.done) + "</div></div>";
-      }).join("");
-      var touches = REF.touches.map(function (t) {
-        return '<div class="touch"><div class="day">Day ' + t.day + '</div><div><div class="tn">' + esc(t.name) +
-          '<span class="chip-c">' + esc(t.channel) + "</span></div>" +
-          '<div class="ti">' + esc(t.intent) + (t.constraints ? ' <span class="spark">(' + esc(t.constraints) + ")</span>" : "") + "</div></div></div>";
-      }).join("");
-      return '<details class="or-playbook"><summary>Deployment playbook, 7 phases &amp; the 28-day sequence</summary>' +
-        '<div class="two-col" style="margin-top:14px"><div><h3 style="margin-bottom:10px">Deploy a campaign</h3>' + phases + "</div>" +
-        '<div><div class="card"><h3>Sequence anatomy (28 days)</h3>' + touches + "</div>" +
-        '<div class="card" style="margin-top:14px"><h3>Decision rules</h3><ul class="phase" style="border:0;padding:0;margin:0">' +
-        REF.seqRules.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div></div></details>";
-    }
   }
 
   /* ---------------- LinkedIn Automation ----------------
@@ -20996,16 +21147,24 @@
   function renderLinkedInOs(el) {
     var crumbEl = $("#crumb");
     if (crumbEl) crumbEl.textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + (motion === "recruiting" ? "Build" : "Tools");
+    // The daily-ops worksheet mounts as a sibling ABOVE the tool host: the
+    // LinkedIn OS renderer owns its element's innerHTML entirely (and repaints
+    // it on internal tab switches), so the panel must live outside that host.
+    el.innerHTML = '<div class="liops-mount"></div><div class="lie-mount"></div><div class="liops-host"></div>';
+    liOpsPanel($(".liops-mount", el), "outreach");
+    if (motion === "bd") liEngagePanel($(".lie-mount", el));
+    var host = $(".liops-host", el);
     var tries = 0;
     (function mount() {
+      if (!document.body.contains(host)) return;
       if (window.__LinkedInOS && window.__LinkedInOS.render) {
-        window.__LinkedInOS.render(el, { motion: motion });
+        window.__LinkedInOS.render(host, { motion: motion });
         return;
       }
       // Cold deep link: linkedin-os.js loads after command.js; wait briefly.
       tries++;
       if (tries > 40) {
-        el.innerHTML = '<div class="empty">The LinkedIn tool failed to load. Refresh the page.</div>';
+        host.innerHTML = '<div class="empty">The LinkedIn tool failed to load. Refresh the page.</div>';
         return;
       }
       setTimeout(mount, 125);
@@ -21868,7 +22027,8 @@
           (d.infra && d.infra.lastError ? ' <span style="color:var(--danger)">' + esc(d.infra.lastError) + "</span>" : "") +
           '<button class="btn btn-sm btn-primary" id="bdpProvision">Set up calling</button></div>';
       } else {
-        html += '<div class="bdp-banner okay">Calling infrastructure is ready. Webhooks: <code style="font:500 11.5px var(--mono)">' + esc(d.infra.webhookUrl || "") + "</code></div>";
+        html += '<div class="bdp-banner okay">Calling infrastructure is ready. Webhooks: <code style="font:500 11.5px var(--mono)">' + esc(d.infra.webhookUrl || "") + "</code>" +
+          '<button class="btn btn-sm" id="bdpResetInfra" style="margin-left:auto">Reset calling setup</button></div>';
       }
 
       // Connected lines.
@@ -21901,6 +22061,16 @@
         send("/phone/numbers", "POST", { action: "provision" }).then(function (r) {
           if (!r.ok) toast((r.data && r.data.error) || "Provisioning failed");
           else toast("Calling is set up");
+          load();
+        });
+      });
+      var reset = $("#bdpResetInfra");
+      if (reset) reset.addEventListener("click", function () {
+        if (!window.confirm("Reset calling setup and rebuild it on this workspace's current phone account? Use this after switching phone accounts. Numbers, texts, and call history are untouched; each recruiter just reconnects their phone once afterward.")) return;
+        reset.disabled = true; reset.textContent = "Resetting";
+        send("/phone/numbers", "POST", { action: "reset-calling" }).then(function (r) {
+          if (!r.ok) toast((r.data && r.data.error) || "Reset failed");
+          else toast("Calling rebuilt on your current account. Recruiters reload the phone to reconnect.");
           load();
         });
       });
