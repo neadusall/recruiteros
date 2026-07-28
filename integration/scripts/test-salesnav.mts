@@ -40,6 +40,26 @@ function ok(cond: boolean, name: string, extra?: unknown) {
   ok(!c.titles.length && !c.geos.length && !c.companies.length && !c.keywords.length, "saved-search: clean empty criteria", c);
 }
 
+/* ---- 3b. Seniority-only search must still seed the waterfall (titles bucket) ---- */
+{
+  const url = "https://www.linkedin.com/sales/search/people?query=(filters%3AList((type%3ASENIORITY_LEVEL%2Cvalues%3AList((id%3A320%2Ctext%3ADirector%2CselectionType%3AINCLUDED)))%2C(type%3AREGION%2Cvalues%3AList((id%3A103644278%2Ctext%3AUnited%2520States%2CselectionType%3AINCLUDED)))%2C(type%3AINDUSTRY%2Cvalues%3AList((id%3A14%2Ctext%3AHospital%2520%2526%2520Health%2520Care%2CselectionType%3AINCLUDED)))))";
+  const c = parseSalesNavUrl(url);
+  ok(c.titles.includes("Director"), "seniority: SENIORITY_LEVEL text lands in titles", c.titles);
+  ok(c.geos[0] === "United States" && c.industries[0] === "Hospital & Health Care", "seniority: geo + industry still parse", c);
+  const icp = icpFromSalesNav(c, []);
+  ok(icp.titles.length > 0, "seniority: derived ICP can drive the waterfall", icp.titles);
+}
+
+/* ---- 3c. Lead-list / recent-search links parse to clean empty (guidance path) ---- */
+{
+  const list = parseSalesNavUrl("https://www.linkedin.com/sales/lists/people/7123456789012345678?sortCriteria=CREATED_TIME");
+  const recent = parseSalesNavUrl("https://www.linkedin.com/sales/search/people?recentSearchId=4373858446&sessionId=xyz");
+  for (const [label, c] of [["lead list", list], ["recent search", recent]] as const) {
+    ok(!c.titles.length && !c.keywords.length && !c.geos.length && !c.companies.length && !c.industries.length,
+      `filterless: ${label} is clean empty, not garbage`, c);
+  }
+}
+
 /* ---- 4. ICP derivation: URL filters win; profile backfill; seniority traps ---- */
 {
   const icp = icpFromSalesNav(

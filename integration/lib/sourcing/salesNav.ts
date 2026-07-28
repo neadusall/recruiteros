@@ -71,7 +71,10 @@ function pushEach(list: string[], v: string): void {
 
 /** Which ICP bucket a Sales Navigator filter `type:` feeds. */
 function bucketFor(type: string): keyof SalesNavCriteria | null {
-  if (/TITLE|FUNCTION/.test(type)) return "titles";
+  // SENIORITY_LEVEL text ("Director", "Owner", "Vice President") is title-shaped:
+  // a search built from seniority + geo + industry alone must still seed the
+  // waterfall, which keys off titles.
+  if (/TITLE|FUNCTION|SENIORITY/.test(type)) return "titles";
   if (/GEO|REGION|POSTAL|STATE|CITY/.test(type)) return "geos";
   if (/COMPANY_HEADCOUNT|COMPANY_TYPE/.test(type)) return null; // size/type bands, not names
   if (/COMPANY/.test(type)) return "companies";
@@ -301,9 +304,11 @@ export async function runSalesNavSourcing(ws: string, ownerUserId: string, opts:
   // back empty, say exactly what to do instead of failing mysteriously.
   const criteriaEmpty = !criteria.titles.length && !criteria.keywords.length
     && !criteria.geos.length && !criteria.companies.length && !criteria.industries.length;
-  if (kind === "LinkedIn Recruiter" && criteriaEmpty && !fetched.rows.length) {
+  if (criteriaEmpty && !fetched.rows.length) {
     warnings.push(
-      "recruiter_url_note: Recruiter search URLs usually keep their filters on LinkedIn's side, so the URL alone can't seed the search waterfall. Connect the LinkedIn seat under Setup so the search's own members can be pulled, or use Recruiter's legacy smartsearch URL (it spells the filters out).",
+      kind === "LinkedIn Recruiter"
+        ? "recruiter_url_note: Recruiter search URLs usually keep their filters on LinkedIn's side, so the URL alone can't seed the search waterfall. Connect the LinkedIn seat under Setup so the search's own members can be pulled, or use Recruiter's legacy smartsearch URL (it spells the filters out)."
+        : "filterless_url_note: this link carries none of the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side). Open the search so its filters are applied, then copy the full URL from the address bar (it will contain \"query=\"), or connect the LinkedIn seat under Setup so the search's own members can be pulled.",
     );
   }
   const icp = icpFromSalesNav(criteria, fetched.rows, kind);

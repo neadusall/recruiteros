@@ -249,11 +249,15 @@ export async function POST(req: Request) {
         minFit: typeof b.minFit === "number" ? b.minFit : undefined,
       }));
       if (!result.candidates.length) {
-        return fail("empty_salesnav_run", 422, {
-          detail: "nothing came back: the LinkedIn pull found no members and the waterfall had no usable filters to run on. " +
-            (result.warnings[0] || "check the URL and that LinkedIn/Unipile is connected under Setup"),
-          warnings: result.warnings,
-        });
+        // Say what actually happened, recruiter-facing: a filterless link (saved
+        // search / recent search / lead list) is by far the common cause, and the
+        // fix is on the recruiter's side of the screen.
+        const c = result.criteria;
+        const criteriaEmpty = !c.titles.length && !c.keywords.length && !c.geos.length && !c.companies.length && !c.industries.length;
+        const detail = criteriaEmpty
+          ? "This link doesn't include the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side), and the search's members couldn't be pulled directly. On LinkedIn, open the search so the filters are applied, then copy the full URL from the address bar (it will contain \"query=\") and paste that here. Connecting a LinkedIn seat under Setup also lets the search's own members be pulled."
+          : "The search's members couldn't be pulled from LinkedIn, and the expanded search found nobody for these filters. Add a title or keyword filter to the search and try again, or connect a LinkedIn seat under Setup so the search's own members can be pulled.";
+        return fail("empty_salesnav_run", 422, { detail, warnings: result.warnings });
       }
 
       // Resolve the destination list: explicit pick > case-insensitive name match
