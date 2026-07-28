@@ -143,3 +143,16 @@ https:// {
 		}
 	}
 }
+
+# mytal.co: client onboarding portal, served by the standalone mytal-web
+# container (static page + POST /api/onboard intake capture to
+# /opt/mytal/data/onboarding.jsonl). Named blocks win over the catch-all.
+mytal.co {
+	encode zstd gzip
+	reverse_proxy mytal-web:3000 {
+		import resilient
+	}
+}
+www.mytal.co {
+	redir https://mytal.co{uri} permanent
+}
