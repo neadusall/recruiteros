@@ -11996,11 +11996,11 @@
             // done, so the mini bar is honest; without a ledger yet it just glides.
             var livePct = ep ? Math.max(4, Math.min(100, Math.round(epDone / (ep.total || n || 1) * 100))) : null;
             var liveBar = '<span class="jd-tbar' + (livePct == null ? ' ind' : '') + '"><b' + (livePct != null ? ' style="width:' + livePct + '%"' : '') + '></b></span>';
-            var etaLine = !jEta ? "" : '<span class="jd-teta">' + (jEta.finishing ? "finishing up" : jEta.short + " left · done ~" + jEta.clock) + '</span>';
+            var etaLine = !jEta ? "" : '<span class="jd-teta">' + (jEta.finishing ? "finishing up · minutes away" : "done by ~" + jEta.clock + " · " + jEta.short + " left") + '</span>';
             sEnrich = jStop("jt-live", jIcons.loop, "Enriching now", ep ? "~" + epDone + " of " + (ep.total || n) + " rows" : "working…",
               "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.", null, liveBar + etaLine);
             jNote = "<b>Working now:</b> contact info is being filled in. " + (jEta && !jEta.finishing
-              ? "Expect it done in " + jEta.span + " (around " + jEta.clock + ")" + (jEta.measured ? ". " : "; that's a first estimate and it sharpens as batches finish. ")
+              ? "Projected to be done around <b>" + jEta.clock + "</b> (" + jEta.span + " from now)" + (jEta.measured ? ". " : "; that's a first estimate and it sharpens as batches finish. ")
               : "It's finishing up; the last checks take a few minutes. ") +
               "Next: everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
           } else if (ep && ep.nextStart == null && lxSkipN) {
@@ -12077,7 +12077,7 @@
           var jBoostCta = (boostable && (jOverall === "done" || jOverall === "wait"))
             ? '<button type="button" class="jd-boostcta" data-boost="' + esc(r.id) + '" title="Texts reach ' + phs + ' of ' + n + ' candidates so far. Boost runs a paid lookup on the ' + boostable + ' still missing a phone; you see the estimated cost and approve it before anything is spent.">Boost phones · up to ' + boostable + ' more</button>'
             : '';
-          var jHeadEta = (jOverall === "live" && jEta) ? (jEta.finishing ? "finishing up" : jEta.short + " left") : "";
+          var jHeadEta = (jOverall === "live" && jEta) ? (jEta.finishing ? "minutes away" : "done by ~" + jEta.clock) : "";
           var jHead = '<div class="jd-jhead"><span class="jd-jhstate"><span class="jd-jstate js-' + jOverall + '"><i></i>' + jChipTxt + '</span>' + jBoostCta + '</span>' +
             '<span class="jd-jsteps">' + jDoneN + ' of 4 steps' + (jUpd ? ' · updated ' + jUpd : '') + (jHeadEta ? ' · ' + jHeadEta : '') + '</span></div>';
           var journey = n
