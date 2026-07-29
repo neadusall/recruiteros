@@ -6568,6 +6568,18 @@
       '.wu-mbwrap{padding:0 8px 10px 22px}' +
       '.wu-mbwrap .wu-table{font-size:12.5px}' +
       '.wu-scroll{overflow-x:auto}' +
+      '.wu-hchip{display:inline-block;min-width:34px;text-align:center;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px}' +
+      '.wu-hchip.healthy{background:rgba(26,127,55,.12);color:#1a7f37}' +
+      '.wu-hchip.watch{background:rgba(178,106,0,.12);color:#b26a00}' +
+      '.wu-hchip.at_risk{background:rgba(179,38,30,.12);color:#b3261e}' +
+      '.wu-dns{display:inline-flex;gap:3px}' +
+      '.wu-dnsp{font-size:9.5px;font-weight:700;letter-spacing:.03em;border-radius:4px;padding:1.5px 5px}' +
+      '.wu-dnsp.ok{background:rgba(26,127,55,.12);color:#1a7f37}' +
+      '.wu-dnsp.miss{background:rgba(179,38,30,.12);color:#b3261e}' +
+      '.wu-dnsp.unk{background:var(--border);color:var(--muted,var(--text-dim))}' +
+      '.wu-acts{margin:8px 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}' +
+      '.wu-acts-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,var(--text-dim));margin-bottom:6px}' +
+      '.wu-acts li{font-size:12.5px;margin:3px 0 3px 16px}' +
       '.wu-days b{font-variant-numeric:tabular-nums}';
     document.head.appendChild(st);
   }
@@ -6583,6 +6595,20 @@
   function wuBadge(r) {
     var label = r === "ready" ? "Ready to send" : r === "attention" ? "Needs attention" : "Warming";
     return '<span class="wu-badge ' + r + '">' + label + '</span>';
+  }
+
+  function wuHealthChip(h) {
+    if (!h) return '<span class="muted">n/a</span>';
+    return '<span class="wu-hchip ' + esc(h.label) + '" title="Composite of reputation, spam outcomes, DNS posture and fleet state">' + h.score + '</span>';
+  }
+
+  function wuDnsPills(dns) {
+    function p(name, val) {
+      var cls = dns == null ? "unk" : (val ? "ok" : "miss");
+      var tip = dns == null ? name + ": checking" : name + (val ? " record found" : " record missing");
+      return '<span class="wu-dnsp ' + cls + '" title="' + esc(tip) + '">' + name + '</span>';
+    }
+    return '<span class="wu-dns">' + p("SPF", dns && dns.spf) + p("DKIM", dns && dns.dkim) + p("DMARC", dns && dns.dmarc) + p("MX", dns && dns.mx) + '</span>';
   }
 
   function wuAgo(iso) {
@@ -6617,25 +6643,38 @@
         c(t.domains || 0, "Domains warming") +
         c(t.mailboxes || 0, "Warm-up mailboxes") +
         c(t.avgReputation != null ? t.avgReputation + "%" : "n/a", "Avg reputation") +
+        c(t.avgHealth != null ? t.avgHealth : "n/a", "Fleet health") +
         c(t.ready || 0, "Domains ready") +
-        c(t.attention || 0, "Need attention") +
+        c(t.atRisk != null ? t.atRisk : (t.attention || 0), "At risk") +
       '</div>';
     var rows = domains.map(function (d) {
       var open = !!wuOpen[d.domain];
       var days = d.days != null ? ('<span class="wu-days"><b>' + d.days.toFixed(1) + '</b> days</span>' + (d.since ? '<div class="muted" style="font-size:11px">since ' + esc(String(d.since).slice(0, 10)) + '</div>' : '')) : '<span class="muted">n/a</span>';
       var main = '<tr class="wu-dom" data-wu-dom="' + esc(d.domain) + '">' +
-        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b></td>' +
+        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
         '<td>' + days + '</td>' +
         '<td>' + wuRepCell(d.avgReputation) + '</td>' +
-        '<td>' + (d.minReputation != null ? d.minReputation + "%" : '<span class="muted">n/a</span>') + '</td>' +
+        '<td>' + wuHealthChip(d.health) + '</td>' +
+        '<td>' + wuDnsPills(d.dns) + '</td>' +
         '<td>' + (d.sentTotal || 0) + (d.spamCount ? ' <span class="muted">(' + d.spamCount + ' spam' + (d.spamRatePct != null ? ", " + d.spamRatePct + "%" : "") + ')</span>' : '') + '</td>' +
         '<td>' + wuBadge(d.readiness) + '</td>' +
       '</tr>';
       if (!open) return main;
-      var mb = '<tr><td colspan="7"><div class="wu-mbwrap"><table class="wu-table"><thead><tr><th>Mailbox</th><th>Status</th><th>Reputation</th><th>Days</th><th>Sent</th><th>Spam</th><th>Daily limit</th></tr></thead><tbody>' +
+      var acts = (d.actions && d.actions.length)
+        ? '<div class="wu-acts"><div class="wu-acts-t">What to do next</div><ul>' + d.actions.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join("") + '</ul></div>'
+        : '<div class="wu-acts"><div class="wu-acts-t">What to do next</div><ul><li>Nothing needed, this domain is on track.</li></ul></div>';
+      var dnsNote = d.dns
+        ? '<div class="muted" style="font-size:11px;margin:0 0 8px">DNS checked ' + esc(wuAgo(d.dns.checkedAt)) + (d.dns.dmarcPolicy ? ' · DMARC policy: ' + esc(d.dns.dmarcPolicy) : '') + (d.dns.dkimSelector ? ' · DKIM selector: ' + esc(d.dns.dkimSelector) : '') + '</div>'
+        : '<div class="muted" style="font-size:11px;margin:0 0 8px">DNS check in progress, results on the next refresh.</div>';
+      var mb = '<tr><td colspan="8"><div class="wu-mbwrap">' + acts + dnsNote + '<table class="wu-table"><thead><tr><th>Mailbox</th><th>Warm-up</th><th>Reputation</th><th>Days</th><th>Sent</th><th>Spam</th><th>Daily limit</th><th>SMTP (this portal)</th></tr></thead><tbody>' +
         (d.accounts || []).map(function (a) {
           var st = a.status === "active" ? '<span class="cur-valid">warming</span>' : a.status === "paused" ? '<span class="im-email-unv">paused</span>' : '<span class="muted">unknown</span>';
+          var smtp = a.smtpStatus
+            ? (a.smtpStatus === "error"
+                ? '<span class="cur-invalid" title="' + esc(a.smtpError || "SMTP error") + '">error</span>'
+                : '<span class="cur-valid">' + esc(a.smtpStatus) + '</span>')
+            : '<span class="muted" title="Not imported as an Email ID on this portal">not imported</span>';
           return '<tr>' +
             '<td>' + esc(a.email) + '</td>' +
             '<td>' + st + '</td>' +
@@ -6644,12 +6683,13 @@
             '<td>' + (a.sentTotal || 0) + '</td>' +
             '<td>' + (a.spamCount || 0) + '</td>' +
             '<td>' + (a.messagePerDay != null ? (a.dailySent != null ? a.dailySent + "/" : "") + a.messagePerDay : "n/a") + '</td>' +
+            '<td>' + smtp + '</td>' +
           '</tr>';
         }).join("") + '</tbody></table></div></td></tr>';
       return main + mb;
     }).join("");
     var table = domains.length
-      ? '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Domain</th><th>Mailboxes</th><th>Time warming</th><th>Avg reputation</th><th>Lowest</th><th>Warm-up sends</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      ? '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Domain</th><th>Mailboxes</th><th>Time warming</th><th>Avg reputation</th><th>Health</th><th>DNS</th><th>Warm-up sends</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
       : '<div class="empty">No domains are warming on this portal yet.</div>';
     box.innerHTML = '<div class="wu-card">' + head + stats + table + '</div>';
     var rb = $("#wuRefresh"); if (rb) rb.addEventListener("click", function () { loadWarmup(true); });
