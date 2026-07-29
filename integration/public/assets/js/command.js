@@ -12418,6 +12418,11 @@
       // boost still gets its done state painted.
       updateBoostCard(items);
       var host = $("#jdNight"); if (!host) return;
+      // A still-queued crash-net checkpoint is the shadow of a search running right
+      // now in some tab (see watchRecovery): showing it here would read as a phantom
+      // duplicate. Once recovery actually starts (stage moves past queued) it is
+      // real server-side work and belongs on the card.
+      items = items.filter(function (i) { return !(i.recovery && i.stage === "queued"); });
       if (!items.length) { host.innerHTML = ""; return; }
       var STAGE_WORDS = {
         queued: "waiting in line",
@@ -13237,7 +13242,25 @@
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
         var refinedIcp = (state.refineNote && state.icp) ? state.icp : undefined;
-        return send("/sourcing", "POST", { action: "run", jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).then(function (r) {
+        // Crash net: the intended list name + a client token ride along, so the server
+        // can arm a durable checkpoint before searching. If a deploy kills the request
+        // mid-search, the search re-runs server-side and watchRecovery below finds it
+        // by this token instead of the bar dying at 95%.
+        var nameEl0 = $("#jdName");
+        var provisionalName = (nameEl0 && nameEl0.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
+        if (state.location && provisionalName.indexOf(state.location) < 0) provisionalName += " · " + state.location;
+        var recoveryToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+        return send("/sourcing", "POST", { action: "run", recoveryToken: recoveryToken, name: provisionalName, jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).catch(function () {
+          // fetch itself rejected: the connection died mid-request (a deploy
+          // recreating the server is the everyday cause). Not a server "no".
+          return { ok: false, status: 0, data: null };
+        }).then(function (r) {
+          if (!r.ok && (r.status === 0 || r.status === 502 || r.status === 503 || r.status === 504)) {
+            // The server (or the connection to it) died mid-search. The checkpoint
+            // armed above survives in the durable store, so the search finishes
+            // server-side; hand this tab over to the recovery watch.
+            throw { recover: { token: recoveryToken, name: provisionalName, cap: cap } };
+          }
           if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
@@ -13275,12 +13298,67 @@
         msg('"' + runName + '" is saved below with ' + state.candidates.length + " candidates, strongest first.");
         loadRuns();
       }).catch(function (e) {
+        // A dead request with a server-side checkpoint behind it is not a failure:
+        // the search finishes on the server; keep the bar alive and watch for it.
+        if (e && e.recover) return watchRecovery(e.recover, reset);
         reset();
         if (prog.timer) finishProgress(((e && e.stage) || "Run") + " stopped");
         if (e && e.plain) { msg(e.plain); return; }
         var detail = (e && e.r && e.r.data && (e.r.data.detail || e.r.data.error)) || (e && e.r && e.r.status) || (e && e.message) || "error";
         msg(((e && e.stage) || "Run") + " failed: " + detail);
       });
+    }
+
+    /* ---- Crash-recovery watch ----
+       The search request died at the network level (the auto-deploy recreating the
+       server mid-run being the everyday cause). The run action armed a durable
+       checkpoint before searching, so the overnight-queue machinery re-runs the
+       search server-side; this watch narrates that on the same progress bar and
+       lands the tab on the recovered list. The recovered list then enriches and
+       delivers to Candidates + OS Text entirely server-side, so closing the tab
+       at any point loses nothing. */
+    function watchRecovery(rec, reset) {
+      showProgress("Recovering your search", 90 + findEta(rec.cap || 500),
+        "The connection to the server dropped mid-search. Finishing it on the server instead; nothing is lost…");
+      var deadline = Date.now() + 30 * 60 * 1000;
+      function done(label, message) { finishProgress(label); msg(message); reset(); loadRuns(); }
+      function poll() {
+        return api("/sourcing").then(function (d) {
+          var items = (d && d.nightQueue) || [];
+          var it = items.filter(function (i) { return i.recovery && i.recovery.token === rec.token; })[0];
+          if (it && it.runId) {
+            var nm = it.name || rec.name;
+            done('Done · "' + nm + '" saved',
+              '"' + nm + '" hit a server update mid-search, so the search re-ran on the server and is saved below. Contact enrichment and delivery to Candidates and OS Text continue automatically.');
+            return;
+          }
+          if (it && it.stage === "error") {
+            done("Recovery stopped",
+              "The interrupted search could not be recovered (" + (it.error || "unknown") + "). Press Initiate Search to run it again.");
+            return;
+          }
+          if (it) {
+            setProgPhase(it.note || "Finishing the search on the server…");
+            if (Date.now() < deadline) return delay(15000).then(poll);
+            done("Still working",
+              "The search is still finishing on the server. It will appear under Your saved candidate lists on its own; no need to keep this tab open.");
+            return;
+          }
+          // No checkpoint and no saved run: the request died before the checkpoint
+          // could be written (or an older server ignored it). Nothing recoverable.
+          done("Connection lost",
+            "The connection dropped mid-search and the server had nothing to recover. Press Initiate Search to run it again.");
+        }).catch(function () {
+          // The app may still be restarting; keep knocking until the deadline.
+          if (Date.now() < deadline) return delay(15000).then(poll);
+          finishProgress("Connection lost");
+          msg("The server did not come back in time. Reload the page and check Your saved candidate lists; the search may still have finished on its own.");
+          reset();
+        });
+      }
+      // First knock after a short beat: right after a deploy the app needs a few
+      // seconds to come back at all.
+      return delay(5000).then(poll);
     }
 
     /** "Dive deeper", refine the ICP with a natural-language instruction (LLM). */

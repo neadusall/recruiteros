@@ -9,7 +9,7 @@
  *  - tick latch constants: the steal window exists and is meaningfully shorter
  *    than the host watchdog's stall window (code heals before the big hammer).
  */
-import { pruneDecision, boostEntryStage, DONE_LINGER_MS, DONE_MAX_MS } from "../lib/sourcing/nightQueue";
+import { pruneDecision, boostEntryStage, recoveryHeld, DONE_LINGER_MS, DONE_MAX_MS } from "../lib/sourcing/nightQueue";
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean) {
@@ -105,6 +105,27 @@ check("boost stage: a no-progress batch bails instead of spinning",
   /made no progress/.test(nightQueueSrc));
 check("boost stage: the in-tick batch loop yields well before the latch-steal window",
   /deadline = Date\.now\(\) \+ 3 \* 60 \* 1000/.test(nightQueueSrc) && Boolean(steal) && 3 < Number(steal![1]));
+
+// ---- crash-net checkpoints: held behind a LIVE interactive request, released
+// the moment the arming process dies (a deploy recreating the app) or the
+// dead-man window passes. The whole recovery guarantee hangs on these rules. ----
+check("recovery: a plain queue item is never held",
+  recoveryHeld({}, "boot_a", NOW) === false);
+check("recovery: same boot, fresh checkpoint: held (the request is still running)",
+  recoveryHeld({ recovery: { token: "t", bootId: "boot_a", armedAt: ago(2 * 60 * 1000) } }, "boot_a", NOW) === true);
+check("recovery: different boot: released (the arming process died mid-search)",
+  recoveryHeld({ recovery: { token: "t", bootId: "boot_old", armedAt: ago(2 * 60 * 1000) } }, "boot_a", NOW) === false);
+check("recovery: same boot past the dead-man window: released (never held shut forever)",
+  recoveryHeld({ recovery: { token: "t", bootId: "boot_a", armedAt: ago(46 * 60 * 1000) } }, "boot_a", NOW) === false);
+check("recovery: unparseable arm stamp: released, never wedged on bad data",
+  recoveryHeld({ recovery: { token: "t", bootId: "boot_a", armedAt: "not-a-date" } }, "boot_a", NOW) === false);
+// Source guarantees: every place the tick picks work must respect the hold, and
+// the run action must both arm the net and stand it down on completion.
+check("recovery: the tick's working view filters held checkpoints everywhere",
+  (nightQueueSrc.match(/workable\(store\)/g) || []).length >= 3);
+check("recovery: recovered searches re-run with the recruiter's own dials",
+  /cap: item\.cap \?\? 500/.test(nightQueueSrc) && /minFit: item\.minFit \?\? 10/.test(nightQueueSrc) &&
+  /item\.freshOnly === false \? undefined/.test(nightQueueSrc) && /item\.icp \?\?/.test(nightQueueSrc));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

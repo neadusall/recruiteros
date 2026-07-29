@@ -235,24 +235,66 @@ export async function POST(req: Request) {
       const queries = generateQueries(icp, { breadth, radiusMi });
       // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
       const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
-      // withWorkspaceCreds: the engines read their keys via cred(), which only sees
-      // Setup-pasted (workspace-store) keys inside this wrapper. Without it a Serper/
-      // RapidAPI key saved in Setup was invisible to the actual search (env-only).
-      const result = await withWorkspaceCreds(ws, () => runDiscovery(queries, icp, {
-        cap: typeof b.cap === "number" ? b.cap : 500,
-        minFit: typeof b.minFit === "number" ? b.minFit : 10,
-        breadth,
-        excludeKeys,
-        strictGeo: b.strictGeo !== false && Boolean(((b.location as string) || "").trim()),
-        // OPT-IN: the separate out-of-area list only when the recruiter asked for it,
-        // so a geo'd run stays geo-only (and credit-safe) by default.
-        keepOutOfArea: b.outsideGeo === true,
-        radiusMi,
-        geoCenter: (b.location as string) || "",
-      }));
-      // Remember who we surfaced so a later fresh-only run skips them.
-      await addSeenKeys(ws, result.candidates.map(candKey));
-      return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true });
+      const strictGeo = b.strictGeo !== false && Boolean(((b.location as string) || "").trim());
+      // CRASH NET: discovery runs for minutes inside THIS request, and nothing exists
+      // outside it until the client saves — an auto-deploy recreating the container
+      // mid-search used to eat the whole run (the tab's bar just froze at 95%). So
+      // before searching, park a held recovery checkpoint in the durable overnight
+      // queue carrying the exact dials. If this request finishes (success OR error),
+      // the finally below removes it; if the process dies, the checkpoint outlives it
+      // and the next boot's queue tick re-runs the search server-side — the list
+      // saves, enriches, and delivers on its own, and the tab that lost its request
+      // finds the item by token (GET /sourcing → nightQueue) to narrate the recovery.
+      const recoveryToken = typeof b.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "";
+      let recoveryId = "";
+      if (recoveryToken) {
+        try {
+          const checkpoint = await addNightItem(ws, {
+            kind: "search",
+            name: (typeof b.name === "string" && b.name.trim()) || icp.label || "Candidate search",
+            jd: b.jd,
+            location: (b.location as string) || undefined,
+            breadth,
+            outsideGeo: b.outsideGeo === true,
+            createdBy: actor,
+            cap: typeof b.cap === "number" ? b.cap : undefined,
+            minFit: typeof b.minFit === "number" ? b.minFit : undefined,
+            freshOnly: b.freshOnly === true,
+            radiusMi,
+            strictGeo,
+            icp,
+            recoveryToken,
+          });
+          recoveryId = checkpoint.id;
+        } catch (err) {
+          console.warn("[sourcing] recovery checkpoint not armed:", (err as Error).message);
+        }
+      }
+      try {
+        // withWorkspaceCreds: the engines read their keys via cred(), which only sees
+        // Setup-pasted (workspace-store) keys inside this wrapper. Without it a Serper/
+        // RapidAPI key saved in Setup was invisible to the actual search (env-only).
+        const result = await withWorkspaceCreds(ws, () => runDiscovery(queries, icp, {
+          cap: typeof b.cap === "number" ? b.cap : 500,
+          minFit: typeof b.minFit === "number" ? b.minFit : 10,
+          breadth,
+          excludeKeys,
+          strictGeo,
+          // OPT-IN: the separate out-of-area list only when the recruiter asked for it,
+          // so a geo'd run stays geo-only (and credit-safe) by default.
+          keepOutOfArea: b.outsideGeo === true,
+          radiusMi,
+          geoCenter: (b.location as string) || "",
+        }));
+        // Remember who we surfaced so a later fresh-only run skips them.
+        await addSeenKeys(ws, result.candidates.map(candKey));
+        return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true });
+      } finally {
+        // The request ran to completion (either way, the client got a real answer),
+        // so the crash net stands down. A killed process never reaches this line —
+        // exactly the case the checkpoint exists for.
+        if (recoveryId) await removeNightItem(ws, recoveryId).catch(() => {});
+      }
     }
 
     /* --- Sales Navigator search mode -------------------------------------

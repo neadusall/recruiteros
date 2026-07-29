@@ -30,7 +30,7 @@
 
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, saveSnapshot } from "../db";
-import type { CandidateRow, SearchBreadth, SourcingRun } from "./types";
+import type { CandidateICP, CandidateRow, SearchBreadth, SourcingRun } from "./types";
 import { getSourcingRun, saveSourcingRun } from "./store";
 import { parseJobDescription } from "./parseJobDescription";
 import { pinIcpLocation } from "./pinLocation";
@@ -49,6 +49,18 @@ import { withWorkspaceCreds } from "../connected";
 
 const KEY = "sourcing_night_queue_v1";
 
+/** This process's identity. A recovery checkpoint (see NightItem.recovery) armed by a
+ *  LIVE interactive request carries the arming process's boot id: while the ids match,
+ *  the request may still be running and the checkpoint stays parked; a different id
+ *  means that process is gone (deploy recreate, crash), so the search it was running
+ *  died mid-flight and the queue takes it over. */
+const BOOT_ID = rid("boot");
+
+/** Dead-man fallback for a checkpoint armed by THIS boot: if the arming request were
+ *  still alive this long after starting, something is deeply wrong anyway — take the
+ *  search over rather than hold the recovery net shut forever. */
+const RECOVERY_DEADMAN_MS = 45 * 60 * 1000;
+
 export type NightStage = "queued" | "search" | "kold" | "koldDb" | "laxis" | "boost" | "done" | "error";
 
 export interface NightItem {
@@ -66,6 +78,29 @@ export interface NightItem {
   /** kind:"search" only: the recruiter who queued it, stamped onto the saved run
    *  so the auto-send credits the campaign to them (not the workspace owner). */
   createdBy?: { userId: string; name: string; email: string };
+  /** kind:"search" only: exact interactive-search parameters, so a crash-recovered
+   *  search re-runs with the recruiter's own dial settings instead of the overnight
+   *  defaults. All optional: a plain queued overnight search leaves them unset. */
+  cap?: number;
+  minFit?: number;
+  /** Mirrors the interactive Fresh-only checkbox. Unset = the overnight default
+   *  (additive: skip people already surfaced in prior runs). */
+  freshOnly?: boolean;
+  radiusMi?: number;
+  strictGeo?: boolean;
+  /** A Dive-deeper refined profile (or the one the dead request already derived),
+   *  so recovery searches the refined profile instead of re-parsing the JD. */
+  icp?: CandidateICP;
+  /** CRASH NET (interactive searches): armed by POST /sourcing {action:"run"} before
+   *  discovery starts, removed when that request finishes. While the arming process
+   *  is alive the item is INVISIBLE to the processor (the live request is doing the
+   *  work); if the process dies mid-search — the auto-deploy recreating the app
+   *  container being the everyday case — the checkpoint survives in the durable
+   *  store, the next boot's tick sees a foreign boot id, and the queue re-runs the
+   *  search server-side: the list saves, enriches, and delivers with no tab needed.
+   *  The token is client-generated so the tab that lost its request can find this
+   *  item in GET /sourcing and narrate the recovery on its progress bar. */
+  recovery?: { token: string; bootId: string; armedAt: string };
   stage: NightStage;
   /** Plain-English progress line for the queue card. */
   note?: string;
@@ -160,6 +195,15 @@ export interface NightAddInput {
   runId?: string;
   /** kind:"search" only: the recruiter queueing it (becomes the run's createdBy). */
   createdBy?: { userId: string; name: string; email: string };
+  /** kind:"search" only: interactive-dial fidelity for crash recovery. */
+  cap?: number;
+  minFit?: number;
+  freshOnly?: boolean;
+  radiusMi?: number;
+  strictGeo?: boolean;
+  icp?: CandidateICP;
+  /** Arms the item as a held recovery checkpoint for a live interactive request. */
+  recoveryToken?: string;
   /** kind:"boost" only: approved lookup count + the recruiter the spend bills to. */
   boost?: { wanted: number; actorUserId?: string; actorEmail: string };
 }
@@ -177,6 +221,15 @@ export async function addNightItem(workspaceId: string, input: NightAddInput): P
     outsideGeo: input.outsideGeo,
     runId: input.runId,
     createdBy: input.createdBy,
+    cap: input.cap,
+    minFit: input.minFit,
+    freshOnly: input.freshOnly,
+    radiusMi: input.radiusMi,
+    strictGeo: input.strictGeo,
+    icp: input.icp,
+    recovery: input.recoveryToken
+      ? { token: input.recoveryToken, bootId: BOOT_ID, armedAt: nowIso() }
+      : undefined,
     boost: input.kind === "boost" && input.boost ? {
       wanted: Math.max(1, Math.round(input.boost.wanted)),
       done: 0, found: 0, costUsd: 0,
@@ -263,6 +316,31 @@ function rememberLaxisSkip(run: SourcingRun, start: number, error: string): void
  *  credentials, structural UI change), as opposed to a one-off job hiccup. */
 function laxisFatal(error: string): boolean {
   return /login_failed|credentials_missing|login_form_not_found|step_unresolved/i.test(error);
+}
+
+/**
+ * Is this checkpoint still parked behind a live interactive request? Held while the
+ * arming process is THIS process and the dead-man window hasn't passed; a foreign
+ * boot id means the arming process died mid-search and the queue must take over.
+ * Pure (clock injected) so the regression suite can pin the rules.
+ */
+export function recoveryHeld(
+  i: Pick<NightItem, "recovery">,
+  bootId: string,
+  now: number,
+): boolean {
+  if (!i.recovery) return false;
+  if (i.recovery.bootId !== bootId) return false;
+  const age = now - Date.parse(i.recovery.armedAt);
+  // An unparseable stamp counts as expired: better a rare double-run risk than a
+  // recovery net a corrupt row holds shut forever.
+  return Number.isFinite(age) && age <= RECOVERY_DEADMAN_MS;
+}
+
+/** The tick's working view: active items minus checkpoints a live request still holds. */
+function workable(items: NightItem[]): NightItem[] {
+  const now = Date.now();
+  return items.filter((i) => i.stage !== "done" && i.stage !== "error" && !recoveryHeld(i, BOOT_ID, now));
 }
 
 let ticking = false;
@@ -372,7 +450,7 @@ export async function tickNightQueue(): Promise<{ active: number }> {
   // Sweep BEFORE the active-work check: a queue holding only finished items
   // still needs its ticks to clear them off the card.
   await pruneFinished().catch((e) => console.warn("[night-queue] prune failed:", (e as Error).message));
-  const active = store.filter((i) => i.stage !== "done" && i.stage !== "error");
+  const active = workable(store);
   if (!active.length) return { active: 0 };
   if (ticking) {
     if (Date.now() - tickingSince < TICK_STEAL_MS) return { active: active.length };
@@ -391,7 +469,7 @@ export async function tickNightQueue(): Promise<{ active: number }> {
       // re-run rungs the run no longer needs.
       try { await save(); } catch (e) { console.warn("[night-queue] snapshot save failed:", (e as Error).message); }
       if (Date.now() >= deadline) break;
-      const activeNow = store.filter((i) => i.stage !== "done" && i.stage !== "error");
+      const activeNow = workable(store);
       if (!activeNow.length) break;
       const nextItem = await pickNext(activeNow);
       if (nextItem !== item) { item = nextItem; continue; } // previous item finished: keep draining
@@ -404,8 +482,8 @@ export async function tickNightQueue(): Promise<{ active: number }> {
         // idle window, and a same-lane submit just queues FIFO on the worker.
         // ONE companion at a time, and never one sharing this item's run: two
         // items polling the same run's job refs could double-merge a result.
-        const companions = store.filter((i) =>
-          i !== item && i.stage !== "done" && i.stage !== "error" &&
+        const companions = workable(store).filter((i) =>
+          i !== item &&
           (!i.runId || !item.runId || i.runId !== item.runId));
         if (companions.length) {
           const companion = await pickNext(companions);
@@ -433,7 +511,7 @@ export async function tickNightQueue(): Promise<{ active: number }> {
     try { await save(); } catch (e) { console.warn("[night-queue] snapshot save failed:", (e as Error).message); }
     ticking = false;
   }
-  return { active: store.filter((i) => i.stage !== "done" && i.stage !== "error").length };
+  return { active: workable(store).length };
 }
 
 /**
@@ -479,7 +557,9 @@ async function step(item: NightItem): Promise<void> {
       return;
     }
     item.stage = item.kind === "search" ? "search" : "kold";
-    touch(item, item.kind === "search" ? "searching…" : "starting enrichment…");
+    touch(item, item.kind !== "search" ? "starting enrichment…"
+      : item.recovery ? "a server update interrupted this search; re-running it here…"
+        : "searching…");
     if (item.kind === "enrich") return; // enrichment starts next tick (cheap steps)
   }
 
@@ -492,17 +572,21 @@ async function step(item: NightItem): Promise<void> {
     // matching stated locations against that short list by NAME — dropping real locals
     // from every town that missed the list while still waving through distant same-state
     // people. Overnight runs must filter by the same measured miles as a live search.
-    const radiusMi = parseRadiusMi(undefined, item.location);
-    const icp = pinIcpLocation(await parseJobDescription(item.jd), item.location, radiusMi);
+    const radiusMi = item.radiusMi ?? parseRadiusMi(undefined, item.location);
+    // A recovered interactive search carries the profile the dead request already
+    // derived (a Dive-deeper refinement included); a plain overnight item parses it.
+    const icp = pinIcpLocation(item.icp ?? (await parseJobDescription(item.jd)), item.location, radiusMi);
     const breadth: SearchBreadth = item.breadth === "focused" || item.breadth === "wide" ? item.breadth : "balanced";
     const queries = generateQueries(icp, { breadth, radiusMi });
-    const excludeKeys = await getSeenKeys(ws); // overnight runs are additive: skip people already surfaced
+    // Overnight runs are additive (skip people already surfaced); a recovered
+    // interactive search honors its own Fresh-only checkbox instead.
+    const excludeKeys = item.freshOnly === false ? undefined : await getSeenKeys(ws);
     const result = await withWorkspaceCreds(ws, () => runDiscovery(queries, icp, {
-      cap: 500,
-      minFit: 10,
+      cap: item.cap ?? 500,
+      minFit: item.minFit ?? 10,
       breadth,
-      excludeKeys: excludeKeys.size ? excludeKeys : undefined,
-      strictGeo: Boolean((item.location || "").trim()),
+      excludeKeys: excludeKeys?.size ? excludeKeys : undefined,
+      strictGeo: item.strictGeo ?? Boolean((item.location || "").trim()),
       keepOutOfArea: item.outsideGeo === true,
       radiusMi,
       geoCenter: item.location,
