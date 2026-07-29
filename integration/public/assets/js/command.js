@@ -12683,10 +12683,25 @@
        Discovery is one request (no server-side progress events), so the bar eases
        toward 95% over an ETA estimated from the cap, then snaps to 100% on completion.
        Honest about being an estimate; the phase labels track the real pipeline steps. */
-    var prog = { timer: null, start: 0, etaMs: 0 };
+    var prog = { timer: null, start: 0, etaMs: 0, owner: "" };
     function fmtSecs(ms) { var s = Math.max(0, Math.round(ms / 1000)); return s >= 60 ? (Math.floor(s / 60) + "m " + (s % 60) + "s") : (s + "s"); }
+    /* ONE ticker ever, app-wide. Leaving this tab and coming back rebuilds this
+       whole view (a fresh closure with its own prog), but the previous visit's
+       200ms interval was never stopped, and its progTick finds the rebuilt
+       #jdProgress by id. Two tickers with different start/ETA then overwrite
+       each other's % five times a second, so the bar visibly jumps between two
+       readings. The live interval id is therefore kept on window (shared across
+       closures) and every new bar kills it before starting its own; it is also
+       registered as a view timer so the router stops it on navigation. The
+       owner stamp keeps a stale background chain (an enrichment started on a
+       previous visit) from finishing or relabeling a bar a newer flow owns. */
+    function progOwns(host) { return !!(host && prog.owner && host.dataset.progOwner === prog.owner); }
+    function stopProgTimer() {
+      if (prog.timer) { clearInterval(prog.timer); prog.timer = null; }
+      if (window.__jdProgTimer) { clearInterval(window.__jdProgTimer); window.__jdProgTimer = null; }
+    }
     function progTick() {
-      var host = $("#jdProgress"); if (!host || !prog.timer) return;
+      var host = $("#jdProgress"); if (!host || !prog.timer || !progOwns(host)) return;
       var fill = host.querySelector(".jd-prog-fill"), pct = host.querySelector(".jd-prog-pct"),
         phase = host.querySelector("#jdProgPhase"), eta = host.querySelector("#jdProgEta");
       var elapsed = Date.now() - prog.start;
@@ -12705,24 +12720,37 @@
           '<span class="jd-prog-pct">0%</span></div>' +
         '<div class="jd-prog-track"><div class="jd-prog-fill" style="width:0%"></div></div>' +
         '<div class="jd-prog-meta muted"><span id="jdProgPhase">' + esc(phaseText || "Starting…") + '</span><span id="jdProgEta"></span></div>';
+      prog.owner = String(window.__jdProgSeq = (window.__jdProgSeq || 0) + 1);
+      host.dataset.progOwner = prog.owner;
       prog.start = Date.now(); prog.etaMs = Math.max(4, etaSec || 20) * 1000;
-      if (prog.timer) clearInterval(prog.timer);
-      prog.timer = setInterval(progTick, 200); progTick();
+      stopProgTimer();
+      prog.timer = window.__jdProgTimer = setInterval(progTick, 200);
+      viewTimers.push(prog.timer); // navigating away stops the ticker with the rest of the view
+      progTick();
     }
-    function setProgTitle(t) { var el = $("#jdProgTitle"); if (el) el.textContent = t; }
+    function setProgTitle(t) { if (!progOwns($("#jdProgress"))) return; var el = $("#jdProgTitle"); if (el) el.textContent = t; }
     /** Update the phase line without resetting the bar (for long polls). */
-    function setProgPhase(t) { var el = $("#jdProgPhase"); if (el) el.textContent = t; }
+    function setProgPhase(t) { if (!progOwns($("#jdProgress"))) return; var el = $("#jdProgPhase"); if (el) el.textContent = t; }
     function finishProgress(label) {
-      if (prog.timer) { clearInterval(prog.timer); prog.timer = null; }
-      var host = $("#jdProgress"); if (!host) return;
+      var host = $("#jdProgress");
+      // A newer flow owns the bar now: this finish is from a stale chain, and
+      // slamming the live bar to 100% is exactly the jumpiness being fixed.
+      if (host && host.dataset.progOwner && !progOwns(host)) { prog.timer = null; return; }
+      stopProgTimer();
+      if (!host) return;
       host.classList.add("done");
       var fill = host.querySelector(".jd-prog-fill"), pct = host.querySelector(".jd-prog-pct"),
         phase = host.querySelector("#jdProgPhase"), eta = host.querySelector("#jdProgEta");
       if (fill) fill.style.width = "100%"; if (pct) pct.textContent = "100%";
       if (phase) phase.textContent = label || "Done"; if (eta) eta.textContent = "";
-      setTimeout(function () { var h = $("#jdProgress"); if (h && !prog.timer) h.style.display = "none"; }, 1600);
+      setTimeout(function () { var h = $("#jdProgress"); if (h && !window.__jdProgTimer && progOwns(h)) h.style.display = "none"; }, 1600);
     }
-    function hideProgress() { if (prog.timer) { clearInterval(prog.timer); prog.timer = null; } var h = $("#jdProgress"); if (h) { h.style.display = "none"; h.innerHTML = ""; } }
+    function hideProgress() {
+      var h = $("#jdProgress");
+      if (h && h.dataset.progOwner && !progOwns(h)) { prog.timer = null; return; }
+      stopProgTimer();
+      if (h) { h.style.display = "none"; h.innerHTML = ""; }
+    }
     /** ETA seconds for a discovery run, estimated from the candidate cap. */
     // Wider breadth runs more searches, so the honest ETA scales with the dial.
     function findEta(cap) {
