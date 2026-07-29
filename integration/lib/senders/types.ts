@@ -75,6 +75,9 @@ export interface SenderInboxPublic {
   dailyCap: number;
   sentToday: number;
   remaining: number;
+  /** False = no SMTP credentials stored (OAuth mailbox managed upstream); the
+   *  rotation never picks it, it is tracked-and-counted only. */
+  hasSmtpCreds: boolean;
   status: SenderStatus;
   warmExternal: boolean;
   sent: number;

@@ -6892,6 +6892,7 @@
         '<div class="btn-row">' +
           '<button class="btn btn-primary btn-sm" id="sndImport">Import inboxes (CSV)</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndAdd">+ Add one</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndSyncFleet">Sync from warm-up fleet</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
         '</div>' +
       '</div>' +
@@ -6908,6 +6909,17 @@
       '<div id="sndBody"><div class="empty">Loading…</div></div>';
     $("#sndImport").addEventListener("click", openSenderImport);
     $("#sndAdd").addEventListener("click", openSenderAdd);
+    $("#sndSyncFleet").addEventListener("click", function () {
+      var btn = $("#sndSyncFleet"); btn.disabled = true; btn.textContent = "Syncing fleet…";
+      send("/senders", "POST", { action: "sync-fleet" }).then(function (r) {
+        btn.disabled = false; btn.textContent = "Sync from warm-up fleet";
+        var rep = (r.data || {}).report;
+        if (!r.ok || !rep) { toast("Fleet sync failed"); return; }
+        if (!rep.configured) { toast("Warm-up connection is not configured"); return; }
+        toast("Fleet synced: " + rep.imported + " new, " + rep.updated + " refreshed (" + rep.withCreds + " sendable here, " + rep.credsless + " upstream-managed)");
+        loadSenders(); loadWarmup(true);
+      });
+    });
     $("#sndRefresh").addEventListener("click", loadSenders);
     var f = $("#sndFilter"); if (f) f.addEventListener("input", renderSenderRows);
     $("#sndAssignSel").addEventListener("click", function () {
@@ -6991,7 +7003,7 @@
       '<td><input type="checkbox" class="snd-pick" data-id="' + esc(m.id) + '"></td>' +
       '<td><b>' + esc(m.email) + '</b>' + (m.displayName ? '<div class="muted">' + esc(m.displayName) + '</div>' : '') + '</td>' +
       '<td>' + (m.ownerName ? esc(m.ownerName) : '<span class="muted">Unassigned</span>') + '</td>' +
-      '<td>' + sndProviderBadge(m.provider) + '</td>' +
+      '<td>' + sndProviderBadge(m.provider) + (m.hasSmtpCreds === false ? '<div class="muted" style="font-size:11px" title="No SMTP credentials stored; this mailbox sends its daily volume upstream and is tracked here">sends upstream</div>' : '') + '</td>' +
       '<td class="muted">' + esc(m.smtpHost) + ':' + esc(m.smtpPort) + '</td>' +
       '<td>' + esc(m.sentToday) + '/' + esc(m.dailyCap) + '</td>' +
       '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '"><svg class="isvg" aria-hidden="true"><use href="#i-alert"/></svg></span>' : '') + '</td>' +

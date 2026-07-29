@@ -25,7 +25,9 @@ function rested(m: SenderInbox): boolean {
 }
 
 function sendable(m: SenderInbox): boolean {
-  return (m.status === "active" || m.status === "warming") && m.sentToday < coldCapFor(m) && rested(m);
+  // No stored SMTP credentials = an upstream-managed (OAuth) mailbox that this
+  // platform tracks but cannot send from; the rotation never picks it.
+  return (m.status === "active" || m.status === "warming") && !!m.smtpPassEnc && m.sentToday < coldCapFor(m) && rested(m);
 }
 
 export interface PickOpts { recruiterId?: string; excludeIds?: string[]; }
@@ -46,9 +48,10 @@ export async function poolCapacity(
   recruiterId?: string,
 ): Promise<{ inboxes: number; remainingToday: number; dailyCapacity: number }> {
   // Capacity ignores the short inter-send rest (it recovers within minutes) but
-  // honors status + ramp, so the numbers recruiters see match what can really send.
+  // honors status + ramp + credentials, so the numbers recruiters see match what
+  // this platform can really send (upstream-managed OAuth mailboxes count 0 here).
   const pool = (await listInboxes(workspaceId, { ownerId: recruiterId }))
-    .filter((m) => (m.status === "active" || m.status === "warming") && m.sentToday < coldCapFor(m));
+    .filter((m) => (m.status === "active" || m.status === "warming") && !!m.smtpPassEnc && m.sentToday < coldCapFor(m));
   let rem = 0, cap = 0;
   for (const m of pool) { rem += Math.max(0, coldCapFor(m) - m.sentToday); cap += coldCapFor(m); }
   return { inboxes: pool.length, remainingToday: rem, dailyCapacity: cap };

@@ -16,6 +16,9 @@ export type { NewInboxInput, RecruiterCapacity, SendCapacity } from "./store";
 
 export { pickSender, poolCapacity } from "./pool";
 
+export { syncFleetInboxes, maybeAutoFleetSync } from "./fleetSync";
+export type { FleetSyncReport } from "./fleetSync";
+
 export { COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap, coldCapFor, coldMaxPerInbox } from "./limits";
 
 export { sendViaInbox, verifyInbox } from "./smtp";

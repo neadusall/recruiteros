@@ -72,6 +72,12 @@ export async function POST(req: Request) {
       case "setStatus":
         if (!b.ids?.length || !b.status) return fail("missing_fields", 422);
         return ok({ updated: await setStatus(ws, b.ids, b.status, b.pausedReason) });
+      case "sync-fleet": {
+        // Mirror the Smartlead warm-up fleet into the per-portal Email ID pools
+        // (this portal's rows come back in the next GET; other portals fill too).
+        const { syncFleetInboxes } = await import("../../../lib/senders");
+        return ok({ report: await syncFleetInboxes() });
+      }
       case "test": {
         if (!b.id) return fail("missing_id", 422);
         const m = await getInbox(ws, b.id);

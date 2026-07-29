@@ -113,6 +113,73 @@ export async function listSmartleadAccounts(): Promise<SmartleadAccount[]> {
   return out;
 }
 
+/** Full account view for the fleet-import sync: warm-up health PLUS the connection
+ *  details Smartlead stores. SMTP-type accounts carry real credentials (username/
+ *  password); OAuth accounts (OUTLOOK/GMAIL) carry none, they send upstream. */
+export interface SmartleadAccountFull extends SmartleadAccount {
+  fromName?: string;
+  /** Upstream connection type: "SMTP" | "OUTLOOK" | "GMAIL" | ... */
+  accountType?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  username?: string;
+  password?: string;
+  imapHost?: string;
+  imapPort?: number;
+  imapUsername?: string;
+  imapPassword?: string;
+}
+
+/** List every Smartlead account WITH connection details (paged, tolerant). Used by
+ *  the fleet-import sync; the warm-up panel keeps the lighter listSmartleadAccounts. */
+export async function listSmartleadAccountsFull(): Promise<SmartleadAccountFull[]> {
+  if (!smartleadConfigured()) return [];
+  const out: SmartleadAccountFull[] = [];
+  const limit = 100;
+  for (let offset = 0; offset < 5000; offset += limit) {
+    let rows: any[];
+    try {
+      const data: any = await getJson(`/email-accounts/?offset=${offset}&limit=${limit}`);
+      rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+    } catch {
+      break;
+    }
+    if (!rows.length) break;
+    for (const a of rows) {
+      const w = a?.warmup_details || a?.warmupDetails || {};
+      const email = String(a?.from_email || a?.email || "").toLowerCase().trim();
+      if (!email) continue;
+      out.push({
+        smartleadId: String(a?.id ?? a?.email_account_id ?? ""),
+        email,
+        warmupStatus: normStatus(w?.warmup_status ?? w?.status ?? a?.warmup_status),
+        reputationPct: num(w?.warmup_reputation ?? w?.reputation ?? a?.warmup_reputation),
+        sentTotal: num(w?.total_sent_count ?? w?.sent_count),
+        spamCount: num(w?.total_spam_count ?? w?.spam_count),
+        messagePerDay: num(a?.message_per_day),
+        dailySent: num(a?.daily_sent_count),
+        createdAt: typeof a?.created_at === "string" ? a.created_at : undefined,
+        warmupStartedAt: typeof w?.warmup_created_at === "string" ? w.warmup_created_at : undefined,
+        warmupPerDay: num(w?.max_email_per_day),
+        replyRatePct: num(w?.reply_rate),
+        blockedReason: w?.blocked_reason ? String(w.blocked_reason) : undefined,
+        fromName: a?.from_name ? String(a.from_name) : undefined,
+        accountType: a?.type ? String(a.type).toUpperCase() : undefined,
+        smtpHost: a?.smtp_host ? String(a.smtp_host) : undefined,
+        smtpPort: num(a?.smtp_port),
+        username: a?.username ? String(a.username) : undefined,
+        password: a?.password ? String(a.password) : undefined,
+        imapHost: a?.imap_host ? String(a.imap_host) : undefined,
+        imapPort: num(a?.imap_port),
+        imapUsername: a?.imap_username ? String(a.imap_username) : undefined,
+        imapPassword: a?.imap_password ? String(a.imap_password) : undefined,
+      });
+    }
+    if (rows.length < limit) break;
+  }
+  return out;
+}
+
 export interface WarmupSyncReport {
   configured: boolean;
   accounts: number;

@@ -262,6 +262,12 @@ export async function GET(req: Request) {
   if (!smartleadConfigured()) {
     return ok({ configured: false, updatedAt: null, domains: [], totals: null });
   }
+  // Self-populating pools: opening the Senders tab keeps the per-portal Email ID
+  // pools mirrored from the warm-up fleet (debounced to every 6h, fire-and-forget).
+  {
+    const { maybeAutoFleetSync } = await import("../../../../lib/senders");
+    maybeAutoFleetSync();
+  }
   const url = new URL(req.url);
   const fresh = url.searchParams.get("fresh") === "1";
   const { accounts, pulledAt } = await fleet(fresh);

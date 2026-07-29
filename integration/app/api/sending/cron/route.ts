@@ -23,6 +23,15 @@ async function run(req: Request) {
   const auth = requireCronAuth(req);
   if (!auth.ok) return auth.response;
 
+  // Mirror the Smartlead warm-up fleet into the per-portal Email ID pools, so
+  // every mailbox is a tracked row on its own portal without anyone importing
+  // CSVs. Idempotent; refreshes credentials and never clobbers operator edits.
+  let fleet: unknown = null;
+  try {
+    const { syncFleetInboxes } = await import("../../../../lib/senders");
+    fleet = await syncFleetInboxes();
+  } catch (e: any) { fleet = { error: e?.message ?? "fleet_sync_failed" }; }
+
   // Drive any in-progress one-click setup forward (provision → DNS verify → mailboxes)
   // so it completes hands-off once the registrar NS + Postal key clear.
   const setups: Array<Record<string, unknown>> = [];
@@ -49,7 +58,7 @@ async function run(req: Request) {
   let seeds: unknown = null;
   try { seeds = await runSeedMaintenance(); } catch (e: any) { seeds = { error: e?.message ?? "seed_maintenance_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet });
 }
 
 export const GET = run;

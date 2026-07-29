@@ -45,6 +45,7 @@ export function toPublic(m: SenderInbox): SenderInboxPublic {
     smtpHost: m.smtpHost, smtpPort: m.smtpPort, smtpSecure: m.smtpSecure, smtpUser: m.smtpUser,
     imapHost: m.imapHost, imapPort: m.imapPort, imapUser: m.imapUser, hasImap: !!m.imapHost,
     dailyCap: coldCapFor(m), sentToday: m.sentToday, remaining: Math.max(0, coldCapFor(m) - m.sentToday),
+    hasSmtpCreds: !!m.smtpPassEnc,
     status: m.status, warmExternal: m.warmExternal,
     sent: m.sent, bounced: m.bounced, lastSendAt: m.lastSendAt, lastError: m.lastError,
     pausedReason: m.pausedReason, createdAt: m.createdAt, updatedAt: m.updatedAt,
@@ -69,6 +70,9 @@ export interface NewInboxInput {
   dailyCap?: number;
   status?: SenderStatus;
   warmExternal?: boolean;
+  /** Backdate the inbox (e.g. to its upstream warm-up start) so the cold-cap ramp
+   *  reflects its TRUE age. Honored on insert only; updates keep the original. */
+  createdAt?: string;
 }
 
 function normalizePort(p: number | undefined, fallback: number): number {
@@ -114,18 +118,20 @@ export async function addInbox(workspaceId: string, input: NewInboxInput): Promi
     smtpPort: normalizePort(input.smtpPort, secure ? 465 : 587),
     smtpSecure: secure,
     smtpUser: (input.smtpUser || input.email).trim(),
-    smtpPassEnc: encryptSecret(input.smtpPass || ""),
+    // Empty stays empty: "" marks a credential-less mailbox (OAuth, sends upstream)
+    // and the rotation skips it. Never encrypt an empty string into a truthy blob.
+    smtpPassEnc: input.smtpPass ? encryptSecret(input.smtpPass) : "",
     imapHost: input.imapHost?.trim() || undefined,
     imapPort: input.imapHost ? normalizePort(input.imapPort, 993) : undefined,
     imapUser: input.imapHost ? (input.imapUser || input.email).trim() : undefined,
-    imapPassEnc: input.imapHost ? encryptSecret(input.imapPass || input.smtpPass || "") : undefined,
+    imapPassEnc: input.imapHost && (input.imapPass || input.smtpPass) ? encryptSecret(input.imapPass || input.smtpPass || "") : undefined,
     dailyCap: COLD_PER_INBOX,   // stored stamp only; the EFFECTIVE cap is coldCapFor(m)'s warm-up ramp (limits.ts)
     sentToday: 0,
     status: input.status || "warming",
     warmExternal: input.warmExternal ?? true,
     sent: 0,
     bounced: 0,
-    createdAt: now,
+    createdAt: input.createdAt && Number.isFinite(Date.parse(input.createdAt)) ? input.createdAt : now,
     updatedAt: now,
   };
   const existingIdx = state.inboxes.findIndex((x) => x.workspaceId === workspaceId && x.email === email);

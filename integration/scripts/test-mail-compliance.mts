@@ -141,6 +141,45 @@ async function main() {
     delete process.env.OUTREACH_TIMEZONE;
   });
 
+  /* ---------------- fleet import: store semantics ---------------- */
+  const store = await import("../lib/senders/store");
+
+  await test("credential-less import stores empty smtpPassEnc and is skipped by rotation", async () => {
+    const m = await store.addInbox("ws_test", {
+      email: "oauth@lumesearchgroup.com", provider: "sending-ac",
+      smtpHost: "smtp.office365.com", smtpPort: 587, smtpPass: "",
+      status: "active", createdAt: days(30),
+    });
+    assert.equal(m.smtpPassEnc, "");
+    assert.equal(store.toPublic(m).hasSmtpCreds, false);
+    const { pickSender } = await import("../lib/senders/pool");
+    assert.equal(await pickSender("ws_test", {}), null);
+  });
+
+  await test("credentialed import is sendable and re-import preserves status + createdAt", async () => {
+    const d20 = days(20);
+    const first = await store.addInbox("ws_test", {
+      email: "r1@lumeoutreach.com", provider: "own-smtp",
+      smtpHost: "mail.lumesp.com", smtpPort: 587, smtpPass: "secret-pw",
+      status: "warming", createdAt: d20,
+    });
+    assert.ok(first.smtpPassEnc.length > 0);
+    assert.equal(first.createdAt, d20);
+    first.status = "active";
+    await store.saveInbox(first);
+    const again = await store.addInbox("ws_test", {
+      email: "r1@lumeoutreach.com", provider: "own-smtp",
+      smtpHost: "mail.lumesp.com", smtpPort: 587, smtpPass: "secret-pw-rotated",
+      status: first.status, createdAt: days(1),
+    });
+    assert.equal(again.id, first.id);
+    assert.equal(again.status, "active");
+    assert.equal(again.createdAt, d20); // updates keep the original age
+    const { pickSender } = await import("../lib/senders/pool");
+    const picked = await pickSender("ws_test", {});
+    assert.equal(picked?.email, "r1@lumeoutreach.com");
+  });
+
   /* ---------------- humanizer gates (pure) ---------------- */
   await test("naturalness gate flags template-mill phrases and em-dashes", () => {
     assert.ok(naturalnessViolations("I wanted to reach out about the role").length > 0);
