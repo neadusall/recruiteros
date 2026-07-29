@@ -413,3 +413,18 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
     byProvider,
   };
 }
+
+/**
+ * Lowercased set of every pooled inbox's email domain, across ALL workspaces. Powers the
+ * media-host cert gate (sending/mediaAsk.ts): vid.<domain> only gets a certificate when
+ * <domain> is one we actually send from.
+ */
+export async function allInboxDomains(): Promise<Set<string>> {
+  await hydrate();
+  const out = new Set<string>();
+  for (const m of state.inboxes) {
+    const d = (m.email.split("@")[1] || "").trim().toLowerCase();
+    if (d) out.add(d);
+  }
+  return out;
+}
