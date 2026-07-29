@@ -6544,6 +6544,43 @@
           Data is /api/senders/warmup (server-cached, tenant-split by portal
           host), refreshed on a timer while the tab is open. ---- */
   var wuData = null, wuTimer = null, wuOpen = {}, wuLoading = false, wuRetry = null;
+  // Live per-mailbox warm-up numbers (the list feed reports 0s upstream): fetched
+  // per domain on expand from /senders/warmup?stats=<domain>, cached 10 min.
+  var wuStats = {}, wuStatsLoading = {};
+
+  function loadWuStats(dom) {
+    var s = wuStats[dom];
+    if (wuStatsLoading[dom] || (s && Date.now() - s.at < 600000)) return;
+    wuStatsLoading[dom] = true;
+    send("/senders/warmup?stats=" + encodeURIComponent(dom), "GET").then(function (r) {
+      wuStatsLoading[dom] = false;
+      if (!r.ok || !r.data || !r.data.rollup) { renderWarmup(); return; }
+      wuStats[dom] = { at: Date.now(), data: r.data };
+      applyWuStats(dom, r.data);
+      renderWarmup();
+    });
+  }
+
+  function applyWuStats(dom, data) {
+    if (!wuData || !wuData.domains) return;
+    var d = null;
+    for (var i = 0; i < wuData.domains.length; i++) if (wuData.domains[i].domain === dom) { d = wuData.domains[i]; break; }
+    if (!d) return;
+    var by = {};
+    (data.accounts || []).forEach(function (a) { if (!a.unavailable) by[a.email] = a; });
+    (d.accounts || []).forEach(function (a) {
+      var s = by[a.email];
+      if (!s) return;
+      a.sentTotal = s.sentTotal; a.spamCount = s.spamCount;
+      a.inboxCount = s.inboxCount; a.warmupSentToday = s.sentToday;
+    });
+    if (data.rollup && data.rollup.covered) {
+      d.sentTotal = data.rollup.sentTotal;
+      d.spamCount = data.rollup.spamCount;
+      d.spamRatePct = d.sentTotal > 0 ? Math.round((d.spamCount / d.sentTotal) * 1000) / 10 : null;
+      d.statsLive = true;
+    }
+  }
 
   function wuEnsureStyles() {
     if (document.getElementById("wuStyles")) return;
@@ -6720,7 +6757,12 @@
       var dnsNote = d.dns
         ? '<div class="muted" style="font-size:11px;margin:0 0 8px">DNS checked ' + esc(wuAgo(d.dns.checkedAt)) + (d.dns.dmarcPolicy ? ' · DMARC policy: ' + esc(d.dns.dmarcPolicy) : '') + (d.dns.dkimSelector ? ' · DKIM selector: ' + esc(d.dns.dkimSelector) : '') + '</div>'
         : '<div class="muted" style="font-size:11px;margin:0 0 8px">DNS check in progress, results on the next refresh.</div>';
-      var mb = '<tr><td colspan="8"><div class="wu-mbwrap">' + acts + dnsNote + '<table class="wu-table"><thead><tr><th>Mailbox</th><th>Warm-up</th><th>Reputation</th><th>Days</th><th>Sent</th><th>Spam</th><th>Daily limit</th><th>SMTP (this portal)</th></tr></thead><tbody>' +
+      var statsNote = d.statsLive
+        ? '<div class="muted" style="font-size:11px;margin:0 0 8px">Sent, Spam and today\'s count are live per-mailbox warm-up numbers from the stats feed (refreshed every 10 minutes).</div>'
+        : (wuStatsLoading[d.domain]
+          ? '<div class="muted" style="font-size:11px;margin:0 0 8px">Pulling live send numbers for this domain…</div>'
+          : '');
+      var mb = '<tr><td colspan="8"><div class="wu-mbwrap">' + acts + dnsNote + statsNote + '<table class="wu-table"><thead><tr><th>Mailbox</th><th>Warm-up</th><th>Reputation</th><th>Days</th><th>Sent</th><th>Spam</th><th>Sent today / limit</th><th>SMTP (this portal)</th></tr></thead><tbody>' +
         (d.accounts || []).map(function (a) {
           var st = a.status === "active" ? '<span class="cur-valid">warming</span>' : a.status === "paused" ? '<span class="im-email-unv">paused</span>' : '<span class="muted">unknown</span>';
           var smtp = a.smtpStatus
@@ -6728,14 +6770,15 @@
                 ? '<span class="cur-invalid" title="' + esc(a.smtpError || "SMTP error") + '">error</span>'
                 : '<span class="cur-valid">' + esc(a.smtpStatus) + '</span>')
             : '<span class="muted" title="Not imported as an Email ID on this portal">not imported</span>';
+          var todaySent = a.warmupSentToday != null ? a.warmupSentToday : a.dailySent;
           return '<tr>' +
             '<td>' + esc(a.email) + '</td>' +
             '<td>' + st + '</td>' +
             '<td>' + wuRepCell(a.reputationPct) + '</td>' +
             '<td>' + (a.days != null ? a.days.toFixed(1) : "n/a") + '</td>' +
-            '<td>' + (a.sentTotal || 0) + '</td>' +
+            '<td' + (a.inboxCount != null ? ' title="' + a.inboxCount + ' of these landed in the inbox"' : '') + '>' + (a.sentTotal || 0) + '</td>' +
             '<td>' + (a.spamCount || 0) + '</td>' +
-            '<td>' + (a.messagePerDay != null ? (a.dailySent != null ? a.dailySent + "/" : "") + a.messagePerDay : "n/a") + '</td>' +
+            '<td title="Warm-up emails sent today / the ramp target for this mailbox">' + (a.messagePerDay != null ? (todaySent != null ? todaySent + "/" : "") + a.messagePerDay : "n/a") + '</td>' +
             '<td>' + smtp + '</td>' +
           '</tr>';
         }).join("") + '</tbody></table></div></td></tr>';
@@ -6750,6 +6793,7 @@
       tr.addEventListener("click", function () {
         var dom = tr.getAttribute("data-wu-dom");
         wuOpen[dom] = !wuOpen[dom];
+        if (wuOpen[dom]) loadWuStats(dom);
         renderWarmup();
       });
     });
@@ -6764,6 +6808,9 @@
       if (!document.getElementById("wuWrap")) return;
       if (r.ok) wuData = r.data || null;
       else if (!wuData) wuData = { configured: false };
+      // A refresh replaces wuData, so fold the cached live per-mailbox numbers
+      // back in before painting (they refetch on their own 10-minute clock).
+      Object.keys(wuStats).forEach(function (dom) { applyWuStats(dom, wuStats[dom].data); });
       renderWarmup();
       // Self-heal a cold DNS cache: the server fills posture in the background,
       // so if any domain came back without DNS yet, re-poll shortly rather than

@@ -273,6 +273,45 @@ export async function GET(req: Request) {
   const { accounts, pulledAt } = await fleet(fresh);
   const now = Date.now();
 
+  // Drill-down stats mode: ?stats=<domain> pulls the REAL per-mailbox warm-up
+  // numbers (cumulative sent/spam/inbox + day series) from the per-account
+  // warmup-stats endpoint. The list endpoint's totals read 0 upstream even while
+  // warm-up sends, so the drilldown fetches truth on demand (cached 10 min).
+  const statsDomain = (url.searchParams.get("stats") || "").toLowerCase().trim();
+  if (statsDomain) {
+    // Same portal wall as the panel itself: a tenant may only pull its own
+    // brand's domains; the house portal only unclaimed ones.
+    const h = requestHost(req);
+    const tWs = tenantWorkspaceForHost(h);
+    const tToken = tWs ? token(presetForHost(h)?.brandName || "") : "";
+    const excluded = allBrandPresets().map((p) => token(p.brandName)).filter(Boolean);
+    const allowed = tWs ? (!!tToken && statsDomain.startsWith(tToken)) : !excluded.some((t) => statsDomain.startsWith(t));
+    if (!allowed) return ok({ domain: statsDomain, accounts: [], rollup: null });
+    const { getWarmupStatsMany } = await import("../../../../lib/sending/smartlead");
+    const mine = accounts.filter((a) => domainOf(a.email) === statsDomain && a.smartleadId);
+    const byId = await getWarmupStatsMany(mine.map((a) => a.smartleadId), 5);
+    const rows = mine.map((a) => {
+      const s = byId.get(a.smartleadId);
+      return s ? {
+        email: a.email,
+        sentTotal: s.sentTotal, spamCount: s.spamCount, inboxCount: s.inboxCount,
+        receivedCount: s.receivedCount, sentToday: s.sentToday, byDate: s.byDate,
+      } : { email: a.email, unavailable: true };
+    });
+    const got = rows.filter((r: any) => !r.unavailable) as Array<{ sentTotal: number; spamCount: number; sentToday: number }>;
+    return ok({
+      domain: statsDomain,
+      accounts: rows,
+      rollup: {
+        sentTotal: got.reduce((s, r) => s + r.sentTotal, 0),
+        spamCount: got.reduce((s, r) => s + r.spamCount, 0),
+        sentToday: got.reduce((s, r) => s + r.sentToday, 0),
+        covered: got.length,
+        of: mine.length,
+      },
+    });
+  }
+
   // Portal split: tenant portals see their brand's domains; the house portal
   // sees everything no white-label brand has a claim on.
   const host = requestHost(req);

@@ -180,6 +180,86 @@ export async function listSmartleadAccountsFull(): Promise<SmartleadAccountFull[
   return out;
 }
 
+/* ---------------- per-account warm-up stats (the REAL send numbers) ----------------
+ * The account-LIST endpoint's warmup_details reports total_sent_count/total_spam_count
+ * as 0 even while warm-up is actively sending (verified against live accounts). The
+ * per-account /email-accounts/{id}/warmup-stats endpoint carries the truth: cumulative
+ * sent/spam/inbox counts plus a day-by-day series. Numbers arrive as strings. */
+
+export interface WarmupDayStat {
+  date: string;
+  sent: number;
+  replies: number;
+  savedFromSpam: number;
+}
+
+export interface WarmupAccountStats {
+  sentTotal: number;
+  spamCount: number;
+  inboxCount: number;
+  receivedCount: number;
+  /** Warm-up emails sent TODAY (last entry of the day series). */
+  sentToday: number;
+  byDate: WarmupDayStat[];
+}
+
+/** Pure normalizer for the warmup-stats payload (string-numbered upstream). */
+export function normalizeWarmupStats(j: any): WarmupAccountStats {
+  const byDate: WarmupDayStat[] = (Array.isArray(j?.stats_by_date) ? j.stats_by_date : [])
+    .map((d: any) => ({
+      date: String(d?.date || ""),
+      sent: num(d?.sent_count) ?? 0,
+      replies: num(d?.reply_count) ?? 0,
+      savedFromSpam: num(d?.save_from_spam_count) ?? 0,
+    }))
+    .filter((d: WarmupDayStat) => d.date)
+    .sort((a: WarmupDayStat, b: WarmupDayStat) => a.date.localeCompare(b.date));
+  const today = new Date().toISOString().slice(0, 10);
+  const last = byDate[byDate.length - 1];
+  return {
+    sentTotal: num(j?.sent_count) ?? 0,
+    spamCount: num(j?.spam_count) ?? 0,
+    inboxCount: num(j?.inbox_count) ?? 0,
+    receivedCount: num(j?.warmup_email_received_count) ?? 0,
+    sentToday: last && last.date === today ? last.sent : 0,
+    byDate,
+  };
+}
+
+const statsCache = new Map<string, { at: number; stats: WarmupAccountStats }>();
+const STATS_TTL_MS = 10 * 60 * 1000;
+
+/** Real warm-up stats for one account, cached 10 min. Null on any failure. */
+export async function getWarmupStats(accountId: string): Promise<WarmupAccountStats | null> {
+  if (!smartleadConfigured() || !accountId) return null;
+  const hit = statsCache.get(accountId);
+  if (hit && Date.now() - hit.at < STATS_TTL_MS) return hit.stats;
+  try {
+    const j = await getJson(`/email-accounts/${encodeURIComponent(accountId)}/warmup-stats`);
+    const stats = normalizeWarmupStats(j);
+    statsCache.set(accountId, { at: Date.now(), stats });
+    return stats;
+  } catch {
+    return null;
+  }
+}
+
+/** Stats for many accounts with bounded concurrency (best-effort per account). */
+export async function getWarmupStatsMany(accountIds: string[], concurrency = 5): Promise<Map<string, WarmupAccountStats>> {
+  const out = new Map<string, WarmupAccountStats>();
+  const queue = [...accountIds];
+  async function worker() {
+    for (;;) {
+      const id = queue.shift();
+      if (!id) return;
+      const s = await getWarmupStats(id);
+      if (s) out.set(id, s);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, accountIds.length || 1) }, worker));
+  return out;
+}
+
 export interface WarmupSyncReport {
   configured: boolean;
   accounts: number;

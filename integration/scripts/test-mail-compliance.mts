@@ -180,6 +180,32 @@ async function main() {
     assert.equal(picked?.email, "r1@lumeoutreach.com");
   });
 
+  /* ---------------- warm-up stats normalizer ---------------- */
+  const { normalizeWarmupStats } = await import("../lib/sending/smartlead");
+
+  await test("warmup-stats normalizer coerces string numbers and finds today's sends", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const s = normalizeWarmupStats({
+      sent_count: "19", spam_count: "3", inbox_count: "19", warmup_email_received_count: "3",
+      stats_by_date: [
+        { date: "2026-01-01", sent_count: 3, reply_count: 1, save_from_spam_count: 0 },
+        { date: today, sent_count: 10, reply_count: 3, save_from_spam_count: 3 },
+      ],
+    });
+    assert.equal(s.sentTotal, 19);
+    assert.equal(s.spamCount, 3);
+    assert.equal(s.inboxCount, 19);
+    assert.equal(s.sentToday, 10);
+    assert.equal(s.byDate.length, 2);
+  });
+
+  await test("warmup-stats normalizer is safe on junk payloads", () => {
+    const s = normalizeWarmupStats(null);
+    assert.equal(s.sentTotal, 0);
+    assert.equal(s.sentToday, 0);
+    assert.deepEqual(s.byDate, []);
+  });
+
   /* ---------------- humanizer gates (pure) ---------------- */
   await test("naturalness gate flags template-mill phrases and em-dashes", () => {
     assert.ok(naturalnessViolations("I wanted to reach out about the role").length > 0);
