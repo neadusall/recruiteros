@@ -12371,8 +12371,9 @@
         // already teaches a real pace), remembered per list in localStorage so a
         // reload doesn't forget. Until a run shows movement it falls back to a
         // typical pace and the wording says it's a first estimate.
-        function jdEta(id, done, total, busy, ledgerAt) {
-          var KEY = "ros_jd_eta_v1", PACE_GUESS_MS = 4000, now = Date.now(), all;
+        function jdEta(id, done, total, busy, ledgerAt, guessMs) {
+          var KEY = "ros_jd_eta_v1", now = Date.now(), all;
+          var GUESS = guessMs || 4000;
           try { all = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { all = {}; }
           Object.keys(all).forEach(function (k) { if (!all[k] || now - (all[k].t || 0) > 2 * 86400000) delete all[k]; });
           if (!busy) {
@@ -12381,24 +12382,44 @@
           }
           var s = all[id];
           var seedT = ledgerAt ? Date.parse(String(ledgerAt).replace(" ", "T")) : NaN;
+          // Ledger-stamp seeds are capped at 10 min back: an older stamp means
+          // the chain sat parked (overnight queue, resume), and counting that
+          // idle gap as working time would wildly overstate the time left.
+          var seed = isNaN(seedT) ? now : Math.max(Math.min(seedT, now), now - 600000);
           // done going BACKWARDS = the chain restarted on a bigger scope; relearn.
-          if (!s || done < s.d) s = { t0: isNaN(seedT) ? now : Math.min(seedT, now), d0: done, t: now, d: done };
+          if (!s || done < s.d) s = { t0: seed, d0: done, t: now, d: done };
           else if (done > s.d) { s.t = now; s.d = done; }
           var left = Math.max(0, (total || 0) - done);
           // All rows counted but the job still busy = the finishing tail
-          // (gap-fill and final checks). Stamp when it started (the ledger's
-          // last-batch time when we have it) so its countdown is real too.
-          if (!left && !s.fin) s.fin = isNaN(seedT) ? now : Math.min(seedT, now);
+          // (gap-fill and final checks). Stamp when it started so its
+          // countdown is real too.
+          if (!left && !s.fin) s.fin = seed;
           if (left && s.fin) delete s.fin;
           all[id] = s;
           try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) { }
-          var pace = (s.d > s.d0 && s.t > s.t0) ? (s.t - s.t0) / (s.d - s.d0) : null;
-          // Row phase: countdown keeps moving between batches (time since the
-          // last one is already progress; floor 45s). Finishing tail: budget
-          // 10 min from its start, floored at ~1 min so it never reads past-due.
-          var ms = left
-            ? Math.max(45000, left * (pace == null ? PACE_GUESS_MS : pace) - (now - s.t))
-            : Math.max(60000, (s.fin || now) + 600000 - now);
+          // Measured pace clamped to sanity (0.3s-30s per row): a tiny sample
+          // must not produce an absurd projection in either direction.
+          var pace = (s.d > s.d0 && s.t > s.t0) ? Math.min(30000, Math.max(300, (s.t - s.t0) / (s.d - s.d0))) : null;
+          var ms;
+          if (left) {
+            var per = pace == null ? GUESS : pace;
+            // Adaptive raise: work in flight longer than the pace predicts
+            // means the pace is really slower; scale it up from the in-flight
+            // time (a 200-row batch mid-ledger, roughly half the run before
+            // the ledger exists) so the projection grows instead of lying.
+            var inflight = pace == null ? Math.max(200, Math.floor((total || 200) / 2)) : 200;
+            var stalledPer = (now - s.t) / inflight;
+            if (stalledPer > per) per = Math.min(30000, stalledPer);
+            // Countdown = remaining work minus time already inside the current
+            // batch, but never below 20% of what the remaining rows should
+            // take: a stalled batch slides the finish clock forward instead of
+            // counting down to a false "under a minute" with rows remaining.
+            ms = Math.max(left * per - (now - s.t), 0.2 * left * per, 60000);
+          } else {
+            // Finishing tail: 10 min budget from its start; if it overruns,
+            // hold a sliding ~3 min projection rather than a past-due time.
+            ms = Math.max((s.fin || now) + 600000 - now, 180000);
+          }
           var m = Math.round(ms / 60000), h = Math.floor(m / 60), mm = m % 60;
           var span = m < 1 ? "under a minute" : h < 1 ? "about " + m + " min" : "about " + h + " hr" + (mm ? " " + mm + " min" : "");
           var at = new Date(now + ms);
@@ -12406,6 +12427,21 @@
           if (ms > 20 * 3600000) clock = at.toLocaleDateString([], { weekday: "short" }) + " " + clock;
           return { finishing: !left, measured: pace != null, span: span, clock: clock, short: span.replace("about ", "~") };
         }
+        // First-guess pace from this workspace's own finished runs (chain
+        // duration per row, clamped 1-8s; median resists outliers like lists
+        // that sat queued overnight) instead of a one-size-fits-all number.
+        var jdPaceGuess = (function () {
+          var ps = [];
+          runs.forEach(function (r2) {
+            var ep2 = r2.laxisProgress, n2 = r2.candidates ? r2.candidates.length : 0;
+            if (ep2 && ep2.nextStart == null && n2 >= 50 && ep2.updatedAt && r2.createdAt) {
+              var dur = Date.parse(String(ep2.updatedAt).replace(" ", "T")) - Date.parse(String(r2.createdAt).replace(" ", "T"));
+              if (dur > 0) ps.push(Math.min(8000, Math.max(1000, dur / n2)));
+            }
+          });
+          ps.sort(function (a, b) { return a - b; });
+          return ps.length ? ps[Math.floor(ps.length / 2)] : 4000;
+        })();
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
           var outN = (r.candidates || []).filter(function (c) { return c.outOfArea; }).length;
@@ -12470,7 +12506,7 @@
           var sSearch = jStop("jt-done", jIcons.check, "Searched", n + " found",
             "The search finished and saved " + n + " candidate" + (n === 1 ? "" : "s") +
             (outN ? (": " + (n - outN) + " in area and " + outN + " out of area") : "") + ".");
-          var sEnrich, jNote = "", jEta = jdEta(r.id, epDone, ep ? (ep.total || n) : n, busyJobs, ep && ep.updatedAt);
+          var sEnrich, jNote = "", jEta = jdEta(r.id, epDone, ep ? (ep.total || n) : n, busyJobs, ep && ep.updatedAt, jdPaceGuess);
           if (busyJobs) {
             // Real progress under the live stop: the chunk ledger gives actual rows
             // done, so the mini bar is honest; without a ledger yet it just glides.
