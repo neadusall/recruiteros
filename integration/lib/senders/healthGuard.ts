@@ -87,13 +87,57 @@ async function hydrate(): Promise<void> {
 export async function guardStatus(workspaceId: string): Promise<{
   lastRunAt?: string;
   holding: number;
+  watched: number;
+  healthy: number;
+  revivedThisWeek: number;
+  repRecoverTarget: number;
+  recoverStreakTarget: number;
+  /** The set parameters this guard enforces, for the UI's rules card. */
+  rules: {
+    repFloorPct: number;         // hold below this at any age
+    repHoldMaturePct: number;    // hold below this after 7+ warm-up days
+    bounceHoldPct: number;       // hold above this windowed bounce rate
+    minHoldHours: number;        // minimum rest before a revive
+  };
+  /** Every Email ID currently resting in auto-hold, with its recovery progress. */
+  held: Array<{
+    email: string;
+    reason: string;
+    heldAt?: string;
+    repNow?: number;
+    streak: number;
+  }>;
   recent: GuardAction[];
 }> {
   await hydrate();
   const inboxes = await listInboxes(workspaceId);
+  const holding = inboxes.filter((m) => m.autoHold && m.status === "paused");
+  const weekAgo = Date.now() - 7 * 86_400_000;
   return {
     lastRunAt: state.lastReport?.at,
-    holding: inboxes.filter((m) => m.autoHold && m.status === "paused").length,
+    holding: holding.length,
+    watched: inboxes.length,
+    healthy: inboxes.filter((m) => m.status === "active" || m.status === "warming").length,
+    revivedThisWeek: state.journal.filter((a) =>
+      a.workspaceId === workspaceId && a.action === "revived" && Date.parse(a.at) >= weekAgo).length,
+    repRecoverTarget: repRecover(),
+    recoverStreakTarget: RECOVER_STREAK,
+    rules: {
+      repFloorPct: repFloor(),
+      repHoldMaturePct: repHoldMature(),
+      bounceHoldPct: Math.round(bounceHoldRate() * 1000) / 10,
+      minHoldHours: Math.round(MIN_HOLD_MS / 3_600_000),
+    },
+    held: holding
+      .sort((a, b) => Date.parse(b.autoHoldAt || "") - Date.parse(a.autoHoldAt || ""))
+      .slice(0, 50)
+      .map((m) => ({
+        email: m.email,
+        reason: m.autoHoldReason || m.pausedReason || "health",
+        heldAt: m.autoHoldAt,
+        repNow: m.warmupRepPct,
+        streak: m.recoverStreak || 0,
+      })),
     recent: state.journal.filter((a) => a.workspaceId === workspaceId).slice(0, 12),
   };
 }

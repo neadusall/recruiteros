@@ -787,13 +787,8 @@
       var alerts = [];
       if (!prov.pool) alerts.push(["info", "No cold-send inboxes imported yet. Import your inbox pool on the Senders screen to send for real."]);
       if (!prov.smartlead) alerts.push(["info", "The warm-up engine is not connected. Ask your account team to enable warm-up health on the fleet."]);
-      // Health guard: what the automatic turn-down / bounce-back did recently.
+      // (Guard activity gets its own Fleet Protection card below, not alert rows.)
       var guard = d.guard || {};
-      if (guard.holding) alerts.push(["warn", guard.holding + " Email ID" + (guard.holding === 1 ? "" : "s") + " in auto-hold: cold sends off while warm-up rebuilds strength, back automatically once healthy."]);
-      (guard.recent || []).slice(0, 4).forEach(function (g) {
-        if (g.action === "held") alerts.push(["warn", "Auto-held " + g.email + ": " + g.reason]);
-        else if (g.action === "revived") alerts.push(["info", "Auto-revived " + g.email + ", back on the warm-up ramp at reduced volume."]);
-      });
       domains.forEach(function (dm) {
         if (dm.status === "paused") alerts.push(["bad", "Domain " + dm.domain + " is paused: " + ((dm.warnings || [])[0] || dm.pausedReason || "governor")]);
         else if (dm.healthLabel === "at_risk") alerts.push(["bad", "Domain " + dm.domain + " at risk: " + ((dm.warnings || []).join("; ") || "health low")]);
@@ -818,6 +813,95 @@
         '<span style="flex:1"></span>' +
         provChip("Warm-up", prov.smartlead) + provChip("Inbox pool", prov.pool) + provChip("Mail server", prov.server) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
         "</div>";
+
+      // ---- Fleet Protection: the always-on health system, front and center ----
+      // What is watched, today's real send capacity, the set limits, and every
+      // Email ID currently resting in auto-hold with its recovery progress.
+      (function () {
+        var cap = d.capacity || {};
+        var pp = d.poolParams || {};
+        var rules = guard.rules || {};
+        var provName = { "sending-ac": "Provisioned pool", "own-smtp": "Own mail server", google: "Google", outlook: "Microsoft", other: "Other" };
+        function ago(iso) {
+          var t = iso ? Date.parse(iso) : NaN;
+          if (!isFinite(t)) return "not yet run";
+          var m = Math.max(0, Math.round((Date.now() - t) / 60000));
+          if (m < 1) return "just now";
+          if (m < 60) return m + "m ago";
+          var h = Math.round(m / 60);
+          return h < 48 ? h + "h ago" : Math.round(h / 24) + "d ago";
+        }
+        function tile(label, value, color) {
+          return '<div style="flex:1;min-width:118px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px">' +
+            '<div style="font-size:20px;font-weight:600;color:' + (color || "var(--text)") + '">' + value + "</div>" +
+            '<div style="font-size:11px;color:var(--text-dim);margin-top:2px">' + esc(label) + "</div></div>";
+        }
+        function ruleRow(k, v) {
+          return '<div style="display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:3px 0"><span style="color:var(--text-dim);flex:none;width:118px">' + esc(k) + '</span><span style="color:var(--text-muted)">' + esc(v) + "</span></div>";
+        }
+        var watched = guard.watched || 0;
+        var holding = guard.holding || 0;
+        var healthy = guard.healthy || 0;
+        var body = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
+          '<span style="width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none"></span>' +
+          '<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Fleet protection · automatic</span>' +
+          '<span style="flex:1"></span>' +
+          '<span style="font-size:11px;color:var(--text-dim)">Checks run hourly · last check ' + esc(ago(guard.lastRunAt)) + "</span></div>";
+
+        body += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
+          tile("Email IDs watched", n(watched)) +
+          tile("Healthy + sending", n(healthy), "var(--ok)") +
+          tile("In recovery (auto-held)", n(holding), holding ? "var(--warn)" : "var(--ok)") +
+          tile("Auto-revived this week", n(guard.revivedThisWeek || 0)) +
+          tile("Cold sends available today", n(cap.coldRemaining || 0) + '<span style="font-size:12px;color:var(--text-dim)"> / ' + n(cap.coldCapacity || 0) + "</span>", "var(--info)") +
+          "</div>";
+
+        // Today's send capacity, spelled out from Email IDs x domains.
+        body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> total capacity across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
+          (cap.warmingPerDay ? ', plus about ' + n(cap.warmingPerDay) + " external warm-up sends/day that build reputation (not outreach)." : ".") + "</div>";
+        var provRows = (cap.byProvider || []).map(function (p) {
+          var nm = provName[p.provider] || p.provider;
+          var model = p.capModel === "flat" ? "flat " + (pp.sendingAcPerInbox || 2) + "/day each" : "ramped";
+          return '<div style="font-size:12px;color:var(--text-dim);padding:1px 0">' + esc(nm) + ": " + n(p.inboxes) + " Email IDs on " + n(p.domains) + " domains · " + esc(model) + " · " + n(p.coldCapacity) + "/day</div>";
+        }).join("");
+        if (provRows) body += '<div style="margin-bottom:12px">' + provRows + "</div>";
+
+        // The set parameters the whole fleet runs on.
+        var rampTxt = (pp.ramp || [5, 10, 15]).join(", then ") + ", then " + (pp.coldMax || 20) + "/day max";
+        body += '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px">' +
+          '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-bottom:6px">Set limits</div>' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 24px">' +
+          ruleRow("New Email ID", (pp.coldPerInbox || 2) + " cold/day while warming") +
+          ruleRow("Active ramp", "per Email ID per week: " + rampTxt) +
+          ruleRow("Provisioned pool", "flat " + (pp.sendingAcPerInbox || 2) + " cold/day per Email ID, never ramps") +
+          ruleRow("Domain spread", (pp.inboxesPerDomain || 3) + " Email IDs per sending domain") +
+          ruleRow("Auto-hold when", "reputation under " + (rules.repFloorPct || 45) + "%, or under " + (rules.repHoldMaturePct || 60) + "% after 7 warm-up days, or bounces over " + (rules.bounceHoldPct || 8) + "%, or the domain hits a spam blocklist") +
+          ruleRow("Auto-return when", (rules.minHoldHours || 24) + "h+ rest and " + (guard.repRecoverTarget || 85) + "%+ reputation on " + (guard.recoverStreakTarget || 2) + " straight checks; returns at the reduced ramp") +
+          "</div></div>";
+
+        // Who is resting right now, and each one's path back.
+        body += '<div style="border-top:1px solid var(--border);padding-top:10px">' +
+          '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-bottom:6px">In recovery now · ' + n(holding) + "</div>";
+        var held = guard.held || [];
+        if (!held.length) {
+          body += '<div style="font-size:12.5px;color:var(--ok)">Nothing held. Every Email ID is healthy and in rotation.</div>';
+        } else {
+          body += held.slice(0, 8).map(function (hm) {
+            var rep = typeof hm.repNow === "number" ? hm.repNow + "%" : "n/a";
+            var target = (guard.repRecoverTarget || 85) + "%";
+            return '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:5px 0;border-bottom:1px solid var(--border)">' +
+              '<span style="font-size:12.5px;font-weight:600;min-width:200px">' + esc(hm.email) + "</span>" +
+              '<span style="font-size:12px;color:var(--text-dim);flex:1;min-width:180px">held: ' + esc(hm.reason) + " · since " + esc(ago(hm.heldAt)) + "</span>" +
+              '<span style="font-size:12px;color:var(--warn)">reputation ' + esc(rep) + ' <span style="color:var(--text-dim)">(needs ' + esc(target) + ")</span></span>" +
+              '<span style="font-size:12px;color:var(--text-dim)">healthy checks ' + (hm.streak || 0) + "/" + (guard.recoverStreakTarget || 2) + "</span></div>";
+          }).join("");
+          if (holding > 8) body += '<div style="font-size:12px;color:var(--text-dim);padding-top:6px">and ' + n(holding - 8) + " more resting</div>";
+          body += '<div style="font-size:12px;color:var(--text-dim);margin-top:8px">What the system is doing: cold sends are OFF for these Email IDs while external warm-up keeps running to rebuild their reputation. Each returns to the rotation automatically at the reduced ramp once it passes the auto-return bar. No action needed.</div>';
+        }
+        body += "</div>";
+
+        html += '<div style="border:1px solid var(--border);border-left:3px solid var(--ok);background:var(--card,var(--surface));border-radius:12px;padding:14px 16px;margin-bottom:16px">' + body + "</div>";
+      })();
 
       if (alerts.length) {
         var worst = alerts[0][0];

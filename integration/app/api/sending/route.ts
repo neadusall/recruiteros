@@ -34,7 +34,10 @@ import {
   startAutoSetup, advanceAutoSetup, setupStatus, pauseAutoSetup,
 } from "../../../lib/sending";
 import type { SeedAccount } from "../../../lib/sending";
-import { listInboxes, runSenderHealthGuard, guardStatus } from "../../../lib/senders";
+import {
+  listInboxes, runSenderHealthGuard, guardStatus, sendCapacity,
+  COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldMaxPerInbox, RAMP_BY_WEEK,
+} from "../../../lib/senders";
 
 /** Strip the app password before a seed ever goes to the client. */
 function publicSeed(s: SeedAccount) {
@@ -78,6 +81,17 @@ export async function GET(req: Request) {
     // Email ID health guard: last run + this workspace's recent auto-hold /
     // auto-revive actions (tenant-filtered) + how many are held right now.
     guard: await guardStatus(ws),
+    // Honest daily cold-send capacity across this portal's Email IDs + domains
+    // (per-inbox warm-up ramp enforced), and the set parameters behind it.
+    capacity: await sendCapacity(ws),
+    poolParams: {
+      coldPerInbox: COLD_PER_INBOX,
+      sendingAcPerInbox: SENDING_AC_PER_INBOX,
+      warmingPerInbox: WARMING_PER_INBOX,
+      inboxesPerDomain: INBOXES_PER_DOMAIN,
+      coldMax: coldMaxPerInbox(),
+      ramp: RAMP_BY_WEEK,
+    },
     suppression: (await listSuppression()).slice(0, 50),
     events: await recentEvents(50),
     seeds: rawSeeds.map(publicSeed),

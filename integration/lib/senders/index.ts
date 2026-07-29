@@ -22,7 +22,7 @@ export type { FleetSyncReport } from "./fleetSync";
 export { runSenderHealthGuard, guardStatus } from "./healthGuard";
 export type { GuardReport, GuardAction } from "./healthGuard";
 
-export { COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap, coldCapFor, coldMaxPerInbox } from "./limits";
+export { COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap, coldCapFor, coldMaxPerInbox, RAMP_BY_WEEK } from "./limits";
 
 export { sendViaInbox, verifyInbox } from "./smtp";
 export type { SmtpMessage, SmtpResult } from "./smtp";

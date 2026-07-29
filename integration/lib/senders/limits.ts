@@ -27,7 +27,7 @@ export const SENDING_AC_PER_INBOX = 2;  // Sending.ac's flat model: 2 cold email
 export const WARMING_PER_INBOX = 10;    // Smartlead warming emails/day per Email ID (informational)
 export const INBOXES_PER_DOMAIN = 3;    // Email IDs provisioned per sending domain
 
-const RAMP_BY_WEEK = [5, 10, 15];       // active-inbox cold cap for weeks 1..3; week 4+ = ceiling
+export const RAMP_BY_WEEK = [5, 10, 15]; // active-inbox cold cap for weeks 1..3; week 4+ = ceiling
 
 /** The fully-ramped ceiling for internal-SMTP inboxes (cold emails/day per Email ID).
  *  Env-tunable within sane bounds; defaults to 20, the sustainable per-inbox practice. */
