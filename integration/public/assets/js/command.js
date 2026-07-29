@@ -6534,7 +6534,7 @@
   /* ---- Domain warm-up: live per-domain warm-up fleet on the Senders tab.
           Data is /api/senders/warmup (server-cached, tenant-split by portal
           host), refreshed on a timer while the tab is open. ---- */
-  var wuData = null, wuTimer = null, wuOpen = {}, wuLoading = false;
+  var wuData = null, wuTimer = null, wuOpen = {}, wuLoading = false, wuRetry = null;
 
   function wuEnsureStyles() {
     if (document.getElementById("wuStyles")) return;
@@ -6734,6 +6734,12 @@
       if (r.ok) wuData = r.data || null;
       else if (!wuData) wuData = { configured: false };
       renderWarmup();
+      // Self-heal a cold DNS cache: the server fills posture in the background,
+      // so if any domain came back without DNS yet, re-poll shortly rather than
+      // leaving grey pills until the 2-minute tick.
+      if (!wuRetry && wuData && wuData.configured && (wuData.domains || []).some(function (d) { return d.dns == null; })) {
+        wuRetry = setTimeout(function () { wuRetry = null; if (document.getElementById("wuWrap")) loadWarmup(false); }, 12000);
+      }
     });
     if (!wuTimer) {
       wuTimer = setInterval(function () {
