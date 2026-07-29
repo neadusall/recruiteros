@@ -134,13 +134,13 @@ export async function getServer(workspaceId: string, id: string): Promise<MtaSer
   return state.servers.find((s) => s.id === id && s.workspaceId === workspaceId);
 }
 
-export async function addServer(workspaceId: string, input: { name: string; hostname: string; serverType?: string; location?: string }): Promise<MtaServer> {
+export async function addServer(workspaceId: string, input: { name: string; hostname: string; serverType?: string; location?: string; provider?: "hetzner" | "external" }): Promise<MtaServer> {
   await hydrate();
   const now = nowIso();
   const s: MtaServer = {
     id: rid("mta"),
     workspaceId,
-    provider: "hetzner",
+    provider: input.provider || "hetzner",
     name: input.name,
     hostname: input.hostname.toLowerCase().trim(),
     serverType: input.serverType,

@@ -34,6 +34,7 @@ import {
   startAutoSetup, advanceAutoSetup, setupStatus, pauseAutoSetup,
 } from "../../../lib/sending";
 import type { SeedAccount } from "../../../lib/sending";
+import { listInboxes } from "../../../lib/senders";
 
 /** Strip the app password before a seed ever goes to the client. */
 function publicSeed(s: SeedAccount) {
@@ -49,6 +50,7 @@ export async function GET(req: Request) {
   const domains = await listDomains(ws);
   const mailboxes = await listMailboxes(ws);
   const servers = await listServers(ws);
+  const poolCount = (await listInboxes(ws)).length;
   const seedTests = await listSeedTests(ws);
   const warmupThreads = await listWarmupThreads(ws, 200);
   const rawSeeds = await listSeeds();
@@ -69,7 +71,10 @@ export async function GET(req: Request) {
     servers: servers.map((s) => ({ ...s, postalApiKey: s.postalApiKey ? "set" : undefined })),
     mailboxes,
     stats: await stats(ws),
-    providers: providerStatus(),
+    // Provider seams + the workspace's cold-send inbox pool (the imported
+    // inboxes real cold sends actually leave from).
+    providers: { ...providerStatus(), pool: poolCount > 0 },
+    poolCount,
     suppression: (await listSuppression()).slice(0, 50),
     events: await recentEvents(50),
     seeds: rawSeeds.map(publicSeed),
@@ -279,6 +284,8 @@ export async function POST(req: Request) {
       hetznerDnsToken: b.hetznerDnsToken,
       hcloudToken: b.hcloudToken,
       smartleadApiKey: b.smartleadApiKey,
+      mailServerUrl: b.mailServerUrl,
+      mailServerKey: b.mailServerKey,
       mtaEnabled: typeof b.mtaEnabled === "boolean" ? b.mtaEnabled : undefined,
     });
     return ok({ config: sendingConfigStatus() });
@@ -288,6 +295,6 @@ export async function POST(req: Request) {
 }
 
 function guard(e: any) {
-  if (e instanceof HetznerNotConfigured) return fail(e.message + " — add the token to enable automatic provisioning.", 503);
+  if (e instanceof HetznerNotConfigured) return fail(e.message + ", add the token to enable automatic provisioning.", 503);
   return fail(e?.message ?? "failed", e?.status ?? 400);
 }

@@ -18,21 +18,37 @@
 import { nowIso } from "../core/ids";
 import { generateDkimKeypair } from "./dkim";
 import { desiredRecords } from "./dns";
-import { ensureZone, listRecords, upsertRecord } from "./providers/hetznerDns";
+import { ensureZone, listRecords, upsertRecord, dnsConfigured } from "./providers/hetznerDns";
 import { createServer, getServer, setReverseDns } from "./providers/hetznerCloud";
 import { cloudInit } from "./postal";
-import { getDomain, saveDomain, getServer as getStoredServer, saveServer, listServers } from "./store";
+import { getDomain, saveDomain, getServer as getStoredServer, saveServer, listServers, addServer } from "./store";
+import { mailServerUrl, mailServerKey } from "./config";
 import type { SendingDomain, MtaServer, DesiredRecord } from "./types";
 
 function env(name: string, fallback: string): string {
   return process.env[name] || fallback;
 }
 
-/** Resolve the MTA server a domain should use (its own, or the first active one). */
+/** Resolve the MTA server a domain should use (its own, or the first active one).
+ *  With no server registered yet but the owned mail server connection set, the
+ *  connected server is auto-registered as an externally managed MTA so domains
+ *  can generate their record set (MX/return-path) with zero cloud automation. */
 async function serverFor(d: SendingDomain): Promise<MtaServer | undefined> {
   if (d.serverId) return getStoredServer(d.workspaceId, d.serverId);
   const servers = await listServers(d.workspaceId);
-  return servers.find((s) => s.status === "active") || servers[0];
+  const existing = servers.find((s) => s.status === "active") || servers[0];
+  if (existing) return existing;
+  const url = mailServerUrl();
+  if (url && mailServerKey()) {
+    try {
+      const host = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname.toLowerCase();
+      const s = await addServer(d.workspaceId, { name: "Mail server", hostname: host, provider: "external" });
+      s.status = "active"; // externally managed: nothing for us to provision
+      await saveServer(s);
+      return s;
+    } catch { /* fall through to undefined */ }
+  }
+  return undefined;
 }
 
 /**
@@ -43,7 +59,7 @@ export async function provisionDomainDns(workspaceId: string, domainId: string):
   const d = await getDomain(workspaceId, domainId);
   if (!d) throw Object.assign(new Error("not_found"), { status: 404 });
   const server = await serverFor(d);
-  if (!server) throw Object.assign(new Error("no_mta_server"), { status: 409, detail: "Provision an MTA server first." });
+  if (!server) throw Object.assign(new Error("no_mta_server"), { status: 409, detail: "Connect your mail server first (Connections), so domains know their MX target." });
 
   try {
     d.status = "provisioning";
@@ -58,22 +74,26 @@ export async function provisionDomainDns(workspaceId: string, domainId: string):
     if (!d.trackingHost) d.trackingHost = `track.${d.domain}`;
     if (!d.dmarcRua) d.dmarcRua = env("SENDING_DMARC_RUA", `mailto:dmarc@${d.domain}`);
 
-    // 2. zone
-    const zone = await ensureZone(d.domain);
-    d.zoneId = zone.id;
-    if (zone.ns?.length) d.nameservers = zone.ns;
-
-    // 3. records
+    // 2 + 3. records (via the DNS automation API when a token is set, else
+    //    manual mode: the record set is generated and the operator publishes it
+    //    at their registrar / DNS host; DoH verify promotes to active either way)
     const desired = desiredRecords(d, server, { dmarcPolicy: "quarantine" });
-    const existing = await listRecords(zone.id);
-    for (const rec of desired) {
-      rec.providerRecordId = await upsertRecord(zone.id, rec, existing);
+    if (dnsConfigured()) {
+      const zone = await ensureZone(d.domain);
+      d.zoneId = zone.id;
+      if (zone.ns?.length) d.nameservers = zone.ns;
+      const existing = await listRecords(zone.id);
+      for (const rec of desired) {
+        rec.providerRecordId = await upsertRecord(zone.id, rec, existing);
+      }
+      d.records = desired;
+      // 4. await NS delegation (records exist at the DNS provider; public
+      //    resolution needs the registrar to delegate NS). Verify promotes to active.
+      d.status = "awaiting_ns";
+    } else {
+      d.records = desired;
+      d.status = "verifying";
     }
-    d.records = desired;
-
-    // 4. await NS delegation (records exist in Hetzner; public resolution needs
-    //    the registrar to point NS at Hetzner). Verify will promote to active.
-    d.status = "awaiting_ns";
     await saveDomain(d);
     return d;
   } catch (e: any) {

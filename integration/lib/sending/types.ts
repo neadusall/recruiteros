@@ -84,8 +84,8 @@ export type ServerStatus = "pending" | "provisioning" | "installing" | "active" 
 export interface MtaServer {
   id: string;
   workspaceId: string;
-  provider: "hetzner";
-  name: string;                   // hetzner server name
+  provider: "hetzner" | "external"; // "external" = an existing, externally managed mail server
+  name: string;                   // server name
   hostname: string;               // "mail.<primary domain>" — the MX target + PTR
   hcloudServerId?: number;        // Hetzner Cloud numeric id
   ip?: string;                    // public IPv4

@@ -624,7 +624,7 @@
     }
 
     function addDomains() {
-      openModal("Add sending domains", "Feed bare domain names; DKIM, the full record set, and PTR are generated automatically.",
+      openModal("Add sending domains", "Feed bare domain names; DKIM keys and the full DNS record set are generated automatically.",
         '<textarea id="mbDomains" rows="5" placeholder="trylumesp.com&#10;getlumesp.com" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:9px;font-family:var(--mono,monospace);font-size:13px"></textarea>' +
         '<div style="font-size:12px;color:var(--text-dim);margin:8px 0 12px">One per line. Never use your primary brand domain for cold sending.</div>' +
         '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="mbCancel">Cancel</button><button class="btn btn-primary btn-sm" id="mbGo">Add and provision</button></div>',
@@ -683,18 +683,21 @@
       var src = c.source || {};
       var body = "";
       if (!c.secretsEncrypted) body += '<div style="border:1px solid var(--warn-bg);border-left:3px solid var(--warn);background:var(--warn-bg);border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:12px;color:var(--text-muted)">Secrets are stored unencrypted until SENDING_SECRET_KEY is set on the server. Set it to encrypt these at rest.</div>';
-      body += field("cxDns", "Hetzner DNS token", c.dns, src.dns, "Publishes SPF, DKIM, DMARC, MX for each domain automatically.");
-      body += field("cxCloud", "Hetzner Cloud token", c.cloud, src.cloud, "Provisions the Postal MTA server and sets reverse DNS.");
-      body += field("cxSmart", "Smartlead API key", c.smartlead, src.smartlead, "Pulls warm-up health onto every mailbox.");
-      body += '<label style="display:flex;gap:9px;align-items:center;margin:6px 0 4px;font-size:13px;cursor:pointer"><input id="cxMta" type="checkbox"' + (c.mtaEnabled ? " checked" : "") + '> Route real cold sends through the owned MTA</label>';
-      body += '<div style="font-size:11px;color:var(--text-dim);margin:0 0 16px 24px">Keep off until a Postal server is live and verified. Nothing sends while this is off.</div>';
+      var srvStatus = c.server ? '<span style="color:var(--ok);font-size:11px;font-weight:600">connected' + (src.server && src.server !== "portal" ? " (" + esc(src.server) + ")" : "") + "</span>" : '<span style="color:var(--text-dim);font-size:11px">not set</span>';
+      body += '<label style="display:block;margin-bottom:12px;font-size:12px;color:var(--text-dim)"><span style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">Mail server URL ' + srvStatus + "</span>" +
+        '<input id="cxMcUrl" type="text" autocomplete="off" placeholder="https://mail.yourdomain.com" value="' + esc(c.serverUrl || "") + '" style="width:100%;background:var(--bg);border:1px solid var(--border-strong);border-radius:6px;color:var(--text);padding:8px 9px"></label>' +
+        '<div style="font-size:11px;color:var(--text-dim);margin:-6px 0 12px">Your own mail server admin URL. Its hostname becomes the MX target for new sending domains.</div>';
+      body += field("cxMcKey", "Mail server API key", c.server, src.server, "From the same admin panel, API access section. Powers server inventory and health.");
+      body += field("cxSmart", "Warm-up engine API key", c.smartlead, src.smartlead, "Pulls warm-up health onto every mailbox.");
+      body += '<label style="display:flex;gap:9px;align-items:center;margin:6px 0 4px;font-size:13px;cursor:pointer"><input id="cxMta" type="checkbox"' + (c.mtaEnabled ? " checked" : "") + '> Route cold sends through the owned mail server</label>';
+      body += '<div style="font-size:11px;color:var(--text-dim);margin:0 0 16px 24px">Advanced. Cold sends normally leave through your imported inbox pool; keep this off unless your account team turns it on.</div>';
       body += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="cxCancel">Cancel</button><button class="btn btn-primary btn-sm" id="cxSave">Save connections</button></div>';
       openModal("Connections", "Configure the sending stack from the portal", body, function (cardEl, close) {
         cardEl.querySelector("#cxCancel").addEventListener("click", close);
         cardEl.querySelector("#cxSave").addEventListener("click", function () {
           var payload = { action: "set-connections", mtaEnabled: cardEl.querySelector("#cxMta").checked };
-          var dnsv = cardEl.querySelector("#cxDns").value.trim(); if (dnsv) payload.hetznerDnsToken = dnsv;
-          var clv = cardEl.querySelector("#cxCloud").value.trim(); if (clv) payload.hcloudToken = clv;
+          var mcu = cardEl.querySelector("#cxMcUrl").value.trim(); if (mcu) payload.mailServerUrl = mcu;
+          var mck = cardEl.querySelector("#cxMcKey").value.trim(); if (mck) payload.mailServerKey = mck;
           var smv = cardEl.querySelector("#cxSmart").value.trim(); if (smv) payload.smartleadApiKey = smv;
           close();
           act(payload, "Connections saved");
@@ -714,7 +717,7 @@
       var body = '<div style="margin-bottom:14px">' + chip(dm.status, sKind) + (dm.lastError ? ' <span style="color:var(--danger);font-size:12px">' + esc(dm.lastError) + "</span>" : "") + "</div>";
       body += '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Nameservers · set these at your registrar</div>';
       if (ns.length) body += '<div style="font-family:var(--mono,monospace);font-size:12.5px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:16px">' + ns.map(esc).join("<br>") + "</div>";
-      else body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Nameservers appear after DNS is provisioned (needs the DNS automation token). Until then this domain cannot verify or send.</div>';
+      else body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">No nameserver change needed. Publish the DNS records below at your DNS host, then click Verify.</div>';
       body += '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">DNS records</div>';
       if (chk.length) {
         body += '<div style="margin-bottom:16px">' + chk.map(function (c) {
@@ -722,18 +725,18 @@
           return '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:' + col + '"></span><span>' + esc(c.label) + "</span>" + (c.core ? ' <span style="font-size:10px;color:var(--text-dim)">core</span>' : "") + '<span style="flex:1"></span><span style="font-size:11px;color:' + col + '">' + (c.present ? "live" : "pending") + "</span></div>";
         }).join("") + "</div>";
       } else {
-        body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Records are written once DNS is provisioned.</div>';
+        body += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Records are generated when the domain provisions. If this persists, connect your mail server (Connections) and re-provision.</div>';
       }
       body += '<div id="dmSetup"></div>';
-      body += '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="dmPostal">Postal setup</button><button class="btn btn-ghost btn-sm" id="dmReprov">Re-provision DNS</button><button class="btn btn-primary btn-sm" id="dmVerify">Verify now</button></div>';
+      body += '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="dmPostal">Server setup</button><button class="btn btn-ghost btn-sm" id="dmReprov">Re-provision DNS</button><button class="btn btn-primary btn-sm" id="dmVerify">Verify now</button></div>';
       openModal("Domain · " + dm.domain, "Complete setup and verify", body, function (cardEl, close) {
         cardEl.querySelector("#dmVerify").addEventListener("click", function () { close(); act({ action: "verify-domain", id: id }, "Verifying domain"); });
         cardEl.querySelector("#dmReprov").addEventListener("click", function () { close(); act({ action: "provision-domain", id: id }, "Re-provisioning DNS"); });
         cardEl.querySelector("#dmPostal").addEventListener("click", function () {
           send("/sending", "POST", { action: "domain-setup", id: id }).then(function (r) {
-            if (!r.ok || !r.data || !r.data.setup) { toast((r.data && r.data.error) || "Could not load Postal setup"); return; }
+            if (!r.ok || !r.data || !r.data.setup) { toast((r.data && r.data.error) || "Could not load server setup"); return; }
             var s = r.data.setup;
-            cardEl.querySelector("#dmSetup").innerHTML = '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 6px">Paste into Postal (DKIM + config)</div><pre style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:11.5px;max-height:220px;overflow:auto;margin:0 0 14px">' + esc(typeof s === "string" ? s : JSON.stringify(s, null, 2)) + "</pre>";
+            cardEl.querySelector("#dmSetup").innerHTML = '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 6px">Paste into your mail server (DKIM + config)</div><pre style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:11.5px;max-height:220px;overflow:auto;margin:0 0 14px">' + esc(typeof s === "string" ? s : JSON.stringify(s, null, 2)) + "</pre>";
           });
         });
       });
@@ -782,7 +785,7 @@
 
       // Triage first: compute the ranked list of things that need the operator.
       var alerts = [];
-      if (!prov.mta) alerts.push(["info", "Sending stack configured but no live MTA yet. Connect Postal to send for real."]);
+      if (!prov.pool) alerts.push(["info", "No cold-send inboxes imported yet. Import your inbox pool on the Senders screen to send for real."]);
       if (!prov.smartlead) alerts.push(["info", "The warm-up engine is not connected. Ask your account team to enable warm-up health on the fleet."]);
       domains.forEach(function (dm) {
         if (dm.status === "paused") alerts.push(["bad", "Domain " + dm.domain + " is paused: " + ((dm.warnings || [])[0] || dm.pausedReason || "governor")]);
@@ -806,7 +809,7 @@
         '<button class="btn btn-ghost btn-sm" id="mbLive">' + (liveOn ? "Live: on" : "Live: off") + "</button>" +
         (can("integrations:manage") ? '<button class="btn btn-ghost btn-sm" id="mbConnect">Connections</button>' : "") +
         '<span style="flex:1"></span>' +
-        provChip("Warm-up", prov.smartlead) + provChip("MTA / Postal", prov.mta) + provChip("DNS", prov.dns) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
+        provChip("Warm-up", prov.smartlead) + provChip("Inbox pool", prov.pool) + provChip("Mail server", prov.server) + provChip("SNDS", prov.snds) + provChip("Postmaster", prov.postmaster) +
         "</div>";
 
       if (alerts.length) {
@@ -826,9 +829,8 @@
       // Go-live readiness: exactly what still has to be wired for submitted domains
       // to provision, verify, and actually send. Shown until everything is set.
       var steps = [
-        ["DNS automation token", prov.dns, "auto-publishes SPF, DKIM, DMARC, MX per domain"],
-        ["Cloud automation token", prov.cloud, "auto-provisions the Postal MTA server and rDNS"],
-        ["Postal MTA routing", prov.mta, "lets real cold sends leave the system"],
+        ["Cold-send inbox pool", prov.pool, "imported inboxes on the Senders screen; real cold sends leave from them"],
+        ["Mail server connection", prov.server, "links your own mail server for inventory, health, and DNS targets"],
         ["Warm-up engine", prov.smartlead, "pulls warm-up health onto every mailbox"],
       ];
       var notReady = steps.filter(function (s) { return !s[1]; }).length;
@@ -840,14 +842,14 @@
             var col = s[1] ? "var(--ok)" : "var(--text-dim)";
             return '<div style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px"><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';margin-top:4px;flex:none"></span><span><b style="color:var(--text)">' + esc(s[0]) + "</b> <span style=\"color:var(--text-dim)\">" + esc(s[2]) + "</span></span></div>";
           }).join("") +
-          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">After a domain provisions, point its nameservers at the assigned nameservers at your registrar (open the domain to see them), then Verify. Nothing sends until MTA routing is on.</div>' +
+          '</div><div style="font-size:12px;color:var(--text-dim);margin-top:10px">Add domains, then open each one to see its DNS records and publish them at your DNS host, then Verify. Cold sends only leave through your imported inbox pool.</div>' +
           (can("integrations:manage") ? '<div style="margin-top:12px"><button class="btn btn-primary btn-sm" id="mbConnect2">Set up connections</button></div>' : "") + "</div>";
       }
 
       if (!domains.length && !mailboxes.length) {
         html += '<div class="card" style="text-align:center;padding:34px 20px">' +
           '<div style="font-size:15px;font-weight:600;margin-bottom:6px">No sending fleet yet</div>' +
-          '<div style="font-size:13px;color:var(--text-dim);max-width:52ch;margin:0 auto 16px">Add secondary sending domains to begin. Each gets its DKIM keys, full DNS record set, and PTR generated automatically, then mailboxes warm up on a slow ramp before any cold send.</div>' +
+          '<div style="font-size:13px;color:var(--text-dim);max-width:52ch;margin:0 auto 16px">Add secondary sending domains to begin. Each gets its DKIM keys and full DNS record set generated automatically, then mailboxes warm up on a slow ramp before any cold send.</div>' +
           '<button class="btn btn-primary" id="mbEmptyAdd">Add your first domains</button></div>';
         view.innerHTML = html;
         wire();

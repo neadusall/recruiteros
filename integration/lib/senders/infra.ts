@@ -12,9 +12,10 @@
  *   2) Auth sweep - rotates through the pool re-verifying real SMTP logins
  *      (verifyInbox) a few at a time, so every credential is re-proven at
  *      least daily without hammering the host.
- *   3) Mailcow API (optional) - when MAILCOW_API_BASE_URL/MAILCOW_API_KEY are
- *      set, pulls mailbox/domain counts off the owned mail server so the
- *      portal shows the server's own inventory, not just our imports.
+ *   3) Mailcow API (optional) - when the mail server connection is set (portal
+ *      Connections, else MAILCOW_API_BASE_URL/MAILCOW_API_KEY env), pulls
+ *      mailbox/domain counts off the owned mail server so the portal shows the
+ *      server's own inventory, not just our imports.
  *
  * Watch-hosts env (servers to monitor even with zero imported inboxes):
  *   SMTP_WATCH_HOSTS='[{"host":"mail.lumesp.com","port":587,"portal":"lume","label":"Lume mail server"}]'
@@ -23,6 +24,7 @@
 
 import net from "net";
 import { listInboxes, verifyInbox, saveInbox } from "./index";
+import { ensureConfig, mailServerUrl, mailServerKey, mailServerConnected } from "../sending/config";
 import type { SenderInbox } from "./types";
 
 /* ------------------------------ server probes ------------------------------ */
@@ -167,15 +169,19 @@ export interface MailcowSummary {
 
 const mailcowCache: { at: number; summary: MailcowSummary | null } = { at: 0, summary: null };
 
+// Connection resolves portal-set values first (Mailbox Ops > Connections),
+// then the MAILCOW_* env vars, via lib/sending/config.
 export function mailcowConfigured(): boolean {
-  return !!(process.env.MAILCOW_API_BASE_URL && process.env.MAILCOW_API_KEY);
+  return mailServerConnected();
 }
 
 export async function mailcowSummary(): Promise<MailcowSummary | null> {
+  await ensureConfig();
   if (!mailcowConfigured()) return null;
   if (mailcowCache.summary && Date.now() - mailcowCache.at < PROBE_TTL_MS) return mailcowCache.summary;
-  const baseUrl = String(process.env.MAILCOW_API_BASE_URL).replace(/\/+$/, "");
-  const headers = { "X-API-Key": String(process.env.MAILCOW_API_KEY), Accept: "application/json" };
+  const rawUrl = String(mailServerUrl());
+  const baseUrl = (/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`).replace(/\/+$/, "");
+  const headers = { "X-API-Key": String(mailServerKey()), Accept: "application/json" };
   async function count(path: string): Promise<number | null> {
     try {
       const ctrl = new AbortController();

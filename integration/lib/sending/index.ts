@@ -5,7 +5,7 @@
  */
 
 // Local import so providerStatus() below can read portal-set connections.
-import { dnsToken, cloudToken, smartleadKey, mtaEnabled } from "./config";
+import { dnsToken, cloudToken, smartleadKey, mailServerConnected, mtaEnabled } from "./config";
 
 export type {
   SendingDomain, DomainStatus, MtaServer, ServerStatus, Mailbox, MailboxStatus,
@@ -57,11 +57,14 @@ export { sendingHealth, domainHealth, mailboxHealth } from "./health";
 export type { SendingHealthSummary, DomainHealthScore, MailboxHealth, ServerHealth, HealthLabel, WarmthLabel } from "./health";
 
 /** One call for the UI: which automations are wired? */
-export function providerStatus(): { dns: boolean; cloud: boolean; snds: boolean; postmaster: boolean; mta: boolean; smartlead: boolean } {
+export function providerStatus(): { dns: boolean; cloud: boolean; server: boolean; snds: boolean; postmaster: boolean; mta: boolean; smartlead: boolean } {
   // Portal-set connections (config.ts) take precedence; env is the fallback.
+  // dns/cloud are the legacy token-driven automations and stay env-only paths;
+  // `server` is the owned mail server connection (the real stack's MTA seam).
   return {
     dns: !!dnsToken(),
     cloud: !!cloudToken(),
+    server: mailServerConnected(),
     snds: !!process.env.SNDS_KEY,
     postmaster: !!(process.env.POSTMASTER_CLIENT_ID && process.env.POSTMASTER_REFRESH_TOKEN),
     mta: mtaEnabled(),
