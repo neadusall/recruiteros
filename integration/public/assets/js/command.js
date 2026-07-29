@@ -11516,6 +11516,9 @@
       '.jd-tbar{display:block;width:88px;max-width:100%;height:4px;border-radius:999px;background:var(--brand-soft);overflow:hidden;margin-top:3px}' +
       '.jd-tbar b{display:block;height:100%;border-radius:999px;background:var(--brand);transition:width .6s ease}' +
       '.jd-tbar.ind b{width:38%;animation:jdslide 1.4s ease-in-out infinite alternate}' +
+      /* Hour/minute ETA under the live bar: how long is left and the clock
+         time it should finish, so the team knows what to expect. */
+      '.jd-teta{display:block;font-size:11px;color:var(--text-muted);line-height:1.3;margin-top:3px;font-variant-numeric:tabular-nums}' +
       '@keyframes jdslide{from{margin-left:-12%}to{margin-left:74%}}' +
       '@keyframes jdspin{to{transform:rotate(360deg)}}' +
       '@keyframes jdlinepulse{0%,100%{opacity:1}50%{opacity:.45}}' +
@@ -11889,6 +11892,40 @@
         // half-finished combine selection silently unticks under the user's mouse.
         var keepTicked = {};
         host.querySelectorAll(".jd-pick:checked").forEach(function (el) { keepTicked[el.getAttribute("data-pick")] = 1; });
+        // ---- Enrichment ETA: the server ledger has no start stamp, so the pace is
+        // learned right here from row-count movement between the card's polls
+        // (seeded with the ledger's own updatedAt so the first finished batch
+        // already teaches a real pace), remembered per list in localStorage so a
+        // reload doesn't forget. Until a run shows movement it falls back to a
+        // typical pace and the wording says it's a first estimate.
+        function jdEta(id, done, total, busy, ledgerAt) {
+          var KEY = "ros_jd_eta_v1", PACE_GUESS_MS = 4000, now = Date.now(), all;
+          try { all = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { all = {}; }
+          Object.keys(all).forEach(function (k) { if (!all[k] || now - (all[k].t || 0) > 2 * 86400000) delete all[k]; });
+          if (!busy) {
+            if (all[id]) { delete all[id]; try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) { } }
+            return null;
+          }
+          var s = all[id];
+          var seedT = ledgerAt ? Date.parse(String(ledgerAt).replace(" ", "T")) : NaN;
+          // done going BACKWARDS = the chain restarted on a bigger scope; relearn.
+          if (!s || done < s.d) s = { t0: isNaN(seedT) ? now : Math.min(seedT, now), d0: done, t: now, d: done };
+          else if (done > s.d) { s.t = now; s.d = done; }
+          all[id] = s;
+          try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) { }
+          var pace = (s.d > s.d0 && s.t > s.t0) ? (s.t - s.t0) / (s.d - s.d0) : null;
+          var left = Math.max(0, (total || 0) - done);
+          if (!left) return { finishing: true };
+          // The countdown keeps moving between batches: time since the last
+          // finished batch is already progress, so subtract it (floor 45s).
+          var ms = Math.max(45000, left * (pace == null ? PACE_GUESS_MS : pace) - (now - s.t));
+          var m = Math.round(ms / 60000), h = Math.floor(m / 60), mm = m % 60;
+          var span = m < 1 ? "under a minute" : h < 1 ? "about " + m + " min" : "about " + h + " hr" + (mm ? " " + mm + " min" : "");
+          var at = new Date(now + ms);
+          var clock = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+          if (ms > 20 * 3600000) clock = at.toLocaleDateString([], { weekday: "short" }) + " " + clock;
+          return { finishing: false, measured: pace != null, span: span, clock: clock, short: span.replace("about ", "~") };
+        }
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
           var outN = (r.candidates || []).filter(function (c) { return c.outOfArea; }).length;
@@ -11953,15 +11990,19 @@
           var sSearch = jStop("jt-done", jIcons.check, "Searched", n + " found",
             "The search finished and saved " + n + " candidate" + (n === 1 ? "" : "s") +
             (outN ? (": " + (n - outN) + " in area and " + outN + " out of area") : "") + ".");
-          var sEnrich, jNote = "";
+          var sEnrich, jNote = "", jEta = jdEta(r.id, epDone, ep ? (ep.total || n) : n, busyJobs, ep && ep.updatedAt);
           if (busyJobs) {
             // Real progress under the live stop: the chunk ledger gives actual rows
             // done, so the mini bar is honest; without a ledger yet it just glides.
             var livePct = ep ? Math.max(4, Math.min(100, Math.round(epDone / (ep.total || n || 1) * 100))) : null;
             var liveBar = '<span class="jd-tbar' + (livePct == null ? ' ind' : '') + '"><b' + (livePct != null ? ' style="width:' + livePct + '%"' : '') + '></b></span>';
+            var etaLine = !jEta ? "" : '<span class="jd-teta">' + (jEta.finishing ? "finishing up" : jEta.short + " left · done ~" + jEta.clock) + '</span>';
             sEnrich = jStop("jt-live", jIcons.loop, "Enriching now", ep ? "~" + epDone + " of " + (ep.total || n) + " rows" : "working…",
-              "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.", null, liveBar);
-            jNote = "<b>Working now:</b> contact info is being filled in. Next: everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
+              "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.", null, liveBar + etaLine);
+            jNote = "<b>Working now:</b> contact info is being filled in. " + (jEta && !jEta.finishing
+              ? "Expect it done in " + jEta.span + " (around " + jEta.clock + ")" + (jEta.measured ? ". " : "; that's a first estimate and it sharpens as batches finish. ")
+              : "It's finishing up; the last checks take a few minutes. ") +
+              "Next: everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
           } else if (ep && ep.nextStart == null && lxSkipN) {
             sEnrich = jStop("jt-act", jIcons.alert, "Enriched", { btn: lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " to redo · press to finish", act: r.id },
               "Every batch finished, but " + lxSkipN + " ran while one enrichment source was unreachable, so they were filled by the other sources only. Press the amber pill to give them their full pass; finished batches are never bought twice.");
@@ -12036,8 +12077,9 @@
           var jBoostCta = (boostable && (jOverall === "done" || jOverall === "wait"))
             ? '<button type="button" class="jd-boostcta" data-boost="' + esc(r.id) + '" title="Texts reach ' + phs + ' of ' + n + ' candidates so far. Boost runs a paid lookup on the ' + boostable + ' still missing a phone; you see the estimated cost and approve it before anything is spent.">Boost phones · up to ' + boostable + ' more</button>'
             : '';
+          var jHeadEta = (jOverall === "live" && jEta) ? (jEta.finishing ? "finishing up" : jEta.short + " left") : "";
           var jHead = '<div class="jd-jhead"><span class="jd-jhstate"><span class="jd-jstate js-' + jOverall + '"><i></i>' + jChipTxt + '</span>' + jBoostCta + '</span>' +
-            '<span class="jd-jsteps">' + jDoneN + ' of 4 steps' + (jUpd ? ' · updated ' + jUpd : '') + '</span></div>';
+            '<span class="jd-jsteps">' + jDoneN + ' of 4 steps' + (jUpd ? ' · updated ' + jUpd : '') + (jHeadEta ? ' · ' + jHeadEta : '') + '</span></div>';
           var journey = n
             ? '<div class="jd-journeywrap">' + jHead + '<div class="jd-journey">' + sSearch + sEnrich + sCand + sText + '</div>' +
               '<div class="jd-journey-note">' + jNote + '</div></div>'
