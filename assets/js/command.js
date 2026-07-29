@@ -6287,6 +6287,156 @@
     });
   }
 
+  /* ---- Domain warm-up: live per-domain warm-up fleet on the Senders tab.
+          Data is /api/senders/warmup (server-cached, tenant-split by portal
+          host), refreshed on a timer while the tab is open. ---- */
+  var wuData = null, wuTimer = null, wuOpen = {}, wuLoading = false;
+
+  function wuEnsureStyles() {
+    if (document.getElementById("wuStyles")) return;
+    var st = document.createElement("style");
+    st.id = "wuStyles";
+    st.textContent =
+      '.wu-card{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:16px 18px;margin:4px 0 18px}' +
+      '.wu-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}' +
+      '.wu-title{font-size:15px;font-weight:650;letter-spacing:-.01em}' +
+      '.wu-live{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted,var(--text-dim))}' +
+      '.wu-dot{width:7px;height:7px;border-radius:50%;background:#1a7f37;animation:wuPulse 2s infinite}' +
+      '@keyframes wuPulse{0%,100%{opacity:1}50%{opacity:.35}}' +
+      '.wu-sub{font-size:12.5px;color:var(--muted,var(--text-dim));margin-bottom:12px}' +
+      '.wu-stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}' +
+      '.wu-stat{flex:1;min-width:110px;border:1px solid var(--border);border-radius:12px;padding:10px 12px}' +
+      '.wu-statv{font-size:20px;font-weight:650;letter-spacing:-.02em}' +
+      '.wu-statl{font-size:11.5px;color:var(--muted,var(--text-dim));margin-top:2px}' +
+      '.wu-table{width:100%;border-collapse:collapse;font-size:13px}' +
+      '.wu-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));padding:6px 8px;border-bottom:1px solid var(--border)}' +
+      '.wu-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
+      '.wu-dom{cursor:pointer}.wu-dom:hover td{background:var(--surface-2,rgba(46,91,215,.04))}' +
+      '.wu-caret{display:inline-block;width:14px;color:var(--muted,var(--text-dim));transition:transform .15s}' +
+      '.wu-caret.open{transform:rotate(90deg)}' +
+      '.wu-repbar{display:inline-flex;align-items:center;gap:8px;min-width:120px}' +
+      '.wu-reptrack{flex:1;height:6px;border-radius:4px;background:var(--border);overflow:hidden;min-width:60px}' +
+      '.wu-repfill{display:block;height:100%;border-radius:4px}' +
+      '.wu-badge{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:2px 9px}' +
+      '.wu-badge.ready{background:rgba(26,127,55,.12);color:#1a7f37}' +
+      '.wu-badge.warming{background:rgba(46,91,215,.10);color:var(--brand,#2e5bd7)}' +
+      '.wu-badge.attention{background:rgba(179,38,30,.10);color:#b3261e}' +
+      '.wu-mbwrap{padding:0 8px 10px 22px}' +
+      '.wu-mbwrap .wu-table{font-size:12.5px}' +
+      '.wu-scroll{overflow-x:auto}' +
+      '.wu-days b{font-variant-numeric:tabular-nums}';
+    document.head.appendChild(st);
+  }
+
+  function wuRepColor(p) { return p >= 95 ? "#1a7f37" : p >= 70 ? "#b26a00" : "#b3261e"; }
+
+  function wuRepCell(p) {
+    if (p == null) return '<span class="muted">n/a</span>';
+    var c = wuRepColor(p);
+    return '<span class="wu-repbar"><span class="wu-reptrack"><span class="wu-repfill" style="width:' + Math.max(2, Math.min(100, p)) + '%;background:' + c + '"></span></span><b style="color:' + c + '">' + p + '%</b></span>';
+  }
+
+  function wuBadge(r) {
+    var label = r === "ready" ? "Ready to send" : r === "attention" ? "Needs attention" : "Warming";
+    return '<span class="wu-badge ' + r + '">' + label + '</span>';
+  }
+
+  function wuAgo(iso) {
+    if (!iso) return "";
+    var s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 90) return s + "s ago";
+    var m = Math.round(s / 60);
+    if (m < 90) return m + " min ago";
+    return Math.round(m / 60) + " h ago";
+  }
+
+  function renderWarmup() {
+    var box = $("#wuWrap"); if (!box) return;
+    wuEnsureStyles();
+    if (!wuData) { box.innerHTML = '<div class="wu-card"><div class="empty">Loading warm-up fleet…</div></div>'; return; }
+    if (!wuData.configured) {
+      box.innerHTML = '<div class="wu-card"><div class="wu-head"><div class="wu-title">Domain warm-up</div></div><div class="empty">Warm-up tracking is not connected on this portal yet. Once the warm-up connection is configured in Setup, every warming domain and mailbox shows here live.</div></div>';
+      return;
+    }
+    var t = wuData.totals || {}, domains = wuData.domains || [];
+    function c(v, l) { return '<div class="wu-stat"><div class="wu-statv">' + esc(v) + '</div><div class="wu-statl">' + esc(l) + '</div></div>'; }
+    var head =
+      '<div class="wu-head">' +
+        '<div class="wu-title">Domain warm-up</div>' +
+        '<span class="wu-live"><span class="wu-dot"></span> Live · updated ' + esc(wuAgo(wuData.updatedAt)) + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-ghost btn-sm" id="wuRefresh"' + (wuLoading ? " disabled" : "") + '>' + (wuLoading ? "Refreshing…" : "↻ Refresh now") + '</button>' +
+      '</div>' +
+      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. A domain is <b>Ready to send</b> after 14+ days warming at 95%+ average reputation. Click a domain for its mailboxes.</div>';
+    var stats =
+      '<div class="wu-stats">' +
+        c(t.domains || 0, "Domains warming") +
+        c(t.mailboxes || 0, "Warm-up mailboxes") +
+        c(t.avgReputation != null ? t.avgReputation + "%" : "n/a", "Avg reputation") +
+        c(t.ready || 0, "Domains ready") +
+        c(t.attention || 0, "Need attention") +
+      '</div>';
+    var rows = domains.map(function (d) {
+      var open = !!wuOpen[d.domain];
+      var days = d.days != null ? ('<span class="wu-days"><b>' + d.days.toFixed(1) + '</b> days</span>' + (d.since ? '<div class="muted" style="font-size:11px">since ' + esc(String(d.since).slice(0, 10)) + '</div>' : '')) : '<span class="muted">n/a</span>';
+      var main = '<tr class="wu-dom" data-wu-dom="' + esc(d.domain) + '">' +
+        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b></td>' +
+        '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
+        '<td>' + days + '</td>' +
+        '<td>' + wuRepCell(d.avgReputation) + '</td>' +
+        '<td>' + (d.minReputation != null ? d.minReputation + "%" : '<span class="muted">n/a</span>') + '</td>' +
+        '<td>' + (d.sentTotal || 0) + (d.spamCount ? ' <span class="muted">(' + d.spamCount + ' spam' + (d.spamRatePct != null ? ", " + d.spamRatePct + "%" : "") + ')</span>' : '') + '</td>' +
+        '<td>' + wuBadge(d.readiness) + '</td>' +
+      '</tr>';
+      if (!open) return main;
+      var mb = '<tr><td colspan="7"><div class="wu-mbwrap"><table class="wu-table"><thead><tr><th>Mailbox</th><th>Status</th><th>Reputation</th><th>Days</th><th>Sent</th><th>Spam</th><th>Daily limit</th></tr></thead><tbody>' +
+        (d.accounts || []).map(function (a) {
+          var st = a.status === "active" ? '<span class="cur-valid">warming</span>' : a.status === "paused" ? '<span class="im-email-unv">paused</span>' : '<span class="muted">unknown</span>';
+          return '<tr>' +
+            '<td>' + esc(a.email) + '</td>' +
+            '<td>' + st + '</td>' +
+            '<td>' + wuRepCell(a.reputationPct) + '</td>' +
+            '<td>' + (a.days != null ? a.days.toFixed(1) : "n/a") + '</td>' +
+            '<td>' + (a.sentTotal || 0) + '</td>' +
+            '<td>' + (a.spamCount || 0) + '</td>' +
+            '<td>' + (a.messagePerDay != null ? (a.dailySent != null ? a.dailySent + "/" : "") + a.messagePerDay : "n/a") + '</td>' +
+          '</tr>';
+        }).join("") + '</tbody></table></div></td></tr>';
+      return main + mb;
+    }).join("");
+    var table = domains.length
+      ? '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Domain</th><th>Mailboxes</th><th>Time warming</th><th>Avg reputation</th><th>Lowest</th><th>Warm-up sends</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      : '<div class="empty">No domains are warming on this portal yet.</div>';
+    box.innerHTML = '<div class="wu-card">' + head + stats + table + '</div>';
+    var rb = $("#wuRefresh"); if (rb) rb.addEventListener("click", function () { loadWarmup(true); });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-wu-dom]"), function (tr) {
+      tr.addEventListener("click", function () {
+        var dom = tr.getAttribute("data-wu-dom");
+        wuOpen[dom] = !wuOpen[dom];
+        renderWarmup();
+      });
+    });
+  }
+
+  function loadWarmup(fresh) {
+    if (wuLoading) return;
+    wuLoading = true;
+    if (fresh) renderWarmup();
+    send("/senders/warmup" + (fresh ? "?fresh=1" : ""), "GET").then(function (r) {
+      wuLoading = false;
+      if (!document.getElementById("wuWrap")) return;
+      if (r.ok) wuData = r.data || null;
+      else if (!wuData) wuData = { configured: false };
+      renderWarmup();
+    });
+    if (!wuTimer) {
+      wuTimer = setInterval(function () {
+        if (!document.getElementById("wuWrap")) { clearInterval(wuTimer); wuTimer = null; return; }
+        loadWarmup(false);
+      }, 120000);
+    }
+  }
+
   /* ---- Senders: recruiter-owned SMTP inbox pools (scoped to this portal) ---- */
   var sndData = {}, sndPicks = {};
 
@@ -6322,6 +6472,7 @@
           '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
         '</div>' +
       '</div>' +
+      '<div id="wuWrap"></div>' +
       '<div id="sndStatsBox" class="snd-stats"></div>' +
       '<div id="sndPoolsBox"></div>' +
       '<div class="snd-toolbar">' +
@@ -6338,6 +6489,8 @@
       var ids = Object.keys(sndPicks); if (!ids.length) return;
       pickRecruiter(function (m) { if (m) doAssign(ids, m); });
     });
+    renderWarmup();
+    loadWarmup(false);
     loadSenders();
   }
 

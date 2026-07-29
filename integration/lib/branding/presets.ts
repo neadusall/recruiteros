@@ -47,3 +47,9 @@ function matchPreset(host: string): BrandPreset | null {
 export function presetForHost(host: string): BrandPreset | null {
   return matchPreset(host);
 }
+
+/** Every built-in white-label preset (used to keep tenant-branded assets, e.g.
+ *  warm-up domains named after a tenant, off the house portal's views). */
+export function allBrandPresets(): BrandPreset[] {
+  return [LUME];
+}
