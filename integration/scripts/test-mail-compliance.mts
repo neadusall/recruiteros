@@ -99,6 +99,13 @@ async function main() {
     assert.equal(coldCapFor({ status: "active", createdAt: days(30) }), 20);
   });
 
+  await test("Sending.ac inboxes stay flat at 2/day and NEVER ramp", () => {
+    assert.equal(coldCapFor({ status: "active", createdAt: days(60), provider: "sending-ac" }), 2);
+    assert.equal(coldCapFor({ status: "warming", createdAt: days(1), provider: "sending-ac" }), 2);
+    assert.equal(coldCapFor({ status: "paused", createdAt: days(60), provider: "sending-ac" }), 0);
+    assert.equal(coldCapFor({ status: "active", createdAt: days(60), provider: "own-smtp" }), 20);
+  });
+
   await test("paused and error inboxes have zero capacity", () => {
     assert.equal(coldCapFor({ status: "paused", createdAt: days(30) }), 0);
     assert.equal(coldCapFor({ status: "error", createdAt: days(30) }), 0);

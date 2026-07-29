@@ -299,6 +299,19 @@ export interface RecruiterCapacity {
   warmingPerDay: number;    // inboxes × WARMING_PER_INBOX (Smartlead, informational)
 }
 
+/** Per-provider capacity rollup: Sending.ac's flat 2/day model versus the internal
+ *  SMTP server's warm-up ramp are DIFFERENT products; capacity reads wrong unless
+ *  they're split. `capModel` tells the UI which story to render. */
+export interface ProviderCapacity {
+  provider: string;                  // sending-ac | own-smtp | google | outlook | other
+  capModel: "flat" | "ramp";
+  inboxes: number;
+  domains: number;
+  coldCapacity: number;
+  coldUsedToday: number;
+  coldRemaining: number;
+}
+
 export interface SendCapacity {
   coldPerInbox: number;
   warmingPerInbox: number;
@@ -310,6 +323,7 @@ export interface SendCapacity {
   coldRemaining: number;
   warmingPerDay: number;
   byRecruiter: RecruiterCapacity[];
+  byProvider: ProviderCapacity[];
 }
 
 /**
@@ -324,6 +338,7 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
     (m) => m.workspaceId === workspaceId && (m.status === "active" || m.status === "warming"),
   );
   const recs = new Map<string, RecruiterCapacity & { _domains: Set<string> }>();
+  const provs = new Map<string, ProviderCapacity & { _domains: Set<string> }>();
   const domains = new Set<string>();
   let inboxes = 0, coldCapacity = 0, coldUsedToday = 0;
   for (const m of mine) {
@@ -332,6 +347,18 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
     const dom = domainOf(m.email);
     inboxes++; coldCapacity += cap; coldUsedToday += used;
     if (dom) domains.add(dom);
+    const pKey = m.provider || "other";
+    let pv = provs.get(pKey);
+    if (!pv) {
+      pv = {
+        provider: pKey, capModel: pKey === "sending-ac" ? "flat" : "ramp",
+        inboxes: 0, domains: 0, coldCapacity: 0, coldUsedToday: 0, coldRemaining: 0,
+        _domains: new Set<string>(),
+      };
+      provs.set(pKey, pv);
+    }
+    pv.inboxes++; pv.coldCapacity += cap; pv.coldUsedToday += used;
+    if (dom) pv._domains.add(dom);
     const key = m.ownerId || "_unassigned";
     let r = recs.get(key);
     if (!r) {
@@ -354,11 +381,19 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
       warmingPerDay: r.inboxes * WARMING_PER_INBOX,
     }))
     .sort((a, b) => b.inboxes - a.inboxes);
+  const byProvider: ProviderCapacity[] = [...provs.values()]
+    .map((p) => ({
+      provider: p.provider, capModel: p.capModel, inboxes: p.inboxes, domains: p._domains.size,
+      coldCapacity: p.coldCapacity, coldUsedToday: p.coldUsedToday,
+      coldRemaining: Math.max(0, p.coldCapacity - p.coldUsedToday),
+    }))
+    .sort((a, b) => b.inboxes - a.inboxes);
   return {
     coldPerInbox: coldMaxPerInbox(), warmingPerInbox: WARMING_PER_INBOX, inboxesPerDomain: INBOXES_PER_DOMAIN,
     inboxes, domains: domains.size,
     coldCapacity, coldUsedToday, coldRemaining: Math.max(0, coldCapacity - coldUsedToday),
     warmingPerDay: inboxes * WARMING_PER_INBOX,
     byRecruiter,
+    byProvider,
   };
 }

@@ -19,7 +19,7 @@ import { ensureConfig } from "../../../../lib/sending/config";
 import { requestHost, tenantWorkspaceForHost } from "../../../../lib/branding/portal";
 import { presetForHost, allBrandPresets } from "../../../../lib/branding/presets";
 import { probeDnsMany, cachedDns, type DnsPosture } from "../../../../lib/sending/dnsProbe";
-import { listInboxes } from "../../../../lib/senders";
+import { listInboxes, SENDING_AC_PER_INBOX, coldMaxPerInbox } from "../../../../lib/senders";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +90,10 @@ export interface WarmupDomainRow {
   actions: string[];
   /** Email IDs from this domain imported on THIS portal (the send side). */
   emailIds: { total: number; active: number; error: number };
+  /** Which sending infrastructure this domain rides: Sending.ac's provisioned
+   *  mailboxes (flat 2 cold/day each) or the internal SMTP server (warm-up ramp).
+   *  Resolved from imported Email IDs first, then the domain's live MX records. */
+  infra: { kind: "sending-ac" | "internal-smtp" | "unknown"; source: "email-ids" | "mx" | "none"; coldPerDay: number | null };
   /** Warm-up throughput the upstream schedule is running at (emails/day, summed)
    *  and the average reply rate. Meaningful even when cumulative sends read 0. */
   warmupPerDay: number | null;
@@ -98,6 +102,37 @@ export interface WarmupDomainRow {
 }
 
 function round1(n: number): number { return Math.round(n * 10) / 10; }
+
+/** Hostnames that identify the INTERNAL SMTP server(s): the watch list plus the
+ *  Mailcow host (e.g. mail.lumesp.com on the RackNerd box). */
+function internalSmtpHosts(): string[] {
+  const hosts: string[] = [];
+  try {
+    const raw = process.env.SMTP_WATCH_HOSTS;
+    if (raw) for (const w of JSON.parse(raw)) if (w?.host) hosts.push(String(w.host).toLowerCase());
+  } catch { /* bad JSON: the Mailcow host below still applies */ }
+  try {
+    const base = process.env.MAILCOW_API_BASE_URL;
+    if (base) hosts.push(new URL(base).hostname.toLowerCase());
+  } catch { /* unset/invalid: watch hosts above still apply */ }
+  return hosts.filter(Boolean);
+}
+
+/**
+ * Which infrastructure a warm-up domain sends through. Imported Email IDs are the
+ * ground truth (their provider field says who runs the mailbox); a domain with no
+ * imports yet is classified by its live MX: Sending.ac provisions MS-based
+ * mailboxes (protection.outlook.com MX), the internal server answers its own MX.
+ */
+function classifyInfra(d: WarmupDomainRow, local: { provider?: string }[], p: DnsPosture | null): WarmupDomainRow["infra"] {
+  const provs = new Set(local.map((m) => m.provider));
+  if (provs.has("sending-ac")) return { kind: "sending-ac", source: "email-ids", coldPerDay: d.mailboxes * SENDING_AC_PER_INBOX };
+  if (provs.has("own-smtp")) return { kind: "internal-smtp", source: "email-ids", coldPerDay: d.mailboxes * coldMaxPerInbox() };
+  const mx = (p?.mxHosts || []).join(" ").toLowerCase();
+  if (/protection\.outlook\.com/.test(mx)) return { kind: "sending-ac", source: "mx", coldPerDay: d.mailboxes * SENDING_AC_PER_INBOX };
+  if (internalSmtpHosts().some((h) => mx.includes(h))) return { kind: "internal-smtp", source: "mx", coldPerDay: d.mailboxes * coldMaxPerInbox() };
+  return { kind: "unknown", source: "none", coldPerDay: null };
+}
 
 function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRow[] {
   const byDomain = new Map<string, SmartleadAccount[]>();
@@ -150,6 +185,7 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
       health: { score: 0, label: "watch" },
       actions: [],
       emailIds: { total: 0, active: 0, error: 0 },
+      infra: { kind: "unknown", source: "none", coldPerDay: null },
       warmupPerDay,
       replyRatePct,
       accounts: list
@@ -274,6 +310,7 @@ export async function GET(req: Request) {
         row.smtpError = m.lastError || null;
       }
     }
+    d.infra = classifyInfra(d, local, p);
     d.health = computeHealth(d);
     d.actions = computeActions(d);
   }
@@ -295,6 +332,17 @@ export async function GET(req: Request) {
     })(),
     sentTotal: domains.reduce((s, d) => s + d.sentTotal, 0),
     spamCount: domains.reduce((s, d) => s + d.spamCount, 0),
+    // Infrastructure split: Sending.ac's flat 2/day mailboxes vs the internal
+    // SMTP server's ramping mailboxes; the UI renders each with its own math.
+    byInfra: (["sending-ac", "internal-smtp", "unknown"] as const).map((kind) => {
+      const rows = domains.filter((d) => d.infra.kind === kind);
+      return {
+        kind,
+        domains: rows.length,
+        mailboxes: rows.reduce((s, d) => s + d.mailboxes, 0),
+        coldPerDay: rows.reduce((s, d) => s + (d.infra.coldPerDay || 0), 0),
+      };
+    }),
   };
   return ok({ configured: true, updatedAt: new Date(pulledAt).toISOString(), domains, totals });
 }

@@ -6626,6 +6626,20 @@
     return '<span class="wu-hchip ' + esc(h.label) + '" title="Composite of reputation, spam outcomes, DNS posture and fleet state">' + h.score + '</span>';
   }
 
+  // Which sending infrastructure the domain rides: Sending.ac (flat 2/day per
+  // mailbox) vs the internal SMTP server (warm-up ramp). Resolved server-side
+  // from imported Email IDs or the domain's live MX records.
+  function wuInfraChip(infra) {
+    if (!infra || infra.kind === "unknown") return "";
+    var isAc = infra.kind === "sending-ac";
+    var label = isAc ? "Sending.ac" : "Internal SMTP";
+    var color = isAc ? "#7a5af8" : "#0e7490";
+    var tip = (isAc ? "Sending.ac mailboxes: flat 2 cold emails/day each" : "Internal SMTP server mailboxes: ramp to full volume as they warm") +
+      (infra.coldPerDay != null ? " · about " + infra.coldPerDay + " cold/day for this domain" : "") +
+      (infra.source === "mx" ? " (detected from MX records)" : infra.source === "email-ids" ? " (from imported Email IDs)" : "");
+    return ' <span class="snd-prov" style="border-color:' + color + ';color:' + color + ';font-size:10px;vertical-align:1px" title="' + esc(tip) + '">' + label + '</span>';
+  }
+
   function wuDnsPills(dns) {
     function p(name, val) {
       var cls = dns == null ? "unk" : (val ? "ok" : "miss");
@@ -6662,10 +6676,18 @@
         '<button class="btn btn-ghost btn-sm" id="wuRefresh"' + (wuLoading ? " disabled" : "") + '>' + (wuLoading ? "Refreshing…" : "↻ Refresh now") + '</button>' +
       '</div>' +
       '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam; a domain is <b>Ready to send</b> after 14+ days warming at 95%+ average reputation. Click a domain for its mailboxes.</div>';
+    // Infrastructure split cards: only providers that actually have mailboxes.
+    var infraCards = "";
+    (t.byInfra || []).forEach(function (b) {
+      if (!b.mailboxes) return;
+      if (b.kind === "sending-ac") infraCards += c(b.mailboxes + " · " + b.coldPerDay + "/day", "Sending.ac mailboxes");
+      else if (b.kind === "internal-smtp") infraCards += c(b.mailboxes + " · " + b.coldPerDay + "/day", "Internal SMTP mailboxes");
+    });
     var stats =
       '<div class="wu-stats">' +
         c(t.domains || 0, "Domains warming") +
         c(t.mailboxes || 0, "Warm-up mailboxes") +
+        infraCards +
         c(t.avgReputation != null ? t.avgReputation + "%" : "n/a", "Avg reputation") +
         c(t.avgHealth != null ? t.avgHealth : "n/a", "Fleet health") +
         c(t.ready || 0, "Domains ready") +
@@ -6675,7 +6697,7 @@
       var open = !!wuOpen[d.domain];
       var days = d.days != null ? ('<span class="wu-days"><b>' + d.days.toFixed(1) + '</b> days</span>' + (d.since ? '<div class="muted" style="font-size:11px">since ' + esc(String(d.since).slice(0, 10)) + '</div>' : '')) : '<span class="muted">n/a</span>';
       var main = '<tr class="wu-dom" data-wu-dom="' + esc(d.domain) + '">' +
-        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
+        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + wuInfraChip(d.infra) + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
         '<td>' + days + '</td>' +
         '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation) + '</td>' +
@@ -6847,6 +6869,13 @@
       '.snd-poolname{font-weight:600;font-size:13px}' +
       '.snd-poolmeta{font-size:11.5px;color:var(--muted,var(--text-dim))}' +
       '.snd-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 12px}' +
+      '.snd-prov{display:inline-block;border:1px solid;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap}' +
+      '.snd-split{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:10px 14px;margin:0 0 16px}' +
+      '.snd-split-t{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));margin-bottom:6px}' +
+      '.snd-split-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:5px 0}' +
+      '.snd-split-row+.snd-split-row{border-top:1px solid var(--border)}' +
+      '.snd-split-meta{font-size:13px}' +
+      '.snd-split-note{font-size:11.5px;color:var(--muted,var(--text-dim));flex-basis:100%;line-height:1.4}' +
       '.snd-table{width:100%;border-collapse:collapse;font-size:13px}' +
       '.snd-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));padding:6px 8px;border-bottom:1px solid var(--border)}' +
       '.snd-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
@@ -6859,7 +6888,7 @@
     sndPicks = {};
     el.innerHTML = sndStyles() +
       '<div class="im-hero">' +
-        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>), about <b>50 per domain</b>, each owned by a recruiter. Every Email ID sends <b>2 cold emails/day</b> (hard limit); warm-up runs them at 10/day. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
+        '<div class="im-lead">Your sending inboxes (<b>Email IDs</b>), each owned by a recruiter, run on two kinds of infrastructure: <b>Sending.ac</b> mailboxes send a flat <b>2 cold emails/day</b> each (their model, never more), while <b>internal SMTP server</b> mailboxes ramp from 5/day up to <b>20/day</b> as they warm. Import in bulk, assign to a recruiter by name, and campaigns rotate sends across that recruiter’s pool. Watch live capacity on <b>Send Queue</b>.</div>' +
         '<div class="btn-row">' +
           '<button class="btn btn-primary btn-sm" id="sndImport">Import inboxes (CSV)</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndAdd">+ Add one</button>' +
@@ -6869,6 +6898,7 @@
       '<div id="wuWrap"></div>' +
       '<div id="siWrap"></div>' +
       '<div id="sndStatsBox" class="snd-stats"></div>' +
+      '<div id="sndProvBox"></div>' +
       '<div id="sndPoolsBox"></div>' +
       '<div class="snd-toolbar">' +
         '<input id="sndFilter" class="cur-ind-select" placeholder="Filter by recruiter or email…" style="min-width:240px">' +
@@ -6900,10 +6930,42 @@
     });
   }
 
+  function sndProviderBadge(p) {
+    var map = {
+      "sending-ac": ["Sending.ac", "#7a5af8"],
+      "own-smtp": ["Internal SMTP", "#0e7490"],
+      google: ["Google", "#b26a00"],
+      outlook: ["Outlook", "#1a7f37"],
+      other: ["Other", "#6b7280"],
+    };
+    var e = map[p] || [p || "?", "#6b7280"];
+    return '<span class="snd-prov" style="border-color:' + e[1] + ';color:' + e[1] + '">' + esc(e[0]) + '</span>';
+  }
+
   function renderSenderStats() {
     var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
     function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
     box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
+    renderSenderProviders();
+  }
+
+  // The Sending.ac vs internal-SMTP split: two different capacity models, shown
+  // side by side so "cold sends/day" is never a blended mystery number.
+  function renderSenderProviders() {
+    var box = $("#sndProvBox"); if (!box) return;
+    var cap = sndData.capacity || {}, list = cap.byProvider || [];
+    if (!list.length) { box.innerHTML = ""; return; }
+    var notes = {
+      "sending-ac": "Sending.ac model: every mailbox sends a flat 2 cold emails/day, warmed externally. More volume means more mailboxes, not higher caps.",
+      "own-smtp": "Your internal SMTP server: mailboxes ramp 5, 10, 15, then " + (cap.coldPerInbox || 20) + "/day across their first four weeks of sending.",
+    };
+    box.innerHTML = '<div class="snd-split"><div class="snd-split-t">Sending infrastructure split</div>' +
+      list.map(function (p) {
+        return '<div class="snd-split-row">' + sndProviderBadge(p.provider) +
+          '<span class="snd-split-meta">' + p.inboxes + ' Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + p.coldCapacity + '</b> cold sends/day · ' + p.coldRemaining + ' left today</span>' +
+          (notes[p.provider] ? '<span class="snd-split-note">' + esc(notes[p.provider]) + '</span>' : '') +
+        '</div>';
+      }).join("") + '</div>';
   }
 
   function renderSenderPools() {
@@ -6929,7 +6991,7 @@
       '<td><input type="checkbox" class="snd-pick" data-id="' + esc(m.id) + '"></td>' +
       '<td><b>' + esc(m.email) + '</b>' + (m.displayName ? '<div class="muted">' + esc(m.displayName) + '</div>' : '') + '</td>' +
       '<td>' + (m.ownerName ? esc(m.ownerName) : '<span class="muted">Unassigned</span>') + '</td>' +
-      '<td>' + esc(m.provider) + '</td>' +
+      '<td>' + sndProviderBadge(m.provider) + '</td>' +
       '<td class="muted">' + esc(m.smtpHost) + ':' + esc(m.smtpPort) + '</td>' +
       '<td>' + esc(m.sentToday) + '/' + esc(m.dailyCap) + '</td>' +
       '<td>' + badge + (m.lastError ? ' <span class="muted" title="' + esc(m.lastError) + '"><svg class="isvg" aria-hidden="true"><use href="#i-alert"/></svg></span>' : '') + '</td>' +
