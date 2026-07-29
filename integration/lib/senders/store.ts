@@ -10,7 +10,7 @@
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { encryptSecret } from "./crypto";
-import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap } from "./limits";
+import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCapFor, coldMaxPerInbox } from "./limits";
 import type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, RecruiterPool } from "./types";
 
 interface SendersState { inboxes: SenderInbox[]; lastResetDay?: string; }
@@ -44,7 +44,7 @@ export function toPublic(m: SenderInbox): SenderInboxPublic {
     email: m.email, displayName: m.displayName, provider: m.provider,
     smtpHost: m.smtpHost, smtpPort: m.smtpPort, smtpSecure: m.smtpSecure, smtpUser: m.smtpUser,
     imapHost: m.imapHost, imapPort: m.imapPort, imapUser: m.imapUser, hasImap: !!m.imapHost,
-    dailyCap: m.dailyCap, sentToday: m.sentToday, remaining: Math.max(0, m.dailyCap - m.sentToday),
+    dailyCap: coldCapFor(m), sentToday: m.sentToday, remaining: Math.max(0, coldCapFor(m) - m.sentToday),
     status: m.status, warmExternal: m.warmExternal,
     sent: m.sent, bounced: m.bounced, lastSendAt: m.lastSendAt, lastError: m.lastError,
     pausedReason: m.pausedReason, createdAt: m.createdAt, updatedAt: m.updatedAt,
@@ -119,7 +119,7 @@ export async function addInbox(workspaceId: string, input: NewInboxInput): Promi
     imapPort: input.imapHost ? normalizePort(input.imapPort, 993) : undefined,
     imapUser: input.imapHost ? (input.imapUser || input.email).trim() : undefined,
     imapPassEnc: input.imapHost ? encryptSecret(input.imapPass || input.smtpPass || "") : undefined,
-    dailyCap: COLD_PER_INBOX,   // HARD cap: 2 cold emails/day per Email ID (limits.ts)
+    dailyCap: COLD_PER_INBOX,   // stored stamp only; the EFFECTIVE cap is coldCapFor(m)'s warm-up ramp (limits.ts)
     sentToday: 0,
     status: input.status || "warming",
     warmExternal: input.warmExternal ?? true,
@@ -216,8 +216,8 @@ export async function recruiterPools(workspaceId: string): Promise<RecruiterPool
     p.inboxes++;
     if (m.status === "active" || m.status === "warming") {
       p.active++;
-      p.dailyCapacity += m.dailyCap;
-      p.remainingToday += Math.max(0, m.dailyCap - m.sentToday);
+      p.dailyCapacity += coldCapFor(m);
+      p.remainingToday += Math.max(0, coldCapFor(m) - m.sentToday);
     }
   }
   return [...map.values()].sort((a, b) => b.inboxes - a.inboxes);
@@ -231,8 +231,8 @@ export async function stats(workspaceId: string): Promise<{ inboxes: number; act
   for (const m of mine) {
     if (m.status === "active" || m.status === "warming") {
       active++;
-      cap += m.dailyCap;
-      rem += Math.max(0, m.dailyCap - m.sentToday);
+      cap += coldCapFor(m);
+      rem += Math.max(0, coldCapFor(m) - m.sentToday);
     }
   }
   return { inboxes: mine.length, active, recruiters: owners.size, dailyCapacity: cap, remainingToday: rem };
@@ -313,10 +313,10 @@ export interface SendCapacity {
 }
 
 /**
- * Daily cold-send capacity for a portal, enforcing the HARD per-inbox cap (limits.ts):
- * every Email ID counts for at most COLD_PER_INBOX cold sends/day. `coldUsedToday`
- * ticks up as the rotation records sends, so the Send Queue can show the remaining
- * headroom draining toward zero — i.e. every inbox getting maxed to its 2/day.
+ * Daily cold-send capacity for a portal, enforcing the HARD per-inbox ramp (limits.ts):
+ * every Email ID counts for at most its coldCapFor() warm-up-ramped sends/day.
+ * `coldUsedToday` ticks up as the rotation records sends, so the Send Queue can show
+ * the remaining headroom draining toward zero.
  */
 export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
   await hydrate();
@@ -327,7 +327,7 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
   const domains = new Set<string>();
   let inboxes = 0, coldCapacity = 0, coldUsedToday = 0;
   for (const m of mine) {
-    const cap = coldCap(m.dailyCap);
+    const cap = coldCapFor(m);
     const used = Math.min(m.sentToday, cap);
     const dom = domainOf(m.email);
     inboxes++; coldCapacity += cap; coldUsedToday += used;
@@ -355,7 +355,7 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
     }))
     .sort((a, b) => b.inboxes - a.inboxes);
   return {
-    coldPerInbox: COLD_PER_INBOX, warmingPerInbox: WARMING_PER_INBOX, inboxesPerDomain: INBOXES_PER_DOMAIN,
+    coldPerInbox: coldMaxPerInbox(), warmingPerInbox: WARMING_PER_INBOX, inboxesPerDomain: INBOXES_PER_DOMAIN,
     inboxes, domains: domains.size,
     coldCapacity, coldUsedToday, coldRemaining: Math.max(0, coldCapacity - coldUsedToday),
     warmingPerDay: inboxes * WARMING_PER_INBOX,

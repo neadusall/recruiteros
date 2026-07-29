@@ -84,6 +84,15 @@ export interface SendQueueOverview {
   copyHolds: number;
   days: SendQueueDay[];
   campaigns: CampaignReadiness[];
+  /** HONEST capacity: what the inbox fleet can actually send today versus the pool
+   *  target. A shortfall means the daily pool number is aspiration, not capacity;
+   *  fix it by warming/importing more inboxes or lowering the pool. */
+  capacity: {
+    inboxes: number;
+    fleetDailyCapacity: number;
+    dailyTarget: number;
+    shortfallPerDay: number;
+  };
 }
 
 /** The workspace's daily first-email band. Defaults to the env 4–6K band; when
@@ -154,9 +163,23 @@ export async function sendQueueOverview(workspaceId: string, todayIso: string): 
     .map(([id, v]) => ({ campaignId: id, label: labelOf.get(id)?.label || id, status: labelOf.get(id)?.status, ready: v.ready, needsAssets: v.need }))
     .sort((a, b) => b.ready - a.ready || b.needsAssets - a.needsAssets);
 
+  // Honest capacity: the ramped inbox fleet's real ceiling vs the pool target.
+  let capacity = { inboxes: 0, fleetDailyCapacity: 0, dailyTarget: band.daily, shortfallPerDay: band.daily };
+  try {
+    const { poolCapacity } = await import("../senders");
+    const fleet = await poolCapacity(workspaceId);
+    capacity = {
+      inboxes: fleet.inboxes,
+      fleetDailyCapacity: fleet.dailyCapacity,
+      dailyTarget: band.daily,
+      shortfallPerDay: Math.max(0, band.daily - fleet.dailyCapacity),
+    };
+  } catch { /* fleet store unavailable: zeros already say "no capacity" */ }
+
   return {
     targetMin: band.min, targetMax: band.max, dailyTarget: band.daily, bufferDays: BUFFER_DAYS,
     readySupply: ready, inSequence, runwayDays, shortfall, needsAssets: need, copyHolds, days, campaigns: campaignsOut,
+    capacity,
   };
 }
 

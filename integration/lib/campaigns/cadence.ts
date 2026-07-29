@@ -185,6 +185,13 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
   const todayStr = now.toISOString().slice(0, 10);
   const DAY = 86_400_000;
 
+  // BUSINESS-HOURS GATE: email touches only go out inside the send window
+  // (lib/sending/sendWindow, weekdays 8:00 to 17:00 operating timezone by
+  // default). Outside it, email prospects HOLD in place and the next in-window
+  // tick sends them; other channels are unaffected.
+  const { emailSendWindow } = await import("../sending/sendWindow");
+  const window = emailSendWindow(now);
+
   for (const c of campaigns) {
     // LAUNCH-DATE GATE (fail-safe): a campaign whose scheduledFor is still in the future holds
     // ENTIRELY until that day — nothing is drafted, sent, or advanced. This is what lets you fully
@@ -242,10 +249,17 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         if (t.day > daysSince + 1e-9) break;
         // Voice is the HOT-tier touch: skip (and advance past) it for cold prospects.
         if (t.channel === "voice" && p.warmth < (c.voiceNoteThreshold ?? 80)) { sent = i + 1; continue; }
+        // Send-window hold: an email touch outside business hours waits, in place,
+        // for a later tick. Nothing advances, nothing is dropped, no copyHold noise.
+        if (t.channel === "email" && !window.open) {
+          results.push({ campaignId: c.id, prospectId: p.id, channel: t.channel, touch: t.label, ok: false, held: true, reasons: [`send window closed (${window.reason})`] });
+          held = true;
+          break;
+        }
         // Which EMAIL this is in the sequence (1 = first email, 2 = second, …). The video fail-safe
         // in renderTouch only attaches the video on the 2nd email.
         const emailStep = t.channel === "email" ? touches.slice(0, i + 1).filter((x) => x.channel === "email").length : 0;
-        const r = renderTouch(t, p, { emailStep });
+        let r = renderTouch(t, p, { emailStep });
 
         // RENDER GUARD (fail-safe): never send a touch whose merged copy has missing data points
         // or reads broken. HOLD the prospect — nothing sends, nothing advances — and record why,
@@ -264,6 +278,18 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
           break;
         }
 
+        // AI HUMANIZER (opt-in, fail-safe): rewrite the Day-0 MPC opener into natural, human copy.
+        // Only the 1st email of an MPC lead (p.mpcContext), so the Day-1 video HTML is never touched.
+        // Returns null unless MPC_HUMANIZER is on and the rewrite passes the truth+naturalness gate;
+        // on null the deterministic render (which already passed the guard above) sends unchanged.
+        if (t.channel === "email" && emailStep === 1 && p.mpcContext) {
+          try {
+            const { humanizeMpc } = await import("../bd/mpc/humanizer");
+            const h = await humanizeMpc(p, { subject: r.subject, body: r.body }, `${p.id || ""}:${t.label || ""}`);
+            if (h) r = { ...r, subject: h.subject ?? r.subject, body: h.body };
+          } catch { /* deterministic copy stands */ }
+        }
+
         const res = await sendTouch(workspaceId, {
           channel: t.channel,
           prospect: p,
@@ -280,6 +306,12 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         results.push({ campaignId: c.id, prospectId: p.id, channel: t.channel, touch: t.label, ...res });
         if (res.ok) { sent = i + 1; fired = true; }
         else break; // a failed send is retried on the next tick, not skipped
+
+        // Human pacing: a short randomized pause after each delivered email, so the
+        // tick never machine-guns a burst through the pool in the same second.
+        if (res.ok && t.channel === "email") {
+          await new Promise((resolve) => setTimeout(resolve, 1500 + Math.floor(Math.random() * 4500)));
+        }
       }
 
       // A held prospect stays exactly where it is (queued prospects don't start, in-sequence

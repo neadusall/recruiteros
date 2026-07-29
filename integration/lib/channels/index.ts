@@ -140,21 +140,34 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
         const guarded = await guardTouch(workspaceId, t);
         if (guarded) return guarded;
       }
+      // WHITE-LABEL FAIL-CLOSED (same rule as transactional mail): resolve the
+      // workspace's brand identity ONCE. A white-label tenant's cold email may
+      // only leave through its own inbox pool; when no compliant inbox exists
+      // the send BLOCKS rather than falling through to the house MTA/Instantly
+      // providers, which would put the house domain on a tenant's outreach.
+      const brand = await resolveBrand(workspaceId);
       // Recruiter-owned SMTP inbox pool (lib/senders): when the prospect's campaign
       // is assigned to a recruiter who has an available inbox, send through that
       // recruiter's pool (rotated + sticky per prospect). Falls through to the MTA /
       // Instantly paths below when no pool/inbox applies, so a send is never dropped.
       if (t.prospect.email) {
-        const pooled = await trySenderPool(workspaceId, t);
+        const pooled = await trySenderPool(workspaceId, t, brand);
         if (pooled) return pooled;
+      }
+      if (brand.whiteLabel) {
+        // Held, not dropped: the prospect stays put and the next tick retries once
+        // a tenant inbox has capacity. Cross-brand sending must never "help out".
+        return { ok: false, channel: "email", provider: "brand_guard", error: "no_tenant_inbox" };
       }
       // Owned MTA path (self-hosted infrastructure) when opted in; Instantly otherwise.
       const { mtaPreferred, sendEmail } = await import("../providers/mta");
       if (mtaPreferred() && t.prospect.email) {
+        const { complianceFooter } = await import("../sending/compliance");
+        const footer = complianceFooter(workspaceId, t.prospect.email, brand);
         const m = await sendEmail(workspaceId, {
           to: t.prospect.email,
           subject: t.subject ?? "",
-          htmlBody: emailPayload(t.text).html,
+          htmlBody: emailPayload(t.text).html + footer.html,
           fromName: t.prospect.company ? undefined : undefined,
         });
         // A clean skip (no capacity / not ready) falls through to Instantly so a
@@ -256,32 +269,48 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
  * Returns null when it doesn't apply (no campaign / no recruiterId / empty pool)
  * so the caller falls through to the MTA / Instantly providers and never drops a send.
  */
-async function trySenderPool(workspaceId: string, t: SendTouch): Promise<SendResult | null> {
+async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIdentity): Promise<SendResult | null> {
   try {
     const campaignId = t.prospect.campaignId;
     if (!campaignId || !t.prospect.email) return null;
     const campaign = await getCore().getCampaign(campaignId);
     const recruiterId = campaign?.recruiterId;
     if (!recruiterId) return null;
-    const { pickSender, getInbox, sendViaInbox, recordSend } = await import("../senders");
+    const { pickSender, getInbox, sendViaInbox, recordSend, coldCapFor } = await import("../senders");
+    const { senderAllowedForBrand } = await import("../senders/brandGuard");
     let inbox: any = null;
     // Sticky: keep a prospect on its already-chosen inbox across the sequence while
     // it still has capacity; otherwise rotate to the freshest inbox in the pool.
     if (t.prospect.senderInboxId) {
       const cur = await getInbox(workspaceId, t.prospect.senderInboxId);
-      if (cur && cur.ownerId === recruiterId && cur.status !== "paused" && cur.status !== "error" && cur.sentToday < cur.dailyCap) inbox = cur;
+      if (cur && cur.ownerId === recruiterId && cur.status !== "paused" && cur.status !== "error" && cur.sentToday < coldCapFor(cur)
+        && (await senderAllowedForBrand(brand, cur.email))) inbox = cur;
     }
-    if (!inbox) inbox = await pickSender(workspaceId, { recruiterId });
-    if (!inbox) return null; // pool empty / all capped -> fall through to MTA/Instantly
+    // Rotation honors the white-label domain guard: a misfiled inbox (wrong brand's
+    // domain in this pool) is skipped, never sent from. Bounded by the pool size.
+    if (!inbox) {
+      const excludeIds: string[] = [];
+      for (let i = 0; i < 50; i++) {
+        const cand = await pickSender(workspaceId, { recruiterId, excludeIds });
+        if (!cand) break;
+        if (await senderAllowedForBrand(brand, cand.email)) { inbox = cand; break; }
+        excludeIds.push(cand.id);
+      }
+    }
+    if (!inbox) return null; // pool empty / all capped / none brand-compliant
     const payload = emailPayload(t.text);
     // Gmail/Yahoo bulk-sender compliance: every cold send carries a signed one-click
     // List-Unsubscribe (lib/sending/unsubscribe) + a mailto fallback on the sending inbox.
+    // CAN-SPAM compliance: the body itself carries the visible footer (brand identity,
+    // postal address when configured, and the same signed unsubscribe link).
     const { unsubscribeHeaders } = await import("../sending/unsubscribe");
+    const { complianceFooter } = await import("../sending/compliance");
+    const footer = complianceFooter(workspaceId, t.prospect.email, brand);
     const res = await sendViaInbox(inbox, {
       to: t.prospect.email,
       subject: t.subject ?? "",
-      html: payload.html,
-      text: payload.text,
+      html: payload.html + footer.html,
+      text: payload.text + footer.text,
       headers: unsubscribeHeaders(workspaceId, t.prospect.email, inbox.email),
     });
     if (!res.ok) return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: res.error };
@@ -296,6 +325,18 @@ async function trySenderPool(workspaceId: string, t: SendTouch): Promise<SendRes
     return { ok: true, channel: "email", provider: "smtp:" + inbox.provider, providerMessageId: res.messageId };
   } catch {
     return null; // any error -> fall through to existing providers
+  }
+}
+
+/** The workspace's brand identity (house or white-label), used by the sending-domain
+ *  guard and the CAN-SPAM footer. notifyBrand already fails safe to the house brand. */
+type BrandIdentity = import("../outbound/brand").NotifyBrand;
+async function resolveBrand(workspaceId: string): Promise<BrandIdentity> {
+  try {
+    const { notifyBrand } = await import("../outbound/brand");
+    return await notifyBrand(workspaceId);
+  } catch {
+    return { name: "RecruitersOS", appUrl: process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co", whiteLabel: false };
   }
 }
 

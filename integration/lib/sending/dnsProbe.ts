@@ -16,6 +16,13 @@
 
 import { promises as dns } from "dns";
 
+export interface DnsblStatus {
+  /** True when the domain or its mail IP answered positively on a blocklist. */
+  listed: boolean;
+  /** Which lists hit (e.g. "spamhaus-dbl", "spamhaus-zen"). Empty when clean. */
+  lists: string[];
+}
+
 export interface DnsPosture {
   domain: string;
   spf: boolean;
@@ -26,6 +33,8 @@ export interface DnsPosture {
   dkimSelector?: string;
   mx: boolean;
   mxHosts?: string[];
+  /** Public spam-blocklist posture (best-effort; some resolvers refuse DNSBL queries). */
+  dnsbl: DnsblStatus;
   checkedAt: string;
 }
 
@@ -51,6 +60,39 @@ async function txt(name: string): Promise<string[]> {
   return rows.map((chunks) => chunks.join(""));
 }
 
+async function aRecords(name: string): Promise<string[]> {
+  return timebox(dns.resolve4(name), 3000, [] as string[]);
+}
+
+/**
+ * A DNSBL answer is a positive hit only in the designated 127.0.x.y ranges.
+ * 127.255.x.y means the query was REFUSED (typically an open public resolver),
+ * which must never read as "listed"; NXDOMAIN (empty here) means clean.
+ */
+function dnsblHit(answers: string[]): boolean {
+  return answers.some((ip) => /^127\.0\.\d+\.\d+$/.test(ip) && !ip.startsWith("127.255."));
+}
+
+/**
+ * Public spam-blocklist check for a sending domain: the domain itself against
+ * Spamhaus DBL, and its A/MX IPs against Spamhaus ZEN. Best-effort by design:
+ * refused or timed-out queries read as clean, so this can flag a real listing
+ * but never false-alarms a healthy domain.
+ */
+async function probeDnsbl(domain: string, mxHosts: string[]): Promise<DnsblStatus> {
+  const lists: string[] = [];
+  try {
+    if (dnsblHit(await aRecords(`${domain}.dbl.spamhaus.org`))) lists.push("spamhaus-dbl");
+    const ips = new Set<string>(await aRecords(domain));
+    if (mxHosts[0]) for (const ip of await aRecords(mxHosts[0])) ips.add(ip);
+    for (const ip of [...ips].slice(0, 3)) {
+      const reversed = ip.split(".").reverse().join(".");
+      if (dnsblHit(await aRecords(`${reversed}.zen.spamhaus.org`))) { lists.push("spamhaus-zen"); break; }
+    }
+  } catch { /* best-effort */ }
+  return { listed: lists.length > 0, lists };
+}
+
 export async function probeDns(domain: string): Promise<DnsPosture> {
   const hit = cache.get(domain);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.posture;
@@ -73,6 +115,8 @@ export async function probeDns(domain: string): Promise<DnsPosture> {
   const dkim = !!dkimHit;
   const dkimSelector = dkimHit?.sel;
 
+  const dnsbl = await probeDnsbl(domain, mxRows.map((m) => m.exchange));
+
   const posture: DnsPosture = {
     domain,
     spf: !!spfRecord,
@@ -83,6 +127,7 @@ export async function probeDns(domain: string): Promise<DnsPosture> {
     dkimSelector,
     mx: mxRows.length > 0,
     mxHosts: mxRows.length ? mxRows.map((m) => m.exchange) : undefined,
+    dnsbl,
     checkedAt: new Date().toISOString(),
   };
   cache.set(domain, { at: Date.now(), posture });

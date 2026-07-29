@@ -81,6 +81,8 @@ export interface WarmupDomainRow {
   dns: {
     spf: boolean; dkim: boolean; dmarc: boolean; mx: boolean;
     dmarcPolicy: string | null; dkimSelector: string | null; checkedAt: string;
+    /** Public spam-blocklist state (Spamhaus DBL/ZEN, best-effort). */
+    blacklisted: boolean; blocklists: string[];
   } | null;
   /** Composite deliverability health, 0-100 + label. */
   health: { score: number; label: "healthy" | "watch" | "at_risk" };
@@ -189,12 +191,16 @@ function computeHealth(d: WarmupDomainRow): { score: number; label: "healthy" | 
     score += 18;                                                             // unknown DNS: neutral, not punitive
   }
   score += Math.max(0, 15 - d.paused * 3);                                   // 0-15
+  // A confirmed public-blocklist listing is an emergency regardless of warm-up
+  // reputation: cap the score so the domain always reads at_risk until delisted.
+  if (d.dns?.blacklisted) score = Math.min(score, 40);
   const s = Math.round(Math.min(100, score));
   return { score: s, label: s >= 85 ? "healthy" : s >= 65 ? "watch" : "at_risk" };
 }
 
 function computeActions(d: WarmupDomainRow): string[] {
   const a: string[] = [];
+  if (d.dns?.blacklisted) a.push(`Listed on a public spam blocklist (${d.dns.blocklists.join(", ")}), pause this domain's sending and request delisting before resuming`);
   if (d.paused > 0) a.push(`Resume ${d.paused} paused mailbox${d.paused === 1 ? "" : "es"} in warm-up`);
   if (d.spamRatePct != null && d.spamRatePct > 2) a.push(`Spam rate ${d.spamRatePct}% is high, slow this domain's ramp and let reputation recover`);
   if (d.days != null && d.days >= 7 && d.avgReputation != null && d.avgReputation < 60) a.push("Reputation is low after a week of warming, reduce daily warm-up volume for this domain");
@@ -253,6 +259,7 @@ export async function GET(req: Request) {
     d.dns = p ? {
       spf: p.spf, dkim: p.dkim, dmarc: p.dmarc, mx: p.mx,
       dmarcPolicy: p.dmarcPolicy || null, dkimSelector: p.dkimSelector || null, checkedAt: p.checkedAt,
+      blacklisted: !!p.dnsbl?.listed, blocklists: p.dnsbl?.lists || [],
     } : null;
     const local = inboxes.filter((m) => m.email.toLowerCase().endsWith("@" + d.domain));
     d.emailIds = {
@@ -280,6 +287,7 @@ export async function GET(req: Request) {
     attention: domains.filter((d) => d.readiness === "attention").length,
     healthy: domains.filter((d) => d.health.label === "healthy").length,
     atRisk: domains.filter((d) => d.health.label === "at_risk").length,
+    blacklisted: domains.filter((d) => d.dns?.blacklisted).length,
     avgHealth: domains.length ? Math.round(domains.reduce((s, d) => s + d.health.score, 0) / domains.length) : null,
     avgReputation: (() => {
       const reps = domains.map((d) => d.avgReputation).filter((r): r is number => r != null);
