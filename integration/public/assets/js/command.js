@@ -6721,6 +6721,86 @@
     }
   }
 
+  /* ---- SMTP infrastructure: live server + login health under the warm-up
+          panel. Data is /api/senders/infra (probes every distinct SMTP host in
+          the pool plus env watch-hosts, advances a rolling login re-verify
+          sweep on every poll). ---- */
+  var siData = null, siTimer = null, siLoading = false, siSweeping = false;
+
+  function renderInfra() {
+    var box = $("#siWrap"); if (!box) return;
+    wuEnsureStyles();
+    if (!siData) { box.innerHTML = '<div class="wu-card"><div class="empty">Checking sending servers…</div></div>'; return; }
+    var servers = siData.servers || [];
+    var sweep = siData.sweep || {};
+    var head =
+      '<div class="wu-head">' +
+        '<div class="wu-title">Sending servers</div>' +
+        '<span class="wu-live"><span class="wu-dot"></span> Live · updated ' + esc(wuAgo(siData.updatedAt)) + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-ghost btn-sm" id="siSweep"' + (siSweeping ? " disabled" : "") + '>' + (siSweeping ? "Testing logins…" : "Test logins now") + '</button>' +
+      '</div>' +
+      '<div class="wu-sub">The servers your Email IDs actually send through, probed live from this portal, with real login checks rotating through the pool so every credential is re-proven at least daily.</div>';
+    var sweepLine = '<div class="muted" style="font-size:12px;margin:0 0 10px">Login checks this pass: ' + (sweep.tested || 0) + ' tested, ' + (sweep.passed || 0) + ' passed, ' + (sweep.failed || 0) + ' failed' + (sweep.pendingStale ? ', ' + sweep.pendingStale + ' queued' : '') + '.</div>';
+    var mailcow = siData.mailcow
+      ? '<div class="muted" style="font-size:12px;margin:0 0 10px">Mail server inventory (' + esc(siData.mailcow.baseUrl.replace(/^https?:\/\//, "")) + '): ' + (siData.mailcow.mailboxes != null ? siData.mailcow.mailboxes + ' mailboxes' : 'mailboxes n/a') + (siData.mailcow.domains != null ? ' across ' + siData.mailcow.domains + ' domains' : '') + (siData.mailcow.ok ? '' : ' · <span style="color:#b3261e">inventory API unreachable, check the key</span>') + '</div>'
+      : '';
+    var table;
+    if (!servers.length) {
+      table = '<div class="empty">No sending servers yet. Import Email IDs and their servers appear here automatically.</div>';
+    } else {
+      table = '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Server</th><th>Status</th><th>Inboxes</th><th>Login health</th><th>Recent errors</th></tr></thead><tbody>' +
+        servers.map(function (s) {
+          var up = s.probe && s.probe.reachable;
+          var st = up
+            ? '<span class="wu-hchip healthy">Up</span>' + (s.probe.latencyMs != null ? ' <span class="muted" style="font-size:11px">' + s.probe.latencyMs + ' ms</span>' : '')
+            : '<span class="wu-hchip at_risk">Down</span>';
+          var inb = s.inboxes
+            ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + s.warming + ' warming' + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
+            : '<span class="muted">none imported yet</span>';
+          var auth = s.error
+            ? '<span style="color:#b3261e">' + s.error + ' failing</span>' + (s.staleAuth ? ' <span class="muted">· ' + s.staleAuth + ' due a re-check</span>' : '')
+            : (s.staleAuth ? '<span class="muted">' + s.staleAuth + ' due a re-check</span>' : (s.inboxes ? '<span style="color:#1a7f37">all recently verified</span>' : '<span class="muted">n/a</span>'));
+          var errs = s.lastErrors && s.lastErrors.length
+            ? s.lastErrors.map(function (e) { return '<div class="muted" style="font-size:11px" title="' + esc(e) + '">' + esc(e.length > 60 ? e.slice(0, 60) + "…" : e) + '</div>'; }).join("")
+            : '<span class="muted">none</span>';
+          return '<tr>' +
+            '<td><b>' + esc(s.host) + '</b><span class="muted">:' + s.port + '</span>' + (s.label ? '<div class="muted" style="font-size:11px">' + esc(s.label) + '</div>' : '') + '</td>' +
+            '<td>' + st + '</td>' +
+            '<td>' + inb + '</td>' +
+            '<td>' + auth + '</td>' +
+            '<td>' + errs + '</td>' +
+          '</tr>';
+        }).join("") + '</tbody></table></div>';
+    }
+    box.innerHTML = '<div class="wu-card">' + head + sweepLine + mailcow + table + '</div>';
+    var sb = $("#siSweep");
+    if (sb) sb.addEventListener("click", function () {
+      if (siSweeping) return;
+      siSweeping = true; renderInfra();
+      send("/senders/infra", "POST", { action: "sweep" }).then(function () {
+        siSweeping = false; loadInfra(true);
+      });
+    });
+  }
+
+  function loadInfra() {
+    if (siLoading) return;
+    siLoading = true;
+    send("/senders/infra", "GET").then(function (r) {
+      siLoading = false;
+      if (!document.getElementById("siWrap")) return;
+      if (r.ok) siData = r.data || null;
+      renderInfra();
+    });
+    if (!siTimer) {
+      siTimer = setInterval(function () {
+        if (!document.getElementById("siWrap")) { clearInterval(siTimer); siTimer = null; return; }
+        loadInfra();
+      }, 120000);
+    }
+  }
+
   /* ---- Senders: recruiter-owned SMTP inbox pools (scoped to this portal) ---- */
   var sndData = {}, sndPicks = {};
 
@@ -6757,6 +6837,7 @@
         '</div>' +
       '</div>' +
       '<div id="wuWrap"></div>' +
+      '<div id="siWrap"></div>' +
       '<div id="sndStatsBox" class="snd-stats"></div>' +
       '<div id="sndPoolsBox"></div>' +
       '<div class="snd-toolbar">' +
@@ -6775,6 +6856,8 @@
     });
     renderWarmup();
     loadWarmup(false);
+    renderInfra();
+    loadInfra();
     loadSenders();
   }
 
@@ -11608,9 +11691,22 @@
   var MAIL_BASE = (typeof window !== "undefined" && window.RECRUITEROS_MAIL_URL) || "https://mail.recruitersos.co";
 
   function renderSending(el) {
+    // WHITE-LABEL: on a tenant portal this page must stay entirely on the
+    // tenant's own brand and host. No house links, no external mail app, no
+    // vendor names. Render the live in-portal infrastructure panels instead
+    // (same data the Senders tab shows: warm-up fleet + sending servers).
+    if (isLumeWorkspace() || /(^|\.)lumesp\.com$/.test((location.hostname || "").toLowerCase())) {
+      el.innerHTML =
+        head("Email Sending", "Your sending infrastructure, live: domain warm-up, mailbox reputation, server health and login checks. Manage the inbox pool itself on the Senders tab.") +
+        '<div id="wuWrap"></div>' +
+        '<div id="siWrap"></div>';
+      renderWarmup(); loadWarmup(false);
+      renderInfra(); loadInfra();
+      return;
+    }
     var base = String(MAIL_BASE).replace(/\/+$/, "");
     el.innerHTML =
-      head("Email Sending", "Your owned email infrastructure, domains, sender mailboxes, warmup, deliverability health and open/click tracking, powered by RecruitersOS Mail (Azure Communication Services).") +
+      head("Email Sending", "Your owned email infrastructure, domains, sender mailboxes, warmup, deliverability health and open/click tracking, powered by RecruitersOS Mail.") +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px">' +
         '<a class="btn btn-primary btn-sm" href="' + esc(base + "/setup") + '" target="_blank" rel="noopener">Setup &amp; domains</a>' +
         '<a class="btn btn-ghost btn-sm" href="' + esc(base + "/health-stats") + '" target="_blank" rel="noopener">Health stats</a>' +
