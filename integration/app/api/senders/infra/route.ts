@@ -12,7 +12,7 @@
  * tenant's mail server only ever shows on that tenant's portal.
  */
 import { requireSession, requireCapability, body, ok } from "../../../../lib/api";
-import { smtpServerFleet, sweepSmtpAuth, mailcowConfigured, mailcowSummary } from "../../../../lib/senders/infra";
+import { smtpServerFleet, sweepSmtpAuth, mailcowConfigured, mailcowSummary, serverDailyCapacity, WARMED_PER_MAILBOX_PER_DAY } from "../../../../lib/senders/infra";
 import { requestHost, tenantWorkspaceForHost } from "../../../../lib/branding/portal";
 import { presetForHost } from "../../../../lib/branding/presets";
 
@@ -40,6 +40,20 @@ export async function GET(req: Request) {
   // white-label, override with MAILCOW_PORTAL=house etc.).
   const mailcowPortal = (process.env.MAILCOW_PORTAL || "lume").toLowerCase();
   const mailcow = token === mailcowPortal && mailcowConfigured() ? await mailcowSummary() : null;
+
+  // Fill in the owned mail server's steady-state daily send capacity from its
+  // live inventory (mailboxes × warmed per-mailbox/day), unless a dailyCap was
+  // already pinned via SMTP_WATCH_HOSTS. This surfaces the "≈1,100/day" figure
+  // on the Lume portal (75 warmed mailboxes × 15/day).
+  if (mailcow && mailcow.mailboxes != null) {
+    const mailcowHost = mailcow.baseUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+    for (const s of servers) {
+      if (s.capacityPerDay == null && s.host.toLowerCase() === mailcowHost) {
+        s.capacityPerDay = serverDailyCapacity(mailcow.mailboxes);
+        s.capacityBasis = `${mailcow.mailboxes} warmed mailboxes × ~${WARMED_PER_MAILBOX_PER_DAY}/day`;
+      }
+    }
+  }
 
   return ok({ servers, sweep, mailcow, updatedAt: new Date().toISOString() });
 }

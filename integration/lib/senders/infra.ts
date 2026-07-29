@@ -18,14 +18,37 @@
  *      server's own inventory, not just our imports.
  *
  * Watch-hosts env (servers to monitor even with zero imported inboxes):
- *   SMTP_WATCH_HOSTS='[{"host":"mail.lumesp.com","port":587,"portal":"lume","label":"Lume mail server"}]'
+ *   SMTP_WATCH_HOSTS='[{"host":"mail.lumesp.com","port":587,"portal":"lume","label":"Lume mail server","dailyCap":1100}]'
  *   "portal" is a brand token ("lume") or "house"; omitted = every portal.
+ *   "dailyCap" (optional) pins the server's steady-state daily send capacity; when
+ *   absent we derive it from the mail server inventory (mailboxes × WARMED_PER_MAILBOX_PER_DAY).
  */
 
 import net from "net";
 import { listInboxes, verifyInbox, saveInbox } from "./index";
 import { ensureConfig, mailServerUrl, mailServerKey, mailServerConnected } from "../sending/config";
 import type { SenderInbox } from "./types";
+
+/* ------------------------------ send capacity ------------------------------ */
+
+/**
+ * Warmed steady-state sends/day for ONE dedicated mailbox on an owned mail
+ * server (e.g. mail.lumesp.com). Deliberately conservative: the solo-recruiter
+ * runbook holds warmed mailboxes at ~8-15/day for best-in-class inbox
+ * placement, so a fully warmed server's daily capacity is mailboxes × this.
+ * A 75-mailbox server therefore sustains ~1,100 sends/day.
+ */
+export const WARMED_PER_MAILBOX_PER_DAY = 15;
+
+/** Round a capacity figure to a clean headline number (nearest 100). */
+export function roundCapacity(n: number): number {
+  return Math.max(0, Math.round(n / 100) * 100);
+}
+
+/** Steady-state daily send capacity for an owned mail server given its mailbox inventory. */
+export function serverDailyCapacity(mailboxes: number): number {
+  return roundCapacity(mailboxes * WARMED_PER_MAILBOX_PER_DAY);
+}
 
 /* ------------------------------ server probes ------------------------------ */
 
@@ -79,7 +102,7 @@ export function probeSmtp(host: string, port: number, timeoutMs = 6000): Promise
 
 /* ------------------------------ watch hosts ------------------------------ */
 
-export interface WatchHost { host: string; port: number; portal?: string; label?: string }
+export interface WatchHost { host: string; port: number; portal?: string; label?: string; dailyCap?: number }
 
 export function watchHosts(): WatchHost[] {
   try {
@@ -89,7 +112,12 @@ export function watchHosts(): WatchHost[] {
     if (!Array.isArray(arr)) return [];
     return arr
       .filter((w) => w && typeof w.host === "string" && w.host)
-      .map((w) => ({ host: String(w.host), port: Number(w.port) || 587, portal: w.portal ? String(w.portal) : undefined, label: w.label ? String(w.label) : undefined }));
+      .map((w) => ({
+        host: String(w.host), port: Number(w.port) || 587,
+        portal: w.portal ? String(w.portal) : undefined,
+        label: w.label ? String(w.label) : undefined,
+        dailyCap: Number.isFinite(Number(w.dailyCap)) && Number(w.dailyCap) > 0 ? Math.round(Number(w.dailyCap)) : undefined,
+      }));
   } catch {
     return [];
   }
@@ -227,6 +255,8 @@ export interface SmtpServerRow {
   lastErrors: string[];   // up to 3 distinct recent SMTP errors
   probe: SmtpProbe;
   watched: boolean;       // came from SMTP_WATCH_HOSTS (monitor even with 0 inboxes)
+  capacityPerDay: number | null;  // steady-state warmed sends/day for this server (null = unknown)
+  capacityBasis: string | null;   // how capacityPerDay was derived (for the tooltip)
 }
 
 export async function smtpServerFleet(workspaceId: string, portalToken: string | "house"): Promise<SmtpServerRow[]> {
@@ -252,6 +282,10 @@ export async function smtpServerFleet(workspaceId: string, portalToken: string |
     const w = watchByKey.get(key);
     const probe = await probeSmtp(host, port);
     const errors = Array.from(new Set(list.filter((m) => m.lastError).map((m) => String(m.lastError)))).slice(0, 3);
+    // A pinned dailyCap wins; the mail-server-inventory figure is filled in by
+    // the route (it has the live inventory). Left null here otherwise.
+    const capacityPerDay = w?.dailyCap ?? null;
+    const capacityBasis = w?.dailyCap ? "Configured steady-state cap" : null;
     return {
       host,
       port,
@@ -266,6 +300,8 @@ export async function smtpServerFleet(workspaceId: string, portalToken: string |
       lastErrors: errors,
       probe,
       watched: !!w,
+      capacityPerDay,
+      capacityBasis,
     } as SmtpServerRow;
   }));
   rows.sort((a, b) => (b.inboxes - a.inboxes) || a.host.localeCompare(b.host));

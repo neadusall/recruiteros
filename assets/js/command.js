@@ -6939,12 +6939,15 @@
     if (!servers.length) {
       table = '<div class="empty">No sending servers yet. Import Email IDs and their servers appear here automatically.</div>';
     } else {
-      table = '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Server</th><th>Status</th><th>Inboxes</th><th>Login health</th><th>Recent errors</th></tr></thead><tbody>' +
+      table = '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Server</th><th>Status</th><th>Capacity</th><th>Inboxes</th><th>Login health</th><th>Recent errors</th></tr></thead><tbody>' +
         servers.map(function (s) {
           var up = s.probe && s.probe.reachable;
           var st = up
             ? '<span class="wu-hchip healthy">Up</span>' + (s.probe.latencyMs != null ? ' <span class="muted" style="font-size:11px">' + s.probe.latencyMs + ' ms</span>' : '')
             : '<span class="wu-hchip at_risk">Down</span>';
+          var cap = s.capacityPerDay
+            ? '<b>≈' + Number(s.capacityPerDay).toLocaleString() + '</b><span class="muted" style="font-size:11px">/day</span>' + (s.capacityBasis ? '<div class="muted" style="font-size:11px" title="' + esc(s.capacityBasis) + '">' + esc(s.capacityBasis) + '</div>' : '')
+            : '<span class="muted">n/a</span>';
           var inb = s.inboxes
             ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + s.warming + ' warming' + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
             : '<span class="muted">none imported yet</span>';
@@ -6957,6 +6960,7 @@
           return '<tr>' +
             '<td><b>' + esc(s.host) + '</b><span class="muted">:' + s.port + '</span>' + (s.label ? '<div class="muted" style="font-size:11px">' + esc(s.label) + '</div>' : '') + '</td>' +
             '<td>' + st + '</td>' +
+            '<td>' + cap + '</td>' +
             '<td>' + inb + '</td>' +
             '<td>' + auth + '</td>' +
             '<td>' + errs + '</td>' +
