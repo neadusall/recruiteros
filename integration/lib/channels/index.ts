@@ -309,12 +309,17 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
     // postal address when configured, and the same signed unsubscribe link).
     const { unsubscribeHeaders } = await import("../sending/unsubscribe");
     const { complianceFooter } = await import("../sending/compliance");
+    // Per-recruiter signature (name / title / company / phone, lib/sending/signature)
+    // sits between the body and the compliance footer. No-op until OUTREACH_SIGNATURES
+    // is configured; never invents an identity for an unmatched sender.
+    const { signatureFor } = await import("../sending/signature");
+    const sig = signatureFor({ inboxEmail: inbox.email, ownerId: inbox.ownerId, ownerName: inbox.ownerName });
     const footer = complianceFooter(workspaceId, t.prospect.email, brand);
     const res = await sendViaInbox(inbox, {
       to: t.prospect.email,
       subject: t.subject ?? "",
-      html: payload.html + footer.html,
-      text: payload.text + footer.text,
+      html: payload.html + sig.html + footer.html,
+      text: payload.text + sig.text + footer.text,
       headers: unsubscribeHeaders(workspaceId, t.prospect.email, inbox.email),
     });
     if (!res.ok) return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: res.error };

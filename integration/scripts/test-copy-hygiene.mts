@@ -69,6 +69,45 @@ test("every MPC subject varies (spintax present)", () => {
   }
 });
 
+/* ---- per-recruiter signature block (lib/sending/signature) ---- */
+import { signatureFor, formatPhone } from "../lib/sending/signature";
+
+process.env.OUTREACH_SIGNATURES = JSON.stringify({
+  "ryan@lumesp.com": { name: "Ryan Nead", lines: ["Director of Recruiting Operations", "Executive Recruiter | Lume Search Partners"], phone: "+19295430608" },
+  "noah": { name: "Noah Wilkowski", lines: ["Executive Recruiter | Lume Search Partners"], phone: "+19295430584" },
+});
+
+test("signature: exact email match renders name, titles, formatted phone", () => {
+  const s = signatureFor({ inboxEmail: "ryan@lumesp.com" });
+  assert.ok(s.text.includes("Ryan Nead"));
+  assert.ok(s.text.includes("Director of Recruiting Operations"));
+  assert.ok(s.text.includes("(929) 543-0608"));
+  assert.ok(s.html.includes("Executive Recruiter | Lume Search Partners"));
+});
+test("signature: fleet inbox matches by local-part letters (noah2@talsearches.com)", () => {
+  const s = signatureFor({ inboxEmail: "noah2@talsearches.com" });
+  assert.ok(s.text.includes("Noah Wilkowski"));
+  assert.ok(s.text.includes("(929) 543-0584"));
+});
+test("signature: owner name matches when the inbox address doesn't", () => {
+  const s = signatureFor({ inboxEmail: "bd7@talpools.com", ownerName: "Noah Wilkowski" });
+  assert.ok(s.text.includes("Noah Wilkowski"));
+});
+test("signature: unmatched sender gets NO signature (never invent an identity)", () => {
+  const s = signatureFor({ inboxEmail: "unknown@talpools.com" });
+  assert.equal(s.text, ""); assert.equal(s.html, "");
+});
+test("signature: adds no links and no em/en dash", () => {
+  const s = signatureFor({ inboxEmail: "ryan@lumesp.com" });
+  assert.ok(!/https?:\/\//i.test(s.html + s.text));
+  assert.ok(!/<a[\s>]/i.test(s.html));
+  assert.ok(!/[—–]/.test(s.html + s.text));
+});
+test("signature: formatPhone passes non-US strings through", () => {
+  assert.equal(formatPhone("+19295430608"), "(929) 543-0608");
+  assert.equal(formatPhone("929 543 0608"), "929 543 0608");
+});
+
 process.on("beforeExit", () => {
   console.log(process.exitCode ? `FAILED (passed ${passed})` : `all ${passed} passed`);
 });
