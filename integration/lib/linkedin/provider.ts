@@ -145,6 +145,12 @@ async function unipile<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+/** Raw provider request for surfaces outside this module (the per-recruiter
+ *  seat connect flow, seat health probes). Same call-time, workspace-first
+ *  credential resolution as every other provider call. */
+export const unipileRequest = unipile;
+export { UnipileError };
+
 /** Wrap a provider call so transport errors become a clean ActionResult. */
 async function attempt(
   action: ActionResult["action"],

@@ -52,6 +52,7 @@ import { pickSameRoleMaster } from "../../../lib/sourcing/sameRole";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { withWorkspaceCreds } from "../../../lib/connected";
 import { listLinkedInAccounts } from "../../../lib/accounts";
+import { seatForUser } from "../../../lib/linkedin/seats";
 import { cred } from "../../../lib/providers/http";
 import { nowIso } from "../../../lib/core/ids";
 import { dbEnabled } from "../../../lib/db";
@@ -160,17 +161,27 @@ export async function POST(req: Request) {
           peopleApi: rapidApiSearchConfigured(),
         },
         // LinkedIn seat readout for the Sales Nav card: same resolution order as
-        // fetchSearchMembers (connected account first, then a Unipile seat), so the
-        // pill tells the truth about whether a pasted search will pull its members.
-        linkedinSeat: (() => {
+        // fetchSearchMembers (the CALLER's own connected LinkedIn first, then a
+        // connected workspace account, then a workspace-level automation seat), so
+        // the pill tells the truth about whether a pasted search will pull its
+        // members, and the card knows which connect action to offer.
+        linkedinSeat: await (async () => {
+          const automationOn = Boolean(cred("UNIPILE_DSN") && cred("UNIPILE_API_KEY"));
+          const mine = automationOn ? await seatForUser(ws, g.ctx.user.id) : null;
           const seat = listLinkedInAccounts(ws).find((a) => a.active && a.warmup !== "flagged");
-          const unipileReady = Boolean(
-            cred("UNIPILE_DSN") && cred("UNIPILE_API_KEY")
-            && (cred("UNIPILE_ACCOUNT_ID") || process.env.UNIPILE_ACCOUNT_ID),
-          );
+          const wsReady = Boolean(seat) || (automationOn && Boolean(cred("UNIPILE_ACCOUNT_ID") || process.env.UNIPILE_ACCOUNT_ID));
+          const personal = Boolean(mine && mine.status === "ok");
           return {
-            connected: Boolean(seat) || unipileReady,
-            label: seat?.handle || (unipileReady ? "automation seat" : ""),
+            connected: personal || wsReady,
+            personal,
+            needsReconnect: Boolean(mine && mine.status === "reconnect"),
+            // Whether the per-recruiter Connect button can work at all (the
+            // workspace's automation instance is live).
+            canConnect: automationOn,
+            workspace: wsReady,
+            label: personal
+              ? (mine!.label || "your LinkedIn")
+              : (seat?.handle || (wsReady ? "the workspace seat" : "")),
           };
         })(),
         // Phone-source readout: which of the phone rungs can actually fire right now.
@@ -270,8 +281,8 @@ export async function POST(req: Request) {
         const c = result.criteria;
         const criteriaEmpty = !c.titles.length && !c.keywords.length && !c.geos.length && !c.companies.length && !c.industries.length;
         const detail = criteriaEmpty
-          ? "This link doesn't include the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side), and the search's members couldn't be pulled directly. On LinkedIn, open the search so the filters are applied, then copy the full URL from the address bar (it will contain \"query=\") and paste that here. Connecting a LinkedIn seat under Setup also lets the search's own members be pulled."
-          : "The search's members couldn't be pulled from LinkedIn, and the expanded search found nobody for these filters. Add a title or keyword filter to the search and try again, or connect a LinkedIn seat under Setup so the search's own members can be pulled.";
+          ? "This link doesn't include the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side), and the search's members couldn't be pulled directly. On LinkedIn, open the search so the filters are applied, then copy the full URL from the address bar (it will contain \"query=\") and paste that here. Connecting your LinkedIn with the button on this card also lets the search's own members be pulled."
+          : "The search's members couldn't be pulled from LinkedIn, and the expanded search found nobody for these filters. Add a title or keyword filter to the search and try again, or connect your LinkedIn with the button on this card so the search's own members can be pulled.";
         return fail("empty_salesnav_run", 422, { detail, warnings: result.warnings });
       }
 

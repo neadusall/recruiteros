@@ -14,6 +14,7 @@ import { SequenceEngine } from "../../../../lib/linkedin/sequenceEngine";
 import { getRepository } from "../../../../lib/linkedin/repository";
 import { verifyProviderSignature } from "../../../../lib/linkedin/auth";
 import { ingestProviderWebhook, storeRawEvent } from "../../../../lib/linkedin/os/events";
+import { markSeatStatusByAccount } from "../../../../lib/linkedin/seats";
 import type { LinkedInWebhookEvent } from "../../../../lib/linkedin/types";
 
 export async function POST(req: Request) {
@@ -44,6 +45,15 @@ export async function POST(req: Request) {
 
   const event = normalizeUnipileEvent(payload);
   if (!event) return NextResponse.json({ ok: true, osEvents, ignored: true });
+
+  // Keep per-recruiter JD Sourcing seats honest: when the provider says a
+  // login lost its credentials / got restricted, the recruiter's Sales Nav
+  // card flips to "Reconnect" instead of silently running waterfall-only.
+  if (event.type === "account_status" && (event.status === "ok" || event.status === "disconnected" || event.status === "restricted")) {
+    try {
+      await markSeatStatusByAccount(event.accountId, event.status === "ok" ? "ok" : "reconnect");
+    } catch { /* seat sync must never break webhook ingestion */ }
+  }
 
   const engine = new SequenceEngine(getRepository());
   await engine.handleEvent(event);

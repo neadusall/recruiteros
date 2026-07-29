@@ -18,6 +18,7 @@
 
 import { listLinkedInAccounts } from "../accounts";
 import { toEngineAccount } from "../linkedin/console";
+import { seatForUser } from "../linkedin/seats";
 import { getProvider, type SearchProfile } from "../linkedin/provider";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
 import { cred } from "../providers/http";
@@ -219,28 +220,42 @@ async function fetchSearchMembers(ws: string, ownerUserId: string, url: string, 
   const unipileAccountId = cred("UNIPILE_ACCOUNT_ID") || process.env.UNIPILE_ACCOUNT_ID;
   const hasUnipile = Boolean(cred("UNIPILE_DSN") && cred("UNIPILE_API_KEY"));
 
+  // The signed-in recruiter's OWN connected LinkedIn wins: a pasted Sales Nav /
+  // Recruiter URL only resolves against the seat that can actually see that
+  // search (their subscription, their network). Workspace-level seats stay as
+  // fallback so nothing that worked before stops working.
+  const mySeat = hasUnipile ? await seatForUser(ws, ownerUserId) : null;
+  if (mySeat?.status === "reconnect") {
+    warnings.push("linkedin_reconnect: your LinkedIn connection needs a quick re-login (use Reconnect on the Search from LinkedIn card); this search ran without it");
+  }
+  const personal = mySeat && mySeat.status === "ok" ? mySeat : null;
+
   // Provider leg: needs a seat to drive. Skip cleanly (not an error) when the
-  // workspace has neither a connected account nor a Unipile seat.
-  if (core || (hasUnipile && unipileAccountId)) {
-    const account = core
+  // recruiter has no seat and the workspace has neither a connected account
+  // nor a workspace-level automation seat.
+  if (personal || core || (hasUnipile && unipileAccountId)) {
+    const seatId = personal?.accountId || unipileAccountId;
+    const account = !personal && core
       ? toEngineAccount(core, ownerUserId)
       : {
-          id: unipileAccountId!, providerAccountId: unipileAccountId!, ownerUserId,
-          displayName: "Unipile LinkedIn", status: "ok" as const, premium: true, salesNavigator: true,
+          id: seatId!, providerAccountId: seatId!, ownerUserId,
+          displayName: personal ? (personal.label || "your LinkedIn") : "workspace LinkedIn seat",
+          status: "ok" as const, premium: true, salesNavigator: true,
           limits: { invitesPerDay: 25, messagesPerDay: 50, inmailsPerDay: 10, profileViewsPerDay: 80, workingHours: { startHour: 8, endHour: 18, days: [1, 2, 3, 4, 5] } },
           timezone: "UTC",
         };
     try {
       const profiles = await getProvider().searchProfiles({ account, url, limit });
       if (profiles.length) {
-        return { rows: profiles.map((p) => profileToRow(p, kindLabel)), warnings, account: core?.handle || "Unipile LinkedIn" };
+        const via = personal ? "your LinkedIn" : (core?.handle || "the workspace LinkedIn seat");
+        return { rows: profiles.map((p) => profileToRow(p, kindLabel)), warnings, account: via };
       }
       warnings.push("linkedin(search): the connected account returned no members for this URL");
     } catch (err) {
       warnings.push(`linkedin(search): ${(err as Error).message}`);
     }
   } else {
-    warnings.push("linkedin_not_connected: no LinkedIn account or Unipile seat is set up, so the search's own members could not be pulled; candidates below come from the discovery waterfall run on the URL's filters");
+    warnings.push("linkedin_not_connected: your LinkedIn is not connected, so the search's own members could not be pulled; candidates below come from the discovery waterfall run on the URL's filters. Use Connect my LinkedIn on the Search from LinkedIn card to pull the exact people your searches show.");
   }
 
   // Scraper sidecar fallback (cookie-authenticated, best-effort).
@@ -307,8 +322,8 @@ export async function runSalesNavSourcing(ws: string, ownerUserId: string, opts:
   if (criteriaEmpty && !fetched.rows.length) {
     warnings.push(
       kind === "LinkedIn Recruiter"
-        ? "recruiter_url_note: Recruiter search URLs usually keep their filters on LinkedIn's side, so the URL alone can't seed the search waterfall. Connect the LinkedIn seat under Setup so the search's own members can be pulled, or use Recruiter's legacy smartsearch URL (it spells the filters out)."
-        : "filterless_url_note: this link carries none of the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side). Open the search so its filters are applied, then copy the full URL from the address bar (it will contain \"query=\"), or connect the LinkedIn seat under Setup so the search's own members can be pulled.",
+        ? "recruiter_url_note: Recruiter search URLs usually keep their filters on LinkedIn's side, so the URL alone can't seed the search waterfall. Use Connect my LinkedIn on the Search from LinkedIn card so the search's own members can be pulled, or use Recruiter's legacy smartsearch URL (it spells the filters out)."
+        : "filterless_url_note: this link carries none of the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side). Open the search so its filters are applied, then copy the full URL from the address bar (it will contain \"query=\"), or use Connect my LinkedIn on the Search from LinkedIn card so the search's own members can be pulled.",
     );
   }
   const icp = icpFromSalesNav(criteria, fetched.rows, kind);

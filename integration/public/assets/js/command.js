@@ -12485,8 +12485,8 @@
         smsg(bits.join(" · ") + ". Enriching contact info and sending everyone to Candidates and OS Text automatically…");
         // A LinkedIn leg that could not run is worth a heads-up, but never blocks:
         // the waterfall result above still landed.
-        var warn = (d.warnings || []).filter(function (w) { return /linkedin_not_connected|linkedin\(search\)/.test(w); })[0];
-        if (warn) toast("Note: " + warn);
+        var warn = (d.warnings || []).filter(function (w) { return /linkedin_not_connected|linkedin_reconnect|linkedin\(search\)/.test(w); })[0];
+        if (warn) toast("Note: " + warn.replace(/^linkedin[a-z_()]*:\s*/i, ""));
         if (urlEl) urlEl.value = "";
         if (nameEl) nameEl.value = "";
         if (sel) sel.value = "";
@@ -13130,23 +13130,107 @@
           pill(p.vendorEnrich, "Contact enrichment", "Off: the enrichment service is not reachable right now, so the passes that fill emails and phones are skipped.") +
           pill(p.inHouseDb, "In-house phone database", "Off: the in-house phone database is not reachable right now.") +
           pill(p.paidFinder, "Paid phone finder", "Off: optional top-up. Ask your admin to fill in the phone-lookup fields in Setup under JD Sourcing; it then runs only on candidates the free phone sources could not fill.");
-        /* LinkedIn-seat readout on the Sales Nav card: says up front whether a
-           pasted search will pull its own members or run waterfall-only, and gives
-           the admin a place to plug a Sales Navigator seat in. */
-        var seat = (r.data && r.data.linkedinSeat) || null;
-        var seatHost = $("#jdSnavSeat");
-        if (seatHost) {
-          seatHost.style.display = "";
-          if (seat && seat.connected) {
-            seatHost.innerHTML = '<span class="jd-eng on"><span class="jd-eng-dot"></span>LinkedIn seat connected</span> ' +
-              '<span class="muted">Pasted searches pull their own members' + (seat.label ? " through " + esc(seat.label) : "") + ", then the search waterfall expands the list.</span>";
-          } else {
-            seatHost.innerHTML = '<span class="jd-eng off"><span class="jd-eng-dot"></span>LinkedIn seat · not connected</span> ' +
-              '<span class="muted">Pasted searches run on the URL\'s filters through the search waterfall. To also pull the exact members the search shows on LinkedIn, an admin can connect a Sales Navigator seat under <a href="#connected">Connected → LinkedIn Automation</a>.</span>';
-          }
-        }
+        /* LinkedIn readout on the Sales Nav card: per-recruiter first. Each
+           recruiter connects THEIR OWN LinkedIn (secure hosted sign-in, their
+           password never touches this app) so pasted searches pull the exact
+           members their Sales Navigator / Recruiter search shows. */
+        renderLinkedInSeat((r.data && r.data.linkedinSeat) || null);
       }).catch(function () {});
     }
+
+    /* ---------- per-recruiter LinkedIn connection (Sales Nav card) ---------- */
+    var liPoll = null;
+    function seatRow(cls, pillText, bodyHtml, buttons) {
+      return '<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+        '<span class="jd-eng ' + cls + '"><span class="jd-eng-dot"></span>' + pillText + '</span> ' +
+        '<span class="muted">' + bodyHtml + '</span>' + (buttons || "") + '</span>';
+    }
+    function renderLinkedInSeat(seat) {
+      var host = $("#jdSnavSeat"); if (!host) return;
+      host.style.display = "";
+      var connectBtn = '<button class="btn btn-primary btn-sm" id="jdLiConnect" style="padding:4px 12px">Connect my LinkedIn</button>';
+      if (seat && seat.personal) {
+        host.innerHTML = seatRow("on", "Your LinkedIn is connected",
+          'Pasted searches pull their members through your own account' +
+          (seat.label && seat.label !== "your LinkedIn" ? " (" + esc(seat.label) + ")" : "") +
+          ", then the search waterfall expands the list.",
+          ' <button class="btn btn-ghost btn-sm" id="jdLiDisconnect" style="padding:4px 10px">Disconnect</button>');
+      } else if (seat && seat.needsReconnect) {
+        host.innerHTML = seatRow("off", "Your LinkedIn needs a re-login",
+          "LinkedIn signed this connection out (that happens after password changes and security checks). Reconnect and your searches pull from your account again.",
+          ' <button class="btn btn-primary btn-sm" id="jdLiConnect" style="padding:4px 12px">Reconnect my LinkedIn</button>');
+      } else if (seat && seat.canConnect) {
+        host.innerHTML = seatRow("off", "Your LinkedIn is not connected",
+          'Connect your own LinkedIn and pasted searches pull the exact people your Sales Navigator or Recruiter search shows' +
+          (seat.workspace ? ' (right now they run through ' + esc(seat.label || "the workspace seat") + ')' : "") +
+          '. A secure LinkedIn sign-in window opens; your password is never seen or stored here.',
+          " " + connectBtn);
+      } else if (seat && seat.connected) {
+        host.innerHTML = seatRow("on", "LinkedIn seat connected",
+          "Pasted searches pull their own members" + (seat.label ? " through " + esc(seat.label) : "") +
+          ", then the search waterfall expands the list.");
+      } else {
+        host.innerHTML = seatRow("off", "LinkedIn not connected",
+          (typeof can === "function" && can("integrations:manage"))
+            ? 'Pasted searches run on the URL\'s filters through the search waterfall. To let every recruiter connect their own LinkedIn (and pull the exact members their searches show), switch on LinkedIn Automation under <a href="#connected">Connected</a> first.'
+            : "Pasted searches run on the URL's filters through the search waterfall. Ask your admin to switch on LinkedIn connections; a Connect button then appears here for you.");
+      }
+      var cb = $("#jdLiConnect"); if (cb) cb.addEventListener("click", startLinkedInConnect);
+      var db = $("#jdLiDisconnect"); if (db) db.addEventListener("click", disconnectLinkedIn);
+    }
+    function startLinkedInConnect() {
+      var btn = $("#jdLiConnect");
+      if (btn) { btn.disabled = true; btn.textContent = "Opening secure sign-in…"; }
+      send("/linkedin/connect", "POST", { action: "start" }).then(function (r) {
+        if (!r.ok || !(r.data && r.data.url)) {
+          toast((r.data && r.data.detail) || "Could not start the LinkedIn connection. Try again in a minute.");
+          loadEngines();
+          return;
+        }
+        var w = window.open(r.data.url, "_blank", "noopener");
+        var host = $("#jdSnavSeat");
+        if (host) {
+          host.innerHTML = seatRow("off", "Waiting for your LinkedIn sign-in",
+            w ? "Finish signing in on the tab that just opened. This card updates by itself the moment the connection lands."
+              : 'The sign-in window was blocked by the browser. <a href="' + esc(r.data.url) + '" target="_blank" rel="noopener">Open the secure sign-in</a>, finish there, and this card updates by itself.');
+        }
+        watchLinkedInConnect();
+      }).catch(function () {
+        toast("Could not start the LinkedIn connection. Try again in a minute.");
+        loadEngines();
+      });
+    }
+    function watchLinkedInConnect() {
+      if (liPoll) clearInterval(liPoll);
+      var tries = 0;
+      liPoll = setInterval(function () {
+        tries++;
+        if (tries > 90) { clearInterval(liPoll); liPoll = null; loadEngines(); return; }
+        api("/linkedin/connect").then(function (d) {
+          if (d && d.connected) {
+            clearInterval(liPoll); liPoll = null;
+            toast("Your LinkedIn is connected. Pasted searches now pull from your own account.");
+            loadEngines();
+          }
+        }).catch(function () {});
+      }, 4000);
+    }
+    function disconnectLinkedIn() {
+      if (!confirm("Disconnect your LinkedIn? Pasted searches stop pulling members from your account until you reconnect.")) return;
+      send("/linkedin/connect", "POST", { action: "disconnect" }).then(function () {
+        toast("Your LinkedIn was disconnected.");
+        loadEngines();
+      }).catch(function () { toast("Could not disconnect right now. Try again in a minute."); });
+    }
+    // Landing back from the hosted sign-in's success redirect: confirm, clean the URL.
+    if (/[?&]linkedin=connected\b/.test(location.search)) {
+      toast("Your LinkedIn is connected. Pasted searches now pull from your own account.");
+      try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
+    } else if (/[?&]linkedin=failed\b/.test(location.search)) {
+      toast("The LinkedIn sign-in did not finish. Press Connect my LinkedIn to try again.");
+      try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
+    }
+
     loadEngines();
     loadRuns();
   }
