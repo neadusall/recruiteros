@@ -88,6 +88,10 @@ export interface WarmupDomainRow {
   actions: string[];
   /** Email IDs from this domain imported on THIS portal (the send side). */
   emailIds: { total: number; active: number; error: number };
+  /** Warm-up throughput the upstream schedule is running at (emails/day, summed)
+   *  and the average reply rate. Meaningful even when cumulative sends read 0. */
+  warmupPerDay: number | null;
+  replyRatePct: number | null;
   accounts: WarmupMailboxRow[];
 }
 
@@ -105,8 +109,14 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
   const rows: WarmupDomainRow[] = [];
   for (const [domain, list] of byDomain) {
     const reps = list.map((a) => a.reputationPct).filter((r): r is number => typeof r === "number");
-    const createds = list.map((a) => a.createdAt).filter((c): c is string => !!c).sort();
+    // Prefer the true warm-up start (warmup_created_at) over the account's
+    // upstream created_at; fall back to created_at where warm-up hasn't stamped one.
+    const createds = list.map((a) => a.warmupStartedAt || a.createdAt).filter((c): c is string => !!c).sort();
     const since = createds[0] || null;
+    const perDays = list.map((a) => a.warmupPerDay).filter((n): n is number => typeof n === "number");
+    const warmupPerDay = perDays.length ? perDays.reduce((s, n) => s + n, 0) : null;
+    const replies = list.map((a) => a.replyRatePct).filter((n): n is number => typeof n === "number");
+    const replyRatePct = replies.length ? Math.round(replies.reduce((s, n) => s + n, 0) / replies.length) : null;
     const days = since ? round1((now - new Date(since).getTime()) / 86_400_000) : null;
     const sentTotal = list.reduce((s, a) => s + (a.sentTotal || 0), 0);
     const spamCount = list.reduce((s, a) => s + (a.spamCount || 0), 0);
@@ -138,6 +148,8 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
       health: { score: 0, label: "watch" },
       actions: [],
       emailIds: { total: 0, active: 0, error: 0 },
+      warmupPerDay,
+      replyRatePct,
       accounts: list
         .map((a): WarmupMailboxRow => ({
           email: a.email,
@@ -145,10 +157,10 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
           reputationPct: a.reputationPct ?? null,
           sentTotal: a.sentTotal || 0,
           spamCount: a.spamCount || 0,
-          messagePerDay: a.messagePerDay ?? null,
+          messagePerDay: a.warmupPerDay ?? a.messagePerDay ?? null,
           dailySent: a.dailySent ?? null,
-          createdAt: a.createdAt || null,
-          days: a.createdAt ? round1((now - new Date(a.createdAt).getTime()) / 86_400_000) : null,
+          createdAt: a.warmupStartedAt || a.createdAt || null,
+          days: (a.warmupStartedAt || a.createdAt) ? round1((now - new Date((a.warmupStartedAt || a.createdAt) as string).getTime()) / 86_400_000) : null,
           smtpStatus: null,
           smtpError: null,
         }))

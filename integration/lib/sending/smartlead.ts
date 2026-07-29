@@ -35,6 +35,15 @@ export interface SmartleadAccount {
   dailySent?: number;
   /** ISO timestamp the account was added upstream, the start of its warm-up clock. */
   createdAt?: string;
+  /** ISO timestamp warm-up actually began (warmup_details.warmup_created_at);
+   *  the true clock, preferred over createdAt when present. */
+  warmupStartedAt?: string;
+  /** Target warm-up emails/day at the current ramp (warmup_details.max_email_per_day). */
+  warmupPerDay?: number;
+  /** Warm-up reply rate %, an engagement signal upstream reports even at 0 sends. */
+  replyRatePct?: number;
+  /** Upstream block reason if warm-up is halted (null/undefined = fine). */
+  blockedReason?: string;
 }
 
 function num(v: unknown): number | undefined {
@@ -93,6 +102,10 @@ export async function listSmartleadAccounts(): Promise<SmartleadAccount[]> {
         messagePerDay: num(a?.message_per_day),
         dailySent: num(a?.daily_sent_count),
         createdAt: typeof a?.created_at === "string" ? a.created_at : undefined,
+        warmupStartedAt: typeof w?.warmup_created_at === "string" ? w.warmup_created_at : undefined,
+        warmupPerDay: num(w?.max_email_per_day),
+        replyRatePct: num(w?.reply_rate),
+        blockedReason: w?.blocked_reason ? String(w.blocked_reason) : undefined,
       });
     }
     if (rows.length < limit) break;

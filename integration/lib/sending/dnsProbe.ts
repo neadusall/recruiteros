@@ -32,7 +32,12 @@ export interface DnsPosture {
 const TTL_MS = 6 * 60 * 60 * 1000; // 6h; posture changes rarely
 const cache = new Map<string, { at: number; posture: DnsPosture }>();
 
-const DKIM_SELECTORS = ["smtp", "default", "google", "k1", "s1", "mail"];
+// Order matters: the first hit wins, so the highest-prevalence selectors lead.
+// selector1/selector2 are Microsoft 365's fixed pair (the bulk of the fleet);
+// dkim/smtp/default cover the self-hosted mail server; the rest are common
+// ESP selectors. Missing selector1/selector2 was why M365 domains showed a
+// false "DKIM missing".
+const DKIM_SELECTORS = ["selector1", "selector2", "dkim", "smtp", "default", "google", "k1", "s1", "mail", "mx", "s1024", "sig1"];
 
 function timebox<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise((resolve) => {

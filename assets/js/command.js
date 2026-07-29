@@ -6597,6 +6597,28 @@
     return '<span class="wu-badge ' + r + '">' + label + '</span>';
   }
 
+  // Plain-English reason for a domain's reputation given how long it has been
+  // warming, so a low number on a brand-new domain reads as "expected", not
+  // "problem". A low number on a MATURE domain is the real signal to act on.
+  function wuRepReason(days, rep) {
+    if (rep == null) return "";
+    var d = days == null ? 0 : days;
+    var msg, tone = "muted";
+    if (d < 3) {
+      msg = "Normal for a new domain. It climbs as warm-up sends land, get pulled from spam, opened and replied to. Expect 90%+ within 1 to 2 weeks.";
+    } else if (d < 7) {
+      msg = rep >= 80 ? "Ramping well, on track to reach 90%+ soon." : "Still early days, reputation is expected to keep rising this week.";
+    } else if (d < 14) {
+      msg = rep >= 85 ? "Almost there, nearly warmed." : (rep >= 70 ? "Climbing, give it the rest of the two weeks." : (tone = "warn", "Lower than expected at this age. Watch it. If it does not rise, ease the daily volume."));
+    } else {
+      if (rep >= 95) { tone = "ok"; msg = "Fully warmed and steady. Ready to send."; }
+      else if (rep >= 85) { tone = "ok"; msg = "Warmed and healthy."; }
+      else { tone = "danger"; msg = "Mature but under-warmed. This one needs attention: slow its ramp and let reputation recover before sending."; }
+    }
+    var color = tone === "ok" ? "#1a7f37" : tone === "warn" ? "#b26a00" : tone === "danger" ? "#b3261e" : "var(--muted,var(--text-dim))";
+    return '<div style="font-size:11px;color:' + color + ';margin-top:2px;max-width:230px;line-height:1.35">' + esc(msg) + '</div>';
+  }
+
   function wuHealthChip(h) {
     if (!h) return '<span class="muted">n/a</span>';
     return '<span class="wu-hchip ' + esc(h.label) + '" title="Composite of reputation, spam outcomes, DNS posture and fleet state">' + h.score + '</span>';
@@ -6637,7 +6659,7 @@
         '<span style="flex:1"></span>' +
         '<button class="btn btn-ghost btn-sm" id="wuRefresh"' + (wuLoading ? " disabled" : "") + '>' + (wuLoading ? "Refreshing…" : "↻ Refresh now") + '</button>' +
       '</div>' +
-      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. A domain is <b>Ready to send</b> after 14+ days warming at 95%+ average reputation. Click a domain for its mailboxes.</div>';
+      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam; a domain is <b>Ready to send</b> after 14+ days warming at 95%+ average reputation. Click a domain for its mailboxes.</div>';
     var stats =
       '<div class="wu-stats">' +
         c(t.domains || 0, "Domains warming") +
@@ -6654,10 +6676,10 @@
         '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
         '<td>' + days + '</td>' +
-        '<td>' + wuRepCell(d.avgReputation) + '</td>' +
+        '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation) + '</td>' +
         '<td>' + wuHealthChip(d.health) + '</td>' +
         '<td>' + wuDnsPills(d.dns) + '</td>' +
-        '<td>' + (d.sentTotal || 0) + (d.spamCount ? ' <span class="muted">(' + d.spamCount + ' spam' + (d.spamRatePct != null ? ", " + d.spamRatePct + "%" : "") + ')</span>' : '') + '</td>' +
+        '<td>' + (d.warmupPerDay != null ? '<b>' + d.warmupPerDay + '</b><span class="muted" style="font-size:11px">/day</span>' + (d.replyRatePct != null ? '<div class="muted" style="font-size:11px">' + d.replyRatePct + '% replies</div>' : '') : '<span class="muted">n/a</span>') + '</td>' +
         '<td>' + wuBadge(d.readiness) + '</td>' +
       '</tr>';
       if (!open) return main;
@@ -6689,7 +6711,7 @@
       return main + mb;
     }).join("");
     var table = domains.length
-      ? '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Domain</th><th>Mailboxes</th><th>Time warming</th><th>Avg reputation</th><th>Health</th><th>DNS</th><th>Warm-up sends</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      ? '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Domain</th><th>Mailboxes</th><th>Time warming</th><th>Avg reputation</th><th>Health</th><th>DNS</th><th>Warm-up/day</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
       : '<div class="empty">No domains are warming on this portal yet.</div>';
     box.innerHTML = '<div class="wu-card">' + head + stats + table + '</div>';
     var rb = $("#wuRefresh"); if (rb) rb.addEventListener("click", function () { loadWarmup(true); });
