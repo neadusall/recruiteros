@@ -11911,20 +11911,27 @@
           // done going BACKWARDS = the chain restarted on a bigger scope; relearn.
           if (!s || done < s.d) s = { t0: isNaN(seedT) ? now : Math.min(seedT, now), d0: done, t: now, d: done };
           else if (done > s.d) { s.t = now; s.d = done; }
+          var left = Math.max(0, (total || 0) - done);
+          // All rows counted but the job still busy = the finishing tail
+          // (gap-fill and final checks). Stamp when it started (the ledger's
+          // last-batch time when we have it) so its countdown is real too.
+          if (!left && !s.fin) s.fin = isNaN(seedT) ? now : Math.min(seedT, now);
+          if (left && s.fin) delete s.fin;
           all[id] = s;
           try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) { }
           var pace = (s.d > s.d0 && s.t > s.t0) ? (s.t - s.t0) / (s.d - s.d0) : null;
-          var left = Math.max(0, (total || 0) - done);
-          if (!left) return { finishing: true };
-          // The countdown keeps moving between batches: time since the last
-          // finished batch is already progress, so subtract it (floor 45s).
-          var ms = Math.max(45000, left * (pace == null ? PACE_GUESS_MS : pace) - (now - s.t));
+          // Row phase: countdown keeps moving between batches (time since the
+          // last one is already progress; floor 45s). Finishing tail: budget
+          // 10 min from its start, floored at ~1 min so it never reads past-due.
+          var ms = left
+            ? Math.max(45000, left * (pace == null ? PACE_GUESS_MS : pace) - (now - s.t))
+            : Math.max(60000, (s.fin || now) + 600000 - now);
           var m = Math.round(ms / 60000), h = Math.floor(m / 60), mm = m % 60;
           var span = m < 1 ? "under a minute" : h < 1 ? "about " + m + " min" : "about " + h + " hr" + (mm ? " " + mm + " min" : "");
           var at = new Date(now + ms);
           var clock = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
           if (ms > 20 * 3600000) clock = at.toLocaleDateString([], { weekday: "short" }) + " " + clock;
-          return { finishing: false, measured: pace != null, span: span, clock: clock, short: span.replace("about ", "~") };
+          return { finishing: !left, measured: pace != null, span: span, clock: clock, short: span.replace("about ", "~") };
         }
         host.innerHTML = warn + runs.map(function (r) {
           var n = r.candidates ? r.candidates.length : 0;
@@ -11996,12 +12003,12 @@
             // done, so the mini bar is honest; without a ledger yet it just glides.
             var livePct = ep ? Math.max(4, Math.min(100, Math.round(epDone / (ep.total || n || 1) * 100))) : null;
             var liveBar = '<span class="jd-tbar' + (livePct == null ? ' ind' : '') + '"><b' + (livePct != null ? ' style="width:' + livePct + '%"' : '') + '></b></span>';
-            var etaLine = !jEta ? "" : '<span class="jd-teta">' + (jEta.finishing ? "finishing up · minutes away" : "done by ~" + jEta.clock + " · " + jEta.short + " left") + '</span>';
+            var etaLine = !jEta ? "" : '<span class="jd-teta">' + (jEta.finishing ? "finishing up · " : "") + "done by ~" + jEta.clock + " · " + jEta.short + " left" + '</span>';
             sEnrich = jStop("jt-live", jIcons.loop, "Enriching now", ep ? "~" + epDone + " of " + (ep.total || n) + " rows" : "working…",
               "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.", null, liveBar + etaLine);
-            jNote = "<b>Working now:</b> contact info is being filled in. " + (jEta && !jEta.finishing
-              ? "Projected to be done around <b>" + jEta.clock + "</b> (" + jEta.span + " from now)" + (jEta.measured ? ". " : "; that's a first estimate and it sharpens as batches finish. ")
-              : "It's finishing up; the last checks take a few minutes. ") +
+            jNote = "<b>Working now:</b> contact info is being filled in. " + (!jEta ? "" : jEta.finishing
+              ? "It's finishing the last checks; projected to be done around <b>" + jEta.clock + "</b> (" + jEta.span + " from now). "
+              : "Projected to be done around <b>" + jEta.clock + "</b> (" + jEta.span + " from now)" + (jEta.measured ? ". " : "; that's a first estimate and it sharpens as batches finish. ")) +
               "Next: everyone lands in Candidates and a text campaign is built by itself. Nothing to press.";
           } else if (ep && ep.nextStart == null && lxSkipN) {
             sEnrich = jStop("jt-act", jIcons.alert, "Enriched", { btn: lxSkipN + " batch" + (lxSkipN === 1 ? "" : "es") + " to redo · press to finish", act: r.id },
@@ -12077,7 +12084,7 @@
           var jBoostCta = (boostable && (jOverall === "done" || jOverall === "wait"))
             ? '<button type="button" class="jd-boostcta" data-boost="' + esc(r.id) + '" title="Texts reach ' + phs + ' of ' + n + ' candidates so far. Boost runs a paid lookup on the ' + boostable + ' still missing a phone; you see the estimated cost and approve it before anything is spent.">Boost phones · up to ' + boostable + ' more</button>'
             : '';
-          var jHeadEta = (jOverall === "live" && jEta) ? (jEta.finishing ? "minutes away" : "done by ~" + jEta.clock) : "";
+          var jHeadEta = (jOverall === "live" && jEta) ? "done by ~" + jEta.clock : "";
           var jHead = '<div class="jd-jhead"><span class="jd-jhstate"><span class="jd-jstate js-' + jOverall + '"><i></i>' + jChipTxt + '</span>' + jBoostCta + '</span>' +
             '<span class="jd-jsteps">' + jDoneN + ' of 4 steps' + (jUpd ? ' · updated ' + jUpd : '') + (jHeadEta ? ' · ' + jHeadEta : '') + '</span></div>';
           var journey = n
