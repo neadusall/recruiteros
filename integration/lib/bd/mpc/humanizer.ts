@@ -104,11 +104,13 @@ export function truthPreserved(reference: string, candidate: string, mustAppear:
  * Layer 2 — the AI rewrite                                            *
  * ------------------------------------------------------------------ */
 
-/** True only when the humanizer is switched on AND a key exists. Off by default: deploying this file
- *  changes nothing until you opt in, and the deterministic engine keeps running exactly as before. */
+/** ON by default whenever an Anthropic key exists — per-send variation is the main defense against
+ *  template fingerprinting at volume, so cold email should never silently run without it. Explicit
+ *  opt-out only (MPC_HUMANIZER=0/false/off/no). Without a key it is off and the deterministic engine
+ *  runs exactly as before. */
 export function humanizerEnabled(): boolean {
-  return ["1", "true", "yes", "on"].includes((process.env.MPC_HUMANIZER || "").toLowerCase())
-    && !!process.env.ANTHROPIC_API_KEY;
+  if (!process.env.ANTHROPIC_API_KEY) return false;
+  return !["0", "false", "no", "off"].includes((process.env.MPC_HUMANIZER || "").toLowerCase());
 }
 
 const STYLE = [

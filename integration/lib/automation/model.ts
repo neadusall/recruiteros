@@ -65,13 +65,17 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   vals.watchlink = watch;
   vals.videogif = pv?.gifUrl || "";
   vals.videoposter = pv?.posterUrl || "";
-  // Loom-look embed, exactly how a Loom lands in an inbox: the ANIMATED teaser GIF of THEIR video
-  // (play button baked in by the compositor), centered like a share card, rounded, with a "Watch"
-  // line beneath for image-blocking clients. Clients that freeze animation (Outlook) show the
-  // first frame — which, with the baked button, reads as the static poster. Older videos rendered
-  // before the teaser carried the button fall back to the poster JPEG. Table markup + explicit
-  // width because email clients ignore margin:auto on divs.
-  const thumb = pv?.gifUrl || pv?.posterUrl || "";
+  // Loom-look embed, centered like a share card, rounded, with a "Watch" line beneath for
+  // image-blocking clients. Table markup + explicit width because email clients ignore
+  // margin:auto on divs.
+  //
+  // POSTER-FIRST by default: the static JPEG (play button baked in, ~10x lighter than the
+  // animated teaser) paints instantly, survives Outlook's animation freeze, and keeps a cold
+  // second touch light while domain reputation is still building. Opt back into the animated
+  // GIF teaser with INMARKET_EMBED_GIF=1 once placement is proven. Either way the other asset
+  // remains the fallback, so older videos missing one artifact still render.
+  const gifFirst = ["1", "true", "yes", "on"].includes((process.env.INMARKET_EMBED_GIF || "").toLowerCase());
+  const thumb = gifFirst ? (pv?.gifUrl || pv?.posterUrl || "") : (pv?.posterUrl || pv?.gifUrl || "");
   vals.videoembed = watch && thumb
     ? `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:14px auto"><tr><td align="center">` +
       `<a href="${watch}" target="_blank" style="text-decoration:none">` +

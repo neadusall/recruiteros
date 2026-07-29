@@ -9,7 +9,7 @@
 import { resetDaily } from "./caps";
 import { advanceWarmup, runWarmupRound } from "./warmup";
 import { refreshReputation } from "./reputation";
-import { runGovernor } from "./governor";
+import { runGovernor, runBlocklistGuard } from "./governor";
 import { syncSmartleadWarmup } from "./smartlead";
 
 export interface DailyReport {
@@ -31,6 +31,8 @@ export async function runSendingDaily(workspaceId: string): Promise<DailyReport>
   let warmupSynced = 0;
   try { warmupSynced = (await syncSmartleadWarmup(workspaceId)).matched; } catch { /* best-effort */ }
   const paused = await runGovernor(workspaceId);
+  // Spamhaus DBL/ZEN listings auto-pause too (both send stores); no longer display-only.
+  try { paused.push(...await runBlocklistGuard(workspaceId)); } catch { /* best-effort */ }
   let warmupSent = 0;
   try { warmupSent = (await runWarmupRound(workspaceId)).sent; } catch { /* best-effort */ }
   return { reset: true, warmup, reputationUpdated, paused, warmupSent, warmupSynced };

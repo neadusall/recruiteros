@@ -63,6 +63,63 @@ export async function runGovernor(workspaceId: string): Promise<Array<{ domain: 
   return actions;
 }
 
+/**
+ * Public-blocklist auto-pause. A Spamhaus DBL/ZEN listing used to be display-only (health
+ * capped at 40 + a delisting action) while sends kept flowing; a listed domain kept burning
+ * reputation until a human noticed. Now a listing pauses the domain the same way a complaint
+ * spike does — across BOTH send stores: the owned-MTA fleet (SendingDomain) and the recruiter
+ * SMTP inbox pool (sender inboxes on that domain). Probes are cached 6h in dnsProbe and
+ * best-effort (a refused DNSBL query never reads as listed), so this can flag a real listing
+ * but never false-alarm a pause. Opt out with OUTREACH_BLOCKLIST_AUTOPAUSE=0.
+ */
+export async function runBlocklistGuard(workspaceId: string): Promise<Array<{ domain: string; reason: string }>> {
+  if (["0", "false", "no", "off"].includes((process.env.OUTREACH_BLOCKLIST_AUTOPAUSE || "").toLowerCase())) return [];
+  const actions: Array<{ domain: string; reason: string }> = [];
+  try {
+    const { probeDnsMany } = await import("./dnsProbe");
+    const senders = await import("../senders/store");
+    const domains = await allDomains(workspaceId);
+    const mailboxes = await allMailboxes(workspaceId);
+    const inboxes = await senders.listInboxes(workspaceId);
+
+    const poolByDomain = new Map<string, string[]>();
+    for (const m of inboxes) {
+      if (m.status === "paused") continue;
+      const d = (m.email.split("@")[1] || "").toLowerCase();
+      if (d) poolByDomain.set(d, [...(poolByDomain.get(d) || []), m.id]);
+    }
+    const candidates = new Set<string>([
+      ...domains.filter((d) => d.status !== "paused").map((d) => d.domain.toLowerCase()),
+      ...poolByDomain.keys(),
+    ]);
+    if (!candidates.size) return [];
+
+    const postures = await probeDnsMany([...candidates]);
+    for (const [domain, posture] of postures) {
+      if (!posture?.dnsbl?.listed) continue;
+      const reason = `listed on ${posture.dnsbl.lists.join(", ") || "a public spam blocklist"}`;
+      const rec = domains.find((d) => d.domain.toLowerCase() === domain && d.status !== "paused");
+      if (rec) {
+        rec.status = "paused";
+        rec.pausedReason = reason;
+        await saveDomain(rec);
+        for (const m of mailboxes.filter((x) => x.domainId === rec.id && x.status !== "paused")) {
+          m.status = "paused";
+          m.pausedReason = `domain paused: ${reason}`;
+          await saveMailbox(m);
+        }
+        actions.push({ domain, reason });
+      }
+      const ids = poolByDomain.get(domain) || [];
+      if (ids.length) {
+        await senders.setStatus(workspaceId, ids, "paused", reason);
+        actions.push({ domain, reason: `${reason} (inbox pool: ${ids.length} paused)` });
+      }
+    }
+  } catch { /* best-effort: a probe failure must never break the daily tick */ }
+  return actions;
+}
+
 /** Ensure a domain has a metrics object, then mutate it. */
 export function ensureMetrics(d: SendingDomain): DeliveryMetrics {
   if (!d.metrics) d.metrics = { sent: 0, delivered: 0, bounced: 0, complained: 0, opened: 0, openedHuman: 0, since: new Date(0).toISOString() };

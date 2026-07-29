@@ -89,6 +89,11 @@ export interface PostalSendInput {
   htmlBody?: string;
   plainBody?: string;
   replyTo?: string;
+  /** ADVISORY ONLY — Postal's send API has no per-message tracking toggle, so these flags are
+   *  NOT forwarded. Open/click tracking on the MTA path is governed by the Postal SERVER
+   *  config (its tracking domain, e.g. track.<domain> from lib/sending/dns.ts); events arrive
+   *  via the webhook (MessageLoaded / MessageLinkClicked -> lib/sending/ingest). Callers
+   *  passing these should not expect them to change behavior. */
   trackOpens?: boolean;
   trackClicks?: boolean;
   headers?: Record<string, string>;

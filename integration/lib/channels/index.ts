@@ -298,7 +298,11 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
       }
     }
     if (!inbox) return null; // pool empty / all capped / none brand-compliant
-    const payload = emailPayload(t.text);
+    // From-domain / link-domain alignment: when OUTREACH_MEDIA_HOST_PATTERN is set (e.g.
+    // "vid.{domain}"), video links ride the sending inbox's own domain instead of the shared
+    // app origin (lib/sending/mediaHost). No-op until the DNS + proxy for those hosts exist.
+    const { alignMediaHost } = await import("../sending/mediaHost");
+    const payload = alignMediaHost(emailPayload(t.text), inbox.email);
     // Gmail/Yahoo bulk-sender compliance: every cold send carries a signed one-click
     // List-Unsubscribe (lib/sending/unsubscribe) + a mailto fallback on the sending inbox.
     // CAN-SPAM compliance: the body itself carries the visible footer (brand identity,
