@@ -33,6 +33,8 @@ export interface SmartleadAccount {
   spamCount?: number;
   messagePerDay?: number;
   dailySent?: number;
+  /** ISO timestamp the account was added upstream, the start of its warm-up clock. */
+  createdAt?: string;
 }
 
 function num(v: unknown): number | undefined {
@@ -90,6 +92,7 @@ export async function listSmartleadAccounts(): Promise<SmartleadAccount[]> {
         spamCount: num(w?.total_spam_count ?? w?.spam_count),
         messagePerDay: num(a?.message_per_day),
         dailySent: num(a?.daily_sent_count),
+        createdAt: typeof a?.created_at === "string" ? a.created_at : undefined,
       });
     }
     if (rows.length < limit) break;
