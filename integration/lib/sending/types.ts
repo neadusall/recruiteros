@@ -77,6 +77,11 @@ export interface SendingDomain {
   updatedAt: string;
   verifiedAt?: string;
   lastError?: string;
+  /** Governor bookkeeping: set when the DELIVERABILITY GOVERNOR paused this
+   *  domain (vs an operator), so the auto-revive pass knows it may bring it
+   *  back after quarantine. Operator pauses are never auto-revived. */
+  autoPaused?: boolean;
+  pausedAt?: string;
 }
 
 export type ServerStatus = "pending" | "provisioning" | "installing" | "active" | "error";

@@ -107,6 +107,12 @@ async function tickSending(): Promise<void> {
     try { await runSendingDaily(ws); } catch { /* one workspace */ }
   }
   try { await runSeedMaintenance(); } catch { /* seeds are global, best-effort */ }
+  // Email ID health guard: auto-hold pool inboxes going bad, auto-revive
+  // recovered ones onto the reduced ramp. Warm-up (external) is untouched.
+  try {
+    const { runSenderHealthGuard } = await import("../senders");
+    await runSenderHealthGuard();
+  } catch { /* guard is best-effort per tick */ }
 }
 
 /** Publish LinkedIn Poster posts that were approved for a scheduled time. */

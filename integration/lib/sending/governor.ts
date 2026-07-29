@@ -37,27 +37,62 @@ export function evaluateDomain(d: SendingDomain): string | null {
   return null;
 }
 
+/** Quarantine before a governor-paused domain may auto-revive (rest + fresh
+ *  reputation data), env-tunable in days. */
+function reviveAfterMs(): number {
+  const days = Number(process.env.SENDING_GOVERNOR_REVIVE_DAYS);
+  return (Number.isFinite(days) && days >= 1 ? days : 7) * 86_400_000;
+}
+
 /**
  * Run the governor across a workspace. Pauses offending domains (+ their
- * mailboxes) and returns what it did. Idempotent.
+ * mailboxes), and auto-revives GOVERNOR-paused domains once quarantine has
+ * passed and reputation reads clean: the domain restarts with a FRESH metrics
+ * window and its mailboxes come back as "warming" (the reduced ramp), never at
+ * full volume. Operator-paused domains are never auto-revived. Idempotent.
  */
-export async function runGovernor(workspaceId: string): Promise<Array<{ domain: string; reason: string }>> {
-  const actions: Array<{ domain: string; reason: string }> = [];
+export async function runGovernor(workspaceId: string): Promise<Array<{ domain: string; reason: string; action?: "paused" | "revived" }>> {
+  const actions: Array<{ domain: string; reason: string; action?: "paused" | "revived" }> = [];
   const domains = await allDomains(workspaceId);
   const mailboxes = await allMailboxes(workspaceId);
   for (const d of domains) {
-    if (d.status === "paused") continue;
+    if (d.status === "paused") {
+      // Auto-revive pass: only for pauses THIS governor tripped.
+      if (!d.autoPaused) continue;
+      const restedLongEnough = d.pausedAt ? Date.now() - Date.parse(d.pausedAt) >= reviveAfterMs() : false;
+      const reputationClean = d.reputation?.tier !== "bad"
+        && !(typeof d.reputation?.spamRatePct === "number" && d.reputation.spamRatePct > THRESHOLDS.spamRatePct);
+      if (restedLongEnough && reputationClean) {
+        // Fresh measurement window: the old cumulative bounce/complaint counts
+        // belong to the incident; the re-ramped domain earns its own record and
+        // re-pauses automatically if it trips the thresholds again.
+        d.metrics = { sent: 0, delivered: 0, bounced: 0, complained: 0, opened: 0, openedHuman: 0, since: new Date().toISOString() };
+        d.status = "active";
+        d.autoPaused = false;
+        d.pausedReason = undefined;
+        await saveDomain(d);
+        for (const m of mailboxes.filter((x) => x.domainId === d.id && x.status === "paused" && (x.pausedReason || "").startsWith("domain paused:"))) {
+          m.status = "warming";
+          m.pausedReason = undefined;
+          await saveMailbox(m);
+        }
+        actions.push({ domain: d.domain, reason: "quarantine passed, reputation clean; re-ramping as warming", action: "revived" });
+      }
+      continue;
+    }
     const reason = evaluateDomain(d);
     if (reason) {
       d.status = "paused";
       d.pausedReason = reason;
+      d.autoPaused = true;
+      d.pausedAt = new Date().toISOString();
       await saveDomain(d);
       for (const m of mailboxes.filter((x) => x.domainId === d.id && x.status !== "paused")) {
         m.status = "paused";
         m.pausedReason = `domain paused: ${reason}`;
         await saveMailbox(m);
       }
-      actions.push({ domain: d.domain, reason });
+      actions.push({ domain: d.domain, reason, action: "paused" });
     }
   }
   return actions;

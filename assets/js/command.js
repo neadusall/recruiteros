@@ -787,6 +787,13 @@
       var alerts = [];
       if (!prov.pool) alerts.push(["info", "No cold-send inboxes imported yet. Import your inbox pool on the Senders screen to send for real."]);
       if (!prov.smartlead) alerts.push(["info", "The warm-up engine is not connected. Ask your account team to enable warm-up health on the fleet."]);
+      // Health guard: what the automatic turn-down / bounce-back did recently.
+      var guard = d.guard || {};
+      if (guard.holding) alerts.push(["warn", guard.holding + " Email ID" + (guard.holding === 1 ? "" : "s") + " in auto-hold: cold sends off while warm-up rebuilds strength, back automatically once healthy."]);
+      (guard.recent || []).slice(0, 4).forEach(function (g) {
+        if (g.action === "held") alerts.push(["warn", "Auto-held " + g.email + ": " + g.reason]);
+        else if (g.action === "revived") alerts.push(["info", "Auto-revived " + g.email + ", back on the warm-up ramp at reduced volume."]);
+      });
       domains.forEach(function (dm) {
         if (dm.status === "paused") alerts.push(["bad", "Domain " + dm.domain + " is paused: " + ((dm.warnings || [])[0] || dm.pausedReason || "governor")]);
         else if (dm.healthLabel === "at_risk") alerts.push(["bad", "Domain " + dm.domain + " at risk: " + ((dm.warnings || []).join("; ") || "health low")]);

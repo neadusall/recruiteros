@@ -58,7 +58,16 @@ async function run(req: Request) {
   let seeds: unknown = null;
   try { seeds = await runSeedMaintenance(); } catch (e: any) { seeds = { error: e?.message ?? "seed_maintenance_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet });
+  // Email ID health guard over every portal's pool: auto-hold cold sends on
+  // inboxes going bad (warm-up keeps running so they regain strength) and
+  // auto-revive held ones once health recovers, onto the reduced ramp.
+  let guard: unknown = null;
+  try {
+    const { runSenderHealthGuard } = await import("../../../../lib/senders");
+    guard = await runSenderHealthGuard();
+  } catch (e: any) { guard = { error: e?.message ?? "health_guard_failed" }; }
+
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard });
 }
 
 export const GET = run;

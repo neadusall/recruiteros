@@ -51,6 +51,17 @@ export interface SenderInbox {
   lastError?: string;
   pausedReason?: string;
 
+  // Health guard (set ONLY by lib/senders/healthGuard; operator pauses never set autoHold)
+  autoHold?: boolean;         // the guard (not an operator) paused this inbox
+  autoHoldAt?: string;
+  autoHoldReason?: string;
+  recoverStreak?: number;     // consecutive healthy checks while held
+  warmupRepPct?: number;      // last synced external warm-up reputation %
+  warmupStatus?: string;      // last synced external warm-up status
+  healthCheckedAt?: string;
+  guardBaseSent?: number;     // bounce window baseline (reset on each revive)
+  guardBaseBounced?: number;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -85,6 +96,10 @@ export interface SenderInboxPublic {
   lastSendAt?: string;
   lastError?: string;
   pausedReason?: string;
+  autoHold?: boolean;
+  autoHoldReason?: string;
+  warmupRepPct?: number;
+  warmupStatus?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -34,7 +34,7 @@ import {
   startAutoSetup, advanceAutoSetup, setupStatus, pauseAutoSetup,
 } from "../../../lib/sending";
 import type { SeedAccount } from "../../../lib/sending";
-import { listInboxes } from "../../../lib/senders";
+import { listInboxes, runSenderHealthGuard, guardStatus } from "../../../lib/senders";
 
 /** Strip the app password before a seed ever goes to the client. */
 function publicSeed(s: SeedAccount) {
@@ -75,6 +75,9 @@ export async function GET(req: Request) {
     // inboxes real cold sends actually leave from).
     providers: { ...providerStatus(), pool: poolCount > 0 },
     poolCount,
+    // Email ID health guard: last run + this workspace's recent auto-hold /
+    // auto-revive actions (tenant-filtered) + how many are held right now.
+    guard: await guardStatus(ws),
     suppression: (await listSuppression()).slice(0, 50),
     events: await recentEvents(50),
     seeds: rawSeeds.map(publicSeed),
@@ -247,7 +250,12 @@ export async function POST(req: Request) {
   }
 
   if (b?.action === "run-governor") {
-    return ok({ paused: await runGovernor(ws) });
+    // The panel's "Run safety check": domain governor (pause/revive) + the
+    // Email ID health guard over the pool, in one click.
+    const paused = await runGovernor(ws);
+    let guard: unknown = null;
+    try { guard = await runSenderHealthGuard(); } catch (e: any) { guard = { error: e?.message ?? "health_guard_failed" }; }
+    return ok({ paused, guard });
   }
 
   // Operator "doctor" controls: pause or revive a single mailbox by hand.

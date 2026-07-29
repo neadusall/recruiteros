@@ -48,7 +48,10 @@ export function toPublic(m: SenderInbox): SenderInboxPublic {
     hasSmtpCreds: !!m.smtpPassEnc,
     status: m.status, warmExternal: m.warmExternal,
     sent: m.sent, bounced: m.bounced, lastSendAt: m.lastSendAt, lastError: m.lastError,
-    pausedReason: m.pausedReason, createdAt: m.createdAt, updatedAt: m.updatedAt,
+    pausedReason: m.pausedReason,
+    autoHold: m.autoHold, autoHoldReason: m.autoHoldReason,
+    warmupRepPct: m.warmupRepPct, warmupStatus: m.warmupStatus,
+    createdAt: m.createdAt, updatedAt: m.updatedAt,
   };
 }
 
@@ -195,6 +198,13 @@ export async function setStatus(workspaceId: string, ids: string[], status: Send
     if (m.workspaceId === workspaceId && set.has(m.id)) {
       m.status = status;
       m.pausedReason = status === "paused" ? pausedReason : undefined;
+      // An operator decision supersedes the guard: clear the auto-hold marker so
+      // the guard treats this row as operator-managed, and give a manual revive
+      // a clean bounce window (same as an auto bounce-back).
+      m.autoHold = false;
+      m.autoHoldReason = undefined;
+      m.recoverStreak = 0;
+      if (status !== "paused") { m.guardBaseSent = m.sent || 0; m.guardBaseBounced = m.bounced || 0; }
       m.updatedAt = nowIso();
       n++;
     }
