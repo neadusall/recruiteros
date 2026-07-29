@@ -541,6 +541,7 @@ async function step(item: NightItem): Promise<void> {
       if (!count) { item.stage = "koldDb"; touch(item); return; }
       const jobId = await submitLaxisJob(csv, "koldinfo");
       run.koldJob = { jobId, submittedAt: nowIso(), count };
+      if (!run.enrichStartedAt) run.enrichStartedAt = nowIso();
       await saveSourcingRun(ws, { ...run });
       touch(item, `free pass 1: looking up ${count} candidate(s)…`);
       return;
@@ -574,6 +575,7 @@ async function step(item: NightItem): Promise<void> {
       if (!count) { item.stage = "laxis"; touch(item); return; }
       const jobId = await submitLaxisJob(csv, "koldinfo-db");
       run.koldDbJob = { jobId, submittedAt: nowIso(), count };
+      if (!run.enrichStartedAt) run.enrichStartedAt = nowIso();
       await saveSourcingRun(ws, { ...run });
       touch(item, `free pass 2: database lookup for ${count} candidate(s)…`);
       return;
@@ -621,6 +623,7 @@ async function step(item: NightItem): Promise<void> {
         item.added.emails += gf.enriched; item.added.phones += gf.phones;
         rememberLaxisSkip(run, start, "laxis_down_cooldown");
         run.laxisProgress = markOffsetDone(progress, start, total);
+        stampEnrichStats(run, total);
         await saveSourcingRun(ws, { ...run });
         if (run.laxisProgress.nextStart === null) { chainDone(item); return; }
         touch(item, laxisNote(run, total));
@@ -641,6 +644,7 @@ async function step(item: NightItem): Promise<void> {
         jobId, submittedAt: nowIso(), count: targetRows.length, start, sent,
         targets: targetRows.map((c) => (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "")),
       };
+      if (!run.enrichStartedAt) run.enrichStartedAt = nowIso();
       run.laxisProgress = { ...progress, total, updatedAt: nowIso() };
       await saveSourcingRun(ws, { ...run });
       touch(item, laxisNote(run, total));
@@ -677,6 +681,7 @@ async function step(item: NightItem): Promise<void> {
     item.added.emails += gf.enriched; item.added.phones += gf.phones;
     delete run.laxisJob;
     run.laxisProgress = markOffsetDone(run.laxisProgress ?? progress, start, total);
+    stampEnrichStats(run, total);
     await saveSourcingRun(ws, { ...run });
     if (run.laxisProgress.nextStart === null) { chainDone(item); return; }
     touch(item, laxisNote(run, total));
@@ -744,4 +749,12 @@ function markOffsetDone(progress: NonNullable<SourcingRun["laxisProgress"]>, sta
 function laxisNote(run: SourcingRun, total: number): string {
   const done = Math.min((run.laxisProgress?.doneOffsets.length ?? 0) * MAX_LAXIS_UPLOAD, total);
   return `final pass: ${done}/${total} rows through`;
+}
+
+/** Once the last chunk completes, record the chain's real wall-clock duration
+ *  (feeds the saved-list ETA's learned per-row pace). Stamps at most once. */
+function stampEnrichStats(run: SourcingRun, rows: number): void {
+  if (run.laxisProgress?.nextStart !== null || !run.enrichStartedAt || run.enrichStats) return;
+  const ms = Date.now() - Date.parse(run.enrichStartedAt);
+  if (Number.isFinite(ms) && ms > 0) run.enrichStats = { finishedAt: nowIso(), ms, rows };
 }

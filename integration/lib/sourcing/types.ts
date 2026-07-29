@@ -212,6 +212,17 @@ export interface SourcingRun {
    */
   laxisProgress?: LaxisProgress;
   /**
+   * When the enrichment chain's FIRST rung was submitted (set once, kept across
+   * resumes). Lets the UI show a truthful elapsed/projected time for the chain.
+   */
+  enrichStartedAt?: string;
+  /**
+   * Stamped once, when the chain's last chunk completes: the real wall-clock
+   * duration of this run's enrichment. Finished runs feed the saved-list ETA
+   * (median per-row pace of this workspace's own chains).
+   */
+  enrichStats?: { finishedAt: string; ms: number; rows: number };
+  /**
    * Chunks that were completed WITHOUT their Laxis pass because the worker was down
    * (login wall, UI drift, credentials) when they ran: the in-house waterfall still
    * filled them and their offsets were marked done so the chain never stalls. Pressing

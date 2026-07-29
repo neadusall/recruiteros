@@ -601,6 +601,7 @@ export async function POST(req: Request) {
       if (!count) return ok({ submitted: false, nothingMissing: true, skipped });
       const jobId = await submitLaxisJob(csv, "koldinfo");
       run.koldJob = { jobId, submittedAt: nowIso(), count };
+      if (!run.enrichStartedAt) run.enrichStartedAt = nowIso();
       await saveSourcingRun(ws, { ...run });
       return ok({ submitted: true, jobId, count, skipped });
     }
@@ -649,6 +650,7 @@ export async function POST(req: Request) {
       if (!count) return ok({ submitted: false, nothingMissing: true, skipped });
       const jobId = await submitLaxisJob(csv, "koldinfo-db");
       run.koldDbJob = { jobId, submittedAt: nowIso(), count };
+      if (!run.enrichStartedAt) run.enrichStartedAt = nowIso();
       await saveSourcingRun(ws, { ...run });
       return ok({ submitted: true, jobId, count, skipped });
     }
@@ -761,6 +763,7 @@ export async function POST(req: Request) {
         jobId, submittedAt: nowIso(), count: targetRows.length, start, sent,
         targets: targetRows.map(candKey),
       };
+      if (!run.enrichStartedAt) run.enrichStartedAt = nowIso();
       run.laxisProgress = { ...progress, total, updatedAt: nowIso() };
       await saveSourcingRun(ws, { ...run });
       const remaining = Math.max(0, total - (start + targetRows.length));
@@ -803,6 +806,10 @@ export async function POST(req: Request) {
         const doneOffsets = Array.from(new Set([...prog.doneOffsets, start])).sort((a, b2) => a - b2);
         const nextStart = nextLaxisOffset(doneOffsets, total, MAX_LAXIS_UPLOAD);
         run.laxisProgress = { doneOffsets, total, nextStart, updatedAt: nowIso() };
+        if (nextStart === null && run.enrichStartedAt && !run.enrichStats) {
+          const chainMs = Date.now() - Date.parse(run.enrichStartedAt);
+          if (Number.isFinite(chainMs) && chainMs > 0) run.enrichStats = { finishedAt: nowIso(), ms: chainMs, rows: total };
+        }
         const skipped = run.laxisSkipped ?? { offsets: [], error: errMsg, at: nowIso() };
         if (!skipped.offsets.includes(start)) skipped.offsets.push(start);
         skipped.error = errMsg;
@@ -841,6 +848,10 @@ export async function POST(req: Request) {
       const doneOffsets = Array.from(new Set([...prog.doneOffsets, start])).sort((a, b) => a - b);
       const nextStart = nextLaxisOffset(doneOffsets, total, MAX_LAXIS_UPLOAD);
       run.laxisProgress = { doneOffsets, total, nextStart, updatedAt: nowIso() };
+      if (nextStart === null && run.enrichStartedAt && !run.enrichStats) {
+        const chainMs = Date.now() - Date.parse(run.enrichStartedAt);
+        if (Number.isFinite(chainMs) && chainMs > 0) run.enrichStats = { finishedAt: nowIso(), ms: chainMs, rows: total };
+      }
       await saveSourcingRun(ws, { ...run });
       return ok({ done: true, status: "done", laxis, gapFill, warnings, nextStart, doneOffsets, run });
     }
