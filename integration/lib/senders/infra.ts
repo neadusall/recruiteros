@@ -185,6 +185,36 @@ export async function sweepSmtpAuth(workspaceId: string, maxTests = 12): Promise
   }
 }
 
+/* ------------------------------ revive errored logins ------------------------------ */
+
+export interface ReviveReport { checked: number; revived: number; stillFailing: number; at: string; }
+
+/**
+ * Re-verify own-smtp inboxes currently in ERROR and, on a successful login, flip
+ * them back to "warming" so they rejoin the send rotation. Unlike sweepSmtpAuth
+ * this is NOT gated by the 24h freshness window and targets only errored own-smtp
+ * mailboxes, so a credential that just got fixed (e.g. a self-healed base64
+ * password) is revived on the next maintenance tick without waiting for anyone to
+ * open the Senders panel. A login that still fails keeps its error, untouched.
+ */
+export async function reviveErroredSmtpLogins(workspaceId: string, max = 60): Promise<ReviveReport> {
+  const at = new Date().toISOString();
+  const all = await listInboxes(workspaceId);
+  const targets = all.filter((m) => m.provider === "own-smtp" && m.status === "error").slice(0, Math.max(0, max));
+  let revived = 0, stillFailing = 0;
+  const CONCURRENCY = 3;
+  for (let i = 0; i < targets.length; i += CONCURRENCY) {
+    await Promise.all(targets.slice(i, i + CONCURRENCY).map(async (m) => {
+      const r = await verifyInbox(m);
+      (m as unknown as { lastVerifyAt?: string }).lastVerifyAt = new Date().toISOString();
+      if (r.ok) { m.status = "warming"; m.lastError = undefined; revived++; }
+      else { m.lastError = r.error; stillFailing++; }
+      await saveInbox(m);
+    }));
+  }
+  return { checked: targets.length, revived, stillFailing, at };
+}
+
 /* ------------------------------ mailcow (optional) ------------------------------ */
 
 export interface MailcowSummary {

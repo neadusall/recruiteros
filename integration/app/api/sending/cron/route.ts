@@ -67,7 +67,24 @@ async function run(req: Request) {
     guard = await runSenderHealthGuard();
   } catch (e: any) { guard = { error: e?.message ?? "health_guard_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard });
+  // Revive own-smtp logins stuck in error: re-verify and flip error->warming on a
+  // successful login, so a just-fixed credential (e.g. a self-healed base64
+  // password) rejoins the send rotation hands-off, without waiting for someone to
+  // open the Senders panel or for the 24h auth-sweep freshness window.
+  let revive: unknown = null;
+  try {
+    const { listSenderWorkspaceIds } = await import("../../../../lib/senders");
+    const { reviveErroredSmtpLogins } = await import("../../../../lib/senders/infra");
+    const ids = await listSenderWorkspaceIds();
+    let checked = 0, revived = 0, stillFailing = 0;
+    for (const ws of ids) {
+      try { const r = await reviveErroredSmtpLogins(ws, 60); checked += r.checked; revived += r.revived; stillFailing += r.stillFailing; }
+      catch { /* per-workspace best-effort */ }
+    }
+    revive = { workspaces: ids.length, checked, revived, stillFailing };
+  } catch (e: any) { revive = { error: e?.message ?? "revive_failed" }; }
+
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive });
 }
 
 export const GET = run;
