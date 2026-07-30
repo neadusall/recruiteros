@@ -41,10 +41,10 @@ export async function GET(req: Request) {
   const mailcowPortal = (process.env.MAILCOW_PORTAL || "lume").toLowerCase();
   const mailcow = token === mailcowPortal && mailcowConfigured() ? await mailcowSummary() : null;
 
-  // Fill in the owned mail server's steady-state daily send capacity from its
-  // live inventory (mailboxes × warmed per-mailbox/day), unless a dailyCap was
-  // already pinned via SMTP_WATCH_HOSTS. This surfaces the "≈1,100/day" figure
-  // on the Lume portal (75 warmed mailboxes × 15/day).
+  // Fill in the owned mail server's fully-ramped daily send capacity from its
+  // live inventory (mailboxes × per-mailbox ceiling), unless a dailyCap was
+  // already pinned via SMTP_WATCH_HOSTS. Matches the Sending-infrastructure
+  // "at full ramp" figure (75 mailboxes × 20/day = ~1,500/day on the Lume portal).
   if (mailcow && mailcow.mailboxes != null) {
     const mailcowHost = mailcow.baseUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
     for (const s of servers) {

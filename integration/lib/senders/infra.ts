@@ -26,19 +26,20 @@
 
 import net from "net";
 import { listInboxes, verifyInbox, saveInbox } from "./index";
+import { coldMaxPerInbox } from "./limits";
 import { ensureConfig, mailServerUrl, mailServerKey, mailServerConnected } from "../sending/config";
 import type { SenderInbox } from "./types";
 
 /* ------------------------------ send capacity ------------------------------ */
 
 /**
- * Warmed steady-state sends/day for ONE dedicated mailbox on an owned mail
- * server (e.g. mail.lumesp.com). Deliberately conservative: the solo-recruiter
- * runbook holds warmed mailboxes at ~8-15/day for best-in-class inbox
- * placement, so a fully warmed server's daily capacity is mailboxes × this.
- * A 75-mailbox server therefore sustains ~1,100 sends/day.
+ * Fully-ramped cold sends/day for ONE dedicated mailbox on an owned mail server
+ * (e.g. mail.lumesp.com). Kept in lockstep with the send model's per-inbox ceiling
+ * (limits.ts coldMaxPerInbox, default 20) so this per-server figure and the
+ * Sending-infrastructure-split "at full ramp" number agree. A 75-mailbox server
+ * therefore matures to ~1,500 sends/day.
  */
-export const WARMED_PER_MAILBOX_PER_DAY = 15;
+export const WARMED_PER_MAILBOX_PER_DAY = coldMaxPerInbox();
 
 /** Round a capacity figure to a clean headline number (nearest 100). */
 export function roundCapacity(n: number): number {

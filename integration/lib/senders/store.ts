@@ -10,7 +10,7 @@
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { encryptSecret, decryptSecret } from "./crypto";
-import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCapFor, coldMaxPerInbox } from "./limits";
+import { COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCapFor, coldMaxPerInbox } from "./limits";
 import type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, RecruiterPool } from "./types";
 
 interface SendersState { inboxes: SenderInbox[]; lastResetDay?: string; }
@@ -376,6 +376,7 @@ export interface ProviderCapacity {
   coldCapacity: number;
   coldUsedToday: number;
   coldRemaining: number;
+  matureCapacity: number;            // cold sends/day at FULL ramp (flat model: == coldCapacity)
 }
 
 export interface SendCapacity {
@@ -387,6 +388,7 @@ export interface SendCapacity {
   coldCapacity: number;
   coldUsedToday: number;
   coldRemaining: number;
+  matureCapacity: number;            // portal-wide cold sends/day at FULL ramp
   warmingPerDay: number;
   byRecruiter: RecruiterCapacity[];
   byProvider: ProviderCapacity[];
@@ -406,24 +408,28 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
   const recs = new Map<string, RecruiterCapacity & { _domains: Set<string> }>();
   const provs = new Map<string, ProviderCapacity & { _domains: Set<string> }>();
   const domains = new Set<string>();
-  let inboxes = 0, coldCapacity = 0, coldUsedToday = 0;
+  let inboxes = 0, coldCapacity = 0, coldUsedToday = 0, matureCapacity = 0;
   for (const m of mine) {
     const cap = coldCapFor(m);
+    // Full-ramp ceiling for this inbox: Sending.ac is flat (never ramps), every
+    // other provider matures to coldMaxPerInbox()/day. Lets the UI show the real
+    // capacity (e.g. 1,500/day) next to today's warm-up-throttled figure.
+    const mature = m.provider === "sending-ac" ? SENDING_AC_PER_INBOX : coldMaxPerInbox();
     const used = Math.min(m.sentToday, cap);
     const dom = domainOf(m.email);
-    inboxes++; coldCapacity += cap; coldUsedToday += used;
+    inboxes++; coldCapacity += cap; coldUsedToday += used; matureCapacity += mature;
     if (dom) domains.add(dom);
     const pKey = m.provider || "other";
     let pv = provs.get(pKey);
     if (!pv) {
       pv = {
         provider: pKey, capModel: pKey === "sending-ac" ? "flat" : "ramp",
-        inboxes: 0, domains: 0, coldCapacity: 0, coldUsedToday: 0, coldRemaining: 0,
+        inboxes: 0, domains: 0, coldCapacity: 0, coldUsedToday: 0, coldRemaining: 0, matureCapacity: 0,
         _domains: new Set<string>(),
       };
       provs.set(pKey, pv);
     }
-    pv.inboxes++; pv.coldCapacity += cap; pv.coldUsedToday += used;
+    pv.inboxes++; pv.coldCapacity += cap; pv.coldUsedToday += used; pv.matureCapacity += mature;
     if (dom) pv._domains.add(dom);
     const key = m.ownerId || "_unassigned";
     let r = recs.get(key);
@@ -452,12 +458,14 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
       provider: p.provider, capModel: p.capModel, inboxes: p.inboxes, domains: p._domains.size,
       coldCapacity: p.coldCapacity, coldUsedToday: p.coldUsedToday,
       coldRemaining: Math.max(0, p.coldCapacity - p.coldUsedToday),
+      matureCapacity: p.matureCapacity,
     }))
     .sort((a, b) => b.inboxes - a.inboxes);
   return {
     coldPerInbox: coldMaxPerInbox(), warmingPerInbox: WARMING_PER_INBOX, inboxesPerDomain: INBOXES_PER_DOMAIN,
     inboxes, domains: domains.size,
     coldCapacity, coldUsedToday, coldRemaining: Math.max(0, coldCapacity - coldUsedToday),
+    matureCapacity,
     warmingPerDay: inboxes * WARMING_PER_INBOX,
     byRecruiter,
     byProvider,

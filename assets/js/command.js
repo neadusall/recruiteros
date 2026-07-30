@@ -7111,12 +7111,16 @@
     if (!list.length) { box.innerHTML = ""; return; }
     var notes = {
       "sending-ac": "Sending.ac model: every mailbox sends a flat 2 cold emails/day, warmed externally. More volume means more mailboxes, not higher caps.",
-      "own-smtp": "Your internal SMTP server: mailboxes ramp 5, 10, 15, then " + (cap.coldPerInbox || 20) + "/day across their first four weeks of sending.",
+      "own-smtp": "Your internal SMTP server: each mailbox ramps 5, 10, 15, then " + (cap.coldPerInbox || 20) + "/day over its first four weeks once activated. Mailboxes still warming send the day-one floor until you activate them.",
     };
+    function fmt(n) { return Number(n || 0).toLocaleString(); }
     box.innerHTML = '<div class="snd-split"><div class="snd-split-t">Sending infrastructure split</div>' +
       list.map(function (p) {
+        // Show today's warm-up-throttled figure, plus the full-ramp ceiling when the
+        // provider ramps and isn't there yet, so the capacity never reads misleadingly low.
+        var ramps = p.matureCapacity > p.coldCapacity;
         return '<div class="snd-split-row">' + sndProviderBadge(p.provider) +
-          '<span class="snd-split-meta">' + p.inboxes + ' Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + p.coldCapacity + '</b> cold sends/day · ' + p.coldRemaining + ' left today</span>' +
+          '<span class="snd-split-meta">' + p.inboxes + ' Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + fmt(p.coldCapacity) + '</b> cold sends/day' + (ramps ? ' <span class="muted">(ramps to <b>' + fmt(p.matureCapacity) + '</b>/day at full ramp)</span>' : '') + ' · ' + fmt(p.coldRemaining) + ' left today</span>' +
           (notes[p.provider] ? '<span class="snd-split-note">' + esc(notes[p.provider]) + '</span>' : '') +
         '</div>';
       }).join("") + '</div>';
