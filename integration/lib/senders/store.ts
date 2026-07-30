@@ -53,8 +53,8 @@ function decodeBase64Password(cur: string): string | null {
  * mailbox passwords base64-ENCODED, and an early importer stored them without
  * decoding, so every own-smtp login was rejected (535/454 authentication failed).
  * We repair a stored password IN PLACE only when the inbox is an own-smtp mailbox
- * whose last error is an AUTH failure — so a credential that actually
- * authenticates is never touched, whatever its shape — AND the stored value is
+ * whose last error is an AUTH failure (so a credential that actually
+ * authenticates is never touched, whatever its shape) AND the stored value is
  * unambiguously base64 per decodeBase64Password. Runs at hydrate (once per boot),
  * which also inoculates against a base64 password reappearing after a re-import.
  */
