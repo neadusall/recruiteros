@@ -27,6 +27,26 @@ function transportFor(m: SenderInbox) {
   });
 }
 
+/**
+ * Whether this inbox has an SMTP login we can actually prove from here.
+ *
+ * The Sending.ac-provisioned fleet (OAuth OUTLOOK/GMAIL mailboxes) is imported
+ * WITHOUT an SMTP password — those accounts send their warm-up volume upstream,
+ * never by SMTP-AUTH from our server. Running verifyInbox on one is an
+ * empty-password login that ALWAYS fails, which would falsely latch the mailbox
+ * to "error". So anything with no decryptable password is "nothing to verify"
+ * (healthy-by-definition on our side), and callers must skip it rather than
+ * treat the guaranteed failure as a real one.
+ */
+export function hasVerifiableSmtp(m: SenderInbox): boolean {
+  if (!m.smtpHost || !m.smtpUser) return false;
+  try {
+    return decryptSecret(m.smtpPassEnc).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Send one message via the given inbox. Never throws — returns {ok}. */
 export async function sendViaInbox(m: SenderInbox, msg: SmtpMessage): Promise<SmtpResult> {
   try {

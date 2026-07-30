@@ -27,6 +27,7 @@
 import net from "net";
 import { listInboxes, verifyInbox, saveInbox } from "./index";
 import { coldMaxPerInbox } from "./limits";
+import { hasVerifiableSmtp } from "./smtp";
 import { ensureConfig, mailServerUrl, mailServerKey, mailServerConnected } from "../sending/config";
 import type { SenderInbox } from "./types";
 
@@ -151,14 +152,17 @@ export async function sweepSmtpAuth(workspaceId: string, maxTests = 12): Promise
   const at = new Date().toISOString();
   if (sweepInFlight.has(workspaceId)) {
     const all = await listInboxes(workspaceId);
-    const stale = all.filter((m) => Date.now() - lastVerifiedAt(m) > SWEEP_FRESH_MS).length;
+    const stale = all.filter((m) => hasVerifiableSmtp(m) && Date.now() - lastVerifiedAt(m) > SWEEP_FRESH_MS).length;
     return { tested: 0, passed: 0, failed: 0, pendingStale: stale, at };
   }
   sweepInFlight.add(workspaceId);
   try {
     const all = await listInboxes(workspaceId);
+    // Only test mailboxes that actually have an SMTP login to prove. Credential-
+    // less upstream senders (the Sending.ac fleet) would fail an empty-password
+    // verify every time and get falsely latched to "error", so they are excluded.
     const stale = all
-      .filter((m) => Date.now() - lastVerifiedAt(m) > SWEEP_FRESH_MS)
+      .filter((m) => hasVerifiableSmtp(m) && Date.now() - lastVerifiedAt(m) > SWEEP_FRESH_MS)
       .sort((a, b) => lastVerifiedAt(a) - lastVerifiedAt(b));
     const batch = stale.slice(0, Math.max(0, maxTests));
     let passed = 0;
@@ -188,20 +192,38 @@ export async function sweepSmtpAuth(workspaceId: string, maxTests = 12): Promise
 
 /* ------------------------------ revive errored logins ------------------------------ */
 
-export interface ReviveReport { checked: number; revived: number; stillFailing: number; at: string; }
+export interface ReviveReport { checked: number; revived: number; stillFailing: number; cleared: number; at: string; }
 
 /**
- * Re-verify own-smtp inboxes currently in ERROR and, on a successful login, flip
- * them back to "warming" so they rejoin the send rotation. Unlike sweepSmtpAuth
- * this is NOT gated by the 24h freshness window and targets only errored own-smtp
- * mailboxes, so a credential that just got fixed (e.g. a self-healed base64
- * password) is revived on the next maintenance tick without waiting for anyone to
- * open the Senders panel. A login that still fails keeps its error, untouched.
+ * Reconcile inboxes currently in ERROR each maintenance tick, hands-off:
+ *
+ *  1) Credential-less upstream senders (the Sending.ac fleet, no SMTP password)
+ *     can NOT be "in error" from our side — there is no login to fail. If one is
+ *     stuck at "error" (a stale flag from an old sweep), clear it straight back
+ *     to "warming". No network call; these can't be verified from here.
+ *  2) Mailboxes that DO have an SMTP login (own-smtp) are re-verified, and on a
+ *     successful login flipped back to "warming" so a just-fixed credential
+ *     (e.g. a self-healed base64 password) rejoins the rotation without waiting
+ *     for the 24h sweep window or for anyone to open the Senders panel. A login
+ *     that still fails keeps its error, untouched.
  */
 export async function reviveErroredSmtpLogins(workspaceId: string, max = 60): Promise<ReviveReport> {
   const at = new Date().toISOString();
   const all = await listInboxes(workspaceId);
-  const targets = all.filter((m) => m.provider === "own-smtp" && m.status === "error").slice(0, Math.max(0, max));
+  const errored = all.filter((m) => m.status === "error");
+
+  // 1) Release false errors on upstream senders (nothing to verify from here).
+  let cleared = 0;
+  for (const m of errored.filter((m) => !hasVerifiableSmtp(m))) {
+    m.status = "warming";
+    m.lastError = undefined;
+    (m as unknown as { lastVerifyAt?: string }).lastVerifyAt = new Date().toISOString();
+    await saveInbox(m);
+    cleared++;
+  }
+
+  // 2) Re-verify real SMTP logins that are still errored.
+  const targets = errored.filter((m) => hasVerifiableSmtp(m)).slice(0, Math.max(0, max));
   let revived = 0, stillFailing = 0;
   const CONCURRENCY = 3;
   for (let i = 0; i < targets.length; i += CONCURRENCY) {
@@ -213,7 +235,7 @@ export async function reviveErroredSmtpLogins(workspaceId: string, max = 60): Pr
       await saveInbox(m);
     }));
   }
-  return { checked: targets.length, revived, stillFailing, at };
+  return { checked: targets.length, revived, stillFailing, cleared, at };
 }
 
 /* ------------------------------ mailcow (optional) ------------------------------ */
