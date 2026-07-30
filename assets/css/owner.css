@@ -196,3 +196,59 @@
 .impact-box { border-left: 3px solid var(--brand); background: var(--brand-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 10px 14px; margin: 14px 0 4px; }
 .impact-box .ib-label { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--brand); margin-bottom: 4px; }
 .impact-box p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text); }
+
+/* ---------------- receipts · month by month ----------------
+   The grid is wide by nature (one column per month), so it scrolls horizontally with the
+   service column pinned. Cells carry a thumbnail of the actual invoice, which is the whole
+   point of the panel: a figure you can click through to the paper behind it. */
+.rc-months { height: 30px; font-size: 12.5px; }
+.rc-wrap { max-height: 620px; overflow: auto; }
+.rc-matrix { border-collapse: separate; border-spacing: 0; }
+.rc-matrix th, .rc-matrix td { border-bottom: 1px solid var(--border); }
+.rc-matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--bg); }
+.rc-matrix th.rc-svc {
+  position: sticky; left: 0; z-index: 2; background: var(--bg); text-align: left;
+  min-width: 210px; max-width: 260px; border-right: 1px solid var(--border);
+}
+.rc-matrix thead th.rc-svc { z-index: 4; }
+.rc-matrix tfoot th.rc-svc, .rc-matrix tfoot td { background: var(--bg-soft); font-weight: 600; }
+.rc-matrix tfoot tr.rc-foot td, .rc-matrix tfoot tr.rc-foot th { border-top: 1px solid var(--border); }
+.rc-matrix td { text-align: right; vertical-align: top; padding: 8px 10px; min-width: 92px; }
+
+.rc-cell { cursor: pointer; transition: background 0.12s ease; }
+.rc-cell:hover { background: var(--brand-soft); }
+.rc-amt { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; }
+.rc-amt.est { font-weight: 500; color: var(--text-muted); }
+.rc-delta { font-size: 11px; font-variant-numeric: tabular-nums; }
+.rc-dash { color: var(--text-muted); opacity: 0.45; }
+.rc-gap { font-size: 10.5px; color: var(--danger); font-weight: 600; }
+.rc-noshot { font-size: 10.5px; color: var(--text-muted); }
+.rc-thumb {
+  display: block; margin: 4px 0 0 auto; width: 62px; height: 42px; object-fit: cover;
+  object-position: top center; border: 1px solid var(--border); border-radius: 3px; background: #fff;
+}
+.rc-cell.rc-paid { background: var(--ok-bg); }
+.rc-cell.rc-mismatch { background: var(--warn-bg); }
+.rc-cell.rc-missing { background: var(--danger-bg); }
+.rc-cell.rc-unexpected { background: var(--warn-bg); }
+.rc-total { background: var(--bg-soft); }
+
+.rcpt-anoms li { list-style: none; margin-left: -14px; padding-left: 12px; border-left: 3px solid transparent; }
+.rcpt-anoms li.sev-high { border-left-color: var(--danger); }
+.rcpt-anoms li.sev-medium { border-left-color: var(--warn); }
+.rcpt-anoms li.sev-low, .rcpt-anoms li.sev-info { border-left-color: var(--border); }
+.anom-kind {
+  display: inline-block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  font-weight: 700; color: var(--text-muted); margin-right: 6px;
+}
+.burn-alert.warn { border-color: var(--warn); background: var(--warn-bg); }
+.rc-rejects { margin: 6px 0 10px; font-size: 12.5px; }
+.rc-rejects summary { cursor: pointer; color: var(--text-muted); }
+.rc-rejects li { margin: 3px 0; }
+
+.rc-full { display: block; margin-top: 14px; }
+.rc-full img { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; }
+.rc-excerpt {
+  white-space: pre-wrap; font-size: 11.5px; line-height: 1.5; max-height: 220px; overflow: auto;
+  background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px;
+}

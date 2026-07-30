@@ -673,10 +673,20 @@
   }
 
   function viewBurn() {
-    api("/owner/burn?window=" + win).then(function (b) {
+    Promise.all([
+      api("/owner/burn?window=" + win),
+      api("/owner/receipts?months=" + rcptMonths).catch(function () { return null; })
+    ]).then(function (res) {
+      var b = res[0];
       burnData = b;
+      rcptData = res[1];
       var html = '<div class="v-head"><h2>Spend master</h2><p>Every dollar leaving the business: subscriptions, servers, domains, one-time buys and pay-per-use, checked against what the running system is actually calling. Metered cost is for the selected window (' + esc(win) + '); recurring cost is per month.</p></div>';
       html += burnKpis(b);
+      html += receiptKpis(rcptData);
+      html += receiptAlerts(rcptData);
+      html += receiptMatrix(rcptData);
+      html += receiptSourcing(rcptData);
+      html += receiptUnmatched(rcptData);
       html += burnAlert(b);
       html += '<div class="card" style="margin-top:14px">' +
         '<div class="burn-head"><h3>Recurring cost</h3><div class="burn-filters" id="burnFilters">' +
@@ -693,6 +703,7 @@
       html += '<div class="card" style="margin-top:14px"><h3>Add a line item</h3>' + burnForm() + '</div>';
       $("#view").innerHTML = html;
       wireBurn();
+      wireReceipts();
     }).catch(fail);
   }
 
@@ -968,6 +979,415 @@
         if (!r.ok) { toast("Could not add that"); return; }
         toast("Line item added"); viewBurn();
       });
+    });
+  }
+
+  /* ================= RECEIPTS · MONTH BY MONTH =================
+   * Proof, not estimates. Every vendor down the side, every month across the top, the
+   * receipt itself behind each cell, and a running total in both directions. A cell with
+   * no receipt is not blank — it is reported as a gap, because an unnoticed gap is how a
+   * month goes unaccounted for.
+   *
+   *   receiptKpis / receiptAlerts / receiptMatrix / receiptSourcing / receiptUnmatched
+   *   openReceipt      the receipt viewer (the actual invoice image)
+   *   openAttach       hand-attach an invoice downloaded from a vendor portal
+   *   Backend          GET/POST/PATCH/DELETE /api/owner/receipts
+   */
+  var rcptData = null;
+  var rcptMonths = Number(localStorage.getItem("owner_rcpt_months")) || 12;
+  var rcptPoll = null;
+
+  var CELL_LABEL = {
+    paid: "receipt on file", mismatch: "amount differs from the register", missing: "no receipt",
+    pending: "not charged yet", unexpected: "charged with nothing expected", metered: "pay per use",
+    prepaid: "covered by the annual payment", none: "nothing charged", before: "before this service started",
+    cancelled: "cancelled"
+  };
+
+  function receiptKpis(d) {
+    if (!d) {
+      return '<div class="burn-alert" style="margin-top:16px"><div class="ba-title">Receipt tracking could not load</div>' +
+        '<p class="note">The month-by-month report is unavailable, so what follows is the register only.</p></div>';
+    }
+    var t = d.matrix.totals;
+    var delta = t.priorMonthUsd ? ((t.currentMonthUsd - t.priorMonthUsd) / t.priorMonthUsd) * 100 : 0;
+    return '<div class="stat-grid" style="margin-top:14px">' +
+      stat(usd(t.allTimeCountedUsd), "Spent all-time (tracked)", "amber") +
+      stat(usd(t.currentMonthUsd), "This month" + (t.priorMonthUsd ? " · " + (delta >= 0 ? "+" : "") + delta.toFixed(0) + "% vs last" : "")) +
+      stat(usd(t.priorMonthUsd), "Last month") +
+      stat(usd(t.avgMonthUsd), "Average closed month") +
+      stat(pct(t.coveragePct), t.receiptCount + " receipts on file" + (t.missingCount ? " · " + t.missingCount + " gaps" : "") + " · backed by a receipt",
+        t.coveragePct >= 90 ? "good" : t.coveragePct >= 60 ? "amber" : "bad") +
+      '</div>';
+  }
+
+  /* Everything the reconciler could not explain, worst first. This is the list that keeps
+     a month from passing unreported. */
+  function receiptAlerts(d) {
+    if (!d) return "";
+    var a = d.matrix.anomalies || [];
+    if (!a.length) {
+      return '<div class="burn-alert ok" style="margin-top:16px"><div class="ba-title">Every month reconciles.</div>' +
+        '<p class="note">Each active service has a receipt for every elapsed month, and every charge matches the register.</p></div>';
+    }
+    var high = a.filter(function (x) { return x.severity === "high"; });
+    var head = high.length
+      ? high.length + " thing" + (high.length > 1 ? "s" : "") + " will leave a month unreported"
+      : a.length + " item" + (a.length > 1 ? "s" : "") + " to reconcile";
+    var html = '<div class="burn-alert' + (high.length ? "" : " warn") + '" style="margin-top:16px"><div class="ba-title">' + esc(head) + '</div><ul class="rcpt-anoms">';
+    a.slice(0, 14).forEach(function (x) {
+      html += '<li class="sev-' + esc(x.severity) + '"><span class="anom-kind">' + esc(x.kind.replace(/_/g, " ")) + '</span> ' +
+        esc(x.message) + (x.fix ? ' <span class="note">' + esc(x.fix) + '</span>' : "") + '</li>';
+    });
+    html += '</ul>';
+    if (a.length > 14) html += '<p class="note">' + (a.length - 14) + ' more below the fold of this list.</p>';
+    return html + '</div>';
+  }
+
+  /* The grid itself: services x months, receipts behind the cells, running totals on both
+     axes. Amounts a receipt proves are solid; amounts taken from the register are shown as
+     estimates so a total is never quietly invented. */
+  function receiptMatrix(d) {
+    if (!d) return "";
+    var m = d.matrix, months = m.months || [];
+    var html = '<div class="card" style="margin-top:14px"><div class="burn-head"><h3>Month by month</h3>' +
+      '<div class="btn-row" style="margin:0">' +
+      '<select id="rcMonths" class="rc-months">' +
+      [6, 12, 18, 24].map(function (n) { return '<option value="' + n + '"' + (n === rcptMonths ? " selected" : "") + '>Last ' + n + ' months</option>'; }).join("") +
+      '</select>' +
+      '<button class="btn btn-sm" id="rcHarvest">Pull receipts from the mailbox</button>' +
+      '<button class="btn btn-sm" id="rcAttach">Attach an invoice</button>' +
+      '</div></div>' +
+      '<p class="note" style="margin-top:2px">Each cell is one month for one service. Click a receipt to see the invoice itself; click an empty month to attach one. Solid figures are proven by a receipt, faded figures are the register\'s estimate.</p>';
+
+    html += '<div class="otable-wrap rc-wrap"><table class="otable rc-matrix"><thead><tr><th class="rc-svc">Service</th>';
+    months.forEach(function (p) { html += '<th class="num">' + esc(monthLabel(p)) + '</th>'; });
+    html += '<th class="num">Total</th></tr></thead><tbody>';
+
+    (m.rows || []).forEach(function (r) {
+      if (!r.totalCountedUsd && !r.receiptCount && r.monthlyUsd === 0 && r.billing !== "metered") return;
+      html += '<tr><th class="rc-svc"><div class="lr-main">' + esc(r.vendor) + '</div>' +
+        '<div class="lr-sub note">' + esc(r.label) + '</div>' +
+        (r.missingCount ? '<div class="lr-sub bad-t">' + r.missingCount + ' month' + (r.missingCount > 1 ? "s" : "") + ' unreceipted</div>' : "") +
+        '</th>';
+      (r.cells || []).forEach(function (c) { html += matrixCell(r, c); });
+      html += '<td class="num rc-total"><strong>' + usd(r.totalCountedUsd) + '</strong>' +
+        (r.totalVerifiedUsd < r.totalCountedUsd ? '<div class="note" style="font-size:11px">' + usd(r.totalVerifiedUsd) + ' proven</div>' : "") +
+        '</td></tr>';
+    });
+
+    html += '</tbody><tfoot>';
+    html += '<tr class="rc-foot"><th class="rc-svc">Month total</th>';
+    (m.monthTotals || []).forEach(function (t) {
+      html += '<td class="num"><strong>' + usd(t.countedUsd) + '</strong>' +
+        (t.deltaUsd != null && Math.abs(t.deltaUsd) >= 1
+          ? '<div class="rc-delta ' + (t.deltaUsd > 0 ? "margin-bad" : "margin-good") + '">' + (t.deltaUsd > 0 ? "+" : "") + usd(t.deltaUsd) + '</div>'
+          : "") +
+        '</td>';
+    });
+    html += '<td class="num"><strong>' + usd(m.totals.allTimeCountedUsd) + '</strong></td></tr>';
+    html += '<tr class="rc-foot"><th class="rc-svc">Running total</th>';
+    (m.monthTotals || []).forEach(function (t) { html += '<td class="num">' + usd(t.runningUsd) + '</td>'; });
+    html += '<td class="num"></td></tr>';
+    html += '<tr class="rc-foot"><th class="rc-svc">Proven by receipt</th>';
+    (m.monthTotals || []).forEach(function (t) {
+      var cls = t.coveragePct >= 90 ? "margin-good" : t.coveragePct >= 60 ? "margin-mid" : "margin-bad";
+      html += '<td class="num"><span class="' + cls + '">' + pct(t.coveragePct) + '</span></td>';
+    });
+    html += '<td class="num"><span class="' + (m.totals.coveragePct >= 90 ? "margin-good" : "margin-mid") + '">' + pct(m.totals.coveragePct) + '</span></td></tr>';
+    return html + '</tfoot></table></div></div>';
+  }
+
+  function matrixCell(row, c) {
+    var cls = "rc-cell rc-" + c.status;
+    var attr = ' data-cell="' + esc((row.itemId || "") + "|" + c.period) + '"';
+    var inner;
+    if (c.receipts && c.receipts.length) {
+      var r = c.receipts[0];
+      inner = '<div class="rc-amt">' + usd(c.actualUsd) + '</div>' +
+        (r.hasShot
+          ? '<img class="rc-thumb" src="' + API + '/owner/receipts/file/' + esc(r.id) + '?v=thumb" alt="receipt" loading="lazy" />'
+          : '<div class="rc-noshot">no image</div>') +
+        (c.receipts.length > 1 ? '<div class="note" style="font-size:10.5px">' + c.receipts.length + ' receipts</div>' : "") +
+        (c.note ? '<div class="note" style="font-size:10.5px">' + esc(c.note) + '</div>' : "");
+    } else if (c.status === "missing") {
+      inner = '<div class="rc-amt est">' + usd(c.expectedUsd) + '</div><div class="rc-gap">no receipt</div>';
+    } else if (c.status === "pending") {
+      inner = '<div class="rc-amt est">' + usd(c.expectedUsd) + '</div><div class="note" style="font-size:10.5px">due</div>';
+    } else if (c.status === "metered") {
+      inner = '<div class="rc-amt">' + usd(c.countedUsd) + '</div><div class="note" style="font-size:10.5px">metered</div>';
+    } else {
+      inner = '<div class="rc-dash">·</div>';
+    }
+    return '<td class="' + cls + '"' + attr + ' title="' + esc(monthLabel(c.period) + " · " + (CELL_LABEL[c.status] || c.status)) + '">' + inner + '</td>';
+  }
+
+  function monthLabel(p) {
+    var parts = String(p || "").split("-");
+    var names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return (names[Number(parts[1]) - 1] || p) + " " + String(parts[0] || "").slice(2);
+  }
+
+  /* How each vendor's receipt is supposed to reach us, and whether it actually does. This
+     is the panel that makes next month report itself. */
+  function receiptSourcing(d) {
+    if (!d) return "";
+    var inbox = d.inbox || {};
+    var html = '<div class="card" style="margin-top:14px"><div class="burn-head"><h3>Where the receipts come from</h3></div>';
+
+    if (!inbox.configured) {
+      html += '<div class="burn-alert" style="margin:10px 0"><div class="ba-title">No billing mailbox is wired up</div>' +
+        '<p class="note">Not one vendor here exposes an invoice API, so email is the only channel that works for all of them. Point the console at the mailbox the vendors already send to by setting ' +
+        esc((inbox.envKeys || []).join(", ")) + ' on the server, then run the pull. Receipts are read only: nothing is deleted or marked read.</p></div>';
+    } else {
+      var mb = (inbox.mailboxes || []).map(function (b) {
+        return esc(b.user) + ' <span class="note">(' + esc(b.host) + (b.inherited ? ", shared with the resume inbox" : "") + ')</span>';
+      }).join(", ");
+      var sweep = (inbox.sweeps || [])[0];
+      html += '<p class="note" style="margin-top:2px">Reading ' + mb + '. ' +
+        (inbox.lastSweepAt ? 'Last pull ' + esc(fmtDate(inbox.lastSweepAt)) + '. ' : 'No pull has run yet. ') +
+        (sweep
+          ? (sweep.ok
+            ? 'Scanned ' + sweep.scanned + ' messages back to ' + esc(sweep.since) + ': ' + sweep.imported + ' receipts imported, ' + sweep.duplicates + ' already on file, ' + sweep.shotFailures + ' images failed.'
+            : '<span class="bad-t">Last pull failed: ' + esc(sweep.error || "unknown error") + '</span>')
+          : "") +
+        '</p>';
+      if (sweep && sweep.rejects && sweep.rejects.length) {
+        html += '<details class="rc-rejects"><summary>' + sweep.rejects.length + ' billing-looking messages were not imported</summary><ul>';
+        sweep.rejects.forEach(function (r) {
+          html += '<li><strong>' + esc(r.subject) + '</strong> <span class="note">' + esc(r.from) + ' · ' + esc(r.date) + ' · ' + esc(r.reason) + '</span></li>';
+        });
+        html += '</ul></details>';
+      }
+      if (inbox.harvest && inbox.harvest.running) {
+        html += '<p class="note">A pull is running now (started ' + esc(fmtDate(inbox.harvest.startedAt)) + '). Rendering each receipt takes a few seconds, so this page refreshes itself when it finishes.</p>';
+      }
+    }
+
+    var rows = d.sourcing || [];
+    html += '<div class="otable-wrap"><table class="otable"><thead><tr>' +
+      '<th>Vendor</th><th>How the receipt arrives</th><th class="num">On file</th><th>Last</th><th>What is needed</th>' +
+      '</tr></thead><tbody>';
+    rows.forEach(function (r) {
+      var pill = r.state === "auto" ? '<span class="pill active">Automatic</span>'
+        : r.state === "manual" ? '<span class="pill needs">By hand</span>'
+        : r.state === "unproven" ? '<span class="pill dead">Not arriving</span>'
+        : '<span class="pill unknown">Not billed</span>';
+      html += '<tr><td><div class="lr-main">' + esc(r.vendor) + '</div>' + pill + '</td>' +
+        '<td><div class="lr-sub">' + esc(channelLabel(r.channel)) + '</div>' +
+        (r.from && r.from.length ? '<div class="note" style="font-size:11px">from ' + esc(r.from.slice(0, 3).join(", ")) + '</div>' : "") +
+        (r.api ? '<div class="note" style="font-size:11px">' + esc(r.api) + '</div>' : "") + '</td>' +
+        '<td class="num">' + (r.emailCount + r.manualCount) + (r.manualCount ? ' <span class="note">(' + r.manualCount + ' by hand)</span>' : "") + '</td>' +
+        '<td>' + esc((r.lastAt || "").slice(0, 10) || "-") + '</td>' +
+        '<td><div class="lr-sub">' + esc(r.advice) + '</div>' +
+        (r.portal ? '<a class="note" href="' + esc(r.portal) + '" target="_blank" rel="noopener">open the billing page</a>' : "") +
+        (r.setup ? '<div class="note" style="font-size:11px">' + esc(r.setup) + '</div>' : "") + '</td></tr>';
+    });
+    return html + '</tbody></table></div></div>';
+  }
+
+  function channelLabel(c) {
+    return c === "email_vendor" ? "The vendor emails a receipt"
+      : c === "email_processor" ? "A payment processor emails it (Stripe / Paddle / PayPal)"
+      : c === "portal_only" ? "No email at all: download it from the portal"
+      : c === "api" ? "An invoice API exists" : "Email";
+  }
+
+  /* Charges with no line item behind them: the spend nobody catalogued. */
+  function receiptUnmatched(d) {
+    if (!d || !d.matrix.unmatched || !d.matrix.unmatched.length) return "";
+    var html = '<div class="card" style="margin-top:14px"><h3>Charges with no line item</h3>' +
+      '<p class="note" style="margin-top:-4px">Real money left the account for these and the spend register has never heard of them.</p>' +
+      '<div class="otable-wrap"><table class="otable"><thead><tr><th>Vendor</th><th class="num">Total</th><th class="num">Receipts</th><th>Months</th><th></th></tr></thead><tbody>';
+    d.matrix.unmatched.forEach(function (u) {
+      html += '<tr><td><div class="lr-main">' + esc(u.vendor) + '</div></td>' +
+        '<td class="num">' + usd(u.totalUsd) + '</td><td class="num">' + u.count + '</td>' +
+        '<td>' + esc(u.periods.join(", ")) + '</td>' +
+        '<td>' + u.receipts.slice(0, 4).map(function (r) {
+          return '<button class="btn btn-sm" data-receipt="' + esc(r.id) + '">' + esc((r.chargedAt || "").slice(0, 10)) + '</button>';
+        }).join(" ") + '</td></tr>';
+    });
+    return html + '</tbody></table></div></div>';
+  }
+
+  function wireReceipts() {
+    var sel = $("#rcMonths");
+    if (sel) sel.addEventListener("change", function () {
+      rcptMonths = Number(sel.value) || 12;
+      localStorage.setItem("owner_rcpt_months", String(rcptMonths));
+      viewBurn();
+    });
+
+    var h = $("#rcHarvest");
+    if (h) h.addEventListener("click", function () {
+      h.classList.add("disabled");
+      send("/owner/receipts", "POST", { action: "harvest", monthsBack: Math.min(24, rcptMonths) }).then(function (r) {
+        h.classList.remove("disabled");
+        if (!r.ok) { toast("Could not start the pull"); return; }
+        if (!r.data.started) { toast(r.data.reason || "Nothing to pull"); return; }
+        toast("Reading " + (r.data.mailboxes || []).join(", ") + "…");
+        pollHarvest();
+      });
+    });
+
+    var at = $("#rcAttach");
+    if (at) at.addEventListener("click", function () { openAttach(null, null); });
+
+    $$("#view .rc-cell").forEach(function (td) {
+      td.addEventListener("click", function () {
+        var parts = (td.dataset.cell || "").split("|");
+        var row = ((rcptData && rcptData.matrix.rows) || []).filter(function (r) { return r.itemId === parts[0]; })[0];
+        var cell = row && (row.cells || []).filter(function (c) { return c.period === parts[1]; })[0];
+        if (cell && cell.receipts && cell.receipts.length) openReceipt(cell.receipts[0].id);
+        else if (row) openAttach(row, cell);
+      });
+    });
+
+    $$("#view [data-receipt]").forEach(function (b) {
+      b.addEventListener("click", function (e) { e.stopPropagation(); openReceipt(b.dataset.receipt); });
+    });
+
+    if (rcptData && rcptData.inbox && rcptData.inbox.harvest && rcptData.inbox.harvest.running) pollHarvest();
+  }
+
+  /* A pull renders one screenshot per receipt, so it runs detached; poll until it lands. */
+  function pollHarvest() {
+    if (rcptPoll) clearInterval(rcptPoll);
+    rcptPoll = setInterval(function () {
+      api("/owner/receipts?months=" + rcptMonths).then(function (d) {
+        if (d && d.inbox && d.inbox.harvest && d.inbox.harvest.running) return;
+        clearInterval(rcptPoll); rcptPoll = null;
+        var s = (d.inbox.sweeps || [])[0];
+        toast(s && s.ok ? "Imported " + s.imported + " receipt(s)" : "Pull finished" + (s && s.error ? ": " + s.error : ""));
+        if (location.hash.replace("#", "") === "burn") viewBurn();
+      }).catch(function () { clearInterval(rcptPoll); rcptPoll = null; });
+    }, 6000);
+  }
+
+  /* The receipt itself. The image is the point: it is the thing an accountant asks for. */
+  function openReceipt(id) {
+    var r = ((rcptData && rcptData.receipts) || []).filter(function (x) { return x.id === id; })[0];
+    var refs = [];
+    ((rcptData && rcptData.matrix.rows) || []).forEach(function (row) {
+      (row.cells || []).forEach(function (c) { (c.receipts || []).forEach(function (x) { refs.push(x); }); });
+    });
+    ((rcptData && rcptData.matrix.unmatched) || []).forEach(function (u) { u.receipts.forEach(function (x) { refs.push(x); }); });
+    var ref = refs.filter(function (x) { return x.id === id; })[0];
+    if (!r && !ref) return;
+    var v = r || ref;
+
+    var html = '<div style="display:flex;justify-content:space-between;align-items:start">' +
+      '<div><h2>' + esc(v.vendor || "Receipt") + '</h2><div class="sub">' + esc(v.subject || v.description || "") + '</div></div>' +
+      '<a class="btn btn-sm" id="dwClose">✕</a></div>';
+
+    html += '<div class="kv">' +
+      kv("Amount", '<strong>' + usd(Math.abs(v.amountUsd)) + '</strong>' + (v.kind && v.kind !== "charge" ? ' <span class="pill needs">' + esc(v.kind.replace("_", " ")) + '</span>' : "")) +
+      kv("Charged", esc((v.chargedAt || "").slice(0, 10))) +
+      (v.period ? kv("Counted in", esc(monthLabel(v.period))) : "") +
+      (v.invoiceNumber ? kv("Invoice / receipt #", esc(v.invoiceNumber)) : "") +
+      (v.currency && v.currency !== "USD" ? kv("Invoiced in", esc(v.nativeAmount + " " + v.currency) + ' <span class="note">converted at a fixed rate</span>') : "") +
+      (v.from ? kv("Sender", esc(v.from) + (v.processor ? ' <span class="note">via ' + esc(v.processor) + '</span>' : "")) : "") +
+      (v.mailbox ? kv("Mailbox", esc(v.mailbox)) : "") +
+      kv("How it was matched", '<span class="note">' + esc(v.matchedBy || (v.source === "manual" ? "entered by hand" : "")) + '</span>') +
+      kv("Confidence", pct((v.confidence || 0) * 100) + (v.reviewed ? ' <span class="pill active">confirmed</span>' : "")) +
+      (v.shotError ? kv("Image", '<span class="bad-t">' + esc(v.shotError) + '</span>') : "") +
+      '</div>';
+
+    if (v.hasShot) {
+      html += '<a href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=png" target="_blank" rel="noopener" class="rc-full">' +
+        '<img src="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=png" alt="receipt" /></a>';
+    }
+    if (v.hasFile) {
+      html += '<div class="btn-row"><a class="btn btn-sm" href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=file" target="_blank" rel="noopener">Open the original ' + esc((v.fileMime || "").indexOf("pdf") >= 0 ? "PDF" : "file") + '</a></div>';
+    }
+    if (v.excerptPreview) html += '<h3 style="margin-top:16px">What the parser read</h3><pre class="rc-excerpt">' + esc(v.excerptPreview) + '</pre>';
+
+    html += '<h3 style="margin-top:18px">Correct it</h3><div class="burn-form">' +
+      fld("Vendor", '<input id="rcVendor" value="' + esc(v.vendor || "") + '" />') +
+      fld("Amount (USD)", '<input id="rcAmount" type="number" step="0.01" value="' + (v.amountUsd || 0) + '" />') +
+      fld("Month", '<input id="rcPeriod" value="' + esc(v.period || "") + '" placeholder="2026-07" />') +
+      fld("Charged on", '<input id="rcCharged" type="date" value="' + esc((v.chargedAt || "").slice(0, 10)) + '" />') +
+      fld("Line item", itemSelect("rcItem", v.itemId)) +
+      '</div><div class="btn-row" style="margin-top:12px">' +
+      '<button class="btn btn-primary btn-sm" id="rcSave">Save</button>' +
+      '<button class="btn btn-sm" id="rcConfirm">Mark confirmed</button>' +
+      '<button class="btn btn-sm btn-danger" id="rcDelete">Remove</button></div>';
+
+    $("#drawerBody").innerHTML = html;
+    $("#scrim").classList.add("show"); $("#drawer").classList.add("show");
+    $("#dwClose").addEventListener("click", closeDrawer);
+    $("#rcSave").addEventListener("click", function () {
+      send("/owner/receipts", "PATCH", {
+        id: v.id, vendor: $("#rcVendor").value.trim(), amountUsd: Number($("#rcAmount").value),
+        period: $("#rcPeriod").value.trim(), chargedAt: $("#rcCharged").value || undefined,
+        itemId: $("#rcItem").value || undefined
+      }).then(function (r2) {
+        if (!r2.ok) { toast("Could not save"); return; }
+        toast("Saved"); closeDrawer(); viewBurn();
+      });
+    });
+    $("#rcConfirm").addEventListener("click", function () {
+      send("/owner/receipts", "PATCH", { id: v.id, reviewed: true }).then(function () { toast("Confirmed"); closeDrawer(); viewBurn(); });
+    });
+    $("#rcDelete").addEventListener("click", function () {
+      send("/owner/receipts?id=" + encodeURIComponent(v.id), "DELETE").then(function () { toast("Removed"); closeDrawer(); viewBurn(); });
+    });
+  }
+
+  function itemSelect(id, sel) {
+    var items = (burnData && burnData.items) || [];
+    return '<select id="' + id + '"><option value="">Not assigned</option>' +
+      items.map(function (i) {
+        return '<option value="' + esc(i.id) + '"' + (i.id === sel ? " selected" : "") + '>' + esc(i.vendor + " · " + i.label) + '</option>';
+      }).join("") + '</select>';
+  }
+
+  /* Hand-attach: the backfill path for a vendor that does not email, or a month the sweep
+     could not find. Prefilled from the cell that was clicked so it is two fields and a file. */
+  function openAttach(row, cell) {
+    var period = (cell && cell.period) || new Date().toISOString().slice(0, 7);
+    var amount = cell ? (cell.expectedUsd || cell.actualUsd || "") : "";
+    var html = '<div style="display:flex;justify-content:space-between;align-items:start">' +
+      '<div><h2>Attach an invoice</h2><div class="sub">' + esc(row ? row.vendor + " · " + row.label : "Any vendor") + '</div></div>' +
+      '<a class="btn btn-sm" id="dwClose">✕</a></div>' +
+      '<p class="note">Download the invoice or screenshot the receipt, then drop it here. It lands in the month you name and counts towards that month\'s total exactly like an emailed one.</p>' +
+      '<div class="burn-form">' +
+      fld("Vendor", '<input id="atVendor" value="' + esc(row ? row.vendor : "") + '" />') +
+      fld("Line item", itemSelect("atItem", row ? row.itemId : "")) +
+      fld("Month", '<input id="atPeriod" value="' + esc(period) + '" placeholder="2026-07" />') +
+      fld("Amount (USD)", '<input id="atAmount" type="number" step="0.01" value="' + esc(String(amount)) + '" />') +
+      fld("Charged on", '<input id="atCharged" type="date" />') +
+      fld("Invoice #", '<input id="atInvoice" />') +
+      fld("Receipt file (PDF or image)", '<input id="atFile" type="file" accept="image/*,application/pdf" />') +
+      fld("Notes", '<input id="atNotes" placeholder="Downloaded from the vendor portal" />') +
+      '</div><div class="btn-row" style="margin-top:12px"><button class="btn btn-primary btn-sm" id="atSave">Attach</button></div>' +
+      (row && row.portal ? '<p class="note"><a href="' + esc(row.portal) + '" target="_blank" rel="noopener">Open ' + esc(row.vendor) + '\'s billing page</a> to download it.</p>' : "");
+
+    $("#drawerBody").innerHTML = html;
+    $("#scrim").classList.add("show"); $("#drawer").classList.add("show");
+    $("#dwClose").addEventListener("click", closeDrawer);
+    $("#atSave").addEventListener("click", function () {
+      var vendor = $("#atVendor").value.trim();
+      var period2 = $("#atPeriod").value.trim();
+      var amt = Number($("#atAmount").value);
+      if (!vendor) { toast("Vendor is required"); return; }
+      if (!/^\d{4}-\d{2}$/.test(period2)) { toast("Month must look like 2026-07"); return; }
+      if (!isFinite(amt)) { toast("Enter the amount"); return; }
+      var fd = new FormData();
+      fd.append("vendor", vendor);
+      fd.append("period", period2);
+      fd.append("amountUsd", String(amt));
+      if ($("#atItem").value) fd.append("itemId", $("#atItem").value);
+      if ($("#atCharged").value) fd.append("chargedAt", $("#atCharged").value);
+      if ($("#atInvoice").value.trim()) fd.append("invoiceNumber", $("#atInvoice").value.trim());
+      if ($("#atNotes").value.trim()) fd.append("notes", $("#atNotes").value.trim());
+      var f = $("#atFile").files && $("#atFile").files[0];
+      if (f) fd.append("file", f);
+      toast("Filing it…");
+      fetch(API + "/owner/receipts", { method: "POST", credentials: "include", body: fd })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function () { toast("Attached"); closeDrawer(); viewBurn(); })
+        .catch(function () { toast("Could not attach that"); });
     });
   }
 

@@ -314,6 +314,26 @@ export function userSpend(
   return hit ?? { userEmail: email, costUsd: 0, events: 0, quantity: 0, found: 0 };
 }
 
+/**
+ * Metered cost per calendar month, sliced by provider. Pay-per-use never produces a monthly
+ * invoice, so this is the only record of what it cost in (say) June — which is exactly what
+ * the Spend master's month-over-month report needs to put it in the same grid as the
+ * subscriptions that DO invoice.
+ *
+ *   { "2026-07": { claude: 41.20, telnyx: 88.05 }, … }
+ */
+export function meteredByMonth(): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const e of store.events) {
+    const period = String(e.at || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(period)) continue;
+    const src = e.source || "other";
+    const month = out[period] || (out[period] = {});
+    month[src] = round((month[src] || 0) + (Number(e.costUsd) || 0));
+  }
+  return out;
+}
+
 /** Dev/tests only. */
 export function devLedger() {
   return store;

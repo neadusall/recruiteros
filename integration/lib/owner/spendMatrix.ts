@@ -1,0 +1,634 @@
+/**
+ * RecruitersOS · Owner · Month-over-month spend reconciliation (OWNER ONLY)
+ *
+ * The report that answers "what have we actually spent, month by month, and is any of it
+ * unaccounted for". It takes three inputs that each know half the truth —
+ *
+ *   the spend register   what each vendor is SUPPOSED to charge
+ *   the receipt vault    what a vendor PROVABLY charged (with the receipt image)
+ *   the usage ledger     what pay-per-use actually cost inside the engine
+ *
+ * — and lays them on one grid: every service down the side, every month across the top,
+ * a running total in both directions.
+ *
+ * THE RULE THAT MAKES IT USEFUL: a cell is only "paid" when a receipt backs it. A live
+ * subscription with no receipt for an elapsed month is a GAP, reported by name with the
+ * link to go download it. That is the difference between a spend dashboard and a set of
+ * books: this one can tell you what it does not know.
+ */
+
+import type { SpendItem } from "./spendRegister";
+import { monthlyEquivalent } from "./spendRegister";
+import type { Receipt } from "./receipts";
+import { vendorSourceFor, VENDOR_SOURCES } from "./receiptSources";
+import { meteredByMonth } from "../billing/ledger";
+
+/* ============================ types ============================ */
+
+export type CellStatus =
+  | "paid"           // receipt on file and it matches what was expected
+  | "mismatch"       // receipt on file but the figure is not what the register says
+  | "missing"        // charge expected, month elapsed, no receipt anywhere
+  | "pending"        // charge expected but the billing date has not passed yet
+  | "unexpected"     // a charge with nothing in the register expecting it
+  | "metered"        // pay-per-use: the ledger is the source of truth, no invoice per month
+  | "prepaid"        // annual plan, already paid in its anniversary month
+  | "none"           // nothing expected and nothing charged (credit top-ups, free tiers)
+  | "before"         // predates the service
+  | "cancelled";     // service is off
+
+export interface ReceiptRef {
+  id: string;
+  amountUsd: number;
+  chargedAt: string;
+  invoiceNumber?: string;
+  hasShot?: boolean;
+  hasFile?: boolean;
+  source: Receipt["source"];
+  confidence: number;
+  reviewed?: boolean;
+  kind: Receipt["kind"];
+  subject?: string;
+  shotError?: string;
+}
+
+export interface MatrixCell {
+  period: string;
+  status: CellStatus;
+  /** Receipted dollars (charges less refunds). */
+  actualUsd: number;
+  /** Ledger dollars for metered rows. */
+  meteredUsd: number;
+  /** What the register says this month should have cost. */
+  expectedUsd: number;
+  /** Best available truth for the running total: receipts when present, else metered,
+   *  else the expected figure (flagged unverified so a total is never silently invented). */
+  countedUsd: number;
+  verified: boolean;
+  runningUsd: number;
+  /** Change against the previous month's counted figure. */
+  deltaUsd: number | null;
+  receipts: ReceiptRef[];
+  note?: string;
+}
+
+export interface MatrixRow {
+  itemId?: string;
+  vendor: string;
+  label: string;
+  category: string;
+  billing: string;
+  status: string;
+  monthlyUsd: number;
+  /** How this vendor's receipt is supposed to reach us. */
+  channel?: string;
+  portal?: string;
+  /** Has a receipt for this vendor EVER arrived by email? */
+  emailProven: boolean;
+  cells: MatrixCell[];
+  totalCountedUsd: number;
+  totalVerifiedUsd: number;
+  receiptCount: number;
+  missingCount: number;
+  lastReceiptAt?: string;
+}
+
+export interface MonthTotal {
+  period: string;
+  countedUsd: number;
+  verifiedUsd: number;
+  expectedUsd: number;
+  meteredUsd: number;
+  runningUsd: number;
+  deltaUsd: number | null;
+  receiptCount: number;
+  missingCount: number;
+  /** Share of the month's dollars that a receipt can prove. */
+  coveragePct: number;
+}
+
+export type AnomalySeverity = "high" | "medium" | "low" | "info";
+
+export interface Anomaly {
+  severity: AnomalySeverity;
+  kind:
+    | "missing_receipt" | "amount_mismatch" | "price_change" | "duplicate_charge"
+    | "unexpected_charge" | "unmatched_vendor" | "charged_after_cancel" | "no_price_on_file"
+    | "refund" | "metered_spike" | "low_confidence" | "render_failed" | "never_receipted"
+    | "inbox_unconfigured" | "gap_in_series" | "non_usd";
+  period?: string;
+  vendor: string;
+  itemId?: string;
+  receiptId?: string;
+  amountUsd?: number;
+  message: string;
+  /** What to do about it, in one line. */
+  fix?: string;
+}
+
+export interface SpendMatrix {
+  months: string[];
+  rows: MatrixRow[];
+  monthTotals: MonthTotal[];
+  /** Charges that matched no register row: uncatalogued spend. */
+  unmatched: Array<{ vendor: string; totalUsd: number; count: number; receipts: ReceiptRef[]; periods: string[] }>;
+  anomalies: Anomaly[];
+  totals: {
+    allTimeCountedUsd: number;
+    allTimeVerifiedUsd: number;
+    receiptCount: number;
+    missingCount: number;
+    coveragePct: number;
+    currentMonthUsd: number;
+    priorMonthUsd: number;
+    avgMonthUsd: number;
+  };
+}
+
+/* ============================ helpers ============================ */
+
+const round2 = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
+
+function monthKey(d: Date | string): string {
+  const s = typeof d === "string" ? d : d.toISOString();
+  return s.slice(0, 7);
+}
+function addMonths(period: string, n: number): string {
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return d.toISOString().slice(0, 7);
+}
+function monthsBetween(from: string, to: string): string[] {
+  const out: string[] = [];
+  let cur = from;
+  for (let i = 0; i < 120 && cur <= to; i++) { out.push(cur); cur = addMonths(cur, 1); }
+  return out;
+}
+function daysInto(period: string): number {
+  const now = new Date();
+  if (monthKey(now) !== period) return 32;
+  return now.getUTCDate();
+}
+
+/* ============================ the report ============================ */
+
+export function buildSpendMatrix(
+  items: SpendItem[],
+  receipts: Receipt[],
+  opts: { months?: number; inboxConfigured?: boolean } = {},
+): SpendMatrix {
+  const nowMonth = monthKey(new Date());
+  const span = Math.max(2, Math.min(24, opts.months || 12));
+
+  /* Window: far enough back to cover the oldest thing on record, capped at `span`. */
+  const earliestCandidates = [
+    ...items.map((i) => (i.at || "").slice(0, 7)),
+    ...receipts.map((r) => r.period),
+  ].filter((p) => /^\d{4}-\d{2}$/.test(p)).sort();
+  const floor = addMonths(nowMonth, -(span - 1));
+  const start = earliestCandidates.length && earliestCandidates[0] > floor ? earliestCandidates[0] : floor;
+  const months = monthsBetween(start, nowMonth);
+
+  const metered = meteredByMonth();
+  const byItem = new Map<string, Receipt[]>();
+  const byVendor = new Map<string, Receipt[]>();
+  for (const r of receipts) {
+    if (r.itemId) byItem.set(r.itemId, [...(byItem.get(r.itemId) || []), r]);
+    const v = r.vendor.toLowerCase();
+    byVendor.set(v, [...(byVendor.get(v) || []), r]);
+  }
+
+  const anomalies: Anomaly[] = [];
+  const rows: MatrixRow[] = [];
+
+  for (const item of items) {
+    const src = vendorSourceFor(item.vendor);
+    const mine = byItem.get(item.id) || [];
+    const startMonth = (item.at || "").slice(0, 7);
+    const emailProven = mine.some((r) => r.source === "email");
+    let running = 0;
+    let prevCounted: number | null = null;
+    let prevReceiptAmount: number | null = null;
+    const cells: MatrixCell[] = [];
+
+    for (const period of months) {
+      const inMonth = mine.filter((r) => r.period === period);
+      const actual = round2(inMonth.reduce((s, r) => s + r.amountUsd, 0));
+      const meteredUsd = item.link?.ledgerSource ? round2(metered[period]?.[item.link.ledgerSource] || 0) : 0;
+      const expected = expectedFor(item, period);
+
+      let status: CellStatus;
+      let note: string | undefined;
+      let counted = 0;
+      let verified = false;
+
+      if (startMonth && period < startMonth) {
+        status = "before";
+      } else if (item.billing === "metered") {
+        status = "metered";
+        counted = actual !== 0 ? actual : meteredUsd;
+        verified = actual !== 0;
+        if (actual !== 0 && meteredUsd > 0) note = `ledger says ${meteredUsd.toFixed(2)}`;
+      } else if (item.status === "cancelled" && actual === 0) {
+        status = "cancelled";
+      } else if (actual !== 0) {
+        counted = actual; verified = true;
+        if (expected > 0 && Math.abs(actual - expected) > Math.max(1, expected * 0.02)) {
+          status = "mismatch";
+          note = `register says ${expected.toFixed(2)}`;
+        } else if (expected === 0) {
+          status = "unexpected";
+        } else {
+          status = "paid";
+        }
+        if (inMonth.length > 1 && item.billing === "monthly") {
+          anomalies.push({
+            severity: "medium", kind: "duplicate_charge", period, vendor: item.vendor, itemId: item.id,
+            amountUsd: actual,
+            message: `${inMonth.length} separate charges from ${item.vendor} in ${period} totalling $${actual.toFixed(2)} on a monthly plan.`,
+            fix: "Confirm this is a top-up or a second seat rather than a double charge.",
+          });
+        }
+      } else if (expected > 0) {
+        const due = src?.billingDay ?? 1;
+        if (period === nowMonth && daysInto(period) <= due + 3) {
+          status = "pending";
+          note = `charge expected around the ${ordinal(due)}`;
+        } else {
+          status = "missing";
+          counted = expected; verified = false;
+          note = "no receipt on file";
+        }
+      } else if (item.billing === "annual") {
+        status = "prepaid";
+      } else {
+        status = "none";
+      }
+
+      running = round2(running + counted);
+      const delta = prevCounted == null ? null : round2(counted - prevCounted);
+
+      /* Price movement between two months that BOTH have receipts is a real price change,
+         not a reconciliation artefact — worth saying out loud. */
+      if (actual !== 0 && prevReceiptAmount != null && prevReceiptAmount !== 0) {
+        const diff = actual - prevReceiptAmount;
+        if (Math.abs(diff) > Math.max(1, Math.abs(prevReceiptAmount) * 0.05)) {
+          anomalies.push({
+            severity: diff > 0 ? "medium" : "info", kind: "price_change", period, vendor: item.vendor, itemId: item.id,
+            amountUsd: round2(diff),
+            message: `${item.vendor} · ${item.label} ${diff > 0 ? "went up" : "went down"} $${Math.abs(diff).toFixed(2)} in ${period} ($${prevReceiptAmount.toFixed(2)} → $${actual.toFixed(2)}).`,
+            fix: diff > 0 ? "Check the invoice for a plan change or added seats." : undefined,
+          });
+        }
+      }
+      if (actual !== 0) prevReceiptAmount = actual;
+      prevCounted = counted;
+
+      cells.push({
+        period, status, actualUsd: actual, meteredUsd, expectedUsd: round2(expected),
+        countedUsd: round2(counted), verified, runningUsd: running, deltaUsd: delta,
+        receipts: inMonth.map(toRef), note,
+      });
+    }
+
+    const missingCount = cells.filter((c) => c.status === "missing").length;
+    rows.push({
+      itemId: item.id, vendor: item.vendor, label: item.label, category: item.category,
+      billing: item.billing, status: item.status, monthlyUsd: monthlyEquivalent(item),
+      channel: src?.channel, portal: src?.portal, emailProven, cells,
+      totalCountedUsd: round2(cells.reduce((s, c) => s + c.countedUsd, 0)),
+      totalVerifiedUsd: round2(cells.reduce((s, c) => s + (c.verified ? c.countedUsd : 0), 0)),
+      receiptCount: mine.length,
+      missingCount,
+      lastReceiptAt: mine.map((r) => r.chargedAt).sort().slice(-1)[0],
+    });
+
+    /* ---- per-item anomalies ---- */
+    collectItemAnomalies(item, mine, cells, src, anomalies, nowMonth);
+  }
+
+  rows.sort((a, b) => b.totalCountedUsd - a.totalCountedUsd || a.vendor.localeCompare(b.vendor));
+
+  /* ---- unmatched charges: money leaving with no register row behind it ---- */
+  const unmatchedMap = new Map<string, Receipt[]>();
+  for (const r of receipts) if (!r.itemId) unmatchedMap.set(r.vendor, [...(unmatchedMap.get(r.vendor) || []), r]);
+  const unmatched = [...unmatchedMap.entries()].map(([vendor, rs]) => ({
+    vendor,
+    totalUsd: round2(rs.reduce((s, r) => s + r.amountUsd, 0)),
+    count: rs.length,
+    periods: [...new Set(rs.map((r) => r.period))].sort(),
+    receipts: rs.map(toRef),
+  })).sort((a, b) => b.totalUsd - a.totalUsd);
+
+  for (const u of unmatched) {
+    anomalies.push({
+      severity: u.totalUsd >= 50 ? "high" : "medium", kind: "unmatched_vendor", vendor: u.vendor,
+      amountUsd: u.totalUsd,
+      message: `$${u.totalUsd.toFixed(2)} paid to ${u.vendor} across ${u.count} receipt${u.count > 1 ? "s" : ""} with no line item in the spend register.`,
+      fix: "Add it as a line item so it shows up in the monthly burn, or tie the receipt to an existing row.",
+    });
+  }
+
+  /* ---- month totals + running total across everything ---- */
+  const monthTotals: MonthTotal[] = [];
+  let grandRunning = 0;
+  let prevMonthCounted: number | null = null;
+  for (let idx = 0; idx < months.length; idx++) {
+    const period = months[idx];
+    const cellsAt = rows.map((r) => r.cells[idx]);
+    const counted = round2(cellsAt.reduce((s, c) => s + c.countedUsd, 0) + unmatchedIn(unmatchedMap, period));
+    const verifiedUsd = round2(cellsAt.reduce((s, c) => s + (c.verified ? c.countedUsd : 0), 0) + unmatchedIn(unmatchedMap, period));
+    const expectedUsd = round2(cellsAt.reduce((s, c) => s + c.expectedUsd, 0));
+    const meteredUsd = round2(Object.values(metered[period] || {}).reduce((s, n) => s + n, 0));
+    grandRunning = round2(grandRunning + counted);
+    monthTotals.push({
+      period, countedUsd: counted, verifiedUsd, expectedUsd, meteredUsd,
+      runningUsd: grandRunning,
+      deltaUsd: prevMonthCounted == null ? null : round2(counted - prevMonthCounted),
+      receiptCount: cellsAt.reduce((s, c) => s + c.receipts.length, 0),
+      missingCount: cellsAt.filter((c) => c.status === "missing").length,
+      coveragePct: counted > 0 ? Math.round((verifiedUsd / counted) * 1000) / 10 : 100,
+    });
+    prevMonthCounted = counted;
+  }
+
+  /* ---- metered spikes: a pay-per-use line doubling is a spend event with no invoice ---- */
+  const sources = new Set<string>();
+  Object.values(metered).forEach((m) => Object.keys(m).forEach((s) => sources.add(s)));
+  for (const s of sources) {
+    for (let i = 1; i < months.length; i++) {
+      const prev = metered[months[i - 1]]?.[s] || 0;
+      const cur = metered[months[i]]?.[s] || 0;
+      if (prev >= 20 && cur > prev * 1.5) {
+        anomalies.push({
+          severity: "medium", kind: "metered_spike", period: months[i], vendor: s,
+          amountUsd: round2(cur - prev),
+          message: `${s} metered cost rose from $${prev.toFixed(2)} to $${cur.toFixed(2)} in ${months[i]}.`,
+          fix: "Pay-per-use has no invoice to catch this: check what ran that month.",
+        });
+      }
+    }
+  }
+
+  /* ---- receipts that could not be turned into a picture, and shaky matches ---- */
+  for (const r of receipts) {
+    if (r.shotError) {
+      anomalies.push({
+        severity: "low", kind: "render_failed", period: r.period, vendor: r.vendor, receiptId: r.id,
+        message: `The receipt image for ${r.vendor} ${r.period} could not be rendered (${r.shotError}). The amount is still counted.`,
+        fix: "Open the original from the receipt drawer, or attach a screenshot by hand.",
+      });
+    }
+    if (r.confidence < 0.6 && !r.reviewed) {
+      anomalies.push({
+        severity: "medium", kind: "low_confidence", period: r.period, vendor: r.vendor, receiptId: r.id,
+        amountUsd: r.amountUsd,
+        message: `$${r.amountUsd.toFixed(2)} from "${r.subject || r.vendor}" was matched to ${r.vendor} with low confidence (${r.matchedBy || "weak signal"}).`,
+        fix: "Open it and confirm the vendor and amount, or reassign it.",
+      });
+    }
+    if (r.currency !== "USD") {
+      anomalies.push({
+        severity: "low", kind: "non_usd", period: r.period, vendor: r.vendor, receiptId: r.id,
+        message: `${r.vendor} invoiced ${r.nativeAmount?.toFixed(2)} ${r.currency}; converted at a fixed rate to $${r.amountUsd.toFixed(2)}.`,
+        fix: "Enter the exact figure your card was charged if the total has to tie out to the statement.",
+      });
+    }
+    if (r.kind !== "charge") {
+      anomalies.push({
+        severity: "info", kind: "refund", period: r.period, vendor: r.vendor, receiptId: r.id,
+        amountUsd: r.amountUsd,
+        message: `${r.vendor} ${r.kind === "refund" ? "refunded" : "issued a credit note for"} $${Math.abs(r.amountUsd).toFixed(2)} in ${r.period}.`,
+      });
+    }
+  }
+
+  if (opts.inboxConfigured === false) {
+    anomalies.unshift({
+      severity: "high", kind: "inbox_unconfigured", vendor: "Billing mailbox",
+      message: "No billing mailbox is wired up, so no receipt can arrive on its own. Every figure on this page is the register's estimate, not proof.",
+      fix: "Point the console at the mailbox the vendors already email (see the sourcing panel below).",
+    });
+  }
+
+  const totalCounted = round2(monthTotals.reduce((s, m) => s + m.countedUsd, 0));
+  const totalVerified = round2(monthTotals.reduce((s, m) => s + m.verifiedUsd, 0));
+  const current = monthTotals[monthTotals.length - 1];
+  const prior = monthTotals[monthTotals.length - 2];
+  const closed = monthTotals.slice(0, -1);
+
+  anomalies.sort((a, b) => sev(b.severity) - sev(a.severity) || (b.amountUsd || 0) - (a.amountUsd || 0));
+
+  return {
+    months, rows, monthTotals, unmatched, anomalies,
+    totals: {
+      allTimeCountedUsd: totalCounted,
+      allTimeVerifiedUsd: totalVerified,
+      receiptCount: receipts.length,
+      missingCount: monthTotals.reduce((s, m) => s + m.missingCount, 0),
+      coveragePct: totalCounted > 0 ? Math.round((totalVerified / totalCounted) * 1000) / 10 : 100,
+      currentMonthUsd: current?.countedUsd || 0,
+      priorMonthUsd: prior?.countedUsd || 0,
+      avgMonthUsd: closed.length ? round2(closed.reduce((s, m) => s + m.countedUsd, 0) / closed.length) : 0,
+    },
+  };
+}
+
+function sev(s: AnomalySeverity): number {
+  return s === "high" ? 3 : s === "medium" ? 2 : s === "low" ? 1 : 0;
+}
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function unmatchedIn(map: Map<string, Receipt[]>, period: string): number {
+  let sum = 0;
+  for (const rs of map.values()) for (const r of rs) if (r.period === period) sum += r.amountUsd;
+  return round2(sum);
+}
+
+/** What the register says a given month should cost for one line item. */
+function expectedFor(item: SpendItem, period: string): number {
+  if (item.status !== "active") return 0;
+  const startMonth = (item.at || "").slice(0, 7);
+  if (startMonth && period < startMonth) return 0;
+  if (item.billing === "monthly") return item.amountUsd;
+  if (item.billing === "annual") {
+    if (!startMonth) return 0;
+    const monthsSince = monthDiff(startMonth, period);
+    return monthsSince >= 0 && monthsSince % 12 === 0 ? item.amountUsd : 0;
+  }
+  // one-time and credit purchases are expected only in the month they were made; metered
+  // has no expected figure at all (the ledger carries it).
+  if (item.billing === "one_time" || item.billing === "credit") return startMonth === period ? item.amountUsd : 0;
+  return 0;
+}
+function monthDiff(from: string, to: string): number {
+  const [fy, fm] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
+
+function toRef(r: Receipt): ReceiptRef {
+  return {
+    id: r.id, amountUsd: r.amountUsd, chargedAt: r.chargedAt, invoiceNumber: r.invoiceNumber,
+    hasShot: r.hasShot, hasFile: !!r.fileMime, source: r.source, confidence: r.confidence,
+    reviewed: r.reviewed, kind: r.kind, subject: r.subject, shotError: r.shotError,
+  };
+}
+
+/** Everything that can be wrong with ONE line item's history. */
+function collectItemAnomalies(
+  item: SpendItem,
+  mine: Receipt[],
+  cells: MatrixCell[],
+  src: ReturnType<typeof vendorSourceFor>,
+  out: Anomaly[],
+  nowMonth: string,
+): void {
+  const missing = cells.filter((c) => c.status === "missing");
+  if (missing.length) {
+    const periods = missing.map((c) => c.period);
+    out.push({
+      severity: missing.length > 1 ? "high" : "medium", kind: "missing_receipt",
+      period: periods[periods.length - 1], vendor: item.vendor, itemId: item.id,
+      amountUsd: round2(missing.reduce((s, c) => s + c.expectedUsd, 0)),
+      message: `${item.vendor} · ${item.label}: no receipt for ${periods.length} month${periods.length > 1 ? "s" : ""} (${periods.join(", ")}), $${round2(missing.reduce((s, c) => s + c.expectedUsd, 0)).toFixed(2)} unaccounted for.`,
+      fix: src?.portal ? `Download the invoice from ${src.portal} and attach it, or forward the receipt email to the billing mailbox.` : "Forward the receipt email to the billing mailbox, or attach the invoice by hand.",
+    });
+  }
+
+  const mismatches = cells.filter((c) => c.status === "mismatch");
+  for (const c of mismatches) {
+    out.push({
+      severity: "medium", kind: "amount_mismatch", period: c.period, vendor: item.vendor, itemId: item.id,
+      amountUsd: round2(c.actualUsd - c.expectedUsd),
+      message: `${item.vendor} · ${item.label} charged $${c.actualUsd.toFixed(2)} in ${c.period}; the register says $${c.expectedUsd.toFixed(2)}.`,
+      fix: "Update the register price, or find out what changed on the invoice.",
+    });
+  }
+
+  const unexpected = cells.filter((c) => c.status === "unexpected");
+  for (const c of unexpected) {
+    out.push({
+      severity: "low", kind: "unexpected_charge", period: c.period, vendor: item.vendor, itemId: item.id,
+      amountUsd: c.actualUsd,
+      message: `${item.vendor} · ${item.label} charged $${c.actualUsd.toFixed(2)} in ${c.period} with nothing expected that month.`,
+      fix: item.billing === "credit" ? "Normal for a credit top-up." : "Check whether the billing cycle moved.",
+    });
+  }
+
+  if (item.status === "cancelled") {
+    const after = cells.filter((c) => c.actualUsd > 0 && c.period >= nowMonth);
+    if (after.length) {
+      out.push({
+        severity: "high", kind: "charged_after_cancel", period: after[0].period, vendor: item.vendor, itemId: item.id,
+        amountUsd: after.reduce((s, c) => s + c.actualUsd, 0),
+        message: `${item.vendor} · ${item.label} is marked cancelled but still charged in ${after.map((c) => c.period).join(", ")}.`,
+        fix: "Cancel it at the vendor, or mark the line item active again.",
+      });
+    }
+  }
+
+  /* A hole in the middle of an otherwise clean series is the easiest thing to miss. */
+  const paidIdx = cells.map((c, i) => (c.receipts.length ? i : -1)).filter((i) => i >= 0);
+  if (paidIdx.length >= 2) {
+    for (let i = paidIdx[0]; i < paidIdx[paidIdx.length - 1]; i++) {
+      if (!cells[i].receipts.length && cells[i].status !== "prepaid" && cells[i].status !== "none") {
+        out.push({
+          severity: "medium", kind: "gap_in_series", period: cells[i].period, vendor: item.vendor, itemId: item.id,
+          message: `${item.vendor} · ${item.label} has receipts either side of ${cells[i].period} but none for it.`,
+          fix: "The receipt exists somewhere: search the mailbox for that month or pull it from the vendor portal.",
+        });
+        break;
+      }
+    }
+  }
+
+  if (item.needsAmount && !mine.length && item.status === "active" && item.billing !== "metered") {
+    out.push({
+      severity: "high", kind: "no_price_on_file", vendor: item.vendor, itemId: item.id,
+      message: `${item.vendor} · ${item.label} has no price on file and no receipt has ever arrived, so it is invisible in the monthly burn.`,
+      fix: src?.portal ? `Pull one invoice from ${src.portal} to establish the figure.` : "Enter the invoice figure, or forward one receipt to the billing mailbox.",
+    });
+  } else if (!mine.length && item.status === "active" && item.billing !== "metered" && monthlyEquivalent(item) > 0) {
+    out.push({
+      severity: "medium", kind: "never_receipted", vendor: item.vendor, itemId: item.id,
+      amountUsd: monthlyEquivalent(item),
+      message: `${item.vendor} · ${item.label} costs $${monthlyEquivalent(item).toFixed(2)}/mo but not one receipt has ever been captured for it.`,
+      fix: src?.channel === "portal_only"
+        ? "This vendor does not email receipts: download one from the portal and attach it."
+        : "Add the billing mailbox to this vendor's account so its receipts start arriving.",
+    });
+  }
+}
+
+/* ============================ per-vendor sourcing status ============================ */
+
+export interface SourcingRow {
+  vendor: string;
+  channel: string;
+  from: string[];
+  portal?: string;
+  api?: string;
+  setup?: string;
+  /** Receipts captured for this vendor, and how. */
+  emailCount: number;
+  manualCount: number;
+  lastAt?: string;
+  /** What the owner still has to do, if anything. */
+  state: "auto" | "manual" | "unproven" | "not_billed";
+  advice: string;
+}
+
+/**
+ * The panel that keeps the report honest going forward: for every vendor in the register,
+ * whether receipts are arriving on their own, and if not, exactly what to do about it.
+ */
+export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): SourcingRow[] {
+  const vendors = [...new Set(items.map((i) => i.vendor))];
+  for (const r of receipts) if (!vendors.includes(r.vendor)) vendors.push(r.vendor);
+
+  return vendors.map((vendor) => {
+    const src = vendorSourceFor(vendor) || VENDOR_SOURCES.find((s) => vendor.toLowerCase().includes(s.vendor.toLowerCase()));
+    const mine = receipts.filter((r) => r.vendor.toLowerCase() === vendor.toLowerCase());
+    const emailCount = mine.filter((r) => r.source === "email").length;
+    const manualCount = mine.filter((r) => r.source === "manual").length;
+    const own = items.filter((i) => i.vendor === vendor);
+    const billed = own.some((i) => i.status === "active" && (i.amountUsd > 0 || i.billing === "metered" || i.needsAmount));
+
+    let state: SourcingRow["state"];
+    let advice: string;
+    if (emailCount > 0) {
+      state = "auto";
+      advice = `Receipts arrive by email and are captured automatically (${emailCount} on file).`;
+    } else if (manualCount > 0) {
+      state = "manual";
+      advice = `Only hand-attached receipts so far. Add the billing mailbox to this vendor's account so it reports itself.`;
+    } else if (!billed) {
+      state = "not_billed";
+      advice = "Nothing is billed here, so no receipt is expected.";
+    } else {
+      state = "unproven";
+      advice = src?.channel === "portal_only"
+        ? `No email receipt exists for this vendor. Download invoices from ${src.portal || "the vendor portal"} and attach them each month.`
+        : `No receipt has ever arrived. Add the billing mailbox as a billing contact at ${src?.portal || "the vendor"}, then re-run the sweep over the last two months.`;
+    }
+
+    return {
+      vendor,
+      channel: src?.channel || "email_vendor",
+      from: src?.from || [],
+      portal: src?.portal,
+      api: src?.api,
+      setup: src?.setup,
+      emailCount, manualCount,
+      lastAt: mine.map((r) => r.chargedAt).sort().slice(-1)[0],
+      state, advice,
+    };
+  }).sort((a, b) => rank(a.state) - rank(b.state) || a.vendor.localeCompare(b.vendor));
+}
+function rank(s: SourcingRow["state"]): number {
+  return s === "unproven" ? 0 : s === "manual" ? 1 : s === "auto" ? 2 : 3;
+}
