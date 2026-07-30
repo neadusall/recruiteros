@@ -27,6 +27,8 @@
  *   RAPID_WEBSEARCH_HL           default "en"       (language; set "" to omit)
  */
 
+import { noteRapidQuota } from "../sourcing/rapidQuota";
+
 const TIMEOUT_MS = 9_000;
 
 /** True once the real-time web search provider is configured. */
@@ -100,6 +102,9 @@ export async function webSearchResults(query: string): Promise<WebResult[]> {
       },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+    // Feed the credit meter so the Owner Console's spend dashboard can tell a working
+    // subscription from one nobody wired up.
+    noteRapidQuota(host, res.headers, "search");
     if (!res.ok) return [];
     const data: unknown = await res.json().catch(() => null);
     return data ? parseResults(data) : [];

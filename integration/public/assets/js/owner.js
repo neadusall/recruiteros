@@ -86,8 +86,8 @@
 
   /* ---------------- router ---------------- */
   // Projection calculator moved to the in-app command center (Measure → Spending).
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, security: viewSecurity };
-  var TITLES = { overview: "Overview", pricing: "Pricing", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", security: "Security" };
+  var ROUTES = { overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, security: viewSecurity };
+  var TITLES = { overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", security: "Security" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -643,6 +643,415 @@
   function tlv(k, v) { return '<div class="tl"><span>' + esc(k) + '</span><span class="v">' + esc(v) + '</span></div>'; }
   function fmt(n, dp) { return (Number(n) || 0).toFixed(dp == null ? 2 : dp); }
   function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+  /* ================= SPEND MASTER =================
+   * The whole cost of running the business on one screen: every subscription, server,
+   * domain, one-time purchase and credit top-up from the editable spend register, joined
+   * with what the live system says about each one. The join is the value: a row can read
+   * $150/mo while the signal underneath reads "no key configured anywhere", and that gap
+   * is the single most expensive thing an owner can fail to notice.
+   *
+   *   viewBurn        the screen           burnKpis / burnAlert / burnTable / burnOneTime
+   *   openSpendItem   click-through editor (reuses the account drawer)
+   *   Backend         GET/POST/PATCH/DELETE /api/owner/burn
+   */
+  var burnData = null;
+  var burnFilter = "all";
+
+  var BURN_CATEGORIES = [
+    ["search", "Search & job feeds"], ["people", "People & phone data"], ["ai", "AI & voice"],
+    ["messaging", "SMS & voice"], ["email", "Email & mailboxes"], ["infra", "Infrastructure"],
+    ["domain", "Domains"], ["software", "Software seats"], ["other", "Other"]
+  ];
+  var BURN_BILLING = [
+    ["monthly", "Monthly"], ["annual", "Annual"], ["one_time", "One-time"],
+    ["credit", "Credit top-up"], ["metered", "Metered (pay per use)"]
+  ];
+  function labelFor(pairs, v) {
+    for (var i = 0; i < pairs.length; i++) if (pairs[i][0] === v) return pairs[i][1];
+    return v || "";
+  }
+
+  function viewBurn() {
+    api("/owner/burn?window=" + win).then(function (b) {
+      burnData = b;
+      var html = '<div class="v-head"><h2>Spend master</h2><p>Every dollar leaving the business: subscriptions, servers, domains, one-time buys and pay-per-use, checked against what the running system is actually calling. Metered cost is for the selected window (' + esc(win) + '); recurring cost is per month.</p></div>';
+      html += burnKpis(b);
+      html += burnAlert(b);
+      html += '<div class="card" style="margin-top:14px">' +
+        '<div class="burn-head"><h3>Recurring cost</h3><div class="burn-filters" id="burnFilters">' +
+        burnChip("all", "All", b.items.length) +
+        burnChip("dead", "Not earning", b.items.filter(isDead).length) +
+        burnChip("needs", "Needs an amount", b.items.filter(function (i) { return i.needsAmount; }).length) +
+        '</div></div>' + burnTable(b) + '</div>';
+      html += burnEffectiveness(b);
+      html += burnDomains(b);
+      html += burnOneTime(b);
+      html += '<div class="two-col" style="margin-top:14px">' +
+        '<div class="card"><h3>Recurring by category</h3>' + barsFromObj(catLabels(b.byCategory)) + '</div>' +
+        '<div class="card"><h3>Metered by provider · ' + esc(win) + '</h3>' + barsFromObj(b.metered.bySource) + '</div></div>';
+      html += '<div class="card" style="margin-top:14px"><h3>Add a line item</h3>' + burnForm() + '</div>';
+      $("#view").innerHTML = html;
+      wireBurn();
+    }).catch(fail);
+  }
+
+  function isDead(i) { return i.live && (i.live.state === "unwired" || i.live.state === "idle") && monthlyOf(i) > 0; }
+  function monthlyOf(i) {
+    if (i.status !== "active") return 0;
+    if (i.billing === "monthly") return i.amountUsd;
+    if (i.billing === "annual") return i.amountUsd / 12;
+    return 0;
+  }
+  function catLabels(obj) {
+    var o = {}; Object.keys(obj || {}).forEach(function (k) { o[labelFor(BURN_CATEGORIES, k)] = obj[k]; }); return o;
+  }
+  function burnChip(id, label, n) {
+    return '<button class="burn-chip' + (burnFilter === id ? " active" : "") + '" data-filter="' + id + '">' + esc(label) + ' <span>' + n + '</span></button>';
+  }
+
+  function burnKpis(b) {
+    return '<div class="stat-grid">' +
+      stat(usd(b.totalMonthlyUsd), "True monthly burn", "amber") +
+      stat(usd(b.committedMonthlyUsd), "Committed / month") +
+      stat(usd(b.meteredUsd), "Metered · " + esc(win)) +
+      stat(usd(b.deadMonthlyUsd), "Not earning / month", b.deadMonthlyUsd ? "bad" : "good") +
+      stat(usd(b.oneTimeTotalUsd), "One-time & credits") +
+      stat(usd(b.annualCommittedUsd), "Annual commitments") +
+      '</div>';
+  }
+
+  /* The money question, answered before anything else on the page: what is being paid
+     for and not used, and what to do about each one. */
+  function burnAlert(b) {
+    var dead = b.items.filter(isDead).sort(function (x, y) { return monthlyOf(y) - monthlyOf(x); });
+    if (!dead.length) {
+      return '<div class="burn-alert ok" style="margin-top:16px"><div class="ba-title">Every recurring line item is being used.</div>' +
+        '<p class="note">No subscription is drawing a charge without traffic behind it.</p></div>';
+    }
+    var html = '<div class="burn-alert" style="margin-top:16px"><div class="ba-title">' + usd(b.deadMonthlyUsd) + ' a month is being paid for without traffic behind it</div><ul>';
+    dead.forEach(function (i) {
+      html += '<li><strong>' + esc(i.vendor) + ' · ' + esc(i.label) + '</strong> ' + usd(monthlyOf(i)) + '/mo. ' + esc(i.live.reason) + '</li>';
+    });
+    html += '</ul><p class="note">Either wire it up or cancel it. Click any row below to record the decision.</p></div>';
+    return html;
+  }
+
+  function burnTable(b) {
+    var rows = b.items.filter(function (i) {
+      if (i.billing === "one_time" || i.billing === "credit") return false;
+      if (i.domain) return false; // domains have their own section with expiry and renewal
+      if (burnFilter === "dead") return isDead(i);
+      if (burnFilter === "needs") return !!i.needsAmount;
+      return true;
+    }).sort(function (x, y) { return monthlyOf(y) - monthlyOf(x); });
+
+    if (!rows.length) return '<p class="note">Nothing matches this filter.</p>';
+    var html = '<div class="otable-wrap"><table class="otable"><thead><tr>' +
+      '<th>Vendor / item</th><th>Billing</th><th class="num">Cost / mo</th><th>Usage against the plan</th><th>Status</th>' +
+      '</tr></thead><tbody>';
+    rows.forEach(function (i) {
+      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' +
+        '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div>' +
+        '<div class="lr-sub note">' + esc(i.purpose || labelFor(BURN_CATEGORIES, i.category)) + '</div></td>' +
+        '<td>' + esc(labelFor(BURN_BILLING, i.billing)) + '</td>' +
+        '<td class="num">' + amountCell(i) + '</td>' +
+        '<td>' + usageCell(i) + '</td>' +
+        '<td>' + stateCell(i) + '</td>' +
+        '</tr>';
+    });
+    return html + '</tbody></table></div>';
+  }
+
+  function amountCell(i) {
+    if (i.needsAmount) return '<span class="pill needs">Set amount</span>';
+    if (i.billing === "metered") return '<span class="note">per use</span>';
+    var m = monthlyOf(i);
+    var out = usd(m);
+    if (i.billing === "annual") out += '<div class="note" style="font-size:11px">' + usd(i.amountUsd) + '/yr</div>';
+    if (!i.verified) out += '<div class="note" style="font-size:11px">estimate</div>';
+    return out;
+  }
+
+  /* Three different truths depending on what the vendor exposes: a real plan meter from
+     the RapidAPI quota headers, a metered dollar figure from the usage ledger, or nothing
+     at all (say so rather than implying zero usage). */
+  function usageCell(i) {
+    var L = i.live || {};
+    if (L.quota && L.quota.limit) {
+      var q = L.quota;
+      var cls = q.pct >= 90 ? "bad" : q.pct >= 60 ? "amber" : "good";
+      var perReq = i.amountUsd > 0 && q.limit ? i.amountUsd / q.limit : 0;
+      return '<div class="meter"><div class="meter-track"><div class="meter-fill ' + cls + '" style="width:' + Math.max(1, Math.min(100, q.pct)) + '%"></div></div>' +
+        '<div class="meter-l">' + q.used.toLocaleString("en-US") + ' / ' + q.limit.toLocaleString("en-US") + ' requests · ' + pct(q.pct) +
+        (perReq ? ' · ' + usd(perReq, 4) + '/req' : '') + '</div>' +
+        (L.history && L.history.length > 1 ? spark(L.history) : '') + '</div>';
+    }
+    if (L.meteredUsd != null && L.meteredUsd > 0) {
+      return '<div class="meter-l">' + usd(L.meteredUsd) + ' metered in ' + esc(win) + '</div>';
+    }
+    if (L.state === "unwired") return '<div class="meter-l bad-t">No key configured</div>';
+    return '<div class="meter-l note">No usage signal</div>';
+  }
+
+  /* Tiny inline sparkline of daily requests. Pure SVG, no library, no network. */
+  function spark(hist) {
+    var vals = hist.map(function (h) { return h.used; });
+    var max = Math.max.apply(null, vals) || 1;
+    var w = 120, h = 18, step = vals.length > 1 ? w / (vals.length - 1) : w;
+    var pts = vals.map(function (v, idx) { return (idx * step).toFixed(1) + "," + (h - (v / max) * (h - 2)).toFixed(1); }).join(" ");
+    return '<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h + '" aria-hidden="true">' +
+      '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>';
+  }
+
+  function stateCell(i) {
+    var s = (i.live && i.live.state) || "unknown";
+    var map = { live: ["active", "Live"], idle: ["idle", "Idle"], unwired: ["dead", "Not wired"], unknown: ["unknown", "No signal"] };
+    var m = map[s] || map.unknown;
+    var html = '<span class="pill ' + m[0] + '">' + m[1] + '</span>';
+    if (i.live && i.live.workspaces && i.live.workspaces.length) {
+      html += '<div class="note" style="font-size:11px">' + i.live.workspaces.length + ' account' + (i.live.workspaces.length > 1 ? "s" : "") + ' connected</div>';
+    }
+    return html;
+  }
+
+  /* What each data source PRODUCED, priced per reply. The cost column is what makes this
+     comparable: a 96% cell rate is only impressive next to what it cost to get. */
+  function burnEffectiveness(b) {
+    var rows = b.effectiveness || [];
+    var html = '<div class="card" style="margin-top:14px"><h3>What each source actually produced</h3>' +
+      '<p class="note" style="margin-top:-4px">Every phone number the engine handed to OS Text, scored by what happened next: whether the carrier confirmed it as a mobile, whether the text delivered, and whether a human replied. Cost per reply is the comparable number across sources.</p>';
+    if (!rows.length) {
+      return html + '<p class="note">No outcome data available. The OS Text engine did not answer, so spend is shown without results.</p></div>';
+    }
+    html += '<div class="otable-wrap"><table class="otable"><thead><tr>' +
+      '<th>Source</th><th class="num">Cost / mo</th><th class="num">Cell rate</th><th class="num">Delivery</th>' +
+      '<th class="num">Replies</th><th class="num">Reply rate</th><th class="num">Wrong person</th><th class="num">Cost / reply</th>' +
+      '</tr></thead><tbody>';
+    rows.forEach(function (r) {
+      html += '<tr' + (r.itemId ? ' class="clickrow" data-spend="' + esc(r.itemId) + '"' : '') + '>' +
+        '<td><div class="lr-main">' + esc(r.label) + '</div><div class="lr-sub note">' + r.checked.toLocaleString("en-US") + ' numbers checked · ' + r.texted.toLocaleString("en-US") + ' texted</div></td>' +
+        '<td class="num">' + (r.monthlyUsd ? usd(r.monthlyUsd) : '<span class="note">free</span>') + '</td>' +
+        '<td class="num">' + rateCell(r.cellRatePct, 60, 30) + '</td>' +
+        '<td class="num">' + rateCell(r.deliveryRatePct, 90, 75) + '</td>' +
+        '<td class="num">' + r.replied.toLocaleString("en-US") + '</td>' +
+        '<td class="num">' + rateCell(r.replyRatePct, 8, 3) + '</td>' +
+        '<td class="num">' + (r.wrongNumber ? r.wrongNumber + ' <span class="note">(' + pct(r.wrongNumberPct) + ')</span>' : '<span class="note">0</span>') + '</td>' +
+        '<td class="num">' + (r.costPerReplyUsd != null ? '<strong>' + usd(r.costPerReplyUsd, 2) + '</strong>' : '<span class="note">-</span>') + '</td>' +
+        '</tr>';
+    });
+    return html + '</tbody></table></div></div>';
+  }
+  function rateCell(v, good, mid) {
+    var c = v >= good ? "margin-good" : v >= mid ? "margin-mid" : "margin-bad";
+    return '<span class="' + c + '">' + pct(v) + '</span>';
+  }
+
+  /* Domains: bought once, forgotten, then they lapse and a sending domain dies with them.
+     Dates come from the public registry, money is owner-entered. */
+  function burnDomains(b) {
+    var rows = (b.items || []).filter(function (i) { return !!i.domain; });
+    var soon = b.domainsExpiringSoon || [];
+    var html = '<div class="card" style="margin-top:14px"><div class="burn-head"><h3>Domains</h3>' +
+      '<div class="btn-row" style="margin:0"><button class="btn btn-sm" id="dmImport">Import from sending fleet</button>' +
+      '<button class="btn btn-sm" id="dmRefresh">Refresh registry dates</button></div></div>';
+    html += '<p class="note" style="margin-top:2px">' + (b.domainCount || 0) + ' domains tracked · ' + usd(b.domainRenewalAnnualUsd || 0) + ' to renew them all for another year. Registration and expiry come from the public registry; purchase price and renewal price are yours to enter.</p>';
+
+    if (soon.length) {
+      html += '<div class="burn-alert" style="margin:10px 0"><div class="ba-title">' + soon.length + ' domain' + (soon.length > 1 ? 's' : '') + ' expiring within 60 days</div><ul>';
+      soon.slice(0, 8).forEach(function (d) {
+        html += '<li><strong>' + esc(d.domain) + '</strong> ' + (d.days < 0 ? 'EXPIRED ' + Math.abs(d.days) + ' days ago' : 'in ' + d.days + ' days') +
+          ' (' + esc((d.expiresAt || "").slice(0, 10)) + ')' + (d.autoRenew ? ', auto-renew on' : ', auto-renew NOT confirmed') + '</li>';
+      });
+      html += '</ul></div>';
+    }
+    if (!rows.length) {
+      return html + '<p class="note">No domains tracked yet. Import pulls every domain the sending fleet uses, then Refresh fills in registration and expiry dates from the registry.</p></div>';
+    }
+    html += '<div class="otable-wrap"><table class="otable"><thead><tr>' +
+      '<th>Domain</th><th>Registrar</th><th>Purchased</th><th>Expires</th><th class="num">Days left</th><th class="num">Paid</th><th class="num">Renewal</th><th>Auto</th>' +
+      '</tr></thead><tbody>';
+    rows.sort(function (x, y) { return (x.expiresAt || "9999").localeCompare(y.expiresAt || "9999"); }).forEach(function (i) {
+      var days = i.expiresAt ? Math.round((Date.parse(i.expiresAt) - Date.now()) / 86400000) : null;
+      var dcls = days == null ? "" : days < 0 ? "margin-bad" : days <= 60 ? "margin-mid" : "margin-good";
+      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' +
+        '<td><div class="lr-main">' + esc(i.domain) + '</div>' + (i.registryError ? '<div class="lr-sub bad-t">' + esc(i.registryError) + '</div>' : '') + '</td>' +
+        '<td>' + esc(i.registrar || "-") + '</td>' +
+        '<td>' + esc((i.registeredAt || i.at || "").slice(0, 10) || "-") + '</td>' +
+        '<td>' + (i.expiresAt ? esc(i.expiresAt.slice(0, 10)) : '<span class="note">unknown</span>') + '</td>' +
+        '<td class="num">' + (days == null ? '<span class="note">-</span>' : '<span class="' + dcls + '">' + days + '</span>') + '</td>' +
+        '<td class="num">' + (i.needsAmount ? '<span class="pill needs">Set</span>' : usd(i.amountUsd)) + '</td>' +
+        '<td class="num">' + (i.renewalUsd ? usd(i.renewalUsd) : '<span class="note">-</span>') + '</td>' +
+        '<td>' + (i.autoRenew ? '<span class="pill active">On</span>' : '<span class="pill unknown">Unset</span>') + '</td>' +
+        '</tr>';
+    });
+    return html + '</tbody></table></div></div>';
+  }
+
+  function burnOneTime(b) {
+    var rows = b.items.filter(function (i) { return i.billing === "one_time" || i.billing === "credit"; })
+      .sort(function (x, y) { return (y.at || "").localeCompare(x.at || ""); });
+    var html = '<div class="card" style="margin-top:14px"><h3>One-time purchases & credit top-ups</h3>';
+    if (!rows.length) {
+      html += '<p class="note">Nothing recorded yet. Add domain buys, hardware, and prepaid credit here so the true cost of the business is complete.</p>';
+      return html + '</div>';
+    }
+    html += '<div class="otable-wrap"><table class="otable"><thead><tr><th>Vendor / item</th><th>Type</th><th>Date</th><th class="num">Amount</th></tr></thead><tbody>';
+    rows.forEach(function (i) {
+      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' +
+        '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div><div class="lr-sub note">' + esc(i.purpose || "") + '</div></td>' +
+        '<td>' + esc(labelFor(BURN_BILLING, i.billing)) + '</td>' +
+        '<td>' + esc(i.at || "") + '</td>' +
+        '<td class="num">' + (i.needsAmount ? '<span class="pill needs">Set amount</span>' : usd(i.amountUsd)) + '</td></tr>';
+    });
+    return html + '</tbody></table></div></div>';
+  }
+
+  function burnForm() {
+    return '<div class="burn-form">' +
+      fld("Vendor", '<input id="bfVendor" placeholder="Hetzner" />') +
+      fld("Item", '<input id="bfLabel" placeholder="App server (CCX13)" />') +
+      fld("Category", select("bfCategory", BURN_CATEGORIES, "infra")) +
+      fld("Billing", select("bfBilling", BURN_BILLING, "monthly")) +
+      fld("Amount (USD)", '<input id="bfAmount" type="number" min="0" step="0.01" placeholder="0.00" />') +
+      fld("Date", '<input id="bfAt" type="date" />') +
+      fld("What it buys", '<input id="bfPurpose" placeholder="Runs the portal and every worker" />') +
+      '<div class="btn-row"><button class="btn btn-primary btn-sm" id="bfAdd">Add line item</button></div>' +
+      '</div>';
+  }
+  function select(id, pairs, sel) {
+    return '<select id="' + id + '">' + pairs.map(function (p) {
+      return '<option value="' + p[0] + '"' + (p[0] === sel ? " selected" : "") + '>' + esc(p[1]) + '</option>';
+    }).join("") + '</select>';
+  }
+
+  function wireBurn() {
+    $$("#burnFilters .burn-chip").forEach(function (c) {
+      c.addEventListener("click", function () { burnFilter = c.dataset.filter; viewBurn(); });
+    });
+    $$("#view .clickrow[data-spend]").forEach(function (tr) {
+      tr.addEventListener("click", function () { openSpendItem(tr.dataset.spend); });
+    });
+    var imp = $("#dmImport"), ref = $("#dmRefresh");
+    if (imp) imp.addEventListener("click", function () {
+      imp.classList.add("disabled"); toast("Reading the sending fleet…");
+      send("/owner/burn", "POST", { action: "import_domains" }).then(function (r) {
+        imp.classList.remove("disabled");
+        if (!r.ok) { toast("Import failed"); return; }
+        toast(r.data.added ? "Added " + r.data.added + " domain(s)" : "No new domains found");
+        viewBurn();
+      });
+    });
+    if (ref) ref.addEventListener("click", function () {
+      ref.classList.add("disabled"); toast("Checking the registry, this can take a minute…");
+      send("/owner/burn", "POST", { action: "refresh_domains" }).then(function (r) {
+        ref.classList.remove("disabled");
+        if (!r.ok) { toast("Refresh failed"); return; }
+        toast("Updated " + r.data.updated + " of " + r.data.checked + (r.data.failed ? " · " + r.data.failed + " failed" : ""));
+        viewBurn();
+      });
+    });
+
+    var add = $("#bfAdd");
+    if (add) add.addEventListener("click", function () {
+      var vendor = $("#bfVendor").value.trim();
+      if (!vendor) { toast("Vendor is required"); return; }
+      send("/owner/burn", "POST", {
+        vendor: vendor,
+        label: $("#bfLabel").value.trim() || vendor,
+        category: $("#bfCategory").value,
+        billing: $("#bfBilling").value,
+        amountUsd: Number($("#bfAmount").value) || 0,
+        at: $("#bfAt").value || undefined,
+        purpose: $("#bfPurpose").value.trim() || undefined
+      }).then(function (r) {
+        if (!r.ok) { toast("Could not add that"); return; }
+        toast("Line item added"); viewBurn();
+      });
+    });
+  }
+
+  /* ---------------- spend item editor (drawer) ---------------- */
+  function openSpendItem(id) {
+    var i = (burnData && burnData.items || []).filter(function (x) { return x.id === id; })[0];
+    if (!i) return;
+    var L = i.live || {};
+    var html = '<div style="display:flex;justify-content:space-between;align-items:start">' +
+      '<div><h2>' + esc(i.vendor) + '</h2><div class="sub">' + esc(i.label) + '</div></div>' +
+      '<a class="btn btn-sm" id="dwClose">✕</a></div>';
+
+    if (i.impact) html += '<div class="impact-box"><div class="ib-label">How this builds the business</div><p>' + esc(i.impact) + '</p></div>';
+
+    html += '<div class="kv">' +
+      kv("Status", stateCell(i)) +
+      kv("Signal", '<span class="note">' + esc(L.reason || "") + '</span>') +
+      kv("Monthly equivalent", usd(monthlyOf(i))) +
+      (i.domain ? kv("Registrar", esc(i.registrar || "unknown")) : "") +
+      (i.domain ? kv("Registered", esc((i.registeredAt || "").slice(0, 10) || "unknown")) : "") +
+      (i.domain ? kv("Expires", esc((i.expiresAt || "").slice(0, 10) || "unknown")) : "") +
+      (i.notes ? kv("Notes", '<span class="note">' + esc(i.notes) + '</span>') : "") +
+      (L.lastActivityAt ? kv("Last activity", fmtDate(L.lastActivityAt)) : "") +
+      (L.quota ? kv("Plan usage", L.quota.used.toLocaleString("en-US") + " / " + L.quota.limit.toLocaleString("en-US") + " requests" + (L.quota.resetAt ? " · resets " + fmtDate(L.quota.resetAt) : "")) : "") +
+      (L.envPresent && L.envPresent.length ? kv("Keys present", esc(L.envPresent.join(", "))) : "") +
+      (L.envMissing && L.envMissing.length ? kv("Keys missing", '<span class="bad-t">' + esc(L.envMissing.join(", ")) + '</span>') : "") +
+      '</div>';
+
+    if (L.workspaces && L.workspaces.length) {
+      html += '<h3 style="margin-top:16px">Connected accounts</h3><div class="kv">';
+      L.workspaces.forEach(function (w) {
+        html += kv(esc(w.workspaceId), '<span class="pill ' + (w.status === "green" ? "active" : "susp") + '">' + esc(w.status || "unknown") + '</span>' + (w.error ? ' <span class="note">' + esc(w.error) + '</span>' : ""));
+      });
+      html += '</div>';
+    }
+
+    html += '<h3 style="margin-top:18px">Edit</h3><div class="burn-form">' +
+      fld("Vendor", '<input id="seVendor" value="' + esc(i.vendor) + '" />') +
+      fld("Item", '<input id="seLabel" value="' + esc(i.label) + '" />') +
+      fld("Category", select("seCategory", BURN_CATEGORIES, i.category)) +
+      fld("Billing", select("seBilling", BURN_BILLING, i.billing)) +
+      fld("Amount (USD)", '<input id="seAmount" type="number" min="0" step="0.01" value="' + (i.amountUsd || "") + '" />') +
+      fld("Date", '<input id="seAt" type="date" value="' + esc((i.at || "").slice(0, 10)) + '" />') +
+      fld("What it buys", '<input id="sePurpose" value="' + esc(i.purpose || "") + '" />') +
+      fld("Notes", '<input id="seNotes" value="' + esc(i.notes || "") + '" />') +
+      fld("Active", '<select id="seStatus"><option value="active"' + (i.status === "active" ? " selected" : "") + '>Active</option><option value="cancelled"' + (i.status === "cancelled" ? " selected" : "") + '>Cancelled</option></select>') +
+      (i.domain ? fld("Renewal price (USD)", '<input id="seRenewal" type="number" min="0" step="0.01" value="' + (i.renewalUsd || "") + '" />') : "") +
+      (i.domain ? fld("Expires", '<input id="seExpires" type="date" value="' + esc((i.expiresAt || "").slice(0, 10)) + '" />') : "") +
+      (i.domain ? fld("Auto-renew", '<select id="seAuto"><option value="">Not set</option><option value="1"' + (i.autoRenew ? " selected" : "") + '>On</option><option value="0"' + (i.autoRenew === false ? " selected" : "") + '>Off</option></select>') : "") +
+      '</div>' +
+      '<div class="btn-row" style="margin-top:12px"><button class="btn btn-primary btn-sm" id="seSave">Save</button>' +
+      '<button class="btn btn-sm btn-danger" id="seDelete">Remove</button></div>';
+
+    $("#drawerBody").innerHTML = html;
+    $("#scrim").classList.add("show"); $("#drawer").classList.add("show");
+    $("#dwClose").addEventListener("click", closeDrawer);
+    $("#seSave").addEventListener("click", function () {
+      var auto = $("#seAuto") ? $("#seAuto").value : "";
+      send("/owner/burn", "PATCH", {
+        id: i.id,
+        renewalUsd: $("#seRenewal") ? Number($("#seRenewal").value) || 0 : undefined,
+        expiresAt: $("#seExpires") && $("#seExpires").value ? $("#seExpires").value : undefined,
+        autoRenew: auto === "" ? undefined : auto === "1",
+        vendor: $("#seVendor").value.trim(),
+        label: $("#seLabel").value.trim(),
+        category: $("#seCategory").value,
+        billing: $("#seBilling").value,
+        amountUsd: Number($("#seAmount").value) || 0,
+        at: $("#seAt").value || i.at,
+        purpose: $("#sePurpose").value.trim(),
+        notes: $("#seNotes").value.trim(),
+        status: $("#seStatus").value
+      }).then(function (r) {
+        if (!r.ok) { toast("Could not save"); return; }
+        toast("Saved"); closeDrawer(); viewBurn();
+      });
+    });
+    $("#seDelete").addEventListener("click", function () {
+      send("/owner/burn?id=" + encodeURIComponent(i.id), "DELETE").then(function (r) {
+        if (!r.ok) { toast("Could not remove"); return; }
+        toast("Removed"); closeDrawer(); viewBurn();
+      });
+    });
+  }
 
   /* ================= SPEND ================= */
   function viewSpend() {

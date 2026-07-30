@@ -12,18 +12,27 @@
  * Same hydrate-once / snapshot pattern as the sourcing runs store, but saves are
  * debounced: captures fire on every API call during a run, and losing the very last
  * header reading to a crash costs nothing (the next call rewrites it).
+ *
+ * DAILY HISTORY: the reading above is a single point in time, which answers "how much is
+ * left" but not "when did we burn it". Every capture therefore also stamps the running
+ * `used` count against today's date, giving the Owner Console a per-listing usage curve
+ * without a second data source. One number per host per day, 120 days kept.
  */
 
 import { loadSnapshot, saveSnapshot } from "../db";
 import { nowIso } from "../core/ids";
 
 const KEY = "rapidapi_quota_v1";
+/** Days of per-listing usage history retained for the Owner Console sparklines. */
+const HISTORY_DAYS = 120;
 
 /** Which product surface a listing's spend belongs to, so each UI meter shows only its
  *  own subscriptions: "people" = JD Sourcing's people-search/profile listings, "jobs" =
- *  the Hire Signals job feed (JSearch). Older stored snapshots predate this field and
- *  are treated as "people" (they could only have come from the sourcing listings). */
-export type RapidQuotaKind = "people" | "jobs";
+ *  the Hire Signals job feed (JSearch), "search" = the paid SERP behind decision-maker
+ *  naming, "phone" = the recruiter-triggered skip-trace phone rung. Older stored
+ *  snapshots predate this field and are treated as "people" (they could only have come
+ *  from the sourcing listings). */
+export type RapidQuotaKind = "people" | "jobs" | "search" | "phone";
 
 export interface RapidQuotaSnapshot {
   /** The RapidAPI listing host this subscription belongs to. */
@@ -44,17 +53,43 @@ export interface RapidQuotaSnapshot {
   updatedAt: string;
 }
 
-let store: Record<string, RapidQuotaSnapshot> = {};
+/** host -> { "YYYY-MM-DD": cumulative `used` at the last reading that day }. */
+export type RapidQuotaHistory = Record<string, Record<string, number>>;
+
+interface QuotaStore {
+  hosts: Record<string, RapidQuotaSnapshot>;
+  history: RapidQuotaHistory;
+}
+
+let store: QuotaStore = { hosts: {}, history: {} };
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Accept both shapes: the current {hosts,history} envelope and the original bare
+ *  host->snapshot map, so this upgrade lands without losing an existing reading. */
+function adopt(snap: unknown): void {
+  if (!snap || typeof snap !== "object") return;
+  const s = snap as Partial<QuotaStore> & Record<string, unknown>;
+  if (s.hosts && typeof s.hosts === "object") {
+    store.hosts = s.hosts as Record<string, RapidQuotaSnapshot>;
+    store.history = (s.history && typeof s.history === "object" ? s.history : {}) as RapidQuotaHistory;
+    return;
+  }
+  const legacy: Record<string, RapidQuotaSnapshot> = {};
+  for (const [k, v] of Object.entries(s)) {
+    if (v && typeof v === "object" && typeof (v as RapidQuotaSnapshot).host === "string") {
+      legacy[k] = v as RapidQuotaSnapshot;
+    }
+  }
+  store.hosts = legacy;
+}
 
 async function hydrate(): Promise<void> {
   if (hydrated) return;
   if (!hydrating) {
     hydrating = (async () => {
-      const snap = await loadSnapshot<Record<string, RapidQuotaSnapshot>>(KEY);
-      if (snap && typeof snap === "object") store = snap;
+      adopt(await loadSnapshot<unknown>(KEY));
       hydrated = true;
     })();
   }
@@ -68,6 +103,17 @@ function scheduleSave(): void {
     void saveSnapshot(KEY, store).catch(() => { /* next capture retries */ });
   }, 2000);
   if (typeof saveTimer.unref === "function") saveTimer.unref();
+}
+
+/** Stamp today's closing `used` for a host and trim past the retention window. */
+function noteHistory(host: string, used: number): void {
+  const days = (store.history[host] = store.history[host] || {});
+  days[nowIso().slice(0, 10)] = used;
+  const keys = Object.keys(days);
+  if (keys.length > HISTORY_DAYS) {
+    keys.sort();
+    for (const k of keys.slice(0, keys.length - HISTORY_DAYS)) delete days[k];
+  }
 }
 
 /**
@@ -98,9 +144,17 @@ export function noteRapidQuota(host: string, headers: Headers, kind: RapidQuotaK
       if (!picked || o.limit > (objects[picked].limit as number)) picked = k;
     }
   }
-  if (!picked) return;
+  if (!picked) {
+    // No plan headers on this response, but the call still happened: keep the
+    // "last active" clock honest so the console can tell silent from unwired.
+    noteRapidCall(host, kind);
+    return;
+  }
   const o = objects[picked];
-  if (typeof o.limit !== "number" || typeof o.remaining !== "number") return;
+  if (typeof o.limit !== "number" || typeof o.remaining !== "number") {
+    noteRapidCall(host, kind);
+    return;
+  }
   const snap: RapidQuotaSnapshot = {
     host,
     kind,
@@ -112,7 +166,24 @@ export function noteRapidQuota(host: string, headers: Headers, kind: RapidQuotaK
     updatedAt: nowIso(),
   };
   void hydrate().then(() => {
-    store[host] = snap;
+    store.hosts[host] = snap;
+    noteHistory(host, snap.used);
+    scheduleSave();
+  });
+}
+
+/**
+ * Record that a listing was CALLED when the response carried no usable quota headers
+ * (some listings omit them; a network-level failure has none at all). Without this the
+ * Owner Console cannot tell a silent-but-working subscription from an unwired one.
+ */
+export function noteRapidCall(host: string, kind: RapidQuotaKind = "people"): void {
+  if (!host) return;
+  void hydrate().then(() => {
+    const prev = store.hosts[host];
+    store.hosts[host] = prev
+      ? { ...prev, kind: prev.kind || kind, updatedAt: nowIso() }
+      : { host, kind, object: "unreported", limit: 0, remaining: 0, used: 0, updatedAt: nowIso() };
     scheduleSave();
   });
 }
@@ -122,7 +193,26 @@ export function noteRapidQuota(host: string, headers: Headers, kind: RapidQuotaK
  *  omit it to get everything. */
 export async function getRapidQuota(kind?: RapidQuotaKind): Promise<RapidQuotaSnapshot[]> {
   await hydrate();
-  return Object.values(store)
+  return Object.values(store.hosts)
     .filter((s) => !kind || (s.kind || "people") === kind)
     .sort((a, b) => (b.updatedAt < a.updatedAt ? -1 : 1));
+}
+
+/**
+ * Per-day usage for one listing, oldest first, as DELTAS (requests spent that day)
+ * rather than the raw cumulative reading. A negative delta means the plan's monthly
+ * window rolled between readings, so that day's spend is the new reading itself.
+ */
+export async function getRapidQuotaHistory(host: string, days = 30): Promise<Array<{ date: string; used: number }>> {
+  await hydrate();
+  const series = store.history[host];
+  if (!series) return [];
+  const out: Array<{ date: string; used: number }> = [];
+  let prev: number | null = null;
+  for (const date of Object.keys(series).sort()) {
+    const cum = series[date];
+    out.push({ date, used: Math.max(0, prev == null ? cum : cum - prev) });
+    prev = cum;
+  }
+  return out.slice(-days);
 }

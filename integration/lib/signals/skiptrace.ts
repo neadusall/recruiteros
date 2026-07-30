@@ -49,6 +49,7 @@ import {
   type ProviderOutcome,
 } from "./waterfall";
 import { cred } from "../providers/http";
+import { noteRapidQuota } from "../sourcing/rapidQuota";
 
 /**
  * Default per-request cost = the subscribed RapidAPI plan, verified against the
@@ -353,6 +354,9 @@ export function makeSkipTracePhoneProvider(unitCostUsd: number): EnrichmentProvi
       } else {
         res = await fetch(`https://${host}${path}`, { headers });
       }
+      // Feed the credit meter: this listing is a paid subscription and the Owner
+      // Console's spend dashboard reads plan usage straight off these headers.
+      noteRapidQuota(host, res.headers, "phone");
       // 404-style "no record" answers are a billed miss, not an error; real transport
       // or auth failures surface as errors so a broken listing stops the run loudly.
       // ERROR ANSWERS STILL BILL on per-call listings: RapidAPI counts every request
@@ -383,6 +387,7 @@ export function makeSkipTracePhoneProvider(unitCostUsd: number): EnrichmentProvi
       const detailsPath = detailsTpl.replace(/\{id\}/gi, encodeURIComponent(match.id));
       const twoCallCost = billing === "call" ? unitCostUsd * 2 : 0;
       const res2 = await fetch(`https://${host}${detailsPath}`, { headers });
+      noteRapidQuota(host, res2.headers, "phone");
       if (res2.status === 404 || res2.status === 204) return { status: "miss", cost: twoCallCost };
       // Both requests reached the listing (search + details), so both bill even
       // when the details answer is an error status.
