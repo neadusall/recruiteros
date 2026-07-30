@@ -662,9 +662,71 @@
         html += '</tbody></table>';
       }
       html += '</div>';
+      html += '<div id="boostCard" style="margin-top:14px"></div>';
       $("#view").innerHTML = html;
       $$("#view .clickrow").forEach(function (tr) { tr.addEventListener("click", function () { openAccount(tr.dataset.id); }); });
+      renderBoostCard();
     }).catch(fail);
+  }
+
+  /* Paid phone lookups (JD Sourcing "Boost phones"). Loaded after the spend view
+     paints so a slow live plan-quota probe never delays the whole page. */
+  function renderBoostCard() {
+    var el = $("#boostCard");
+    if (!el) return;
+    el.innerHTML = '<div class="card"><h3>Boost phones · paid lookups</h3><p class="note">Reading plan balance…</p></div>';
+    api("/owner/boost").then(function (b) {
+      var t = b.totals || {}, q = b.quota, rows = b.byWorkspace || [];
+      var h = '<div class="card"><h3>Boost phones · paid lookups</h3>' +
+        '<p class="note">The paid skip-trace rung a recruiter triggers per list in JD Sourcing. Lookups are what the plan is billed for; phones found is what they returned.</p>';
+
+      h += '<div class="stat-grid" style="margin-top:12px">' +
+        stat((t.lookups || 0).toLocaleString(), "People looked up") +
+        stat((t.found || 0).toLocaleString(), "Phones found") +
+        stat(pct(t.hitRatePct || 0), "Hit rate", (t.hitRatePct || 0) >= 25 ? "" : "bad") +
+        stat(usd(t.costUsd || 0), "Spent") +
+        '</div>';
+
+      // Plan balance: the number that actually ticks down as Boost runs.
+      if (q && q.limit != null && q.remaining != null) {
+        var used = q.limit - q.remaining;
+        var usedPct = q.limit > 0 ? Math.min(100, (used / q.limit) * 100) : 0;
+        var col = usedPct >= 90 ? "#c0392b" : usedPct >= 70 ? "#d97706" : "var(--ok)";
+        var days = q.resetSec != null ? Math.round((q.resetSec / 86400) * 10) / 10 : null;
+        h += '<div style="margin-top:16px"><div class="tl"><span>Plan balance · ' + esc(q.host) + '</span>' +
+          '<span class="v">' + q.remaining.toLocaleString() + ' of ' + q.limit.toLocaleString() + ' requests left</span></div>' +
+          '<div class="obar" style="margin-top:6px;background:var(--line);border-radius:99px;height:8px;overflow:hidden">' +
+          '<div style="width:' + usedPct.toFixed(1) + '%;height:100%;background:' + col + '"></div></div>' +
+          '<p class="note" style="margin-top:6px">' + used.toLocaleString() + ' used this cycle' +
+          (days != null ? ' · resets in ' + days + ' days' : '') + '. Read live from the provider, cached 30 min.</p></div>';
+      } else if (q && q.error) {
+        h += '<p class="note" style="margin-top:14px"><b>Plan balance unavailable:</b> ' + esc(q.error) + ' (' + esc(q.host) + ')</p>';
+      } else {
+        h += '<p class="note" style="margin-top:14px">No account has the skip-trace rung configured, so Boost phones cannot run anywhere. Set it in Setup → JD Sourcing.</p>';
+      }
+
+      if (rows.length) {
+        h += '<table class="otable" style="margin-top:14px"><thead><tr><th>Account</th><th class="num">Runs</th>' +
+          '<th class="num">Lookups</th><th class="num">Found</th><th class="num">Hit rate</th><th class="num">Spend</th></tr></thead><tbody>';
+        rows.forEach(function (r) {
+          h += '<tr class="clickrow" data-id="' + esc(r.workspaceId) + '"><td>' + esc(r.name) + '</td>' +
+            '<td class="num">' + (r.events || 0) + '</td>' +
+            '<td class="num">' + (r.lookups || 0).toLocaleString() + '</td>' +
+            '<td class="num">' + (r.found || 0).toLocaleString() + '</td>' +
+            '<td class="num">' + pct(r.hitRatePct || 0) + '</td>' +
+            '<td class="num">' + usd(r.costUsd || 0) + '</td></tr>';
+        });
+        h += '</tbody></table>';
+      } else {
+        h += '<p class="note" style="margin-top:14px">No paid lookups yet. Recruiters trigger Boost per list in JD Sourcing after the free enrichment finishes.</p>';
+      }
+
+      h += '</div>';
+      el.innerHTML = h;
+      $$("#boostCard .clickrow").forEach(function (tr) { tr.addEventListener("click", function () { openAccount(tr.dataset.id); }); });
+    }).catch(function () {
+      el.innerHTML = '<div class="card"><h3>Boost phones · paid lookups</h3><p class="note">Could not load paid-lookup usage.</p></div>';
+    });
   }
 
   /* ================= ACCOUNTS ================= */

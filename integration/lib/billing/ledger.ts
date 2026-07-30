@@ -189,6 +189,12 @@ export function workspaceCost(workspaceId: string, window: SpendWindow = "30d"):
   );
 }
 
+/** Every event of one type, all workspaces (per-type rollups, e.g. Boost phones).
+ *  Returns a copy so callers can sort/group without mutating the ledger. */
+export function listUsageByType(type: string): UsageEvent[] {
+  return store.events.filter((e) => e.type === type).slice();
+}
+
 /** Recent raw events for a workspace (account detail drill-down). */
 export function workspaceEvents(workspaceId: string, limit = 100): UsageEvent[] {
   return store.events
