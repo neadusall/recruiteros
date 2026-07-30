@@ -16,7 +16,15 @@ RUN cd integration && npm ci
 COPY . .
 
 # Build (prebuild copies ../*.html and ../assets into integration/public)
-RUN cd integration && npm run build && npm prune --omit=dev
+#
+# The dependency gate runs AFTER `npm prune --omit=dev` on purpose: pruning is the
+# step that removes packages, so checking before it proves nothing. It fails the
+# build if the compiled server requires a package that is not in the node_modules
+# we are about to ship. That is the exact shape of the 2026-07-30 outage, where an
+# undeclared `undici` import built fine, got pruned, and then 500'd 157 routes
+# (JD Sourcing included) on their first request with a clean-looking image.
+RUN cd integration && npm run build && npm prune --omit=dev \
+ && node scripts/check-bundle-deps.mjs
 
 # ---- runtime image ----
 FROM node:22-alpine

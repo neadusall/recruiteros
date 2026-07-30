@@ -300,6 +300,15 @@ git reset --hard "origin/$BRANCH" >> "$LOG" 2>&1
 # submodule the server can't clone) — it must NEVER block the main app deploy.
 git submodule sync --recursive >> "$LOG" 2>&1 || true
 git submodule update --init --recursive >> "$LOG" 2>&1 || echo "$(date -u) submodule update failed — OS Text may be skipped" >> "$LOG"
+# ROLLBACK POINT. Tag whatever app image is currently live as :previous BEFORE we
+# build over it, so the health gate below has something to fall back to. On the very
+# first run there is no image yet; that is fine, the gate just alerts instead of
+# rolling back. Never fatal — a missing tag must not stop a deploy.
+APP_IMG_BEFORE="$(docker image inspect recruiteros-app:latest --format '{{.Id}}' 2>/dev/null || echo '')"
+if [ -n "$APP_IMG_BEFORE" ]; then
+  docker tag recruiteros-app:latest recruiteros-app:previous >> "$LOG" 2>&1 || true
+fi
+
 # Deploy. Try the full stack; if any service (e.g. the `taltxt` OS Text service) fails to build, fall
 # back to (re)building just the core app + db + caddy so app updates ALWAYS ship.
 if docker compose up -d --build >> "$LOG" 2>&1; then
@@ -312,6 +321,58 @@ else
   # back up on their existing images (no build) so the old version keeps serving.
   docker compose up -d --no-build --no-deps taltxt lume-jobs >> "$LOG" 2>&1 || true
   echo "$(date -u) deploy complete (core only, side services on previous images)" >> "$LOG"
+fi
+
+# ---- POST-DEPLOY HEALTH GATE (with rollback) --------------------------------
+# WHY: until 2026-07-30 this watcher shipped the main app BLIND. It built, swapped
+# the container, logged "deploy complete" and moved on without ever asking whether
+# what it shipped could serve a request. That is how a build missing `undici` ran in
+# production for hours — the image built clean, the container started clean, and the
+# first signal was a recruiter saying a JD Sourcing search had disappeared. The OS
+# Text engine already had a deep health probe with a fail-safe rebuild; the app,
+# which is the bigger surface, had nothing. This closes that gap.
+#
+# /api/health is the right probe precisely BECAUSE it is not special-cased: it is a
+# normal compiled route, so it dies from exactly the same bundling/dependency faults
+# as every other route. During the undici outage it was 500ing too.
+app_healthy() {
+  docker exec recruiteros-app-1 wget -qO- --timeout=5 \
+    http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true'
+}
+
+HEALTHY=0
+for _ in $(seq 1 30); do            # up to ~90s: cold Next boot is ~1s, image pull/start slower
+  if app_healthy; then HEALTHY=1; break; fi
+  sleep 3
+done
+
+if [ "$HEALTHY" = "1" ]; then
+  rm -f "$DIR/.deploy-health-failed" 2>/dev/null || true
+  echo "$(date -u) health gate OK (/api/health serving at $REMOTE)" >> "$LOG"
+else
+  echo "$(date -u) !! HEALTH GATE FAILED at $REMOTE — /api/health never returned ok:true" >> "$LOG"
+  echo "$REMOTE" > "$DIR/.deploy-health-failed" 2>/dev/null || true
+  # Capture why, while the broken container is still up — this is the evidence that
+  # was missing on 2026-07-30 and cost hours of guessing.
+  docker logs --tail 40 recruiteros-app-1 >> "$LOG" 2>&1 || true
+
+  if docker image inspect recruiteros-app:previous >/dev/null 2>&1; then
+    echo "$(date -u) !! rolling back to the previous app image..." >> "$LOG"
+    docker tag recruiteros-app:previous recruiteros-app:latest >> "$LOG" 2>&1 || true
+    docker compose up -d --no-build --no-deps app >> "$LOG" 2>&1 || true
+    ROLLED=0
+    for _ in $(seq 1 20); do
+      if app_healthy; then ROLLED=1; break; fi
+      sleep 3
+    done
+    if [ "$ROLLED" = "1" ]; then
+      echo "$(date -u) !! ROLLED BACK — prod is serving the PREVIOUS build. Commit $REMOTE is BAD; fix it and push again." >> "$LOG"
+    else
+      echo "$(date -u) !! ROLLBACK ALSO UNHEALTHY — manual intervention needed. Check: docker logs recruiteros-app-1" >> "$LOG"
+    fi
+  else
+    echo "$(date -u) !! no :previous image to roll back to — leaving the new build up, manual intervention needed" >> "$LOG"
+  fi
 fi
 
 # Apply Caddy's bind-mounted config after every deploy. TRAP (bit us 2026-07-16,
