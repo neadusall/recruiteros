@@ -36,7 +36,7 @@ const STRICT_B64 = /^[A-Za-z0-9+/]{16,}={0,2}$/;
  * it would either fail the printable-ASCII/length checks or (paired with the
  * auth-error gate below) never reach here at all.
  */
-function decodeBase64Password(cur: string): string | null {
+export function decodeBase64Password(cur: string): string | null {
   if (!STRICT_B64.test(cur) || cur.length % 4 !== 0) return null;
   let buf: Buffer;
   try { buf = Buffer.from(cur, "base64"); } catch { return null; }

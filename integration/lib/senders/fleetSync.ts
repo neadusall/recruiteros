@@ -21,7 +21,7 @@
  * an operator's status or recruiter assignment. Safe to run on every tick.
  */
 
-import { addInbox, findInboxByEmail } from "./store";
+import { addInbox, findInboxByEmail, decodeBase64Password } from "./store";
 import type { SenderProvider, SenderStatus } from "./types";
 
 export interface FleetSyncReport {
@@ -119,16 +119,25 @@ export async function syncFleetInboxes(): Promise<FleetSyncReport> {
       const hasCreds = !!(a.username && a.password && a.smtpHost);
       if (hasCreds) report.withCreds++; else report.credsless++;
 
+      const provider = providerFor(a.accountType, a.smtpHost, internal);
+      // The warm-up engine serves internal-SMTP passwords base64-ENCODED. Decode
+      // here so the mailbox is stored ready to authenticate; without this the
+      // sync re-introduces the encoded password on every tick and clobbers the
+      // hydrate-time self-heal. decodeBase64Password only touches values that are
+      // unambiguously base64, so a plaintext password passes through untouched.
+      const rawPass = hasCreds ? (a.password as string) : "";
+      const smtpPass = provider === "own-smtp" ? (decodeBase64Password(rawPass) ?? rawPass) : rawPass;
+
       const existing = await findInboxByEmail(wsId, a.email);
       const status: SenderStatus = existing?.status ?? "warming";
       await addInbox(wsId, {
         email: a.email,
         displayName: existing?.displayName || a.fromName,
-        provider: providerFor(a.accountType, a.smtpHost, internal),
+        provider,
         smtpHost: a.smtpHost || (a.accountType === "OUTLOOK" ? "smtp.office365.com" : a.accountType === "GMAIL" ? "smtp.gmail.com" : "unknown"),
         smtpPort: a.smtpPort || 587,
         smtpUser: a.username || a.email,
-        smtpPass: hasCreds ? (a.password as string) : "",
+        smtpPass,
         imapHost: a.imapHost,
         imapPort: a.imapPort,
         imapUser: a.imapUsername || a.username || undefined,
