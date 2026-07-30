@@ -87,13 +87,28 @@ async function fileLoad<T>(key: string): Promise<T | null> {
     return null; // absent or unreadable -> start empty
   }
 }
+// Every writer gets its OWN temp file. Sharing one "<key>.json.tmp" across
+// concurrent saves of the same key is a race: writer A and writer B both write
+// the same temp path, A renames it into place, and B's rename then fails with
+// ENOENT because the file it wrote is already gone (observed in prod on
+// inmarket_email_pattern_v1). Worse than the log line, the losing writer's
+// snapshot was silently dropped and a half-written temp could be renamed into
+// place. A unique suffix makes each writer's rename independent and atomic;
+// last writer still wins, which is the intended snapshot semantics.
+let tmpSeq = 0;
 async function fileSave(key: string, data: unknown): Promise<void> {
   const dir = fileDir() as string;
   await fs.mkdir(dir, { recursive: true });
   const fp = fpath(key);
-  const tmp = fp + ".tmp";
-  await fs.writeFile(tmp, JSON.stringify(data));
-  await fs.rename(tmp, fp); // atomic replace
+  const tmp = `${fp}.${process.pid}.${++tmpSeq}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(data));
+    await fs.rename(tmp, fp); // atomic replace
+  } catch (e) {
+    // Never leave a stray temp behind on a failed write.
+    try { await fs.unlink(tmp); } catch { /* best-effort */ }
+    throw e;
+  }
 }
 
 /* ---------------- postgres backend ---------------- */

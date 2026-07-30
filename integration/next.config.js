@@ -25,9 +25,18 @@ module.exports = {
   // webpack bundle (required at runtime from node_modules instead). Playwright launches a real
   // browser and sharp ships a native binary; bundling either breaks the build/route. Used by
   // the role-screenshot pipeline (lib/inmarket/roleShot.ts → app/api/in-market/shot).
+  //
+  // pdf-parse/pdfjs-dist are here for the same reason in a subtler form: pdfjs resolves its
+  // worker relative to its own module URL, so once webpack bundles it that path becomes
+  // .next/server/chunks/pdf.worker.mjs — a file the build never emits. Every resume PDF then
+  // failed with "Cannot find module .../chunks/pdf.worker.mjs" (AI Vetting resume inbox,
+  // lib/vetting/inbox.ts extractResumeText). Left external, pdfjs resolves the worker inside
+  // node_modules where build/pdf.worker.mjs actually ships.
   experimental: {
     instrumentationHook: true,
-    serverComponentsExternalPackages: ["playwright", "playwright-core", "sharp", "pngjs", "gifenc"],
+    serverComponentsExternalPackages: [
+      "playwright", "playwright-core", "sharp", "pngjs", "gifenc", "pdf-parse", "pdfjs-dist",
+    ],
   },
 
   // Serve clean URLs: /login renders public/login.html, address bar stays clean.
