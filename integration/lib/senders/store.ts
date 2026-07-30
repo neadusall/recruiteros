@@ -9,7 +9,7 @@
 
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
-import { encryptSecret } from "./crypto";
+import { encryptSecret, decryptSecret } from "./crypto";
 import { COLD_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCapFor, coldMaxPerInbox } from "./limits";
 import type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, RecruiterPool } from "./types";
 
@@ -22,12 +22,62 @@ let hydrating: Promise<void> | null = null;
 
 const save = debouncedSaver(KEY, () => state);
 
+const STRICT_B64 = /^[A-Za-z0-9+/]{16,}={0,2}$/;
+
+/**
+ * Decode a value ONLY when it is unambiguously a base64-ENCODED password, else
+ * return null. Guards (all required):
+ *   - strict base64 (alphabet + padding, length a multiple of 4, >= 16 chars)
+ *   - decodes to all-printable ASCII of a plausible password length (8-48)
+ *   - the decoded value is NOT itself base64-shaped -> the repair is IDEMPOTENT:
+ *     a later boot sees the now-plaintext password and leaves it untouched, so we
+ *     can never double-decode.
+ * A real plaintext password that merely "looks base64-ish" is not decoded because
+ * it would either fail the printable-ASCII/length checks or (paired with the
+ * auth-error gate below) never reach here at all.
+ */
+function decodeBase64Password(cur: string): string | null {
+  if (!STRICT_B64.test(cur) || cur.length % 4 !== 0) return null;
+  let buf: Buffer;
+  try { buf = Buffer.from(cur, "base64"); } catch { return null; }
+  if (buf.length < 8 || buf.length > 48) return null;
+  for (const b of buf) { if (b < 0x20 || b > 0x7e) return null; }
+  const dec = buf.toString("utf8");
+  if (dec === cur) return null;
+  if (STRICT_B64.test(dec) && dec.length % 4 === 0) return null; // ambiguous -> leave alone
+  return dec;
+}
+
+/**
+ * Self-healing repair for a historical import bug: the warm-up engine exports
+ * mailbox passwords base64-ENCODED, and an early importer stored them without
+ * decoding, so every own-smtp login was rejected (535/454 authentication failed).
+ * We repair a stored password IN PLACE only when the inbox is an own-smtp mailbox
+ * whose last error is an AUTH failure — so a credential that actually
+ * authenticates is never touched, whatever its shape — AND the stored value is
+ * unambiguously base64 per decodeBase64Password. Runs at hydrate (once per boot),
+ * which also inoculates against a base64 password reappearing after a re-import.
+ */
+function healBase64Passwords(inboxes: SenderInbox[]): number {
+  let fixed = 0;
+  for (const m of inboxes) {
+    if (m.provider !== "own-smtp" || m.status !== "error") continue;
+    if (!/auth|535|454/i.test(m.lastError || "")) continue;
+    if (!m.smtpPassEnc) continue;
+    const dec = decodeBase64Password(decryptSecret(m.smtpPassEnc));
+    if (dec) { m.smtpPassEnc = encryptSecret(dec); m.updatedAt = nowIso(); fixed++; }
+  }
+  return fixed;
+}
+
 async function hydrate(): Promise<void> {
   if (hydrated) return;
   if (!hydrating) {
     hydrating = (async () => {
       const snap = await loadSnapshot<SendersState>(KEY);
       if (snap && Array.isArray(snap.inboxes)) state = { inboxes: snap.inboxes, lastResetDay: snap.lastResetDay };
+      const healed = healBase64Passwords(state.inboxes);
+      if (healed) { save(); console.log(`[senders] self-healed ${healed} base64-encoded SMTP password(s) at hydrate`); }
       hydrated = true;
     })();
   }
