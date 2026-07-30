@@ -857,7 +857,7 @@
           "</div>";
 
         // Today's send capacity, spelled out from Email IDs x domains.
-        body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> total capacity across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
+        body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> available today" + (cap.matureCapacity && cap.matureCapacity > cap.coldCapacity ? ' <span style="color:var(--text-dim)">(' + n(cap.matureCapacity) + "/day at full ramp, as warming mailboxes mature)</span>" : "") + " across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
           (cap.warmingPerDay ? ', plus about ' + n(cap.warmingPerDay) + " external warm-up sends/day that build reputation (not outreach)." : ".") + "</div>";
         var provRows = (cap.byProvider || []).map(function (p) {
           var nm = provName[p.provider] || p.provider;
