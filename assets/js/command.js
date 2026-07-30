@@ -12644,6 +12644,19 @@
           // they ran): the chain kept moving on the other sources, and Enrich re-runs
           // exactly these batches once Laxis is reachable again.
           var lxSkipN = (r.laxisSkipped && r.laxisSkipped.offsets) ? r.laxisSkipped.offsets.length : 0;
+          // A lingering job ref can be DEAD: the worker crashed mid-run and the chain
+          // never cleared it, which used to leave this card stuck on "Enriching now" for
+          // hours with no way to tell it had died. Flip to a clear, actionable "stalled"
+          // state once a job has been in flight far longer than any real pass would take
+          // (the enrichment pool finishes ~2,300 rows in well under an hour). Age comes
+          // from the ref's own submittedAt, so no server change is needed. Plain words
+          // only, no internal terms ([[feedback-hide-search-internals]]).
+          var jJobRef = r.koldDbJob || r.laxisJob || r.koldJob;
+          var jJobMs = jJobRef && jJobRef.submittedAt ? Date.parse(String(jJobRef.submittedAt).replace(" ", "T")) : NaN;
+          var jJobMin = isFinite(jJobMs) ? Math.round(Math.max(0, Date.now() - jJobMs) / 60000) : 0;
+          var jStallMin = Math.max(90, Math.round(n / 20)); // scales with list size, floor 90 min
+          var enrichStalled = busyJobs && isFinite(jJobMs) && jJobMin >= jStallMin;
+          var jStuckAgo = jJobMin < 60 ? (jJobMin + " min") : (Math.round(jJobMin / 60) + " hr");
           // ---- The visible journey: the four stops every list travels (Searched,
           // Enriched, Candidates, OS Text), each derived from fields the server
           // already stamps (chunk ledger, mid-flight job refs, autoflow bookkeeping).
@@ -12683,8 +12696,15 @@
           var sSearch = jStop("jt-done", jIcons.check, "Searched", n + " found",
             "The search finished and saved " + n + " candidate" + (n === 1 ? "" : "s") +
             (outN ? (": " + (n - outN) + " in area and " + outN + " out of area") : "") + ".");
-          var sEnrich, jNote = "", jEta = jdEta(r, epDone, ep ? (ep.total || n) : n, busyJobs, jdPaceGuess);
-          if (busyJobs) {
+          var sEnrich, jNote = "", jEta = jdEta(r, epDone, ep ? (ep.total || n) : n, busyJobs && !enrichStalled, jdPaceGuess);
+          if (enrichStalled) {
+            // The card was lying ("Working now") over a dead job. Say it plainly and
+            // give the one-press fix: Enrich re-drives the chain from where it stopped,
+            // bypassing the automatic pipeline's wait, so a stuck list unsticks on click.
+            sEnrich = jStop("jt-act", jIcons.alert, "Enrichment stalled", { btn: "stuck ~" + jStuckAgo + " · press to restart", act: r.id },
+              "The contact lookup has been stuck for about " + jStuckAgo + " with no progress, so it most likely hit a snag and stopped. Press to restart it: finished work is kept and nothing is bought twice.");
+            jNote = "<b>Stalled:</b> the contact lookup has been stuck for about " + jStuckAgo + " with no progress. Press the amber pill (or the Enrich button) to restart it; it resumes where it stopped and re-sends the refreshed contacts to Candidates and OS Text when done. If it stalls again right after, tell your admin.";
+          } else if (busyJobs) {
             // Real progress under the live stop: the chunk ledger gives actual rows
             // done, so the mini bar is honest; without a ledger yet it just glides.
             var livePct = ep ? Math.max(4, Math.min(100, Math.round(epDone / (ep.total || n || 1) * 100))) : null;
