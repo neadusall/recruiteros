@@ -392,6 +392,35 @@ export function recoveryHeld(
   return Number.isFinite(age) && age <= RECOVERY_DEADMAN_MS;
 }
 
+/**
+ * Is a candidate search running right now, anywhere on this box?
+ *
+ * The deploy gate asks this before swapping containers. A search is the one piece
+ * of work with nothing to resume from mid-flight: enrichment rungs park job refs on
+ * the run and pick up where they left off, but a search killed halfway leaves only
+ * a checkpoint and has to be paid for again. Two things count:
+ *
+ *  - `live`:   a checkpoint held by THIS process, i.e. an interactive search whose
+ *              request is in flight this second (the recruiter is watching the bar);
+ *  - `queued`: an item actually in the search stage, i.e. a server-side search
+ *              already running (an overnight search, or a recovery re-running one).
+ *
+ * Workspace-blind on purpose: the question is about the box, not about a tenant.
+ * Deliberately does NOT count enrichment, which survives a recreate by design.
+ */
+export async function searchesInFlight(): Promise<{ busy: boolean; live: number; queued: number }> {
+  await hydrate();
+  const now = Date.now();
+  let live = 0;
+  let queued = 0;
+  for (const i of store) {
+    if (i.stage === "done" || i.stage === "error") continue;
+    if (recoveryHeld(i, BOOT_ID, now)) { live++; continue; }
+    if (i.stage === "search") queued++;
+  }
+  return { busy: live + queued > 0, live, queued };
+}
+
 /** The tick's working view: active items minus checkpoints a live request still holds. */
 function workable(items: NightItem[]): NightItem[] {
   const now = Date.now();

@@ -20,7 +20,8 @@ import { join } from "path";
 process.env.ROS_DATA_DIR = mkdtempSync(join(tmpdir(), "snav-queue-"));
 delete process.env.DATABASE_URL;
 
-const { addNightItem, listNightItems, tickNightQueue } = await import("../lib/sourcing/nightQueue.js");
+const { addNightItem, listNightItems, tickNightQueue, removeNightItem, searchesInFlight } =
+  await import("../lib/sourcing/nightQueue.js");
 
 const WS = "ws_test_snav_queue";
 const URL = "https://www.linkedin.com/sales/search/people?query=titles%3ACFO";
@@ -79,6 +80,34 @@ check("and says so in recruiter language, with nothing claimed to be saved",
   /restarted mid-search/i.test(after2.error || "") && /run it again/i.test(after2.error || ""),
   `error=${after2.error}`);
 check("the counter did not run away", (after2.searchAttempts ?? 0) === 4, `attempts=${after2.searchAttempts}`);
+
+/* 3. The signal the deploy gate reads: is a search running right now? --------
+      auto-deploy.sh holds its container swap on this, so a wrong answer either
+      blocks deploys or eats the search the gate exists to protect. ---------- */
+const quiet = await searchesInFlight();
+check("a box with nothing running reports quiet", quiet.busy === false, JSON.stringify(quiet));
+
+const held = await addNightItem(WS, {
+  kind: "search", name: "live interactive search", createdBy: CREATED_BY,
+  salesNav: { url: URL }, recoveryToken: "rcv_test_token",
+});
+const during = await searchesInFlight();
+check("an interactive search in flight reports busy", during.busy === true && during.live === 1,
+  JSON.stringify(during));
+
+await removeNightItem(WS, held.id);
+const afterDone = await searchesInFlight();
+check("the box goes quiet again the moment that request finishes", afterDone.busy === false,
+  JSON.stringify(afterDone));
+
+const server = await addNightItem(WS, {
+  kind: "search", name: "server-side search", createdBy: CREATED_BY, salesNav: { url: URL },
+});
+const live = (await listNightItems(WS)).find((i) => i.id === server.id)!;
+live.stage = "search";
+const duringServer = await searchesInFlight();
+check("a server-side search counts too (a recovery must not be interrupted either)",
+  duringServer.busy === true && duringServer.queued >= 1, JSON.stringify(duringServer));
 
 console.log(failed ? `\n${failed} FAILED` : `\nall checks passed`);
 process.exit(failed ? 1 : 0);

@@ -14,7 +14,7 @@
 
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../lib/linkedin/auth";
-import { tickNightQueue, listNightItems } from "../../../../lib/sourcing";
+import { tickNightQueue, listNightItems, searchesInFlight } from "../../../../lib/sourcing";
 import { tickSourcingAutoflow } from "../../../../lib/sourcing/autoflow";
 import { backfillListPhones, unstickSourcingRun } from "../../../../lib/sourcing/phoneBackfill";
 
@@ -27,6 +27,14 @@ async function run(req: Request) {
     const ws = params.get("ws");
     const items = ws ? await listNightItems(ws) : [];
     return NextResponse.json({ ok: true, items: items.map((i) => ({ id: i.id, name: i.name, stage: i.stage, note: i.note, added: i.added })) });
+  }
+  if (params.get("inflight") === "1") {
+    // DEPLOY GATE (auto-deploy.sh). Read-only, workspace-blind, and deliberately
+    // ahead of the tick below: the deploy asks this every few seconds while it
+    // holds a container swap, and a poll that advanced the queue would be doing
+    // the very work it is waiting on. Answers "is a candidate search running",
+    // which is the only work a recreate destroys outright.
+    return NextResponse.json({ ok: true, ...(await searchesInFlight()) });
   }
   const unstick = params.get("unstick");
   if (unstick) {

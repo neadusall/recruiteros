@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Resolve the repo dir from this script's own location, so the watcher works no
 # matter what the checkout is named (/opt/recruitersos, /opt/recruiteros, …).
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="${DEPLOY_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 LOG="/var/log/recruiteros-deploy.log"
 BRANCH="main"
 
@@ -23,6 +23,22 @@ cd "$DIR" || { echo "$(date -u) no $DIR" >> "$LOG"; exit 0; }
 # run, then yield to the next timer tick.
 exec 9>/var/lock/recruiteros-deploy.lock
 flock -w 300 9 || { echo "$(date -u) another deploy still running after 5 min wait, yielding" >> "$LOG"; exit 0; }
+
+# RUN FROM A SNAPSHOT OF THIS SCRIPT. Further down, this script git-resets its own
+# checkout — it rewrites the very file bash is reading, and bash reads a script
+# incrementally by byte offset, so a commit that changes this file's length can
+# garble every command after the point already read. Re-exec from a copy taken
+# under the lock, so a deploy always finishes as the script it started as. The
+# lock (fd 9) survives the exec, and DEPLOY_REPO_DIR carries the real checkout.
+if [ -z "${DEPLOY_SELF_COPY:-}" ]; then
+  export DEPLOY_REPO_DIR="$DIR"
+  export DEPLOY_SELF_COPY=1
+  if cp "${BASH_SOURCE[0]}" /tmp/recruiteros-auto-deploy.running.sh 2>/dev/null; then
+    exec bash /tmp/recruiteros-auto-deploy.running.sh
+  fi
+  # The copy could not be made: carry on from the original, exactly as before.
+  unset DEPLOY_SELF_COPY
+fi
 
 # One-time: MIGRATE persistence off Postgres onto the durable /data file volume.
 # The app now snapshots accounts/sessions to /data (the app_data named volume),
@@ -377,6 +393,59 @@ APP_IMG_BEFORE="$(docker image inspect recruiteros-app:latest --format '{{.Id}}'
 if [ -n "$APP_IMG_BEFORE" ]; then
   docker tag recruiteros-app:latest recruiteros-app:previous >> "$LOG" 2>&1 || true
 fi
+
+# BUILD FIRST, SWAP SECOND. Building touches nothing that is serving, so it can run
+# while recruiters work; the container swap is what kills work in flight. Splitting
+# them means the expensive minutes happen up front and the swap lands in the quiet
+# window the hold below waits for. Best-effort: if this build fails (or only partly
+# succeeds), the deploy logic underneath is unchanged and handles it — this is a
+# warm-up, not a gate.
+docker compose build >> "$LOG" 2>&1 || true
+
+# HOLD THE SWAP while a candidate search is running. A search is the one job with
+# nothing to resume from: enrichment parks job refs and picks up where it left off,
+# but a search killed halfway leaves a checkpoint and has to be paid for all over
+# again. On 2026-07-31 nine deploys inside one hour ate a recruiter's LinkedIn
+# search outright, which is what the crash net (and now this) exists for.
+#
+# Bounded, and fails OPEN in every unclear case (app down, endpoint missing, no
+# answer): a deploy must never be blocked by a probe it cannot read, and the crash
+# net still catches whatever the hold does not.
+#
+# The block between the markers below is executed as-is by the regression test
+# (integration/scripts/test-deploy-hold.sh) against a stub docker, so the gate's
+# behaviour is pinned rather than assumed. Keep the markers.
+# >>> deploy-hold
+HOLD_MAX_SEC="${DEPLOY_HOLD_MAX_SEC:-900}"
+HOLD_STEP_SEC="${DEPLOY_HOLD_STEP_SEC:-15}"
+HOLD_WAITED=0
+while [ "$HOLD_WAITED" -lt "$HOLD_MAX_SEC" ]; do
+  # The secret is expanded INSIDE the container (single quotes), where it lives —
+  # same trick the nightqueue timer uses.
+  INFLIGHT="$(docker exec recruiteros-app-1 sh -c 'wget -qO- --timeout=5 "http://localhost:3000/api/sourcing/night?inflight=1&secret=$RECRUITEROS_CRON_SECRET"' 2>/dev/null || echo '')"
+  case "$INFLIGHT" in
+    *'"busy":true'*) : ;;
+    *'"busy":false'*) break ;;
+    *)
+      # No readable answer (app down mid-deploy, secret unset, endpoint older than
+      # this script). Fail open, but SAY SO: a gate that silently stopped gating
+      # would otherwise look exactly like a quiet box.
+      echo "$(date -u) deploy-gate: no readable in-flight answer, swapping without a hold" >> "$LOG"
+      break
+      ;;
+  esac
+  if [ "$HOLD_WAITED" -eq 0 ]; then
+    echo "$(date -u) holding the container swap: a candidate search is running ($INFLIGHT)" >> "$LOG"
+  fi
+  sleep "$HOLD_STEP_SEC"
+  HOLD_WAITED=$((HOLD_WAITED + HOLD_STEP_SEC))
+done
+if [ "$HOLD_WAITED" -ge "$HOLD_MAX_SEC" ]; then
+  echo "$(date -u) hold expired after ${HOLD_MAX_SEC}s — swapping anyway; the search crash net recovers what it interrupts" >> "$LOG"
+elif [ "$HOLD_WAITED" -gt 0 ]; then
+  echo "$(date -u) searches finished after ${HOLD_WAITED}s — swapping now" >> "$LOG"
+fi
+# <<< deploy-hold
 
 # Deploy. Try the full stack; if any service (e.g. the `taltxt` OS Text service) fails to build, fall
 # back to (re)building just the core app + db + caddy so app updates ALWAYS ship.
