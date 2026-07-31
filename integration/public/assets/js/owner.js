@@ -861,14 +861,20 @@
   }
 
   /* Domains: bought once, forgotten, then they lapse and a sending domain dies with them.
-     Dates come from the public registry, money is owner-entered. */
+     Dates come from the public registry, money is owner-entered.
+
+     Grouped by the vendor the money actually went to, because that is how they were
+     bought: 29 at Dynadot on one day, 15 at Porkbun a month later, 31 through Zapmail
+     with the mailboxes that sit on them. A flat list of 75 names hides that entirely,
+     and with it the only two questions worth asking, which are what each batch cost and
+     what it renews at. Each group prices in one action for the same reason. */
   function burnDomains(b) {
     var rows = (b.items || []).filter(function (i) { return !!i.domain; });
     var soon = b.domainsExpiringSoon || [];
     var html = '<div class="card" style="margin-top:14px"><div class="burn-head"><h3>Domains</h3>' +
       '<div class="btn-row" style="margin:0"><button class="btn btn-sm" id="dmImport">Import from sending fleet</button>' +
       '<button class="btn btn-sm" id="dmRefresh">Refresh registry dates</button></div></div>';
-    html += '<p class="note" style="margin-top:2px">' + (b.domainCount || 0) + ' domains tracked · ' + usd(b.domainRenewalAnnualUsd || 0) + ' to renew them all for another year. Registration and expiry come from the public registry; purchase price and renewal price are yours to enter.</p>';
+    html += '<p class="note" style="margin-top:2px">' + (b.domainCount || 0) + ' domains tracked · ' + usd(b.domainRenewalAnnualUsd || 0) + ' to renew them all for another year. Registration, expiry and registrar come from the public registry. Price is yours to enter, and can be set for a whole batch at once.</p>';
 
     if (soon.length) {
       html += '<div class="burn-alert" style="margin:10px 0"><div class="ba-title">' + soon.length + ' domain' + (soon.length > 1 ? 's' : '') + ' expiring within 60 days</div><ul>';
@@ -881,15 +887,74 @@
     if (!rows.length) {
       return html + '<p class="note">No domains tracked yet. Import pulls every domain the sending fleet uses, then Refresh fills in registration and expiry dates from the registry.</p></div>';
     }
+
+    groupDomains(rows).forEach(function (g) { html += domainGroup(g); });
+    return html + '</div>';
+  }
+
+  /* One group per vendor, biggest batch first. A domain whose registrar lookup has not
+     landed yet is not silently dropped: it groups under what it does know. */
+  function groupDomains(rows) {
+    var by = {};
+    rows.forEach(function (i) {
+      var k = i.vendor && i.vendor !== "Domain registrar" ? i.vendor : (i.registrar || "Registrar not identified");
+      (by[k] = by[k] || []).push(i);
+    });
+    return Object.keys(by).map(function (k) {
+      var list = by[k].sort(function (x, y) { return (x.expiresAt || "9999").localeCompare(y.expiresAt || "9999"); });
+      var paid = 0, renew = 0, mailboxes = 0, priced = 0;
+      var first = "", last = "";
+      list.forEach(function (i) {
+        paid += Number(i.amountUsd) || 0;
+        renew += Number(i.renewalUsd) > 0 ? Number(i.renewalUsd) : (Number(i.amountUsd) || 0);
+        mailboxes += Number(i.mailboxCount) || 0;
+        if (!i.needsAmount) priced += 1;
+        var d = (i.registeredAt || i.at || "").slice(0, 10);
+        if (d) { if (!first || d < first) first = d; if (!last || d > last) last = d; }
+      });
+      return { vendor: k, rows: list, paid: paid, renew: renew, mailboxes: mailboxes, priced: priced, first: first, last: last };
+    }).sort(function (x, y) { return y.rows.length - x.rows.length; });
+  }
+
+  function domainGroup(g) {
+    var n = g.rows.length;
+    var providers = {};
+    g.rows.forEach(function (i) { if (i.mailProvider) providers[i.mailProvider] = (providers[i.mailProvider] || 0) + (Number(i.mailboxCount) || 0); });
+    var carries = Object.keys(providers).map(function (p) { return providers[p] + ' ' + p + ' inbox' + (providers[p] === 1 ? '' : 'es'); }).join(' · ');
+
+    var when = g.first && g.last && g.first !== g.last ? g.first + ' to ' + g.last : (g.first || 'date unknown');
+    // Named once for the batch: every domain in a group shares its registrar, and
+    // repeating it per row buys nothing but width.
+    var regs = {};
+    g.rows.forEach(function (i) { if (i.registrar && i.registrar !== g.vendor) regs[i.registrar] = 1; });
+    var regNames = Object.keys(regs);
+
+    var html = '<div class="dm-group" style="margin-top:14px">' +
+      '<div class="burn-head" style="align-items:baseline"><h4 style="margin:0">' + esc(g.vendor) + ' <span class="note" style="font-weight:400">· ' + n + ' domain' + (n === 1 ? '' : 's') + '</span></h4>' +
+      '<div class="note">' + (g.priced === n ? usd(g.paid) + ' paid · ' + usd(g.renew) + '/yr to renew' : g.priced + ' of ' + n + ' priced') + '</div></div>' +
+      '<p class="note" style="margin:2px 0 8px">Registered ' + esc(when) +
+      (regNames.length ? ' through ' + esc(regNames.join(', ')) : '') +
+      (carries ? ' · carries ' + esc(carries) : '') + '</p>';
+
+    // Price the whole batch in one action: they were bought in one order at one price.
+    html += '<div class="dm-batch" data-vendor="' + esc(g.vendor) + '" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">' +
+      '<input class="dmPaid" type="number" min="0" step="0.01" placeholder="Paid each ($)" style="max-width:150px" />' +
+      '<input class="dmRenew" type="number" min="0" step="0.01" placeholder="Renews at ($)" style="max-width:150px" />' +
+      '<label class="note" style="display:flex;gap:5px;align-items:center"><input class="dmAuto" type="checkbox" /> auto-renew on</label>' +
+      '<button class="btn btn-sm dmApply">Apply to all ' + n + '</button>' +
+      '<span class="note">sets every ' + esc(g.vendor) + ' domain at once</span></div>';
+
     html += '<div class="otable-wrap"><table class="otable"><thead><tr>' +
-      '<th>Domain</th><th>Registrar</th><th>Purchased</th><th>Expires</th><th class="num">Days left</th><th class="num">Paid</th><th class="num">Renewal</th><th>Auto</th>' +
+      '<th>Domain</th><th>Carries</th><th>Purchased</th><th>Expires</th><th class="num">Days left</th><th class="num">Paid</th><th class="num">Renewal</th><th>Auto</th>' +
       '</tr></thead><tbody>';
-    rows.sort(function (x, y) { return (x.expiresAt || "9999").localeCompare(y.expiresAt || "9999"); }).forEach(function (i) {
+    g.rows.forEach(function (i) {
       var days = i.expiresAt ? Math.round((Date.parse(i.expiresAt) - Date.now()) / 86400000) : null;
       var dcls = days == null ? "" : days < 0 ? "margin-bad" : days <= 60 ? "margin-mid" : "margin-good";
       html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' +
-        '<td><div class="lr-main">' + esc(i.domain) + '</div>' + (i.registryError ? '<div class="lr-sub bad-t">' + esc(i.registryError) + '</div>' : '') + '</td>' +
-        '<td>' + esc(i.registrar || "-") + '</td>' +
+        '<td><div class="lr-main">' + esc(i.domain) + '</div>' +
+        (i.registryError ? '<div class="lr-sub bad-t">' + esc(i.registryError) + '</div>' : '') +
+        '</td>' +
+        '<td>' + (i.mailboxCount ? esc(i.mailboxCount + ' ' + (i.mailProvider || '') + ' inbox' + (i.mailboxCount === 1 ? '' : 'es')) : '<span class="note">no mailboxes</span>') + '</td>' +
         '<td>' + esc((i.registeredAt || i.at || "").slice(0, 10) || "-") + '</td>' +
         '<td>' + (i.expiresAt ? esc(i.expiresAt.slice(0, 10)) : '<span class="note">unknown</span>') + '</td>' +
         '<td class="num">' + (days == null ? '<span class="note">-</span>' : '<span class="' + dcls + '">' + days + '</span>') + '</td>' +
@@ -953,6 +1018,30 @@
     $$("#view .clickrow[data-spend]").forEach(function (tr) {
       tr.addEventListener("click", function () { openSpendItem(tr.dataset.spend); });
     });
+    // Price a whole registrar batch in one call. A blank field is left untouched
+    // rather than sent as zero, so setting only the renewal price is a real option.
+    $$("#view .dm-batch").forEach(function (box) {
+      var btn = box.querySelector(".dmApply");
+      if (!btn) return;
+      btn.addEventListener("click", function () {
+        var paid = box.querySelector(".dmPaid").value.trim();
+        var renew = box.querySelector(".dmRenew").value.trim();
+        var auto = box.querySelector(".dmAuto").checked;
+        if (!paid && !renew && !auto) { toast("Enter a price first"); return; }
+        var payload = { action: "price_domains", vendor: box.dataset.vendor, overwrite: true };
+        if (paid) payload.amountUsd = Number(paid);
+        if (renew) payload.renewalUsd = Number(renew);
+        if (auto) payload.autoRenew = true;
+        btn.classList.add("disabled");
+        send("/owner/burn", "POST", payload).then(function (r) {
+          btn.classList.remove("disabled");
+          if (!r.ok) { toast("Could not price that batch"); return; }
+          toast("Priced " + r.data.priced + " " + box.dataset.vendor + " domain(s)");
+          viewBurn();
+        });
+      });
+    });
+
     var imp = $("#dmImport"), ref = $("#dmRefresh");
     if (imp) imp.addEventListener("click", function () {
       imp.classList.add("disabled"); toast("Reading the sending fleet…");

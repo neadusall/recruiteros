@@ -119,6 +119,11 @@ export interface SpendItem {
   renewalUsd?: number;
   /** Whether the registrar will renew it without intervention. */
   autoRenew?: boolean;
+  /** Which mailbox provider serves this domain, in words: "Sending.ac", "Google Workspace". */
+  mailProvider?: string;
+  /** How many inboxes sit on it. A domain carrying 50 is not the same asset as one
+   *  carrying 1, though both renew at the same price. */
+  mailboxCount?: number;
   /** When the registry lookup last succeeded, ISO. */
   registryCheckedAt?: string;
   /** Last registry lookup failure, kept for display. */
@@ -298,6 +303,13 @@ const SEED: SeedItem[] = [
     notes: "Billed per mailbox, so the figure moves with the fleet size. Sign-in goes through sso.ac.",
   },
   {
+    vendor: "Zapmail", label: "Google Workspace mailboxes", category: "email", billing: "monthly",
+    amountUsd: 0, at: "2026-07-30", status: "active", needsAmount: true,
+    purpose: "53 Google Workspace inboxes across 31 domains, the newest slice of the sending fleet.",
+    impact: "Deliverability spread. Sending the same volume from a second mailbox estate on a different provider means one provider throttling the fleet cannot stop outbound on its own.",
+    notes: "Zapmail also REGISTERED those 31 domains, through its reseller registrar PDR Ltd, on the same day the mailboxes appeared (2026-07-30). That is why they show on no Dynadot or Porkbun order: the domain money and the mailbox money both go to Zapmail, and the Domains panel attributes them here.",
+  },
+  {
     vendor: "Microsoft 365", label: "lumesp.com mailboxes", category: "email", billing: "monthly",
     amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
     purpose: "The real human mailboxes on lumesp.com, including ryan@lumesp.com, and the DKIM records for the domain.",
@@ -386,7 +398,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 10;
+const SEED_VERSION = 11;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -512,6 +524,33 @@ function applySeed(): void {
   store.items = retireSeedRows(store.items);
   store.seededVersion = SEED_VERSION;
   persist();
+  void adoptDomainsOnce();
+}
+
+/**
+ * Pull the sending fleet's domains in and name their registrars, once, on a version bump.
+ *
+ * The Domains panel has always had an Import button and a Refresh button, and for as long
+ * as nobody pressed them the register carried 75 domains it knew nothing about: no
+ * registrar, no expiry, no renewal cost, and no way to notice one lapsing. Two buttons is
+ * two more than a dashboard should need to tell the truth about money already spent, so
+ * the first boot after the bump does both.
+ *
+ * Deliberately fire-and-forget and deliberately quiet: this runs during hydration, and a
+ * registry that is slow or down must never hold up the console or throw into it. Failure
+ * leaves the buttons exactly where they were.
+ */
+let adopted = false;
+async function adoptDomainsOnce(): Promise<void> {
+  if (adopted) return;
+  adopted = true;
+  try {
+    await importSendingDomains();
+    // ~75 keyless RDAP lookups, four at a time. Slow, unattended, and only ever once.
+    await refreshDomainFacts();
+  } catch {
+    /* the buttons remain the manual route */
+  }
 }
 
 /** Drop the rows this register should not be carrying at all. A row is only removed while
@@ -846,33 +885,85 @@ export async function applyVerifiedPlans(
 
 /* ---------------- domains ---------------- */
 
+/** One inbox as the sender store holds it. Only the three fields this module reads. */
+interface SenderInbox {
+  email?: string;
+  provider?: string;
+  smtpHost?: string;
+}
+
+/**
+ * What a sending domain carries: which mailbox provider serves it and how many inboxes
+ * sit on it. This is the fact that makes a domain row meaningful. A domain with 50
+ * Microsoft 365 inboxes on it is a load-bearing part of the outbound fleet; one with a
+ * single mailbox is a spare, and they cost the same to renew.
+ */
+export interface DomainUse {
+  provider: string;
+  smtpHost: string;
+  inboxes: number;
+}
+
+/** Mailbox provider tags, as the sender store writes them, in plain words. */
+const PROVIDER_LABELS: Record<string, string> = {
+  "sending-ac": "Sending.ac",
+  "own-smtp": "in-house Mailcow",
+  google: "Google Workspace",
+  gmail: "Google Workspace",
+  other: "Google Workspace",
+};
+
+/** Read every sending domain out of the sender store, with what it carries. */
+async function sendingDomainUse(): Promise<Map<string, DomainUse>> {
+  const snap = await loadSnapshot<{ inboxes?: SenderInbox[] }>("senders_v1").catch(() => null);
+  const out = new Map<string, DomainUse>();
+  for (const inbox of snap?.inboxes || []) {
+    const domain = String(inbox?.email || "").trim().toLowerCase().split("@")[1];
+    if (!domain) continue;
+    const cur = out.get(domain);
+    if (cur) { cur.inboxes += 1; continue; }
+    out.set(domain, {
+      provider: String(inbox?.provider || "other"),
+      smtpHost: String(inbox?.smtpHost || ""),
+      inboxes: 1,
+    });
+  }
+  return out;
+}
+
+/** "sending-ac on smtp.office365.com" in words a person would use. */
+function providerLabel(use: DomainUse): string {
+  const named = PROVIDER_LABELS[use.provider];
+  if (named) return named;
+  if (/office365|outlook/i.test(use.smtpHost)) return "Microsoft 365";
+  if (/gmail|google/i.test(use.smtpHost)) return "Google Workspace";
+  return use.provider || "unknown provider";
+}
+
 /**
  * Adopt every domain the sending fleet is actually using into the register, so the
- * domain list maintains itself instead of being retyped. Existing rows are left alone,
- * which makes this safe to run repeatedly. Returns the number of new rows.
+ * domain list maintains itself instead of being retyped. Existing rows are left alone
+ * apart from refreshing what each domain CARRIES, which changes as mailboxes are added,
+ * so this is safe to run repeatedly. Returns the number of new rows.
  */
 export async function importSendingDomains(): Promise<{ added: number; total: number }> {
   await ensureSpendRegisterReady();
-  const found = new Set<string>();
+  const use = await sendingDomainUse();
 
-  // The sender store is the authority on what the business actually sends from.
-  const senders = await loadSnapshot<unknown>("senders_v1").catch(() => null);
-  const scan = (o: unknown): void => {
-    if (Array.isArray(o)) { for (const v of o) scan(v); return; }
-    if (!o || typeof o !== "object") return;
-    for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
-      if (typeof v === "string" && /^(domain|sendingDomain|from|email|fromEmail)$/i.test(k)) {
-        const m = /([a-z0-9-]+\.[a-z]{2,})$/i.exec(v.trim().toLowerCase());
-        if (m) found.add(m[1]);
-      } else scan(v);
-    }
-  };
-  scan(senders);
-
-  const have = new Set(store.items.filter((i) => i.domain).map((i) => i.domain));
+  const byDomain = new Map(store.items.filter((i) => i.domain).map((i) => [i.domain as string, i]));
   let added = 0;
-  for (const domain of [...found].sort()) {
-    if (have.has(domain)) continue;
+  for (const domain of [...use.keys()].sort()) {
+    const u = use.get(domain) as DomainUse;
+    const carries = `${u.inboxes} ${providerLabel(u)} inbox${u.inboxes === 1 ? "" : "es"}.`;
+    const existing = byDomain.get(domain);
+    if (existing) {
+      // Inbox counts move; the money on the row does not. Only the usage line is refreshed.
+      existing.mailProvider = providerLabel(u);
+      existing.mailboxCount = u.inboxes;
+      if (existing.seeded) existing.purpose = `Sending domain in the cold-email fleet. ${carries}`;
+      existing.updatedAt = nowIso();
+      continue;
+    }
     store.items.push({
       id: rid("spend"),
       vendor: "Domain registrar",
@@ -884,15 +975,52 @@ export async function importSendingDomains(): Promise<{ added: number; total: nu
       at: nowIso().slice(0, 10),
       status: "active",
       domain,
-      purpose: "Sending domain in the cold-email fleet.",
+      mailProvider: providerLabel(u),
+      mailboxCount: u.inboxes,
+      purpose: `Sending domain in the cold-email fleet. ${carries}`,
       seeded: true,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     });
     added += 1;
   }
-  if (added) persist();
-  return { added, total: found.size };
+  persist();
+  return { added, total: use.size };
+}
+
+/**
+ * The registry names the REGISTRAR. The register has to name whoever the money went to,
+ * and those are not always the same company.
+ *
+ * "Dynadot Inc" and "Porkbun LLC" are both, so they only need trimming to the name on the
+ * invoice. PDR Ltd is different: it is a wholesale registrar that resellers buy through,
+ * and nobody here has ever had an account with it. Every PDR domain on this fleet was
+ * registered on 2026-07-30, the same day Zapmail provisioned the Google Workspace inboxes
+ * that sit on them, and none of them appears on a Dynadot or Porkbun order. So the bill
+ * for them is Zapmail's, and attributing them to "PDR Ltd" would leave 31 domains looking
+ * unaccounted for while Zapmail's own line looked cheaper than it is.
+ *
+ * That inference is stated on the row rather than hidden, and it is only drawn when the
+ * mailboxes on the domain are Google Workspace ones. A PDR domain serving anything else
+ * keeps the registry's own answer, because then the reasoning does not apply.
+ */
+const REGISTRAR_VENDORS: Array<{ match: RegExp; vendor: string; whenMailProvider?: RegExp }> = [
+  { match: /dynadot/i, vendor: "Dynadot" },
+  { match: /porkbun/i, vendor: "Porkbun" },
+  { match: /namecheap/i, vendor: "Namecheap" },
+  { match: /godaddy/i, vendor: "GoDaddy" },
+  { match: /cloudflare/i, vendor: "Cloudflare" },
+  { match: /publicdomainregistry|pdr ltd/i, vendor: "Zapmail", whenMailProvider: /google workspace/i },
+];
+
+/** The vendor a domain's money goes to, given its registrar and what serves its mail. */
+function vendorForRegistrar(registrar: string, mailProvider?: string): string {
+  for (const rule of REGISTRAR_VENDORS) {
+    if (!rule.match.test(registrar)) continue;
+    if (rule.whenMailProvider && !rule.whenMailProvider.test(mailProvider || "")) continue;
+    return rule.vendor;
+  }
+  return registrar;
 }
 
 /**
@@ -924,13 +1052,63 @@ export async function refreshDomainFacts(): Promise<{ checked: number; updated: 
     if (f.expiresAt) row.expiresAt = f.expiresAt;
     if (f.registrar) {
       row.registrar = f.registrar;
-      if (row.vendor === "Domain registrar") row.vendor = f.registrar;
+      // Only ever names a row the import left unnamed, or corrects one this same rule
+      // named before. An owner-entered vendor is never overwritten.
+      const known = REGISTRAR_VENDORS.some((r) => r.vendor === row.vendor);
+      if (row.vendor === "Domain registrar" || (row.seeded && known)) {
+        row.vendor = vendorForRegistrar(f.registrar, row.mailProvider);
+      }
     }
     row.updatedAt = nowIso();
     updated += 1;
   }
   persist();
   return { checked: rows.length, updated, failed };
+}
+
+/**
+ * Set the price on every domain bought from one vendor, in one go.
+ *
+ * Domains are bought in batches at one price: 29 at Dynadot on a Tuesday, 15 at Porkbun a
+ * month later. Entering that price 44 times by hand is how a domain register stops being
+ * maintained, so the panel offers the batch. `renewalUsd` matters more than the purchase
+ * price on this kind of row, because promotional first-year pricing is exactly what makes
+ * a renewal bill a surprise.
+ *
+ * Rows the owner has already priced are left alone unless `overwrite` says otherwise, so
+ * running it again after adding a few domains prices only the new ones.
+ */
+export async function priceDomains(input: {
+  vendor: string;
+  amountUsd?: number;
+  renewalUsd?: number;
+  autoRenew?: boolean;
+  overwrite?: boolean;
+}): Promise<{ priced: number; matched: number }> {
+  await ensureSpendRegisterReady();
+  const want = String(input.vendor || "").trim().toLowerCase();
+  if (!want) return { priced: 0, matched: 0 };
+
+  const rows = store.items.filter(
+    (i) => i.domain && (i.vendor.toLowerCase() === want || (i.registrar || "").toLowerCase().includes(want)),
+  );
+  let priced = 0;
+  for (const row of rows) {
+    if (!input.overwrite && row.verified && row.amountUsd > 0 && input.amountUsd != null) continue;
+    if (input.amountUsd != null) {
+      row.amountUsd = num(input.amountUsd);
+      row.needsAmount = false;
+      // A batch price is a real invoice figure, not an estimate, so it counts as verified
+      // exactly as a hand-typed one would.
+      row.verified = true;
+    }
+    if (input.renewalUsd != null) row.renewalUsd = num(input.renewalUsd);
+    if (input.autoRenew != null) row.autoRenew = !!input.autoRenew;
+    row.updatedAt = nowIso();
+    priced += 1;
+  }
+  if (priced) persist();
+  return { priced, matched: rows.length };
 }
 
 export async function deleteSpendItem(id: string): Promise<boolean> {

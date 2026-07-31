@@ -27,6 +27,7 @@ import {
   rollupEffectiveness,
   importSendingDomains,
   refreshDomainFacts,
+  priceDomains,
   type SpendItem,
 } from "../../../../lib/owner/spendRegister";
 
@@ -70,6 +71,20 @@ export async function POST(req: Request) {
        action=refresh_domains pull registration/expiry/registrar from the public registry */
   if (b.action === "import_domains") return ok(await importSendingDomains());
   if (b.action === "refresh_domains") return ok(await refreshDomainFacts());
+  /* action=price_domains  price a whole registrar batch at once. Domains are bought 29
+     at a time at one price, so pricing them one row at a time is how the panel stops
+     being maintained. */
+  if (b.action === "price_domains") {
+    const p = b as unknown as { vendor?: string; amountUsd?: number; renewalUsd?: number; autoRenew?: boolean; overwrite?: boolean };
+    if (!String(p.vendor || "").trim()) return fail("vendor_required", 400);
+    return ok(await priceDomains({
+      vendor: String(p.vendor),
+      amountUsd: p.amountUsd,
+      renewalUsd: p.renewalUsd,
+      autoRenew: p.autoRenew,
+      overwrite: p.overwrite,
+    }));
+  }
 
   if (!String(b.vendor || "").trim()) return fail("vendor_required", 400);
   return ok({ item: await addSpendItem(b) });

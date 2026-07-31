@@ -246,6 +246,16 @@ export const VENDOR_SOURCES: VendorSource[] = [
     setup: "Billed per mailbox, so the figure moves with the fleet. Sign in through sso.ac and take the invoice from the billing page.",
   },
   {
+    vendor: "Zapmail",
+    channel: "email_processor",
+    from: ["zapmail.ai", "stripe.com"],
+    subject: ["zapmail", "mailbox", "receipt", "invoice", "subscription", "domain"],
+    merchant: ["zapmail"],
+    portal: "https://app.zapmail.ai/billing",
+    api: "POST /v2/payment/invoices (header x-auth-zapmail) returns a Stripe invoice URL, but only for a subscription id it does not itself hand out, and it carries no amount. So it can fetch the document once the subscription is known and can never state the figure.",
+    setup: "Two charges live here, not one: the Google Workspace mailboxes monthly, and the domains Zapmail registered on their reseller registrar. Both bill through Stripe, so the sender is Stripe and the merchant name is what identifies them.",
+  },
+  {
     vendor: "Microsoft 365",
     channel: "email_vendor",
     from: ["microsoft.com", "microsoftonline.com", "billing.microsoft.com"],
