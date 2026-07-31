@@ -880,23 +880,38 @@ export function startHarvest(monthsBack = 3): { started: boolean; reason?: strin
   if (inFlight) return { started: false, reason: "a sweep is already running", mailboxes: inFlight.mailboxes };
   const boxes = billingMailboxes();
   if (!boxes.length) return { started: false, reason: "no billing mailbox is configured", mailboxes: [] };
+  void harvestAll(monthsBack).catch(() => {});
+  return { started: true, mailboxes: boxes.map((b) => b.user) };
+}
+
+/**
+ * Run the sweep to completion and hand back what each mailbox produced. This is the
+ * scheduler's entry point: a nightly tick means a month can never quietly pass without its
+ * receipts, which a button someone has to remember to press cannot guarantee.
+ */
+export async function harvestAll(monthsBack = 3): Promise<{ ok: boolean; reason?: string; reports: SweepReport[] }> {
+  if (inFlight) return { ok: false, reason: "a sweep is already running", reports: [] };
+  const boxes = billingMailboxes();
+  if (!boxes.length) return { ok: false, reason: "no billing mailbox is configured", reports: [] };
 
   const since = new Date();
   since.setUTCMonth(since.getUTCMonth() - Math.max(1, Math.min(24, monthsBack)));
   since.setUTCDate(1);
   inFlight = { startedAt: nowIso(), monthsBack, mailboxes: boxes.map((b) => b.user) };
 
-  void (async () => {
-    try {
-      for (const box of boxes) {
-        await harvestMailbox(box, since).catch(() => {});
-      }
-    } finally {
-      inFlight = null;
+  const reports: SweepReport[] = [];
+  try {
+    for (const box of boxes) {
+      reports.push(await harvestMailbox(box, since).catch((e: Error) => ({
+        at: nowIso(), mailbox: box.user, ok: false, error: e?.message?.slice(0, 300) || "sweep failed",
+        since: since.toISOString().slice(0, 10), scanned: 0, billingCandidates: 0, imported: 0,
+        duplicates: 0, skippedNotCharge: 0, unparsedAmount: 0, shotsRendered: 0, shotFailures: 0, rejects: [],
+      })));
     }
-  })();
-
-  return { started: true, mailboxes: boxes.map((b) => b.user) };
+  } finally {
+    inFlight = null;
+  }
+  return { ok: reports.some((r) => r.ok), reports };
 }
 
 function round2(n: number): number { return Math.round((Number(n) || 0) * 100) / 100; }
