@@ -16,6 +16,7 @@
 import { requireOwner, ok, fail, body } from "../../../../lib/api";
 import type { SpendWindow } from "../../../../lib/billing/ledger";
 import { spendRollup } from "../../../../lib/billing/ledger";
+import { ensureVendorUsageReady } from "../../../../lib/owner/vendorUsage";
 import {
   listSpendItems,
   addSpendItem,
@@ -38,6 +39,10 @@ export async function GET(req: Request) {
   const window = (url.searchParams.get("window") as SpendWindow) || "30d";
 
   const base = await listSpendItems();
+  /* Vendor-billed figures are read synchronously inside attachLive/rollupBurn, so hydrate
+     the store first or a cold container prices every metered line off the internal ledger
+     for one page view. */
+  await ensureVendorUsageReady();
   const [items, outcomes] = await Promise.all([attachLive(base, window), fetchPhoneOutcomes()]);
   const rollup = rollupBurn(items, window);
   const ledger = spendRollup(window);

@@ -30,6 +30,7 @@ import {
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
 import { VENDOR_SOURCES } from "../../../../lib/owner/receiptSources";
+import { ensureVendorUsageReady } from "../../../../lib/owner/vendorUsage";
 import { closeHistory, monthToClose, ensureCloseReady } from "../../../../lib/owner/monthClose";
 import { noticeConfigured } from "../../../../lib/owner/ownerNotice";
 import { ownerEmails } from "../../../../lib/owner/emails";
@@ -44,7 +45,10 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const months = Number(new URL(req.url).searchParams.get("months")) || 12;
 
-  const [items, allReceipts] = await Promise.all([listSpendItems(), listReceipts()]);
+  /* The vendor-billed figures are read synchronously while the grid is built, so the store
+     has to be hydrated before that: on a cold container the first page view would otherwise
+     price every metered line off the internal ledger and look wrong exactly once. */
+  const [items, allReceipts] = await Promise.all([listSpendItems(), listReceipts(), ensureVendorUsageReady()]);
   /* The books begin at REGISTER_START_MONTH. Older charges stay in the vault (nothing is
      deleted, and the sweep still stores what it finds) but they are not reported here, so
      the grid, the gallery and the per-vendor counts all cover the same period. */

@@ -444,7 +444,12 @@ export function buildSpendMatrix(
         verified = actual !== 0;
         const said = vendorMonthFor(ledgerKey, period);
         if (said && !said.closed) {
-          note = `${item.vendor} so far this month, still running`;
+          /* A running figure sits on a month that has already ended for the few days
+             between the month closing and the vendor issuing its invoice, so it must not
+             keep claiming to be "this month". */
+          note = period === nowMonth
+            ? `${item.vendor} so far this month, still running`
+            : `${item.vendor}'s running total, not invoiced yet`;
         } else if (said && actual === 0) {
           note = `${item.vendor}'s own figure for the month`;
         } else if (actual !== 0 && meteredUsd > 0 && Math.abs(actual - meteredUsd) >= 0.01) {

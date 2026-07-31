@@ -143,6 +143,16 @@ function invoicedReceipt(): Receipt {
   check("of which only the invoiced month is proven", row!.totalVerifiedUsd, 34.58);
 }
 
+/* ---- the days between a month ending and the vendor invoicing it ---- */
+{
+  devVendorUsage().months = [];
+  await recordVendorMonth({ key: "telnyx", vendor: "Telnyx", period: SMALL, amountUsd: 7.5, closed: false });
+  const m = buildSpendMatrix([telnyxRow()], [], { months: 4, inboxConfigured: true });
+  const cell = m.rows.find((r) => r.vendor === "Telnyx")!.cells.find((c) => c.period === SMALL)!;
+  check("an ended month still carries its running figure", cell.countedUsd, 7.5);
+  check("...and stops calling itself this month", cell.note, "Telnyx's running total, not invoiced yet");
+}
+
 /* ---- two accounts under one vendor name: the meter belongs to exactly one of them ----
  *
  * The house Telnyx account and Lume's white-label one are two separate accounts with two
