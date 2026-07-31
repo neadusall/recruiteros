@@ -13,6 +13,7 @@
  *   #people      viewPeople      users & roles (→ renderRoster, roleChip)
  *   #accounts    viewAccounts    full account control (see/reset/delete)
  *   #costs       viewCosts       editable cost model
+ *   #passwords   viewPasswords   account vault: portal URL + username + password
  *   #security    viewSecurity
  *   Projection calculator (cost model UI): viewCalculator, computeCalc,
  *                                recompute, renderScenarios, calcState
@@ -86,8 +87,8 @@
 
   /* ---------------- router ---------------- */
   // Projection calculator moved to the in-app command center (Measure → Spending).
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, security: viewSecurity };
-  var TITLES = { overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", security: "Security" };
+  var ROUTES = { overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, security: viewSecurity };
+  var TITLES = { overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", security: "Security" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -2298,6 +2299,261 @@
     };
     send("/owner/costs", "PATCH", { rateOverrides: rateOverrides, constants: constants }).then(function (res) {
       if (res.ok) toast("Cost model saved"); else toast("Save failed");
+    });
+  }
+
+  /* ================= PASSWORDS (account vault) ================= */
+  /* Every account the platform runs on, in one table: the URL you actually sign in at,
+   * the username, and the password. The catalogue ships the services and their real
+   * portal URLs already filled in (those are often nothing like the vendor's marketing
+   * domain), so the only thing left to type is the credential itself.
+   *
+   * Passwords are AES-256-GCM encrypted server-side and are NEVER included in the list
+   * payload. Reveal is one deliberate request per row, which is what keeps a page load
+   * (or a screenshot of it) from spilling the whole vault. */
+  var vaultData = null;
+  var vaultFilter = { q: "", cat: "" };
+
+  function viewPasswords() {
+    api("/owner/vault").then(function (v) {
+      vaultData = v;
+      renderVault();
+    }).catch(fail);
+  }
+
+  function renderVault() {
+    var v = vaultData, s = v.summary;
+    var html = '<div class="v-head"><h2>Passwords</h2><p>Every account RecruitersOS depends on, with the page you actually sign in at. Passwords are encrypted before they are stored and are only ever sent to this page one at a time, when you ask to see one.</p></div>';
+
+    html += '<div class="stat-grid">' +
+      stat(s.total, "Accounts tracked") +
+      stat(s.withPassword, "Passwords on file", s.withPassword ? "good" : "") +
+      stat(s.missing, "Still to fill in", s.missing ? "amber" : "good") +
+      stat(s.withUsername, "Usernames on file") +
+      '</div>';
+
+    if (!v.key.ready) {
+      html += '<div class="card vault-warn" style="margin-top:14px"><h3>No encryption key is set</h3>' +
+        '<p class="note">Passwords cannot be saved until the server has a key to encrypt them with. Set <span class="mono">OWNER_VAULT_KEY</span> in <span class="mono">.env.production</span> to any long random string and restart the app. Everything else on this page works meanwhile.</p></div>';
+    } else if (!v.key.dedicated) {
+      html += '<div class="card" style="margin-top:14px"><h3>Using the session secret as the vault key</h3>' +
+        '<p class="note">Passwords are encrypted, but with the same secret that signs sign-in cookies. Set a separate <span class="mono">OWNER_VAULT_KEY</span> so rotating one never breaks the other. Do that before you fill the vault in: changing the key locks whatever was stored under the old one.</p></div>';
+    }
+    if (s.locked) {
+      html += '<div class="card vault-warn" style="margin-top:14px"><h3>' + s.locked + ' password' + (s.locked === 1 ? '' : 's') + ' cannot be read</h3>' +
+        '<p class="note">These were encrypted with a different key than the server is using now. Restore the previous <span class="mono">OWNER_VAULT_KEY</span> to get them back, or overwrite each one with the current password.</p></div>';
+    }
+
+    html += '<div class="vault-bar">' +
+      '<input id="vaultQ" class="vault-search" type="search" placeholder="Search service, URL, username or note" value="' + esc(vaultFilter.q) + '">' +
+      '<select id="vaultCat" class="vault-cat"><option value="">All categories</option>' +
+      v.categories.map(function (c) { return '<option value="' + esc(c) + '"' + (c === vaultFilter.cat ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join("") +
+      '</select>' +
+      '<span class="spacer" style="flex:1"></span>' +
+      '<a class="btn btn-sm" id="vaultReseed" title="Put back any built-in service that was deleted">Restore defaults</a>' +
+      '<a class="btn btn-primary btn-sm" id="vaultAdd">Add account</a>' +
+      '</div>';
+
+    html += '<div id="vaultRows"></div>';
+    $("#view").innerHTML = html;
+
+    $("#vaultQ").addEventListener("input", function () { vaultFilter.q = this.value; renderVaultRows(); });
+    $("#vaultCat").addEventListener("change", function () { vaultFilter.cat = this.value; renderVaultRows(); });
+    $("#vaultAdd").addEventListener("click", function () { openVaultDrawer(null); });
+    $("#vaultReseed").addEventListener("click", function () {
+      send("/owner/vault", "POST", { action: "reseed" }).then(function (res) {
+        toast(res.ok ? ((res.data.added || 0) + " restored") : "Could not restore");
+        viewPasswords();
+      });
+    });
+    renderVaultRows();
+  }
+
+  function vaultMatches(e) {
+    if (vaultFilter.cat && e.category !== vaultFilter.cat) return false;
+    var q = vaultFilter.q.trim().toLowerCase();
+    if (!q) return true;
+    return [e.service, e.url, e.username, e.account, e.used_for, e.notes, e.envKey]
+      .join(" ").toLowerCase().indexOf(q) >= 0;
+  }
+
+  function renderVaultRows() {
+    var rows = (vaultData.entries || []).filter(vaultMatches);
+    if (!rows.length) {
+      $("#vaultRows").innerHTML = '<div class="card"><p class="note">Nothing matches that search.</p></div>';
+      return;
+    }
+    var byCat = {};
+    rows.forEach(function (e) { (byCat[e.category] = byCat[e.category] || []).push(e); });
+
+    var html = "";
+    Object.keys(byCat).forEach(function (cat) {
+      html += '<div class="card" style="margin-top:14px"><h3>' + esc(cat) + '</h3>' +
+        '<table class="otable vault-table"><thead><tr>' +
+        '<th>Service</th><th>Sign-in URL</th><th>Username / email</th><th>Password</th><th></th>' +
+        '</tr></thead><tbody>';
+      byCat[cat].forEach(function (e) {
+        html += '<tr data-vid="' + esc(e.id) + '">' +
+          '<td><div class="lr-main">' + esc(e.service) + '</div>' +
+            (e.account ? '<div class="vault-sub">' + esc(e.account) + '</div>' : '') +
+            (e.used_for ? '<div class="vault-sub dim">' + esc(e.used_for) + '</div>' : '') + '</td>' +
+          '<td data-l="Sign-in URL"><a class="vault-link" href="' + esc(e.url) + '" target="_blank" rel="noopener" title="' + esc(e.url) + '">' + esc(prettyUrl(e.url)) + '</a></td>' +
+          '<td data-l="Username"><span>' + (e.username
+            ? '<span class="mono vault-user">' + esc(e.username) + '</span><div class="vault-acts"><a class="vault-mini" data-copy="' + esc(e.username) + '">Copy</a></div>'
+            : '<span class="note" style="margin:0">not set</span>') + '</span></td>' +
+          '<td class="vault-pw" data-l="Password" data-pwcell="' + esc(e.id) + '">' + vaultPwCell(e) + '</td>' +
+          '<td class="num"><a class="vault-mini" data-edit="' + esc(e.id) + '">Edit</a></td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+    });
+    $("#vaultRows").innerHTML = html;
+
+    $$("#vaultRows [data-edit]").forEach(function (a) {
+      a.addEventListener("click", function () { openVaultDrawer(a.dataset.edit); });
+    });
+    $$("#vaultRows [data-copy]").forEach(function (a) {
+      a.addEventListener("click", function () { copyText(a.dataset.copy, "Username copied"); });
+    });
+    wireVaultPwCells();
+  }
+
+  function vaultPwCell(e) {
+    if (e.locked) return '<span class="pill susp">Locked</span>';
+    if (!e.hasSecret) return '<span class="note" style="margin:0">not set</span>';
+    return '<span class="vault-dots">••••••••••</span>' +
+      '<div class="vault-acts">' +
+      '<a class="vault-mini" data-reveal="' + esc(e.id) + '">Show</a>' +
+      '<a class="vault-mini" data-pwcopy="' + esc(e.id) + '">Copy</a></div>';
+  }
+
+  function wireVaultPwCells() {
+    $$("#vaultRows [data-reveal]").forEach(function (a) {
+      a.addEventListener("click", function () { revealPw(a.dataset.reveal); });
+    });
+    $$("#vaultRows [data-pwcopy]").forEach(function (a) {
+      a.addEventListener("click", function () {
+        api("/owner/vault?reveal=" + encodeURIComponent(a.dataset.pwcopy))
+          .then(function (r) { copyText(r.password, "Password copied"); })
+          .catch(function () { toast("Could not read that password"); });
+      });
+    });
+  }
+
+  /* Shown passwords hide themselves again after a minute: an unattended tab should not
+   * be left holding a credential in plain sight. */
+  function revealPw(id) {
+    var cell = $('[data-pwcell="' + id + '"]');
+    api("/owner/vault?reveal=" + encodeURIComponent(id)).then(function (r) {
+      cell.innerHTML = '<span class="mono vault-shown">' + esc(r.password) + '</span>' +
+        '<div class="vault-acts">' +
+        '<a class="vault-mini" data-hide="1">Hide</a>' +
+        '<a class="vault-mini" data-pwcopy2="1">Copy</a></div>';
+      var reset = function () {
+        var e = (vaultData.entries || []).filter(function (x) { return x.id === id; })[0];
+        if (e) { cell.innerHTML = vaultPwCell(e); wireVaultPwCells(); }
+      };
+      cell.querySelector("[data-hide]").addEventListener("click", reset);
+      cell.querySelector("[data-pwcopy2]").addEventListener("click", function () { copyText(r.password, "Password copied"); });
+      setTimeout(reset, 60000);
+    }).catch(function () { toast("Could not read that password"); });
+  }
+
+  function copyText(t, msg) {
+    if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { toast(msg); }, function () { toast("Copy blocked by the browser"); });
+    else toast("Copy blocked by the browser");
+  }
+
+  function prettyUrl(u) {
+    return String(u || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+  }
+
+  /* One account, full detail. Password is write-only here: the field starts empty and an
+   * empty field means "leave what is stored alone", so saving a note can never wipe a
+   * credential by accident. */
+  function openVaultDrawer(id) {
+    var e = id ? (vaultData.entries || []).filter(function (x) { return x.id === id; })[0] : null;
+    var cats = vaultData.categories.slice();
+    if (e && cats.indexOf(e.category) < 0) cats.push(e.category);
+
+    var html = '<div style="display:flex;justify-content:space-between;align-items:start">' +
+      '<div><h2>' + esc(e ? e.service : "New account") + '</h2>' +
+      '<div class="sub">' + esc(e ? e.category : "Add an account to track") + '</div></div>' +
+      '<a class="btn btn-sm" id="vdClose">✕</a></div>';
+
+    html += '<div class="vault-form">';
+    html += fld("Service", '<input id="vfService" value="' + esc(e ? e.service : "") + '" placeholder="Vendor or tool name">');
+    html += fld("Category", '<select id="vfCat">' + cats.map(function (c) {
+      return '<option value="' + esc(c) + '"' + (e && e.category === c ? ' selected' : '') + '>' + esc(c) + '</option>';
+    }).join("") + '</select>');
+    html += fld("Sign-in URL", '<input id="vfUrl" value="' + esc(e ? e.url : "") + '" placeholder="https://…">');
+    html += fld("Username / email", '<input id="vfUser" value="' + esc(e ? e.username : "") + '" autocomplete="off">');
+    html += fld("Password", '<input id="vfPw" type="password" autocomplete="new-password" placeholder="' +
+      (e && e.hasSecret ? "Stored. Type to replace it" : "Not set") + '">');
+    html += fld("Account label", '<input id="vfAccount" value="' + esc(e && e.account ? e.account : "") + '" placeholder="Which account, when there is more than one">');
+    html += fld("Two-factor", '<input id="vfMfa" value="' + esc(e && e.mfa ? e.mfa : "") + '" placeholder="Authenticator app, SMS to …, recovery codes kept …">');
+    html += fld("API key env var", '<input id="vfEnv" value="' + esc(e && e.envKey ? e.envKey : "") + '" placeholder="TELNYX_API_KEY">');
+    html += '</div>';
+    html += '<div class="fld" style="margin-top:12px"><label>Used for</label><textarea id="vfUsed" rows="2">' + esc(e && e.used_for ? e.used_for : "") + '</textarea></div>';
+    html += '<div class="fld" style="margin-top:12px"><label>Notes</label><textarea id="vfNotes" rows="4">' + esc(e && e.notes ? e.notes : "") + '</textarea></div>';
+
+    if (e && e.secretUpdatedAt) html += '<p class="note">Password last changed ' + esc(fmtDate(e.secretUpdatedAt)) + '.</p>';
+    if (e && e.hasSecret) html += '<p class="note">Leave the password field empty to keep the stored one.</p>';
+
+    html += '<div class="btn-row" style="margin-top:16px"><a class="btn btn-primary btn-sm" id="vfSave">Save</a>';
+    if (e && e.hasSecret) html += '<a class="btn btn-sm" id="vfClear">Clear password</a>';
+    html += '</div>';
+
+    if (e) {
+      html += '<div class="danger-zone"><h3>Remove</h3>' +
+        '<p class="note" style="margin-top:0">Deletes this row and its stored password. Built-in services come back with Restore defaults, with the password gone.</p>' +
+        '<a class="btn btn-danger btn-sm" id="vfDelete">Delete account</a></div>';
+    }
+
+    $("#drawerBody").innerHTML = html;
+    $("#scrim").classList.add("show");
+    $("#drawer").classList.add("show");
+    $("#vdClose").addEventListener("click", closeDrawer);
+    $("#vfSave").addEventListener("click", function () { saveVault(e, undefined); });
+    if ($("#vfClear")) $("#vfClear").addEventListener("click", function () { saveVault(e, ""); });
+    if ($("#vfDelete")) $("#vfDelete").addEventListener("click", function () { deleteVault(e); });
+  }
+
+  function saveVault(e, forcePassword) {
+    var payload = {
+      service: $("#vfService").value.trim(),
+      category: $("#vfCat").value,
+      url: $("#vfUrl").value.trim(),
+      username: $("#vfUser").value.trim(),
+      account: $("#vfAccount").value.trim(),
+      mfa: $("#vfMfa").value.trim(),
+      envKey: $("#vfEnv").value.trim(),
+      used_for: $("#vfUsed").value.trim(),
+      notes: $("#vfNotes").value.trim()
+    };
+    if (e) payload.id = e.id;
+    if (forcePassword !== undefined) payload.password = forcePassword;
+    else if ($("#vfPw").value) payload.password = $("#vfPw").value;
+
+    if (!payload.service) { toast("Give it a service name"); return; }
+
+    send("/owner/vault", "POST", payload).then(function (res) {
+      if (!res.ok) {
+        toast(res.data && res.data.message ? res.data.message : "Save failed");
+        return;
+      }
+      toast(forcePassword === "" ? "Password cleared" : "Saved");
+      closeDrawer();
+      viewPasswords();
+    });
+  }
+
+  function deleteVault(e) {
+    if (!confirm("Delete " + e.service + " and its stored password?")) return;
+    send("/owner/vault?id=" + encodeURIComponent(e.id), "DELETE").then(function (res) {
+      toast(res.ok ? "Deleted" : "Could not delete");
+      closeDrawer();
+      viewPasswords();
     });
   }
 

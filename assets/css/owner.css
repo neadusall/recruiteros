@@ -381,3 +381,54 @@
   body.rcv-open .rcv-sheet { margin: 0; width: 100%; max-height: none; border: 0; box-shadow: none; }
   body.rcv-open .rcv-body { overflow: visible; }
 }
+
+/* ---------- passwords (account vault) ---------- */
+/* A credential table has to read at a glance: the service and what it is for on the
+   left, and the three things you came for (URL, username, password) in fixed columns
+   that do not shift as rows reveal and re-hide. */
+.vault-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+.vault-search { flex: 1 1 260px; min-width: 200px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); padding: 9px 11px; font: inherit; font-size: 14px; }
+.vault-cat { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); padding: 9px 11px; font: inherit; font-size: 14px; }
+.vault-search:focus, .vault-cat:focus { outline: none; border-color: var(--brand); box-shadow: var(--focus-ring); }
+
+.vault-table { table-layout: fixed; }
+.vault-table th:nth-child(1), .vault-table td:nth-child(1) { width: 30%; }
+.vault-table th:nth-child(2), .vault-table td:nth-child(2) { width: 20%; }
+.vault-table th:nth-child(3), .vault-table td:nth-child(3) { width: 20%; }
+.vault-table th:nth-child(4), .vault-table td:nth-child(4) { width: 20%; }
+.vault-table th:nth-child(5), .vault-table td:nth-child(5) { width: 10%; }
+.vault-table td { word-break: break-word; }
+
+.vault-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.vault-sub.dim { color: var(--text-dim); line-height: 1.45; }
+.vault-link { display: block; color: var(--brand); font-size: 12.5px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-link:hover { text-decoration: underline; }
+.vault-user { display: block; font-size: 12.5px; overflow-wrap: anywhere; }
+.vault-dots { display: block; letter-spacing: 2px; color: var(--text-dim); line-height: 1.2; }
+.vault-shown { display: block; font-size: 12.5px; overflow-wrap: anywhere; color: var(--text); }
+.vault-mini { display: inline-block; margin-left: 8px; font-size: 11.5px; font-weight: 600; color: var(--brand); cursor: pointer; white-space: nowrap; }
+/* Reveal / copy sit on their own line under the value, so the row never reflows when a
+   password is shown and the Edit column is never crowded out at a narrow width. */
+.vault-acts { margin-top: 3px; }
+.vault-acts .vault-mini:first-child { margin-left: 0; }
+.vault-mini:hover { text-decoration: underline; }
+
+.vault-warn { border-color: var(--danger); }
+.vault-warn h3 { color: var(--danger); }
+
+.vault-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
+.drawer textarea { width: 100%; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); padding: 9px 11px; font: inherit; font-size: 13.5px; resize: vertical; }
+.drawer textarea:focus { outline: none; border-color: var(--brand); box-shadow: var(--focus-ring); }
+
+/* Narrow screens: the table collapses to one stacked card per account. The column
+   headers go with it, so each value carries its own label, otherwise two consecutive
+   "not set" lines are unreadable. */
+@media (max-width: 900px) {
+  .vault-table, .vault-table tbody, .vault-table tr, .vault-table td { display: block; width: 100% !important; }
+  .vault-table thead { display: none; }
+  .vault-table tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
+  .vault-table td { border: 0; padding: 3px 0; }
+  .vault-table td[data-l] { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; margin-top: 6px; }
+  .vault-table td[data-l]::before { content: attr(data-l); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--text-dim); }
+  .vault-table td.num { text-align: left; }
+}
