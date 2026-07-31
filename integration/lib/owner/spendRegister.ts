@@ -562,7 +562,13 @@ let adopting = false;
 async function adoptDomainsOnce(): Promise<void> {
   if (adopting) return;
   const rows = store.items.filter((i) => i.domain);
-  const outstanding = rows.length === 0 || rows.some((i) => !i.registrar);
+  /* Outstanding is either a row with no answer yet, or a row still displaying a failure
+     that a later pass disproved. The second case costs no network at all: the refresh
+     finds nothing to look up and just clears the stale text. */
+  const outstanding =
+    rows.length === 0 ||
+    rows.some((i) => !i.registrar) ||
+    rows.some((i) => i.registrar && i.registryError);
   if (!outstanding) return;
   adopting = true;
   try {
@@ -1061,7 +1067,19 @@ export async function refreshDomainFacts(
      always refreshes everything, because a person pressing Refresh means the dates, not
      just the gaps. */
   const rows = store.items.filter((i) => i.domain && (!opts.onlyMissing || !i.registrar));
-  if (!rows.length) return { checked: 0, updated: 0, failed: 0 };
+
+  /* A resume pass deliberately does not re-ask about rows that already answered, which
+     leaves their LAST failure sitting on them: 37 domains carried "registry timed out"
+     under a registrar the retry had since found. An error that a later run disproved is
+     not a warning, it is a lie in red text, so it is cleared here rather than left to
+     wait for someone to press Refresh. */
+  if (opts.onlyMissing) {
+    for (const done of store.items) {
+      if (done.domain && done.registrar && done.registryError) done.registryError = undefined;
+    }
+  }
+
+  if (!rows.length) { persist(); return { checked: 0, updated: 0, failed: 0 }; }
   const facts = await lookupDomains(rows.map((r) => r.domain as string));
   const byDomain = new Map(facts.map((f) => [f.domain, f]));
   let updated = 0, failed = 0;
