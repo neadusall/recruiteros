@@ -689,7 +689,6 @@
       html += receiptMatrix(rcptData);
       html += receiptGallery(rcptData);
       html += receiptSourcing(rcptData);
-      html += receiptUnmatched(rcptData);
       html += burnAlert(b);
       html += '<div class="card" style="margin-top:14px">' +
         '<div class="burn-head"><h3>Recurring cost</h3><div class="burn-filters" id="burnFilters">' +
@@ -999,7 +998,7 @@
    * no receipt is not blank — it is reported as a gap, because an unnoticed gap is how a
    * month goes unaccounted for.
    *
-   *   receiptKpis / receiptAlerts / receiptMatrix / receiptSourcing / receiptUnmatched
+   *   receiptKpis / receiptAlerts / receiptMatrix / receiptSourcing
    *   openViewer       the popup: the invoice full size, ✕ to close, arrows to step
    *   openReceipt      one receipt · openCell one service in one month
    *   openMonthReceipts / openMonthAt   a whole month, in vendor order
@@ -1087,7 +1086,7 @@
       '<button class="btn btn-sm" id="rcHarvest">Pull receipts from the mailbox</button>' +
       '<button class="btn btn-sm" id="rcAttach">Attach an invoice</button>' +
       '</div></div>' +
-      '<p class="note" style="margin-top:2px">Each cell is one month for one service. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate.</p>';
+      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate.</p>';
 
     html += '<div class="otable-wrap rc-wrap"><table class="otable rc-matrix"><thead><tr><th class="rc-svc">Service</th>';
     months.forEach(function (p) {
@@ -1101,13 +1100,17 @@
     });
     html += '<th class="num">Total</th></tr></thead><tbody>';
 
-    (m.rows || []).forEach(function (r) {
-      if (!r.totalCountedUsd && !r.receiptCount && r.monthlyUsd === 0 && r.billing !== "metered") return;
-      html += '<tr><th class="rc-svc"><div class="lr-main">' + esc(r.vendor) + '</div>' +
+    /* EVERY line, whatever it is billed as. A one-time buy, a credit top-up, a domain
+       renewal and a pay-per-use bill are all money out, so they belong in the same grid
+       with a word saying which they are, not in a section of their own. Nothing is hidden
+       for having no charge in the window: a line that is quiet says so. */
+    (m.rows || []).forEach(function (r, ri) {
+      html += '<tr><th class="rc-svc"><div class="lr-main">' + esc(r.vendor) + ' <span class="rc-kind ' + kindClass(r) + '">' + esc(kindLabel(r)) + '</span></div>' +
         '<div class="lr-sub note">' + esc(r.label) + '</div>' +
         (r.missingCount ? '<div class="lr-sub bad-t">' + r.missingCount + ' month' + (r.missingCount > 1 ? "s" : "") + ' unreceipted</div>' : "") +
+        (r.needsAmount ? '<div class="lr-sub bad-t">no price on file</div>' : "") +
         '</th>';
-      (r.cells || []).forEach(function (c) { html += matrixCell(r, c); });
+      (r.cells || []).forEach(function (c) { html += matrixCell(r, c, ri); });
       html += '<td class="num rc-total"><strong>' + usd(r.totalCountedUsd) + '</strong>' +
         (r.totalVerifiedUsd < r.totalCountedUsd ? '<div class="note" style="font-size:11px">' + usd(r.totalVerifiedUsd) + ' proven</div>' : "") +
         '</td></tr>';
@@ -1139,9 +1142,31 @@
      button, because "click the cell" is not a thing an accountant can be told over the
      phone — a button that says View receipt is. Months with nothing on file carry the
      opposite button, so the gap is one click from being filled. */
-  function matrixCell(row, c) {
+  /* What kind of money this line is. Said on the row itself so recurring and one-off can
+     live in one table without anyone having to guess which they are looking at. */
+  function kindLabel(r) {
+    if (r.unregistered) return "Not on the register";
+    if (r.ledgerOnly) return "Pay per use";
+    if (r.lifetime) return "Paid once";
+    if (r.domain) return "Domain";
+    if (r.billing === "monthly") return "Monthly";
+    if (r.billing === "annual") return "Annual";
+    if (r.billing === "one_time") return "One-time";
+    if (r.billing === "credit") return "Credit top-up";
+    if (r.billing === "metered") return "Pay per use";
+    return r.billing || "";
+  }
+  function kindClass(r) {
+    if (r.unregistered) return "k-loose";
+    if (r.lifetime) return "k-once";
+    if (r.billing === "monthly" || r.billing === "annual") return "k-recur";
+    if (r.billing === "metered" || r.ledgerOnly) return "k-use";
+    return "k-once";
+  }
+
+  function matrixCell(row, c, ri) {
     var cls = "rc-cell rc-" + c.status;
-    var key = (row.itemId || "") + "|" + c.period;
+    var key = ri + "|" + c.period;
     var attr = ' data-cell="' + esc(key) + '"';
     var inner;
     if (c.receipts && c.receipts.length) {
@@ -1343,23 +1368,6 @@
       '</div></button>';
   }
 
-  /* Charges with no line item behind them: the spend nobody catalogued. */
-  function receiptUnmatched(d) {
-    if (!d || !d.matrix.unmatched || !d.matrix.unmatched.length) return "";
-    var html = '<div class="card" style="margin-top:14px"><h3>Charges with no line item</h3>' +
-      '<p class="note" style="margin-top:-4px">Real money left the account for these and the spend register has never heard of them.</p>' +
-      '<div class="otable-wrap"><table class="otable"><thead><tr><th>Vendor</th><th class="num">Total</th><th class="num">Receipts</th><th>Months</th><th></th></tr></thead><tbody>';
-    d.matrix.unmatched.forEach(function (u) {
-      html += '<tr><td><div class="lr-main">' + esc(u.vendor) + '</div></td>' +
-        '<td class="num">' + usd(u.totalUsd) + '</td><td class="num">' + u.count + '</td>' +
-        '<td>' + esc(u.periods.join(", ")) + '</td>' +
-        '<td>' + u.receipts.slice(0, 4).map(function (r) {
-          return '<button class="btn btn-sm" data-receipt="' + esc(r.id) + '">' + esc((r.chargedAt || "").slice(0, 10)) + '</button>';
-        }).join(" ") + '</td></tr>';
-    });
-    return html + '</tbody></table></div></div>';
-  }
-
   function wireReceipts() {
     var sel = $("#rcMonths");
     if (sel) sel.addEventListener("change", function () {
@@ -1516,7 +1524,7 @@
   /** A cell of the matrix: one service, one month. */
   function openCell(key) {
     var parts = String(key || "").split("|");
-    var row = ((rcptData && rcptData.matrix.rows) || []).filter(function (r) { return (r.itemId || "") === parts[0]; })[0];
+    var row = ((rcptData && rcptData.matrix.rows) || [])[Number(parts[0])];
     var cell = row && (row.cells || []).filter(function (c) { return c.period === parts[1]; })[0];
     if (!row) return;
     if (cell && cell.receipts && cell.receipts.length) {

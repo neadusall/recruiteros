@@ -81,6 +81,16 @@ export interface MatrixRow {
   billing: string;
   status: string;
   monthlyUsd: number;
+  /** Bought outright: nothing renews, so nothing is ever due again. */
+  lifetime?: boolean;
+  /** On the register with no price yet: the month figures are unknown, not zero. */
+  needsAmount?: boolean;
+  /** Registrable name when this line is a domain. */
+  domain?: string;
+  /** A charge that arrived with no line item in the register expecting it. */
+  unregistered?: boolean;
+  /** Pay-per-use read off the usage ledger, with no register row behind it. */
+  ledgerOnly?: boolean;
   /** How this vendor's receipt is supposed to reach us. */
   channel?: string;
   portal?: string;
@@ -202,8 +212,21 @@ export function buildSpendMatrix(
   const anomalies: Anomaly[] = [];
   const rows: MatrixRow[] = [];
 
+  /* Every `source` tag the usage ledger recorded in this window. A pay-per-use row whose
+     vendor IS one of those but which nobody remembered to link reads $0 every month while
+     the money is plainly going out, so the vendor's own name counts as the link. */
+  const ledgerKeys = new Set<string>();
+  for (const period of months) for (const k of Object.keys(metered[period] || {})) ledgerKeys.add(k.toLowerCase());
+  const ledgerKeyFor = (i: SpendItem): string | undefined => {
+    if (i.link?.ledgerSource) return i.link.ledgerSource;
+    if (i.billing !== "metered") return undefined;
+    const byName = i.vendor.toLowerCase();
+    return ledgerKeys.has(byName) ? byName : undefined;
+  };
+
   for (const item of items) {
     const src = vendorSourceFor(item.vendor);
+    const ledgerKey = ledgerKeyFor(item);
     const mine = byItem.get(item.id) || [];
     const startMonth = (item.at || "").slice(0, 7);
     const emailProven = mine.some((r) => r.source === "email");
@@ -215,7 +238,7 @@ export function buildSpendMatrix(
     for (const period of months) {
       const inMonth = mine.filter((r) => r.period === period);
       const actual = round2(inMonth.reduce((s, r) => s + r.amountUsd, 0));
-      const meteredUsd = item.link?.ledgerSource ? round2(metered[period]?.[item.link.ledgerSource] || 0) : 0;
+      const meteredUsd = ledgerKey ? round2(metered[period]?.[ledgerKey] || 0) : 0;
       const expected = expectedFor(item, period);
 
       let status: CellStatus;
@@ -296,6 +319,7 @@ export function buildSpendMatrix(
     rows.push({
       itemId: item.id, vendor: item.vendor, label: item.label, category: item.category,
       billing: item.billing, status: item.status, monthlyUsd: monthlyEquivalent(item),
+      lifetime: item.lifetime, needsAmount: item.needsAmount, domain: item.domain,
       channel: src?.channel, portal: src?.portal, emailProven, cells,
       totalCountedUsd: round2(cells.reduce((s, c) => s + c.countedUsd, 0)),
       totalVerifiedUsd: round2(cells.reduce((s, c) => s + (c.verified ? c.countedUsd : 0), 0)),
@@ -330,6 +354,85 @@ export function buildSpendMatrix(
     });
   }
 
+  /* ---- everything else that is money out, as its own row ------------------------------
+   *
+   * The month-by-month table is the ledger, not a subscriptions report: a one-time buy, a
+   * credit top-up, a domain renewal and a pay-per-use bill are all spend and all belong in
+   * the same grid, distinguished by a label rather than exiled to a section of their own.
+   * Register lines are already covered above (every billing type, no filter). These two
+   * loops add the spend that has no register line at all:
+   *
+   *   unregistered  a receipt arrived and nothing in the register expected it
+   *   ledgerOnly    pay-per-use the usage ledger recorded against a vendor with no row
+   *
+   * Both were previously counted in the month totals but shown nowhere in the grid, so a
+   * column could exceed the rows above it with no way to see why. */
+  for (const u of unmatched) {
+    const rs = unmatchedMap.get(u.vendor) || [];
+    let running = 0;
+    let prev: number | null = null;
+    const cells: MatrixCell[] = months.map((period) => {
+      const inMonth = rs.filter((r) => r.period === period);
+      const actual = round2(inMonth.reduce((s, r) => s + r.amountUsd, 0));
+      running = round2(running + actual);
+      const delta = prev == null ? null : round2(actual - prev);
+      prev = actual;
+      return {
+        period, status: (actual !== 0 ? "unexpected" : "none") as CellStatus,
+        actualUsd: actual, meteredUsd: 0, expectedUsd: 0, countedUsd: actual,
+        verified: actual !== 0, runningUsd: running, deltaUsd: delta,
+        receipts: inMonth.map(toRef),
+      };
+    });
+    rows.push({
+      vendor: u.vendor, label: "Not on the register", category: "other", billing: "one_time",
+      status: "active", monthlyUsd: 0, unregistered: true, emailProven: rs.some((r) => r.source === "email"),
+      cells,
+      totalCountedUsd: round2(cells.reduce((s, c) => s + c.countedUsd, 0)),
+      totalVerifiedUsd: round2(cells.reduce((s, c) => s + (c.verified ? c.countedUsd : 0), 0)),
+      receiptCount: rs.length, missingCount: 0,
+      lastReceiptAt: rs.map((r) => r.chargedAt).sort().slice(-1)[0],
+    });
+  }
+
+  /* A ledger source is "claimed" when some register row already reports it, either by an
+     explicit link or by carrying the vendor's name; anything left over is real money with
+     nowhere to appear, so it gets a row of its own rather than inflating the total from
+     off-screen. */
+  const claimed = new Set<string>();
+  for (const i of items) {
+    const k = ledgerKeyFor(i);
+    if (k) claimed.add(k.toLowerCase());
+    claimed.add(i.vendor.toLowerCase());
+  }
+  const ledgerSources = new Set<string>();
+  for (const period of months) for (const s of Object.keys(metered[period] || {})) ledgerSources.add(s);
+  for (const source of [...ledgerSources].sort()) {
+    if (claimed.has(source.toLowerCase())) continue;
+    let running = 0;
+    let prev: number | null = null;
+    const cells: MatrixCell[] = months.map((period) => {
+      const used = round2(metered[period]?.[source] || 0);
+      running = round2(running + used);
+      const delta = prev == null ? null : round2(used - prev);
+      prev = used;
+      return {
+        period, status: (used !== 0 ? "metered" : "none") as CellStatus,
+        actualUsd: 0, meteredUsd: used, expectedUsd: 0, countedUsd: used,
+        verified: false, runningUsd: running, deltaUsd: delta, receipts: [],
+      };
+    });
+    const total = round2(cells.reduce((s, c) => s + c.countedUsd, 0));
+    if (total === 0) continue;
+    rows.push({
+      vendor: source, label: "Pay per use, not on the register", category: "other", billing: "metered",
+      status: "active", monthlyUsd: 0, ledgerOnly: true, emailProven: false, cells,
+      totalCountedUsd: total, totalVerifiedUsd: 0, receiptCount: 0, missingCount: 0,
+    });
+  }
+
+  rows.sort((a, b) => b.totalCountedUsd - a.totalCountedUsd || a.vendor.localeCompare(b.vendor));
+
   /* ---- month totals + running total across everything ---- */
   const monthTotals: MonthTotal[] = [];
   let grandRunning = 0;
@@ -337,8 +440,10 @@ export function buildSpendMatrix(
   for (let idx = 0; idx < months.length; idx++) {
     const period = months[idx];
     const cellsAt = rows.map((r) => r.cells[idx]);
-    const counted = round2(cellsAt.reduce((s, c) => s + c.countedUsd, 0) + unmatchedIn(unmatchedMap, period));
-    const verifiedUsd = round2(cellsAt.reduce((s, c) => s + (c.verified ? c.countedUsd : 0), 0) + unmatchedIn(unmatchedMap, period));
+    /* Unregistered charges and ledger-only usage are rows of their own now, so the totals
+       come straight off the grid: what the columns add up to is what the rows show. */
+    const counted = round2(cellsAt.reduce((s, c) => s + c.countedUsd, 0));
+    const verifiedUsd = round2(cellsAt.reduce((s, c) => s + (c.verified ? c.countedUsd : 0), 0));
     const expectedUsd = round2(cellsAt.reduce((s, c) => s + c.expectedUsd, 0));
     const meteredUsd = round2(Object.values(metered[period] || {}).reduce((s, n) => s + n, 0));
     grandRunning = round2(grandRunning + counted);
@@ -443,11 +548,6 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-function unmatchedIn(map: Map<string, Receipt[]>, period: string): number {
-  let sum = 0;
-  for (const rs of map.values()) for (const r of rs) if (r.period === period) sum += r.amountUsd;
-  return round2(sum);
-}
 
 /** What the register says a given month should cost for one line item. */
 function expectedFor(item: SpendItem, period: string): number {

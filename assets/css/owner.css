@@ -432,3 +432,12 @@
   .vault-table td[data-l]::before { content: attr(data-l); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--text-dim); }
   .vault-table td.num { text-align: left; }
 }
+/* what kind of money a row is: recurring, one-off, usage, or off the register entirely */
+.rc-kind {
+  display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 3px; vertical-align: 1px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+}
+.rc-kind.k-recur { background: var(--brand-soft); color: var(--brand); }
+.rc-kind.k-once { background: var(--bg-soft); color: var(--text-muted); }
+.rc-kind.k-use { background: var(--warn-bg); color: var(--owner); }
+.rc-kind.k-loose { background: var(--danger-bg); color: var(--danger); }
