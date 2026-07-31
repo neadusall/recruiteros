@@ -388,7 +388,18 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 16;
+/**
+ * ⚠️ ALWAYS CHECK `origin/main` BEFORE BUMPING THIS.
+ *
+ * Several sessions work this file at once, and this went 15 -> 16 twice on 2026-07-31: a
+ * Telnyx correction and the Sending.ac pricing, each written against 15. Git's three-way
+ * merge sees the SAME change on both sides and resolves it silently, with no conflict to
+ * notice, so the two arrived sharing one number. The store stamps 16 the first time it
+ * boots, and every correction shipped under the second 16 is then skipped FOREVER: the row
+ * quietly keeps its old value and nothing anywhere reports a problem. That is what happened
+ * here, and 17 is the repair.
+ */
+const SEED_VERSION = 17;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
