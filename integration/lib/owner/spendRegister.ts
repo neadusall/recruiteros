@@ -214,14 +214,6 @@ const SEED: SeedItem[] = [
     link: { ledgerSource: "serper", envKeys: ["SERPER_API_KEY"] },
   },
   {
-    vendor: "Reoon", label: "Email verifier", category: "email", billing: "one_time",
-    amountUsd: 0, lifetime: true, at: "2026-06-24", status: "active",
-    purpose: "Mailbox-level verification of curated decision-maker emails. Port 25 is blocked on the app box, so this replaces the SMTP probe.",
-    impact: "Deliverability insurance. Port 25 is blocked on the app box, so this is the only way a guessed decision-maker email gets proven before it touches a warmed inbox. It protects domain reputation, which is the asset the whole cold-email motion rests on.",
-    notes: "Lifetime licence bought outright years ago, before this register existed: no subscription, no monthly fee, and the credits it came with are still running. The purchase price is a sunk cost outside these books, which is why the row carries $0 rather than a guess. It becomes a real spend line the day volume forces a credit top-up: change the billing type to Credit top-up, enter what the pack cost, and the receipt for it will arrive by email on its own.",
-    link: { ledgerSource: "reoon", envKeys: ["REOON_API_KEY"] },
-  },
-  {
     vendor: "Adzuna", label: "Job feed API", category: "search", billing: "monthly",
     amountUsd: 0, at: "2026-06-01", status: "active", verified: true,
     purpose: "Free-tier job feed alongside JSearch.",
@@ -356,11 +348,6 @@ const SEED: SeedItem[] = [
     purpose: "A rung in the email-finding chain alongside Reoon.",
   },
   {
-    vendor: "People Data Labs", label: "Person enrichment", category: "people", billing: "monthly",
-    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
-    purpose: "Person enrichment fallback when the cheaper rungs come back empty.",
-  },
-  {
     vendor: "Telnyx", label: "Lume account (white-label numbers)", category: "messaging", billing: "metered",
     amountUsd: 0, at: "2026-07-01", status: "active",
     purpose: "Lume's own Telnyx account: its five per-recruiter 929 lines and everything its recruiters send.",
@@ -376,7 +363,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 14;
+const SEED_VERSION = 15;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -390,7 +377,10 @@ const SNAP_KEY = "owner_spend_register_v1";
  * past every time. The second batch is the same call on the four accounts whose seed notes
  * were still asking whether anything was billed at all: the owner confirmed (2026-07-31)
  * that Apify, AWS, Cartesia and Cloudflare charge this business nothing, so the question
- * is settled and the rows go rather than sitting there unpriced forever.
+ * is settled and the rows go rather than sitting there unpriced forever. Reoon and People
+ * Data Labs follow on the owner's call the same day, for the same reason: the Reoon licence
+ * was bought outright long before this book existed, so it has no recurring charge to post
+ * here and nothing to receipt, and People Data Labs is not billed to this book either.
  *
  * Guarded the same way a correction is: only a row that came from the seed and carries no
  * owner-entered money is removed, so a figure someone typed can never be deleted by a
@@ -409,17 +399,19 @@ const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
   { vendor: "AWS", label: "S3 and anything else on the account" },
   { vendor: "Cartesia", label: "Voice cloning fallback" },
   { vendor: "Cloudflare", label: "DNS" },
+  { vendor: "Reoon", label: "Email verifier" },
+  { vendor: "People Data Labs", label: "Person enrichment" },
 ];
 
 /**
  * Facts learned about a row AFTER it was already seeded into the live store.
  *
  * `applySeed` only ever ADDS missing rows, deliberately: a redeploy must never overwrite
- * a figure the owner typed. But a seeded row can also be seeded WRONG. Reoon went in as
- * an active credit line with a price still to find, when it is in fact a lifetime licence
- * bought outright years ago with no recurring fee at all. That is a correction to a guess,
- * not a change to anything the owner entered, so it is applied once, on the version bump,
- * and ONLY while the row is still untouched (`seeded`, no owner-entered amount).
+ * a figure the owner typed. But a seeded row can also be seeded WRONG. The Mailcow box went
+ * in as annual, off the vendor's yearly pricing, when the owner is in fact billed monthly.
+ * That is a correction to a guess, not a change to anything the owner entered, so it is
+ * applied once, on the version bump, and ONLY while the row is still untouched (`seeded`,
+ * no owner-entered amount).
  *
  * `force` lifts the untouched guard, for the one case it cannot handle: a row an EARLIER
  * correction marked verified, which is this list's own mark, not the owner's. Pair it with
@@ -430,13 +422,6 @@ const SEED_CORRECTIONS: Array<{
   vendor: string; label: string; patch: Partial<SpendItem>;
   force?: boolean; when?: (i: SpendItem) => boolean;
 }> = [
-  {
-    vendor: "Reoon", label: "Email verifier",
-    patch: {
-      billing: "one_time", lifetime: true, needsAmount: false, amountUsd: 0,
-      notes: SEED.find((s) => s.vendor === "Reoon")?.notes,
-    },
-  },
   {
     // Seeded as annual off the RackNerd Black Friday-style yearly pricing; the owner
     // confirmed (2026-07-31) the Mailcow box is billed MONTHLY.

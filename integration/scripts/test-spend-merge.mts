@@ -10,10 +10,10 @@
  *   - the merged row is only "verified" if every priced row folded in was;
  *   - the spend is dated from the FIRST box bought, not the last;
  *   - with no merged row present (seed never applied) nothing is deleted.
- * Also pins the retirement rule (owner, 2026-07-31): eight vendors come OFF the register
- * entirely - two we do not use, three we use but are not billed for here, and three that
- * cost this book nothing (TidyCal, GitHub, GoDaddy) - and a row is only dropped while it
- * still carries no owner-entered money.
+ * Also pins the retirement rule (owner, 2026-07-31): fourteen vendors come OFF the register
+ * entirely - the ones we do not use, the ones we use but are not billed for here, and the
+ * ones that cost this book nothing at all (down to the Reoon licence bought outright years
+ * ago) - and a row is only dropped while it still carries no owner-entered money.
  * The suite calls mergeSeedRows with its real shipped merge list, so a change to which
  * rows are folded shows up here.
  */
@@ -142,6 +142,16 @@ function hetzner(items: SpendItem[]): SpendItem[] {
     row("Telnyx", "SMS and voice"),
   ]);
   check("retired seed rows are dropped", out.map((i) => i.vendor), ["Telnyx"]);
+}
+{
+  // The lifetime Reoon licence and People Data Labs, retired the same day: neither can
+  // ever post a charge to this book, so a $0 line for either is noise.
+  const out = retireSeedRows([
+    row("Reoon", "Email verifier", { billing: "one_time", lifetime: true, needsAmount: false }),
+    row("People Data Labs", "Person enrichment"),
+    row("Icypeas", "Email finding and verification"),
+  ]);
+  check("lifetime and unbilled rows are dropped", out.map((i) => i.vendor), ["Icypeas"]);
 }
 {
   // Other registrars share GoDaddy's label, so the retirement must match on vendor too.
