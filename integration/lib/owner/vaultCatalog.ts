@@ -352,25 +352,9 @@ export const VAULT_CATALOG: CatalogEntry[] = [
     used_for: "The AI Vetting agent voice and the personalised-video voice (the Lukas clone)",
     envKey: "ELEVENLABS_API_KEY",
   },
-  {
-    id: "hume",
-    service: "Hume AI",
-    vendor: "Hume",
-    category: "Telephony & voice",
-    url: "https://app.hume.ai/",
-    used_for: "Alternate voice engine for the vetting agent",
-    notes: "platform.hume.ai redirects to app.hume.ai.",
-    envKey: "HUME_API_KEY",
-  },
-  {
-    id: "cartesia",
-    service: "Cartesia",
-    vendor: "Cartesia",
-    category: "Telephony & voice",
-    url: "https://play.cartesia.ai/",
-    used_for: "Voice cloning fallback for the vetting and video stack",
-    envKey: "CARTESIA_API_KEY",
-  },
+  /* Hume and Cartesia were catalogued as fallback voice engines and never used: the
+     vetting agent and the personalised videos both speak through ElevenLabs. A login
+     nobody holds is noise on a page whose whole job is the accounts that matter. */
 
   /* ---------------- AI ---------------- */
   {
