@@ -1209,25 +1209,61 @@
     }
 
     var rows = d.sourcing || [];
+
+    /* The browser sessions that fetch the invoices no vendor ever emails. Reported at the
+       card level as well as per vendor, because a sweep that has stopped running makes
+       every row below it stale at once, and no single row can say that. */
+    var pl = d.pullers || {};
+    var unset = rows.filter(function (r) { return r.state === "portal_unset"; });
+    if (!pl.lastReportAt) {
+      html += '<div class="burn-alert" style="margin:10px 0"><div class="ba-title">' +
+        (unset.length ? unset.length + ' vendor' + (unset.length === 1 ? '' : 's') + ' have no receipt collector set up' : 'No portal puller has ever reported in') + '</div>' +
+        '<p class="note">Some vendors email nothing and expose no billing API, so the only way to hold their receipt is a browser session that signs in once and takes the invoice off their own billing page on the day they charge. None is running. Set each one up with <span class="mono">node receipts.mjs login &lt;vendor&gt;</span> in the spend-ledger tool, then schedule <span class="mono">node receipts.mjs sweep</span> daily so it also re-checks for a few days after each charge, since vendors publish late.</p></div>';
+    } else {
+      var pAge = Math.floor((Date.now() - Date.parse(pl.lastReportAt)) / 86400000);
+      if (pAge > 3) {
+        html += '<div class="burn-alert" style="margin:10px 0"><div class="ba-title">The portal pullers stopped reporting ' + pAge + ' days ago</div>' +
+          '<p class="note">Every invoice those sessions fetch has gone uncollected since. Check the scheduled run of <span class="mono">node receipts.mjs sweep</span>.</p></div>';
+      } else {
+        html += '<p class="note" style="margin-top:2px">' + pl.count + ' browser session' + (pl.count === 1 ? '' : 's') +
+          ' fetching invoices the vendors never email. Last run ' + esc(fmtDate(pl.lastReportAt)) +
+          (unset.length ? '. <b>' + unset.length + ' vendor' + (unset.length === 1 ? ' still needs' : 's still need') + ' one set up.</b>' : '.') + '</p>';
+      }
+    }
+
     html += '<div class="otable-wrap"><table class="otable"><thead><tr>' +
       '<th>Vendor</th><th>How the receipt arrives</th><th class="num">On file</th><th>Last</th><th>What is needed</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r) {
       var pill = r.state === "api" ? '<span class="pill active">Pulled from the API</span>'
+        : r.state === "portal" ? '<span class="pill active">Fetched from the portal</span>'
         : r.state === "auto" ? '<span class="pill active">Automatic</span>'
         : r.state === "manual" ? '<span class="pill needs">By hand</span>'
+        : r.state === "portal_unset" ? '<span class="pill dead">No collector</span>'
         : r.state === "unproven" ? '<span class="pill dead">Not arriving</span>'
         : r.state === "lifetime" ? '<span class="pill active">Paid once</span>'
         : '<span class="pill unknown">Not billed</span>';
+      var pu = r.puller;
       html += '<tr><td><div class="lr-main">' + esc(r.vendor) + '</div>' + pill + '</td>' +
         '<td><div class="lr-sub">' + esc(r.state === "lifetime" ? "Nothing recurring to receipt" : channelLabel(r.channel)) + '</div>' +
         (r.from && r.from.length ? '<div class="note" style="font-size:11px">from ' + esc(r.from.slice(0, 3).join(", ")) + '</div>' : "") +
-        (r.api ? '<div class="note" style="font-size:11px">' + esc(r.api) + '</div>' : "") + '</td>' +
-        '<td class="num">' + (r.emailCount + r.manualCount + (r.apiCount || 0)) +
+        (r.api ? '<div class="note" style="font-size:11px">' + esc(r.api) + '</div>' : "") +
+        (pu ? '<div class="note" style="font-size:11px">browser session · ' +
+          (pu.lastRunAt ? 'last checked ' + (pu.ranDaysAgo === 0 ? 'today' : pu.ranDaysAgo === 1 ? 'yesterday' : pu.ranDaysAgo + ' days ago') : 'never run') +
+          '</div>' : "") + '</td>' +
+        '<td class="num">' + (r.emailCount + r.manualCount + (r.apiCount || 0) + (r.portalCount || 0)) +
         (r.manualCount ? ' <span class="note">(' + r.manualCount + ' by hand)</span>' : "") +
-        (r.apiCount ? ' <span class="note">(' + r.apiCount + ' via API)</span>' : "") + '</td>' +
+        (r.apiCount ? ' <span class="note">(' + r.apiCount + ' via API)</span>' : "") +
+        (r.portalCount ? ' <span class="note">(' + r.portalCount + ' from the portal)</span>' : "") + '</td>' +
         '<td>' + esc((r.lastAt || "").slice(0, 10) || "-") + '</td>' +
         '<td><div class="lr-sub">' + esc(r.advice) + '</div>' +
+        // Charges the vendor billed but has published no document for yet.
+        (pu && pu.missing && pu.missing.length
+          ? '<div class="note" style="font-size:11px">' + pu.missing.map(function (m) {
+              return esc((m.date || "undated") + (m.amount != null ? " · " + usd(m.amount) : "") + " · " + m.reason);
+            }).join("<br />") + '</div>'
+          : "") +
+        (pu && pu.error ? '<div class="note bad-t" style="font-size:11px">' + esc(pu.error) + '</div>' : "") +
         (r.portal ? '<a class="note" href="' + esc(r.portal) + '" target="_blank" rel="noopener">open the billing page</a>' : "") +
         (r.setup ? '<div class="note" style="font-size:11px">' + esc(r.setup) + '</div>' : "") + '</td></tr>';
     });
@@ -1237,7 +1273,7 @@
   function channelLabel(c) {
     return c === "email_vendor" ? "The vendor emails a receipt"
       : c === "email_processor" ? "A payment processor emails it (Stripe / Paddle / PayPal)"
-      : c === "portal_only" ? "No email at all: download it from the portal"
+      : c === "portal_only" ? "No email at all: a browser session takes it off the portal"
       : c === "api" ? "Pulled from the vendor's billing API every night" : "Email";
   }
 

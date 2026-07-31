@@ -42,7 +42,7 @@ export type ReceiptKind = "charge" | "refund" | "credit_note";
 /** Where a figure came from. `api` is the vendor's own billing API: authoritative on the
  *  number, but there is no invoice image behind it, and the console says so rather than
  *  drawing a receipt that was never issued. */
-export type ReceiptSource = "email" | "manual" | "api";
+export type ReceiptSource = "email" | "manual" | "api" | "portal";
 
 export interface Receipt {
   id: string;
@@ -117,10 +117,14 @@ interface ReceiptStore {
   receipts: Receipt[];
   sweeps: SweepReport[];
   lastSweepAt?: string;
+  /** Portal pullers, keyed by lowercased vendor. See PullerState. */
+  pullers?: Record<string, PullerState>;
+  /** When a puller sweep last reported in at all. */
+  pullerReportAt?: string;
 }
 
 const SNAP_KEY = "owner_spend_receipts_v1";
-const store: ReceiptStore = { receipts: [], sweeps: [] };
+const store: ReceiptStore = { receipts: [], sweeps: [], pullers: {} };
 const persist = debouncedSaver(SNAP_KEY, () => store);
 
 let hydrated: Promise<void> | null = null;
@@ -131,6 +135,8 @@ export function ensureReceiptsReady(): Promise<void> {
         if (s && Array.isArray(s.receipts)) store.receipts = s.receipts;
         if (s && Array.isArray(s.sweeps)) store.sweeps = s.sweeps;
         if (s?.lastSweepAt) store.lastSweepAt = s.lastSweepAt;
+        if (s?.pullers) store.pullers = s.pullers;
+        if (s?.pullerReportAt) store.pullerReportAt = s.pullerReportAt;
       })
       .catch(() => {});
   }
@@ -890,6 +896,153 @@ export async function recordApiReceipt(input: {
   store.receipts.push(r);
   persist();
   return { receipt: r, created: true };
+}
+
+/**
+ * File the document a portal puller downloaded from a vendor's billing page.
+ *
+ * The third channel, after email and the handful of real billing APIs: a browser
+ * session, signed in once by the owner, that opens the vendor's own billing page on
+ * the day it charges and takes whatever invoice it offers. That covers the vendors
+ * that email nothing and have no API, which is most of them.
+ *
+ * Keyed on vendor + period + invoice number so re-running a puller corrects the month
+ * in place rather than stacking duplicates. The bytes are the vendor's own file, so
+ * this goes through the same render path as a hand-attached receipt and the console
+ * shows the real document. A puller that came back empty must not call this at all:
+ * a row here means a document exists.
+ */
+export async function recordPortalReceipt(input: {
+  vendor: string; itemId?: string; period: string; amountUsd: number;
+  reference?: string; description?: string; chargedAt?: string; notes?: string;
+  currency?: string; nativeAmount?: number;
+  file: { bytes: Buffer; mime: string; name: string };
+}): Promise<{ receipt: Receipt; created: boolean }> {
+  await ensureReceiptsReady();
+
+  const existing = store.receipts.find(
+    (r) => r.source === "portal" && r.vendor === input.vendor && r.period === input.period &&
+      (input.reference ? r.invoiceNumber === input.reference : true),
+  );
+  const id = existing?.id || rid("rcpt");
+
+  const isPdf = input.file.mime.includes("pdf") || /\.pdf$/i.test(input.file.name);
+  const isImage = input.file.mime.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(input.file.name);
+  const isHtml = input.file.mime.includes("html") || /\.html?$/i.test(input.file.name);
+  const shot = await renderShot(id, isPdf
+    ? { pdf: input.file.bytes }
+    : isImage
+      ? { image: { bytes: input.file.bytes, mime: input.file.mime } }
+      : isHtml
+        ? { html: input.file.bytes.toString("utf8") }
+        : { text: input.file.bytes.toString("utf8").slice(0, 20_000) });
+  await saveArtifact(id, `src.${extFromMime(input.file.mime, input.file.name)}`, input.file.bytes).catch(() => {});
+
+  const chargedAt = input.chargedAt || `${input.period}-01`;
+  const amountUsd = round2(input.amountUsd);
+
+  if (existing) {
+    existing.amountUsd = amountUsd;
+    existing.chargedAt = chargedAt;
+    existing.description = input.description ?? existing.description;
+    existing.invoiceNumber = input.reference ?? existing.invoiceNumber;
+    existing.currency = input.currency || existing.currency;
+    existing.nativeAmount = input.nativeAmount ?? existing.nativeAmount;
+    existing.fileName = input.file.name;
+    existing.fileMime = input.file.mime;
+    existing.fileBytes = input.file.bytes.length;
+    existing.hasShot = shot.ok;
+    existing.shotError = shot.error;
+    existing.notes = input.notes ?? existing.notes;
+    existing.updatedAt = nowIso();
+    persist();
+    return { receipt: existing, created: false };
+  }
+
+  const r: Receipt = {
+    id, period: input.period, vendor: input.vendor, itemId: input.itemId,
+    description: input.description, amountUsd, currency: input.currency || "USD",
+    nativeAmount: input.nativeAmount, invoiceNumber: input.reference,
+    chargedAt, kind: input.amountUsd < 0 ? "refund" : "charge", source: "portal",
+    fileName: input.file.name, fileMime: input.file.mime, fileBytes: input.file.bytes.length,
+    hasShot: shot.ok, shotError: shot.error, confidence: 1,
+    matchedBy: "downloaded from the vendor's billing page", reviewed: true,
+    notes: input.notes, createdAt: nowIso(), updatedAt: nowIso(),
+  };
+  store.receipts.push(r);
+  persist();
+  return { receipt: r, created: true };
+}
+
+/* ====================== the pullers themselves ====================== */
+
+/**
+ * What each portal puller last did. This is the half the console cannot infer from the
+ * receipts alone: a vendor with no receipts on file looks identical whether its puller
+ * ran and found nothing or was never set up at all. The distinction is the whole point,
+ * so the pullers report it explicitly and silence is read as "not set up".
+ */
+export interface PullerState {
+  /** Matches the vendor name in the spend register. */
+  vendor: string;
+  /** True when something can fetch this vendor's receipt with nobody present. */
+  ready: boolean;
+  /** api = a real invoice API; portal = a signed-in browser session. */
+  route: "api" | "api + portal" | "portal";
+  state: "setup-needed" | "error" | "missing" | "never-run" | "waiting" | "no-charges" | "ok";
+  lastRunAt?: string;
+  /** Charges seen in the period checked, and how many had a document. */
+  charges?: number;
+  receipted?: number;
+  /** Charges the vendor billed but published no document for. */
+  missing?: Array<{ date?: string; amount?: number; reason: string }>;
+  error?: string;
+  /** What the owner has to do once, if anything. */
+  action?: string;
+  /** Machine this puller runs on, so a dead sweep can be traced to a box. */
+  host?: string;
+  updatedAt: string;
+}
+
+/** A sweep older than this has stopped running, whatever it last reported. */
+export const PULLER_STALE_DAYS = 3;
+
+export function pullerStates(): PullerState[] {
+  return Object.values(store.pullers || {}).sort((a, b) => a.vendor.localeCompare(b.vendor));
+}
+
+export function pullerStateFor(vendor: string): PullerState | undefined {
+  const key = vendor.toLowerCase();
+  return Object.values(store.pullers || {}).find((p) => p.vendor.toLowerCase() === key);
+}
+
+export function lastPullerReportAt(): string | undefined {
+  return store.pullerReportAt;
+}
+
+/** Record what a sweep just did. Replaces each named vendor's line, leaves the rest. */
+export function recordPullerStates(input: { host?: string; pullers: Array<Partial<PullerState> & { vendor: string }> }): PullerState[] {
+  if (!store.pullers) store.pullers = {};
+  for (const p of input.pullers) {
+    if (!p.vendor) continue;
+    store.pullers[p.vendor.toLowerCase()] = {
+      vendor: p.vendor,
+      ready: Boolean(p.ready),
+      route: p.route || "portal",
+      state: p.state || "never-run",
+      lastRunAt: p.lastRunAt,
+      charges: p.charges,
+      receipted: p.receipted,
+      missing: Array.isArray(p.missing) ? p.missing.slice(0, 25) : [],
+      error: p.error?.slice(0, 300),
+      action: p.action?.slice(0, 400),
+      host: p.host || input.host,
+      updatedAt: nowIso(),
+    };
+  }
+  store.pullerReportAt = nowIso();
+  persist();
+  return pullerStates();
 }
 
 export async function listReceipts(): Promise<Receipt[]> {

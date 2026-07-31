@@ -19,7 +19,8 @@
 
 import type { SpendItem } from "./spendRegister";
 import { monthlyEquivalent } from "./spendRegister";
-import type { Receipt } from "./receipts";
+import type { Receipt, PullerState } from "./receipts";
+import { PULLER_STALE_DAYS } from "./receipts";
 import { vendorSourceFor, VENDOR_SOURCES } from "./receiptSources";
 import { meteredByMonth } from "../billing/ledger";
 
@@ -583,19 +584,41 @@ export interface SourcingRow {
   manualCount: number;
   /** Figures pulled straight from the vendor's own billing API. */
   apiCount: number;
+  /** Documents a signed-in browser session took off the vendor's billing page. */
+  portalCount: number;
   lastAt?: string;
   /** What the owner still has to do, if anything. */
-  state: "api" | "auto" | "manual" | "unproven" | "lifetime" | "not_billed";
+  state: "api" | "portal" | "auto" | "manual" | "portal_unset" | "unproven" | "lifetime" | "not_billed";
   advice: string;
+  /** The puller's own last word, when one has been set up for this vendor. */
+  puller?: {
+    ready: boolean;
+    route: string;
+    state: string;
+    lastRunAt?: string;
+    /** Days since it last ran, or null when it never has. */
+    ranDaysAgo: number | null;
+    /** True when the puller has stopped reporting, whatever it last said. */
+    stalled: boolean;
+    charges?: number;
+    receipted?: number;
+    missing?: Array<{ date?: string; amount?: number; reason: string }>;
+    error?: string;
+    action?: string;
+    /** Machine the puller runs on, so a dead sweep can be traced to a box. */
+    host?: string;
+  };
 }
 
 /**
  * The panel that keeps the report honest going forward: for every vendor in the register,
  * whether receipts are arriving on their own, and if not, exactly what to do about it.
  */
-export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): SourcingRow[] {
+export function sourcingStatus(items: SpendItem[], receipts: Receipt[], pullers: PullerState[] = []): SourcingRow[] {
   const vendors = [...new Set(items.map((i) => i.vendor))];
   for (const r of receipts) if (!vendors.includes(r.vendor)) vendors.push(r.vendor);
+
+  const pullerByVendor = new Map(pullers.map((p) => [p.vendor.toLowerCase(), p]));
 
   return vendors.map((vendor) => {
     const src = vendorSourceFor(vendor) || VENDOR_SOURCES.find((s) => vendor.toLowerCase().includes(s.vendor.toLowerCase()));
@@ -603,6 +626,7 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
     const emailCount = mine.filter((r) => r.source === "email").length;
     const manualCount = mine.filter((r) => r.source === "manual").length;
     const apiCount = mine.filter((r) => r.source === "api").length;
+    const portalCount = mine.filter((r) => r.source === "portal").length;
     const own = items.filter((i) => i.vendor === vendor);
     const billed = own.some((i) => i.status === "active" && (i.amountUsd > 0 || i.billing === "metered" || i.needsAmount));
     /* Bought outright: every live row for this vendor is a paid-once licence, so there is
@@ -610,6 +634,15 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
        ever arrived" is only a problem when something is actually being charged. */
     const live = own.filter((i) => i.status === "active");
     const lifetime = live.length > 0 && live.every((i) => i.lifetime);
+
+    const pull = pullerRow(pullerByVendor.get(vendor.toLowerCase()));
+    /* A browser session is the answer when the vendor emails nothing at all, so email
+       harvesting can never work for it, or when one has already been set up. */
+    const pullerIsTheRoute = src?.channel === "portal_only" || Boolean(pull);
+    const pullerWorking = Boolean(
+      pull && pull.ready && !pull.stalled && pull.state !== "setup-needed" && pull.state !== "error",
+    );
+    const needsPuller = billed && pullerIsTheRoute && !pullerWorking;
 
     let state: SourcingRow["state"];
     let advice: string;
@@ -623,15 +656,30 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
     } else if (apiCount > 0) {
       state = "api";
       advice = `Pulled straight from the vendor's billing API every night (${apiCount} month${apiCount > 1 ? "s" : ""} on file)${emailCount ? `, plus ${emailCount} emailed receipt${emailCount > 1 ? "s" : ""}` : ""}. This one cannot go unreported.`;
+    } else if (portalCount > 0 && !pull?.stalled) {
+      state = "portal";
+      advice = `A signed-in browser session takes the invoice off ${src?.portal || "the vendor's billing page"} on the day it charges (${portalCount} on file)` +
+        `${emailCount ? `, plus ${emailCount} emailed receipt${emailCount > 1 ? "s" : ""}` : ""}.` +
+        (pull?.missing?.length ? ` ${pull.missing.length} charge${pull.missing.length > 1 ? "s are" : " is"} still waiting on the vendor to publish a document.` : "");
+    } else if (!billed) {
+      state = "not_billed";
+      advice = "Nothing is billed here, so no receipt is expected.";
+    } else if (needsPuller) {
+      /* Charged money, no email channel that works, and no browser session collecting it.
+         This is the hole: nothing is fetching this vendor's receipt, and saying so is the
+         only thing that gets it fixed. */
+      state = "portal_unset";
+      advice = !pull
+        ? `Nothing is collecting this vendor's receipt. It emails none and has no billing API, so it needs a browser session signed in once: run "node receipts.mjs login ${pullerSlug(vendor)}" in the spend-ledger tool, then let the daily sweep take the invoice off ${src?.portal || "their billing page"} on the day it charges.`
+        : pull.stalled
+          ? `The puller for this vendor has not reported in ${pull.ranDaysAgo ?? "several"} days, so nothing has been collected since. Check the scheduled sweep${pull.host ? ` on ${pull.host}` : ""}.`
+          : pull.action || `The puller for this vendor is set up but is not collecting: ${pull.error || "it has not run yet"}.`;
     } else if (emailCount > 0) {
       state = "auto";
       advice = `Receipts arrive by email and are captured automatically (${emailCount} on file).`;
     } else if (manualCount > 0) {
       state = "manual";
       advice = `Only hand-attached receipts so far. Add the billing mailbox to this vendor's account so it reports itself.`;
-    } else if (!billed) {
-      state = "not_billed";
-      advice = "Nothing is billed here, so no receipt is expected.";
     } else {
       state = "unproven";
       advice = src?.channel === "portal_only"
@@ -646,13 +694,46 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
       portal: src?.portal,
       api: src?.api,
       setup: src?.setup,
-      emailCount, manualCount, apiCount,
+      emailCount, manualCount, apiCount, portalCount,
       lastAt: mine.map((r) => r.chargedAt).sort().slice(-1)[0],
       state, advice,
+      puller: pull,
     };
   }).sort((a, b) => rank(a.state) - rank(b.state) || a.vendor.localeCompare(b.vendor));
 }
+
+/** The id the spend-ledger tool knows this vendor by, for the commands shown to the owner. */
+function pullerSlug(vendor: string): string {
+  return vendor.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * Fold a puller's raw report into what the console needs, including the one judgement
+ * the puller cannot make about itself: whether it has stopped reporting. A puller that
+ * last said "ok" a fortnight ago is not ok, it is dead, and the row has to say so.
+ */
+function pullerRow(p?: PullerState): SourcingRow["puller"] {
+  if (!p) return undefined;
+  const ms = p.lastRunAt ? Date.now() - Date.parse(p.lastRunAt) : NaN;
+  const ranDaysAgo = isFinite(ms) ? Math.floor(ms / 86400000) : null;
+  return {
+    ready: p.ready,
+    route: p.route,
+    state: p.state,
+    lastRunAt: p.lastRunAt,
+    ranDaysAgo,
+    stalled: ranDaysAgo != null && ranDaysAgo > PULLER_STALE_DAYS,
+    charges: p.charges,
+    receipted: p.receipted,
+    missing: p.missing,
+    error: p.error,
+    action: p.action,
+    host: p.host,
+  };
+}
+
 /** Sort order = how much the owner still has to do about it. Settled rows sink. */
 function rank(s: SourcingRow["state"]): number {
-  return s === "unproven" ? 0 : s === "manual" ? 1 : s === "auto" ? 2 : s === "api" ? 3 : s === "lifetime" ? 4 : 5;
+  return s === "portal_unset" ? 0 : s === "unproven" ? 1 : s === "manual" ? 2
+    : s === "auto" ? 3 : s === "portal" ? 4 : s === "api" ? 5 : s === "lifetime" ? 6 : 7;
 }

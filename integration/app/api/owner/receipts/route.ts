@@ -20,6 +20,7 @@ import { listSpendItems } from "../../../../lib/owner/spendRegister";
 import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
+  pullerStates, lastPullerReportAt,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus } from "../../../../lib/owner/spendMatrix";
@@ -37,9 +38,15 @@ export async function GET(req: Request) {
   const boxes = billingMailboxes();
   const matrix = buildSpendMatrix(items, receipts, { months, inboxConfigured: boxes.length > 0 });
 
+  const pullers = pullerStates();
+
   return ok({
     matrix,
-    sourcing: sourcingStatus(items, receipts),
+    sourcing: sourcingStatus(items, receipts, pullers),
+    /* The browser sessions that fetch invoices the vendors never email. Reported
+       separately from the per-vendor rows so the console can say plainly when the
+       sweep itself has stopped running, which no single vendor row can show. */
+    pullers: { lastReportAt: lastPullerReportAt(), count: pullers.length, states: pullers },
     /* EVERY receipt, newest first: the console's receipt gallery is a complete record of
        what has been paid, not a recent-activity feed. Metadata only, so this stays small
        however many there are; the images are fetched per receipt. */
