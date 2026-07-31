@@ -328,18 +328,6 @@ const SEED: SeedItem[] = [
     notes: "Free tier covers a lot of this; confirm whether a Pro seat is being billed.",
   },
   {
-    vendor: "AWS", label: "S3 and anything else on the account", category: "infra", billing: "metered",
-    amountUsd: 0, at: "2026-07-01", status: "active", needsAmount: true,
-    purpose: "Object storage for the video fleet, if that bucket is billed by AWS rather than Hetzner.",
-    notes: "Settle which provider actually holds the bucket: this row and the Object storage row must not both be counted for the same bytes.",
-  },
-  {
-    vendor: "Cloudflare", label: "DNS", category: "domain", billing: "monthly",
-    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
-    purpose: "DNS for the tal fleet, talentrecru.com and the sending domains.",
-    notes: "DNS itself is free; anything billed here would be a paid add-on. Confirm and set it to zero if nothing is.",
-  },
-  {
     vendor: "Dynadot", label: "Domain registrations", category: "domain", billing: "one_time",
     amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
     purpose: "Registrar for the tal-brand fleet, talentrecru.com and the lume batch.",
@@ -362,11 +350,6 @@ const SEED: SeedItem[] = [
     impact: "The people side of sourcing. Without the seat, Sales Navigator URLs stop resolving and JD Sourcing falls back to the free search paths.",
   },
   {
-    vendor: "Apify", label: "Direct-dial phone actor", category: "people", billing: "monthly",
-    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
-    purpose: "The actor behind direct-dial phone discovery in the enrichment chain.",
-  },
-  {
     vendor: "Icypeas", label: "Email finding and verification", category: "people", billing: "monthly",
     amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
     purpose: "A rung in the email-finding chain alongside Reoon.",
@@ -375,12 +358,6 @@ const SEED: SeedItem[] = [
     vendor: "People Data Labs", label: "Person enrichment", category: "people", billing: "monthly",
     amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
     purpose: "Person enrichment fallback when the cheaper rungs come back empty.",
-  },
-  {
-    vendor: "Cartesia", label: "Voice cloning fallback", category: "ai", billing: "monthly",
-    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
-    purpose: "Backup voice engine for the vetting agent and the video stack.",
-    notes: "ElevenLabs carries this today, so confirm whether Cartesia is still subscribed.",
   },
   {
     vendor: "Telnyx", label: "Lume account (white-label numbers)", category: "messaging", billing: "metered",
@@ -398,7 +375,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 13;
+const SEED_VERSION = 14;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -409,9 +386,14 @@ const SNAP_KEY = "owner_spend_register_v1";
  * Hume are not used at all; KoldInfo, Laxis and Loxo are used but are not billed to this
  * book; TidyCal costs nothing ongoing; and GitHub and GoDaddy carry no charge to this book
  * either, so a $0 "no price on file" line for any of them is noise the owner has to look
- * past every time. Guarded the same way a correction is: only a row that came from the
- * seed and carries no owner-entered money is removed, so a figure someone typed can never
- * be deleted by a redeploy.
+ * past every time. The second batch is the same call on the four accounts whose seed notes
+ * were still asking whether anything was billed at all: the owner confirmed (2026-07-31)
+ * that Apify, AWS, Cartesia and Cloudflare charge this business nothing, so the question
+ * is settled and the rows go rather than sitting there unpriced forever.
+ *
+ * Guarded the same way a correction is: only a row that came from the seed and carries no
+ * owner-entered money is removed, so a figure someone typed can never be deleted by a
+ * redeploy. If any of these ever starts billing, add it back to SEED with the real price.
  */
 const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
   { vendor: "Instantly", label: "Outreach sending (alternate provider)" },
@@ -422,6 +404,10 @@ const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
   { vendor: "TidyCal", label: "Booking links" },
   { vendor: "GitHub", label: "Repositories" },
   { vendor: "GoDaddy", label: "Domain registrations" },
+  { vendor: "Apify", label: "Direct-dial phone actor" },
+  { vendor: "AWS", label: "S3 and anything else on the account" },
+  { vendor: "Cartesia", label: "Voice cloning fallback" },
+  { vendor: "Cloudflare", label: "DNS" },
 ];
 
 /**
