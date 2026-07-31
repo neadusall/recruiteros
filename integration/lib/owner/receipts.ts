@@ -30,7 +30,7 @@ import { mkdir, writeFile, readFile, unlink, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
-import { listSpendItems, type SpendItem } from "./spendRegister";
+import { listSpendItems, setLearnedPrice, type SpendItem } from "./spendRegister";
 import {
   VENDOR_SOURCES, PROCESSOR_DOMAINS, GENERIC_SUBJECT_HINTS, NON_CHARGE_HINTS,
   vendorSourceFor, type VendorSource,
@@ -1253,6 +1253,9 @@ export async function recordPortalReceipt(input: {
     existing.notes = input.notes ?? existing.notes;
     existing.updatedAt = nowIso();
     persist();
+    /* A receipt that answers what its row was asking answers it now, not at the next
+       nightly tick: the console is usually being read the moment a pull finishes. */
+    await learnPriceFor(existing.itemId);
     return { receipt: existing, created: false };
   }
 
@@ -1269,6 +1272,7 @@ export async function recordPortalReceipt(input: {
   };
   store.receipts.push(r);
   persist();
+  await learnPriceFor(r.itemId);
   return { receipt: r, created: true };
 }
 
@@ -1393,9 +1397,73 @@ export interface VaultRepair {
   unlinked: number;
   /** Copies of a charge that was already on file, removed. */
   deduped: number;
+  /** Rows that stopped asking for a price because their own receipts answered it. */
+  priced: Array<{ itemId: string; label: string; amountUsd: number; periods: string[] }>;
   /** What moved, so the change is readable rather than something that just happened. */
   links: Array<{ id: string; vendor: string; description?: string; amountUsd: number; period: string; label: string; why: string }>;
   removed: Array<{ id: string; vendor: string; amountUsd: number; chargedAt: string; keptId: string; reason: string }>;
+}
+
+/**
+ * The recurring price a row's own receipts prove, or null.
+ *
+ * Two receipts for the same figure in two DIFFERENT periods is the test. One charge only
+ * proves that money moved once, and taking it as the price would enshrine a first-month
+ * proration or a one-off setup fee as the standing rate. Two identical ones a period apart
+ * is a rate, which is exactly what the register row is missing.
+ *
+ * Where a plan's price has changed, the most recently charged figure wins: that is the one
+ * still being billed, and the older rate is history.
+ */
+function provenPrice(itemId: string): { amountUsd: number; periods: string[] } | null {
+  const periodsByAmount = new Map<number, Set<string>>();
+  for (const r of store.receipts) {
+    if (r.itemId !== itemId || r.kind === "refund" || !(r.amountUsd > 0)) continue;
+    const key = round2(r.amountUsd);
+    const seen = periodsByAmount.get(key) || new Set<string>();
+    seen.add(r.period);
+    periodsByAmount.set(key, seen);
+  }
+  const proven = [...periodsByAmount.entries()]
+    .map(([amountUsd, ps]) => ({ amountUsd, periods: [...ps].sort() }))
+    .filter((p) => p.periods.length >= 2)
+    .sort((a, b) => b.periods[b.periods.length - 1].localeCompare(a.periods[a.periods.length - 1]));
+  return proven[0] || null;
+}
+
+/**
+ * Let the receipts answer the price question the register is asking.
+ *
+ * Only rows still asking are touched, and `setLearnedPrice` is the one that enforces that,
+ * so a figure the owner typed cannot be moved from here however many receipts arrive.
+ */
+async function learnPriceFor(
+  itemId: string | undefined,
+  { dryRun = false, label }: { dryRun?: boolean; label?: string } = {},
+): Promise<VaultRepair["priced"][number] | null> {
+  if (!itemId) return null;
+  const proven = provenPrice(itemId);
+  if (!proven) return null;
+  const entry = { itemId, label: label || itemId, ...proven };
+  if (dryRun) return entry;
+  const item = await setLearnedPrice(
+    itemId,
+    proven.amountUsd,
+    `Priced at $${proven.amountUsd.toFixed(2)} from the vendor's own receipts, which charged`
+      + ` exactly that in ${proven.periods.join(" and ")}. Correct it here if the plan is not what`
+      + ` those months were billed at.`,
+  ).catch(() => null);
+  return item ? { ...entry, label: label || `${item.vendor} · ${item.label}` } : null;
+}
+
+async function learnPrices(items: SpendItem[], dryRun = false): Promise<VaultRepair["priced"]> {
+  const priced: VaultRepair["priced"] = [];
+  for (const item of items) {
+    if (!item.needsAmount) continue;
+    const got = await learnPriceFor(item.id, { dryRun, label: `${item.vendor} · ${item.label}` });
+    if (got) priced.push(got);
+  }
+  return priced;
 }
 
 /**
@@ -1414,7 +1482,7 @@ export async function repairVault(opts: { dryRun?: boolean } = {}): Promise<Vaul
   await ensureReceiptsReady();
   const items = await listSpendItems().catch(() => [] as SpendItem[]);
   const byId = new Map(items.map((i) => [i.id, i]));
-  const out: VaultRepair = { checked: 0, linked: 0, unlinked: 0, deduped: 0, links: [], removed: [] };
+  const out: VaultRepair = { checked: 0, linked: 0, unlinked: 0, deduped: 0, priced: [], links: [], removed: [] };
   let changed = false;
 
   /* ---- 1. every charge on its own line ---- */
@@ -1468,6 +1536,12 @@ export async function repairVault(opts: { dryRun?: boolean } = {}): Promise<Vaul
   }
 
   if (changed) persist();
+
+  /* ---- 3. the price the receipts prove ----
+     Last, because it reads what the two steps above just settled: a charge only counts
+     towards a row's price once it is ON that row and the copies of it are gone. */
+  out.priced = await learnPrices(items, opts.dryRun).catch(() => []);
+
   return out;
 }
 

@@ -715,6 +715,48 @@ export async function updateSpendItem(id: string, patch: Partial<SpendItem>): Pr
   return item;
 }
 
+/**
+ * Teach a row the recurring price its own receipts have proven.
+ *
+ * A seeded row with no price shows "no price on file" forever, even while the vault holds
+ * that vendor's invoices: Smartlead sat at $0/mo in the burn with two $174 receipts filed
+ * against it, because a matched receipt was never allowed to answer the question the row
+ * was asking. Nothing in this book should have to be typed in twice.
+ *
+ * What makes it safe to write:
+ *
+ *   - only onto a row still ASKING (`needsAmount`). A figure the owner typed, or one a
+ *     plan check read off the vendor's own account page, is never touched.
+ *   - only for a recurring term. A credit top-up or a one-time buy has a receipt for a
+ *     purchase, not for a price; a metered row's real number comes from the usage ledger.
+ *   - the caller must have seen the SAME figure in two different periods (see the caller):
+ *     one charge proves money moved, two identical ones a month apart prove a rate. A
+ *     first-month proration or a setup fee would otherwise become the standing price.
+ *
+ * It deliberately does NOT mark the row `verified`. A receipt proves what was charged, not
+ * what the plan costs per term, so a later plan check can still correct it without --force.
+ */
+export async function setLearnedPrice(
+  id: string,
+  amountUsd: number,
+  why: string,
+): Promise<SpendItem | null> {
+  await ensureSpendRegisterReady();
+  const item = store.items.find((i) => i.id === id);
+  if (!item) return null;
+  if (!item.needsAmount || item.lifetime) return null;
+  if (item.billing !== "monthly" && item.billing !== "annual") return null;
+  const amt = num(amountUsd);
+  if (!(amt > 0)) return null;
+
+  item.amountUsd = amt;
+  item.needsAmount = false;
+  item.notes = item.notes ? `${item.notes} ${why}` : why;
+  item.updatedAt = nowIso();
+  persist();
+  return item;
+}
+
 /* ---------------- verified plans, read off the vendor's own account ---------------- */
 
 /**

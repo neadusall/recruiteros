@@ -103,6 +103,14 @@ export async function POST(req: Request) {
   return ok({
     recorded: states.length,
     lastReportAt: lastPullerReportAt(),
-    vault: vault ? { linked: vault.linked, deduped: vault.deduped, unlinked: vault.unlinked } : null,
+    vault: vault
+      ? {
+          linked: vault.linked, deduped: vault.deduped, unlinked: vault.unlinked,
+          /* Named, not counted: a row that just learned its price from its own receipts is
+             a figure appearing in the burn total, and the sweep that caused it should say
+             which one rather than leaving the owner to spot the change. */
+          priced: vault.priced.map((p) => `${p.label} $${p.amountUsd.toFixed(2)}`),
+        }
+      : null,
   });
 }
