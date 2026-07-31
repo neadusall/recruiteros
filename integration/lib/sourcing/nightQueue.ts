@@ -249,6 +249,33 @@ export async function addNightItem(workspaceId: string, input: NightAddInput): P
   return item;
 }
 
+/**
+ * Attach a derived profile to an already-armed recovery checkpoint.
+ *
+ * The crash net is armed BEFORE the JD is parsed (so the request's first seconds are
+ * covered too), which means the checkpoint starts life without an ICP. Once the live
+ * request has parsed one, hand it over: a recovery then re-runs the SAME search instead
+ * of paying for a second parse that may not agree with the first. Missing/finished items
+ * are a no-op, never an error — the caller is on the hot path of a live search.
+ */
+export async function attachNightIcp(
+  workspaceId: string,
+  id: string,
+  icp: CandidateICP,
+): Promise<boolean> {
+  await hydrate();
+  const item = store.find((x) => x.id === id && x.workspaceId === workspaceId);
+  if (!item) return false;
+  item.icp = icp;
+  // The checkpoint was armed before any profile existed, so it may still carry the
+  // generic placeholder name. A recovered list should read like the one the recruiter
+  // was watching, not "Candidate search".
+  if (item.name === "Candidate search" && icp.label) item.name = icp.label;
+  touch(item);
+  await save();
+  return true;
+}
+
 export async function removeNightItem(workspaceId: string, id: string): Promise<boolean> {
   await hydrate();
   const i = store.findIndex((x) => x.id === id && x.workspaceId === workspaceId);

@@ -12016,6 +12016,13 @@
       '.jd-prog-meta{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:12px}' +
       '.jd-prog.done .jd-prog-dot{animation:none;background:var(--ok)}' +
       '.jd-prog.done .jd-prog-fill{animation:none;background:var(--ok)}' +
+      // A run that DIED must never look like a run that finished: no 100%, no green,
+      // no auto-hide. It stops where it stopped, in warning color, and stays on screen.
+      '.jd-prog.fail .jd-prog-dot{animation:none;background:var(--warn,#e0a33e)}' +
+      '.jd-prog.fail .jd-prog-fill{animation:none;background:var(--warn,#e0a33e)}' +
+      '.jd-prog.fail .jd-prog-pct{color:var(--warn,#e0a33e)}' +
+      '.jd-err{font-size:13.5px;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid var(--warn,#e0a33e);border-radius:10px;padding:12px 14px;margin:10px 0 0;line-height:1.5}' +
+      '.jd-err b{color:var(--text)}' +
       '.jd-cardhead{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}' +
       '.jd-ratelink{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
       '.jd-ratelink:hover{color:var(--brand-2)}' +
@@ -12330,7 +12337,15 @@
         '<div id="jdCombineBar" class="jd-combine-bar" style="display:none"></div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
-    function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
+    function msg(t) { var m = $("#jdMsg"); if (m) { m.className = "muted"; m.textContent = t || ""; } }
+    /** A failure the recruiter MUST see. Persistent, boxed, and it survives the
+        progress bar hiding itself — a lost run used to leave nothing but one line of
+        grey text that read like a normal status update. */
+    function msgErr(t) {
+      var m = $("#jdMsg"); if (!m) return;
+      m.className = "jd-err";
+      m.innerHTML = '<b>The search did not finish.</b><br>' + esc(t || "");
+    }
     function chips(arr) { return (arr || []).map(function (x) { return '<span class="jd-chip">' + esc(x) + '</span>'; }).join("") || '<span class="muted">-</span>'; }
 
     function renderPlan() {
@@ -12910,7 +12925,7 @@
       function laxisBail() { if (onDone) onDone(false, ""); }
       function pollLaxis() {
         sendPatient("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
-          if (!s.ok) { laxisReset(); finishProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || gatewayMsg(s.status))); laxisBail(); return; }
+          if (!s.ok) { laxisReset(); failProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || gatewayMsg(s.status))); laxisBail(); return; }
           if (!s.data.done) { setTimeout(pollLaxis, 10000); return; }
           if (s.data.status === "error") {
             var why = (s.data.warnings || []).join("\n");
@@ -12924,7 +12939,7 @@
               setTimeout(function () { startChunk(null); }, 5000);
               return;
             }
-            laxisReset(); finishProgress("Enrichment stopped");
+            laxisReset(); failProgress("Enrichment stopped");
             alert("Enrichment failed:\n" + (why || "unknown error") +
               "\n\nAlready-enriched batches are saved; the list is sent on to Candidates and OS Text with what it has. Press Enrich on the list to finish the rest; if it keeps failing, ask your admin."); loadRuns(); laxisBail(); return;
           }
@@ -12940,7 +12955,7 @@
         if (startOffset != null) body.start = startOffset;
         sendPatient("/sourcing", "POST", body).then(function (r) {
           if (!r.ok) {
-            laxisReset(); finishProgress("Enrichment stopped");
+            laxisReset(); failProgress("Enrichment stopped");
             var err = (r.data && r.data.error) || r.status;
             if (err === "laxis_worker_not_configured") {
               alert("Deep enrichment isn't connected yet. Ask your account team to enable it, then run Enrich again."); laxisBail(); return;
@@ -13030,7 +13045,7 @@
           var err = (r.data && r.data.error) || r.status;
           if (err === "koldinfo_worker_not_configured") { stageKoldDb(); return; }
           aBtn.disabled = false; aBtn.textContent = "Enrich";
-          finishProgress("Enrich could not start");
+          failProgress("Enrich could not start");
           alert("Enrich failed to start: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : ""));
           if (onDone) onDone(false, ""); return;
         }
@@ -13038,7 +13053,7 @@
         setTimeout(pollKold, 8000);
       }).catch(function () {
         aBtn.disabled = false; aBtn.textContent = "Enrich";
-        finishProgress("Enrich stopped");
+        failProgress("Enrich stopped");
         alert("Could not reach the server.");
         if (onDone) onDone(false, "");
       });
@@ -13083,7 +13098,7 @@
         toast(bits.join(" · ") + ". Review and launch the texts in the OS Text tab.");
         loadRuns();
       }).catch(function () {
-        finishProgress("Sending stopped");
+        failProgress("Sending stopped");
         toast('"' + name + '" is saved below, but sending it on failed (could not reach the server).');
         loadRuns();
       });
@@ -13134,7 +13149,7 @@
       sendPatient("/sourcing", "POST", payload).then(function (r) {
         btn.disabled = false; btn.textContent = "Search & Enrich";
         if (!r.ok) {
-          finishProgress("Search stopped");
+          failProgress("Search stopped");
           smsg("Sales Navigator search failed: " + ((r.data && (r.data.detail || r.data.error)) || gatewayMsg(r.status)));
           return;
         }
@@ -13163,7 +13178,7 @@
         });
       }).catch(function () {
         btn.disabled = false; btn.textContent = "Search & Enrich";
-        finishProgress("Search stopped");
+        failProgress("Search stopped");
         smsg("Could not reach the server. Nothing was lost: paste the URL and try again in a moment.");
       });
     }
@@ -13289,13 +13304,13 @@
             // server-side; hand this tab over to the recovery watch.
             throw { recover: { token: recoveryToken, name: provisionalName, cap: cap } };
           }
-          if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
+          if (!r.ok) { failProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
           state.usage = r.data.usage || null; // the run's search-API spend, saved onto the list
           renderPlan(); renderResults();
           if (!state.candidates.length) {
-            finishProgress("No candidates found");
+            failProgress("No candidates found");
             var why = (state.warnings || []).filter(function (w) { return w.indexOf("empty_run:") === 0; })[0];
             throw { plain: (why ? why.replace("empty_run: ", "The search came back empty: ") : "The search came back empty.") };
           }
@@ -13330,10 +13345,12 @@
         // the search finishes on the server; keep the bar alive and watch for it.
         if (e && e.recover) return watchRecovery(e.recover, reset);
         reset();
-        if (prog.timer) finishProgress(((e && e.stage) || "Run") + " stopped");
+        if (prog.timer) failProgress(((e && e.stage) || "Run") + " stopped");
+        // An empty search is a real answer, not a breakage: say so plainly, but still
+        // never paint the bar as a completed run that produced a list.
         if (e && e.plain) { msg(e.plain); return; }
         var detail = (e && e.r && e.r.data && (e.r.data.detail || e.r.data.error)) || (e && e.r && e.r.status) || (e && e.message) || "error";
-        msg(((e && e.stage) || "Run") + " failed: " + detail);
+        msgErr(((e && e.stage) || "Run") + " failed: " + detail + ". Nothing was saved.");
       });
     }
 
@@ -13350,6 +13367,9 @@
         "The connection to the server dropped mid-search. Finishing it on the server instead; nothing is lost…");
       var deadline = Date.now() + 30 * 60 * 1000;
       function done(label, message) { finishProgress(label); msg(message); reset(); loadRuns(); }
+      /** The recovery could not deliver a list. Loud, persistent, and never dressed up
+          as a finished run. */
+      function lost(label, message) { failProgress(label); msgErr(message); reset(); loadRuns(); }
       function poll() {
         return api("/sourcing").then(function (d) {
           var items = (d && d.nightQueue) || [];
@@ -13361,8 +13381,8 @@
             return;
           }
           if (it && it.stage === "error") {
-            done("Recovery stopped",
-              "The interrupted search could not be recovered (" + (it.error || "unknown") + "). Press Initiate Search to run it again.");
+            lost("Recovery stopped",
+              "The interrupted search could not be recovered (" + (it.error || "unknown") + "). Nothing was saved. Press Initiate Search to run it again.");
             return;
           }
           if (it) {
@@ -13374,13 +13394,16 @@
           }
           // No checkpoint and no saved run: the request died before the checkpoint
           // could be written (or an older server ignored it). Nothing recoverable.
-          done("Connection lost",
-            "The connection dropped mid-search and the server had nothing to recover. Press Initiate Search to run it again.");
+          // The server now arms the checkpoint before its first slow step, so this
+          // should be rare; when it does happen the recruiter gets told plainly
+          // instead of watching the bar fill to 100% and vanish.
+          lost("Connection lost",
+            "The connection dropped before the search was registered on the server, so there was nothing to recover and no list was saved. Press Initiate Search to run it again.");
         }).catch(function () {
           // The app may still be restarting; keep knocking until the deadline.
           if (Date.now() < deadline) return delay(15000).then(poll);
-          finishProgress("Connection lost");
-          msg("The server did not come back in time. Reload the page and check Your saved candidate lists; the search may still have finished on its own.");
+          failProgress("Connection lost");
+          msgErr("The server did not come back in time. Reload the page and check Your saved candidate lists: the search may still have finished on its own. If it is not there, run it again.");
           reset();
         });
       }
@@ -13442,7 +13465,8 @@
     }
     function showProgress(title, etaSec, phaseText) {
       var host = $("#jdProgress"); if (!host) return;
-      host.classList.remove("done"); host.style.display = "";
+      // Clear BOTH end-states: a new run must not inherit the last one's failure paint.
+      host.classList.remove("done"); host.classList.remove("fail"); host.style.display = "";
       if (phaseText) host.dataset.staticPhase = "1"; else delete host.dataset.staticPhase;
       host.innerHTML =
         '<div class="jd-prog-head"><span class="jd-prog-dot"></span><b id="jdProgTitle">' + esc(title) + '</b>' +
@@ -13473,6 +13497,22 @@
       if (fill) fill.style.width = "100%"; if (pct) pct.textContent = "100%";
       if (phase) phase.textContent = label || "Done"; if (eta) eta.textContent = "";
       setTimeout(function () { var h = $("#jdProgress"); if (h && !window.__jdProgTimer && progOwns(h)) h.style.display = "none"; }, 1600);
+    }
+    /** End the bar as a FAILURE. Deliberately not finishProgress: that one slams the
+        bar to 100%, paints it green and hides it 1.6s later, which is indistinguishable
+        from success and is exactly how a lost run got reported as a finished one
+        (2026-07-31). This leaves the bar parked at the % it actually reached, in warning
+        color, on screen, until the recruiter starts another run. */
+    function failProgress(label) {
+      var host = $("#jdProgress");
+      if (host && host.dataset.progOwner && !progOwns(host)) { prog.timer = null; return; }
+      stopProgTimer();
+      if (!host) return;
+      host.classList.remove("done");
+      host.classList.add("fail");
+      var phase = host.querySelector("#jdProgPhase"), eta = host.querySelector("#jdProgEta");
+      if (phase) phase.textContent = label || "Stopped";
+      if (eta) eta.textContent = "";
     }
     function hideProgress() {
       var h = $("#jdProgress");

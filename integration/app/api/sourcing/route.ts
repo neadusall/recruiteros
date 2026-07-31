@@ -42,7 +42,7 @@ import {
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
   mergeSourcingRuns, getRapidQuota, runSalesNavSourcing, searchKindOf,
-  gapFillContacts, listNightItems, addNightItem, removeNightItem,
+  gapFillContacts, listNightItems, addNightItem, removeNightItem, attachNightIcp,
   landlineDbReady,
   premiumPhoneQuote, runPremiumPhoneBoost,
 } from "../../../lib/sourcing";
@@ -228,30 +228,32 @@ export async function POST(req: Request) {
       // location label ("Fair Lawn, NJ +25mi"), so fall back to reading it back out of
       // there for older clients / re-runs of saved lists that only stored the label.
       const radiusMi = parseRadiusMi(b.radiusMi, b.location);
-      const icp = pinIcpLocation(clientIcp ?? (await parseJobDescription(b.jd)), b.location, radiusMi);
       // Breadth drives the query FAN-OUT here (how many title-chunk × geo searches
       // run) and the per-query paging depth inside runDiscovery.
       const breadth = parseBreadth(b.breadth);
-      const queries = generateQueries(icp, { breadth, radiusMi });
-      // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
-      const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
       const strictGeo = b.strictGeo !== false && Boolean(((b.location as string) || "").trim());
-      // CRASH NET: discovery runs for minutes inside THIS request, and nothing exists
-      // outside it until the client saves — an auto-deploy recreating the container
-      // mid-search used to eat the whole run (the tab's bar just froze at 95%). So
-      // before searching, park a held recovery checkpoint in the durable overnight
-      // queue carrying the exact dials. If this request finishes (success OR error),
-      // the finally below removes it; if the process dies, the checkpoint outlives it
-      // and the next boot's queue tick re-runs the search server-side — the list
-      // saves, enriches, and delivers on its own, and the tab that lost its request
+      // CRASH NET: this whole request runs for minutes and nothing exists outside it
+      // until the client saves — an auto-deploy recreating the container mid-request
+      // used to eat the entire run. So park a held recovery checkpoint in the durable
+      // overnight queue carrying the exact dials. If this request finishes (success OR
+      // error), the finally below removes it; if the process dies, the checkpoint
+      // outlives it and the next boot's queue tick re-runs the search server-side — the
+      // list saves, enriches, and delivers on its own, and the tab that lost its request
       // finds the item by token (GET /sourcing → nightQueue) to narrate the recovery.
+      //
+      // ARMED FIRST, BEFORE ANY SLOW STEP. This used to sit after the JD parse and the
+      // seen-keys read, which left the request's first several seconds uncovered: a
+      // container swap in that window produced a 502 with NO checkpoint behind it, so
+      // there was nothing to recover and the recruiter's search vanished silently
+      // (2026-07-31, a Lume run lost exactly this way at 5.7s in). Everything below is
+      // derived from the request body alone, so there is nothing left to wait for here.
       const recoveryToken = typeof b.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "";
       let recoveryId = "";
       if (recoveryToken) {
         try {
           const checkpoint = await addNightItem(ws, {
             kind: "search",
-            name: (typeof b.name === "string" && b.name.trim()) || icp.label || "Candidate search",
+            name: (typeof b.name === "string" && b.name.trim()) || "Candidate search",
             jd: b.jd,
             location: (b.location as string) || undefined,
             breadth,
@@ -262,7 +264,11 @@ export async function POST(req: Request) {
             freshOnly: b.freshOnly === true,
             radiusMi,
             strictGeo,
-            icp,
+            // A Dive-deeper refinement is the only profile that exists this early, and
+            // it must ride along or a recovery would silently drop the refinement and
+            // re-parse the raw JD. A plain run leaves icp unset; the queue's search
+            // stage already parses the JD itself when it is missing.
+            icp: clientIcp ? pinIcpLocation(clientIcp, b.location, radiusMi) : undefined,
             recoveryToken,
           });
           recoveryId = checkpoint.id;
@@ -271,6 +277,20 @@ export async function POST(req: Request) {
         }
       }
       try {
+        // A client-supplied ICP wins over re-parsing; otherwise this is the LLM call
+        // that used to run OUTSIDE the net.
+        const icp = pinIcpLocation(clientIcp ?? (await parseJobDescription(b.jd)), b.location, radiusMi);
+        // Hand the freshly parsed profile to the checkpoint so a recovery re-runs the
+        // SAME search instead of paying to derive the profile a second time (and
+        // possibly deriving a different one). Best-effort: a failure here only costs a
+        // re-parse on recovery, so it must never take the live search down.
+        if (recoveryId && !clientIcp) {
+          try { await attachNightIcp(ws, recoveryId, icp); }
+          catch (err) { console.warn("[sourcing] checkpoint icp not attached:", (err as Error).message); }
+        }
+        const queries = generateQueries(icp, { breadth, radiusMi });
+        // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
+        const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
         // withWorkspaceCreds: the engines read their keys via cred(), which only sees
         // Setup-pasted (workspace-store) keys inside this wrapper. Without it a Serper/
         // RapidAPI key saved in Setup was invisible to the actual search (env-only).

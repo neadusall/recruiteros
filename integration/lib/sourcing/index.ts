@@ -72,7 +72,7 @@ export {
 } from "./premiumPhone";
 export { landlineDbReady, fillPhonesFromLandlineDb } from "./landlinePhones";
 export {
-  listNightItems, addNightItem, removeNightItem, tickNightQueue,
+  listNightItems, addNightItem, removeNightItem, attachNightIcp, tickNightQueue,
   type NightItem, type NightStage, type NightAddInput,
 } from "./nightQueue";
 
