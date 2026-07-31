@@ -1086,7 +1086,11 @@
       '<button class="btn btn-sm" id="rcHarvest">Pull receipts from the mailbox</button>' +
       '<button class="btn btn-sm" id="rcAttach">Attach an invoice</button>' +
       '</div></div>' +
-      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate.</p>';
+      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate.' +
+      /* Where the books open. Said out loud so the missing earlier months read as a
+         starting point rather than as spend that went unrecorded. */
+      (d.registerStart ? ' The books open in ' + esc(monthLabelLong(d.registerStart)) + ': nothing charged before then is reported on this page.' : '') +
+      '</p>';
 
     html += '<div class="otable-wrap rc-wrap"><table class="otable rc-matrix"><thead><tr><th class="rc-svc">Service</th>';
     months.forEach(function (p) {
@@ -1198,6 +1202,12 @@
     var parts = String(p || "").split("-");
     var names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     return (names[Number(parts[1]) - 1] || p) + " " + String(parts[0] || "").slice(2);
+  }
+  /* Spelled out, for prose rather than a column heading. */
+  function monthLabelLong(p) {
+    var parts = String(p || "").split("-");
+    var names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    return (names[Number(parts[1]) - 1] || p) + " " + (parts[0] || "");
   }
 
   /* How each vendor's receipt is supposed to reach us, and whether it actually does. This

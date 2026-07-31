@@ -23,7 +23,7 @@ import {
   pullerStates, lastPullerReportAt,
   type Receipt,
 } from "../../../../lib/owner/receipts";
-import { buildSpendMatrix, sourcingStatus } from "../../../../lib/owner/spendMatrix";
+import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
 import { VENDOR_SOURCES } from "../../../../lib/owner/receiptSources";
 
 export const runtime = "nodejs";
@@ -34,7 +34,11 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const months = Number(new URL(req.url).searchParams.get("months")) || 12;
 
-  const [items, receipts] = await Promise.all([listSpendItems(), listReceipts()]);
+  const [items, allReceipts] = await Promise.all([listSpendItems(), listReceipts()]);
+  /* The books begin at REGISTER_START_MONTH. Older charges stay in the vault (nothing is
+     deleted, and the sweep still stores what it finds) but they are not reported here, so
+     the grid, the gallery and the per-vendor counts all cover the same period. */
+  const receipts = allReceipts.filter(withinRegister);
   const boxes = billingMailboxes();
   const matrix = buildSpendMatrix(items, receipts, { months, inboxConfigured: boxes.length > 0 });
 
@@ -42,6 +46,9 @@ export async function GET(req: Request) {
 
   return ok({
     matrix,
+    /* The month the books open on, so the page can say where it starts rather than
+       leaving an accountant to wonder what happened to the months before it. */
+    registerStart: REGISTER_START_MONTH,
     sourcing: sourcingStatus(items, receipts, pullers),
     /* The browser sessions that fetch invoices the vendors never email. Reported
        separately from the per-vendor rows so the console can say plainly when the

@@ -158,6 +158,29 @@ export interface SpendMatrix {
   };
 }
 
+/* ============================ where the books begin ============================ */
+
+/**
+ * The first month these books cover. Anything charged before it is out of scope: the
+ * register was not being kept then, so those months can never be reconciled, and a
+ * half-collected column sitting next to fully receipted ones reads as a hole in the
+ * books rather than as history nobody kept.
+ *
+ * The cut is applied once, at the top of the report, so every number on the page agrees
+ * with it: no column, no receipt in the gallery, no anomaly and no total counts a month
+ * the grid does not show. Move it with SPEND_REGISTER_START=YYYY-MM.
+ */
+export const REGISTER_START_MONTH: string =
+  /^\d{4}-\d{2}$/.test(process.env.SPEND_REGISTER_START || "")
+    ? String(process.env.SPEND_REGISTER_START)
+    : "2026-06";
+
+/** Is this charge inside the period the books cover? */
+export function withinRegister(r: { period?: string; chargedAt?: string }): boolean {
+  const p = r.period || (r.chargedAt || "").slice(0, 7);
+  return !/^\d{4}-\d{2}$/.test(p) || p >= REGISTER_START_MONTH;
+}
+
 /* ============================ helpers ============================ */
 
 const round2 = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
@@ -187,19 +210,25 @@ function daysInto(period: string): number {
 
 export function buildSpendMatrix(
   items: SpendItem[],
-  receipts: Receipt[],
+  allReceipts: Receipt[],
   opts: { months?: number; inboxConfigured?: boolean } = {},
 ): SpendMatrix {
   const nowMonth = monthKey(new Date());
   const span = Math.max(2, Math.min(24, opts.months || 12));
 
-  /* Window: far enough back to cover the oldest thing on record, capped at `span`. */
+  /* Charges from before the books begin are dropped here, once, so the rows, the totals,
+     the coverage percentage and the anomaly list are all talking about the same period. */
+  const receipts = allReceipts.filter(withinRegister);
+
+  /* Window: far enough back to cover the oldest thing on record, capped at `span`, and
+     never earlier than the month the books begin. */
   const earliestCandidates = [
     ...items.map((i) => (i.at || "").slice(0, 7)),
     ...receipts.map((r) => r.period),
   ].filter((p) => /^\d{4}-\d{2}$/.test(p)).sort();
   const floor = addMonths(nowMonth, -(span - 1));
-  const start = earliestCandidates.length && earliestCandidates[0] > floor ? earliestCandidates[0] : floor;
+  const wanted = earliestCandidates.length && earliestCandidates[0] > floor ? earliestCandidates[0] : floor;
+  const start = wanted < REGISTER_START_MONTH ? REGISTER_START_MONTH : wanted;
   const months = monthsBetween(start, nowMonth);
 
   const metered = meteredByMonth();
