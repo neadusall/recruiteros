@@ -321,7 +321,7 @@
 .rcv.show { display: block; }
 .rcv-scrim { position: absolute; inset: 0; background: rgba(16, 24, 40, 0.62); }
 .rcv-sheet {
-  position: relative; margin: 3vh auto; width: min(940px, 94vw); max-height: 94vh;
+  position: relative; margin: 2.5vh auto; width: min(1200px, 96vw); max-height: 95vh;
   display: flex; flex-direction: column; background: var(--surface);
   border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
   overflow: hidden;
@@ -344,16 +344,31 @@
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); cursor: pointer;
 }
 .rcv-x:hover { color: var(--danger); border-color: var(--danger); }
-.rcv-body { padding: 16px 18px 20px; overflow-y: auto; }
+.rcv-body { padding: 16px 18px 0; overflow-y: auto; }
 .rcv-facts { display: flex; flex-wrap: wrap; gap: 10px 26px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .rcv-fact-k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
 .rcv-fact-v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 1px; }
-.rcv-shot-wrap {
+/* THE INVOICE IS THE POINT OF THIS DIALOG, SO IT GETS THE ROOM.
+   The old rule fitted the whole page into 62vh of leftover height, which on a laptop put a
+   Letter-sized invoice on screen at about half size and made the line items unreadable. It
+   now fills the width of the sheet and the pane scrolls, with zoom for the small print. */
+.rcv-stage {
   margin-top: 14px; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 8px; display: flex; justify-content: center;
+  padding: 10px; overflow: auto; max-height: min(74vh, 980px);
+  display: flex; justify-content: center; align-items: flex-start;
+  cursor: zoom-in; overscroll-behavior: contain;
 }
-/* fit the whole invoice on screen: an accountant reads it, they do not scroll it */
-.rcv-shot { display: block; max-width: 100%; max-height: 62vh; width: auto; height: auto; }
+.rcv-stage.zoomed { cursor: zoom-out; justify-content: flex-start; }
+.rcv-shot { display: block; width: 100%; max-width: none; height: auto; flex: 0 0 auto; }
+.rcv-zoom { display: flex; align-items: center; gap: 4px; }
+.rcv-zlevel {
+  min-width: 46px; height: 26px; padding: 0 6px; font: inherit; font-size: 11.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--text-muted); background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); cursor: pointer;
+}
+.rcv-zlevel:hover { color: var(--brand); border-color: var(--brand); }
+.rcv-nav[disabled] { opacity: 0.4; cursor: default; }
+.rcv-nav[disabled]:hover { border-color: var(--border-strong); color: var(--text); }
 .rcv-none { margin-top: 14px; padding: 18px; text-align: center; background: var(--bg-soft); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); }
 .rcv-none-t { font-weight: 600; font-size: 13.5px; }
 .rcv-none p { margin: 6px auto 0; max-width: 62ch; }
@@ -364,14 +379,22 @@
 .rcv-st-amt { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 14px; }
 .rcv-st-line { font-size: 13px; color: #475467; margin-top: 2px; }
 .rcv-st-note { margin-top: 14px; max-width: 70ch; }
-.rcv-foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+/* Pinned to the foot of the sheet rather than sitting under the invoice, which on a laptop
+   put "Download the original PDF" below the fold of a dialog that looked like it ended. */
+.rcv-foot {
+  position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 16px; padding: 10px 0 16px; background: var(--surface);
+  box-shadow: 0 -10px 14px -10px rgba(16, 24, 40, 0.22);
+}
 
 @media (max-width: 720px) {
   .rcv-sheet { margin: 0; width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; border: 0; }
   .rcv-head { flex-direction: column; align-items: stretch; gap: 10px; }
-  .rcv-tools { justify-content: flex-end; }
+  .rcv-tools { justify-content: flex-end; flex-wrap: wrap; }
   .rcv-facts { gap: 8px 18px; }
   .rcv-fact-v { font-size: 14px; }
+  /* On a phone the sheet is the screen, so the invoice takes what is left of it. */
+  .rcv-stage { max-height: 62vh; padding: 6px; }
 }
 
 /* printing an open receipt gives the accountant the page and nothing else */
@@ -381,6 +404,11 @@
   body.rcv-open .rcv { position: static; }
   body.rcv-open .rcv-sheet { margin: 0; width: 100%; max-height: none; border: 0; box-shadow: none; }
   body.rcv-open .rcv-body { overflow: visible; }
+  /* Paper has no scrollbar: the whole invoice prints, at the width of the page, whatever
+     it was zoomed to on screen. */
+  body.rcv-open .rcv-stage { overflow: visible; max-height: none; border: 0; padding: 0; }
+  body.rcv-open .rcv-foot { position: static; }
+  body.rcv-open .rcv-shot { width: 100% !important; }
 }
 
 /* ---------- passwords (account vault) ---------- */

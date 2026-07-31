@@ -1168,6 +1168,7 @@
     if (!d) return "";
     var m = d.matrix, months = m.months || [];
     var gaps = unrendered(d).length;
+    var soft = blurry(d).length;
     var loose = d.vault ? (d.vault.linkable || 0) + (d.vault.duplicates || 0) : 0;
     var html = '<div class="card" style="margin-top:14px"><div class="burn-head"><h3>Month by month</h3>' +
       '<div class="btn-row" style="margin:0">' +
@@ -1180,6 +1181,10 @@
          picture never rendered. Those cells read "no image" with the real invoice sitting
          on disk behind them, and one click puts it back. */
       (gaps ? '<button class="btn btn-sm" id="rcRender">Show ' + gaps + ' missing image' + (gaps > 1 ? 's' : '') + '</button>' : '') +
+      /* Pictures drawn by the old renderer, which magnified every invoice on the way out.
+         The nightly tick redraws them on its own; this is for the owner looking at a soft
+         invoice now. Offered only while any are left. */
+      (!gaps && soft ? '<button class="btn btn-sm" id="rcRender">Sharpen ' + soft + ' receipt' + (soft > 1 ? 's' : '') + '</button>' : '') +
       /* A vendor that bills several listings separately (RapidAPI bills five) sends one
          invoice per listing. Until each is tied to the row it paid for they pile up as a
          single "not on the register" block worth hundreds while every row underneath it
@@ -1286,7 +1291,7 @@
       var many = c.receipts.length > 1;
       inner = '<div class="rc-amt">' + usd(c.actualUsd) + '</div>' +
         (r.hasShot
-          ? '<img class="rc-thumb" src="' + API + '/owner/receipts/file/' + esc(r.id) + '?v=thumb" alt="receipt" loading="lazy" />'
+          ? '<img class="rc-thumb" src="' + shotUrl(r, "thumb") + '" alt="receipt" loading="lazy" />'
           : r.source === "api"
             ? '<div class="rc-noshot">figure from the vendor API</div>'
             : '<div class="rc-noshot">no image</div>') +
@@ -1308,10 +1313,29 @@
 
   /* Receipts whose document is on file but whose picture is not. An API figure never had a
      document and is not a gap; a real invoice showing "no image" always is. */
+  /* The renderer that drew the pictures now on disk. Anything below it was drawn by an
+     older, blurrier one and is worth redrawing from the document, which is still filed.
+     Kept in step with SHOT_VERSION in lib/owner/receipts.ts. */
+  var SHOT_VERSION = 2;
+
   function unrendered(d) {
     return (d && d.receipts || []).filter(function (r) {
       return !r.hasShot && r.source !== "api" && (r.fileName || r.fileMime || r.source === "portal");
     });
+  }
+
+  /* Has a picture, but not one the current renderer drew. */
+  function blurry(d) {
+    return (d && d.receipts || []).filter(function (r) {
+      return r.hasShot && (r.shotVersion || 0) < SHOT_VERSION && (r.fileName || r.fileMime || r.source === "portal");
+    });
+  }
+
+  /* The image URL carries the renderer that drew it, so a redrawn receipt is a new URL: the
+     artifacts are served with a day of private caching and the browser would otherwise go on
+     showing the old blurry one until tomorrow. */
+  function shotUrl(r, which) {
+    return API + "/owner/receipts/file/" + esc(r.id) + "?v=" + (which || "png") + "&s=" + (r.shotVersion || 0);
   }
 
   function monthLabel(p) {
@@ -1486,7 +1510,7 @@
       : r.source === "portal" ? '<span class="rc-badge portal">Portal</span>'
       : '<span class="rc-badge email">Email</span>';
     var art = r.hasShot
-      ? '<img class="rc-tile-shot" src="' + API + '/owner/receipts/file/' + esc(r.id) + '?v=thumb" alt="receipt" loading="lazy" />'
+      ? '<img class="rc-tile-shot" src="' + shotUrl(r, "thumb") + '" alt="receipt" loading="lazy" />'
       : '<div class="rc-tile-shot rc-tile-none">' + (r.source === "api" ? "figure from the vendor API" : "no image") + '</div>';
     return '<button class="rc-tile" data-receipt="' + esc(r.id) + '" data-month="' + esc(r.period || (r.chargedAt || "").slice(0, 7)) + '"' +
       ' title="' + esc((r.subject || r.description || r.vendor) + "") + '">' +
@@ -1554,7 +1578,7 @@
         var s = r.ok && r.data && r.data.shots;
         if (!s) { toast("Could not render the receipts"); return; }
         toast(s.rendered
-          ? s.rendered + " receipt" + (s.rendered > 1 ? "s" : "") + " now show the invoice"
+          ? s.rendered + " receipt" + (s.rendered > 1 ? "s" : "") + " redrawn from the vendor's own document"
           : s.failed ? "Nothing rendered: " + ((s.failures || [])[0] || {}).error : "Every receipt on file already has its image");
         viewBurn();
       });
@@ -1769,6 +1793,10 @@
       '<div class="rcv-head">' +
       '<div class="rcv-title"><h2 id="rcvTitle"></h2><div class="rcv-sub" id="rcvSub"></div></div>' +
       '<div class="rcv-tools">' +
+      '<div class="rcv-zoom" id="rcvZoomBox">' +
+      '<button class="rcv-nav" id="rcvOut" aria-label="Zoom out" title="Zoom out (−)">−</button>' +
+      '<button class="rcv-zlevel" id="rcvZoomLevel" title="Back to the whole page">Fit</button>' +
+      '<button class="rcv-nav" id="rcvIn" aria-label="Zoom in" title="Zoom in (+)">+</button></div>' +
       '<div class="rcv-step" id="rcvStep">' +
       '<button class="rcv-nav" id="rcvPrev" aria-label="Previous receipt">‹</button>' +
       '<span id="rcvCount"></span>' +
@@ -1784,12 +1812,104 @@
     $("#rcvPrev").addEventListener("click", function () { rcvStep(-1); });
     $("#rcvNext").addEventListener("click", function () { rcvStep(1); });
     $("#rcvPrint").addEventListener("click", function () { window.print(); });
+    $("#rcvIn").addEventListener("click", function () { rcvZoomBy(1); });
+    $("#rcvOut").addEventListener("click", function () { rcvZoomBy(-1); });
+    $("#rcvZoomLevel").addEventListener("click", function () { rcvSetZoom(0); });
     document.addEventListener("keydown", function (e) {
       if (!document.body.classList.contains("rcv-open")) return;
       if (e.key === "Escape") closeViewer();
       else if (e.key === "ArrowLeft") rcvStep(-1);
       else if (e.key === "ArrowRight") rcvStep(1);
+      else if (e.key === "+" || e.key === "=") { e.preventDefault(); rcvZoomBy(1); }
+      else if (e.key === "-" || e.key === "_") { e.preventDefault(); rcvZoomBy(-1); }
+      else if (e.key === "0") { e.preventDefault(); rcvSetZoom(0); }
     });
+    /* Fit is a measurement of the pane, so it has to be taken again when the pane changes. */
+    window.addEventListener("resize", function () {
+      if (document.body.classList.contains("rcv-open")) rcvApplyZoom(true);
+    });
+  }
+
+  /* ---------------------------- zooming the invoice ----------------------------
+     Step 0 is "fit": as wide as the pane, or the image's own pixels if it is smaller than
+     that, so a small receipt is shown at native size rather than blown up to fill a frame
+     it was never big enough for. Every other step multiplies the fit width, and the pane
+     scrolls. The steps stop at 4x, past which there is no more detail in the file to find. */
+  var RCV_STEPS = [0, 1.25, 1.5, 2, 2.5, 3, 4];
+  var rcvZoom = 0;
+
+  function rcvShotEl() { return $("#rcvShot"); }
+
+  function rcvFitWidth() {
+    var stage = $("#rcvStage"), img = rcvShotEl();
+    if (!stage || !img) return 0;
+    var cs = window.getComputedStyle(stage);
+    var pad = parseFloat(cs.paddingLeft || "0") + parseFloat(cs.paddingRight || "0");
+    var pane = Math.max(160, stage.clientWidth - pad);
+    /* naturalWidth is 0 until the image has loaded; fall back to the pane so the first paint
+       is still the right size and applyZoom runs again on load. */
+    var natural = img.naturalWidth || pane;
+    return Math.min(pane, natural);
+  }
+
+  /**
+   * Resize the invoice to the current step.
+   *
+   * `anchor` is the point of the INVOICE, in fractions of its own width and height, to leave
+   * sitting in the middle of the pane afterwards — the line that was being read, or the line
+   * that was clicked. Without it (a fresh receipt) the scroll is left alone, so every invoice
+   * opens at its top rather than wherever the last one happened to be.
+   */
+  function rcvApplyZoom(anchor) {
+    var stage = $("#rcvStage"), img = rcvShotEl(), box = $("#rcvZoomBox");
+    if (box) box.style.display = img ? "" : "none";
+    if (!stage || !img) return;
+    var fit = rcvFitWidth();
+    if (!fit) return;
+    var wasW = img.clientWidth || fit, wasH = img.clientHeight || 0;
+    var keep = anchor === true
+      ? { fx: wasW ? (stage.scrollLeft + stage.clientWidth / 2) / wasW : 0.5,
+          fy: wasH ? (stage.scrollTop + stage.clientHeight / 2) / wasH : 0 }
+      : (anchor || null);
+
+    img.style.width = Math.round(rcvZoom ? fit * rcvZoom : fit) + "px";
+    img.style.maxWidth = "none";
+    stage.classList.toggle("zoomed", !!rcvZoom);
+
+    var lvl = $("#rcvZoomLevel");
+    if (lvl) lvl.textContent = rcvZoom ? Math.round(rcvZoom * 100) + "%" : "Fit";
+    var out = $("#rcvOut"), zin = $("#rcvIn");
+    if (out) out.disabled = rcvZoom === 0;
+    if (zin) zin.disabled = rcvZoom === RCV_STEPS[RCV_STEPS.length - 1];
+
+    if (!keep) return;
+    stage.scrollLeft = Math.max(0, keep.fx * img.clientWidth - stage.clientWidth / 2);
+    stage.scrollTop = Math.max(0, keep.fy * img.clientHeight - stage.clientHeight / 2);
+  }
+
+  function rcvSetZoom(z, anchor) { rcvZoom = z; rcvApplyZoom(anchor === undefined ? true : anchor); }
+
+  function rcvZoomBy(dir) {
+    var i = RCV_STEPS.indexOf(rcvZoom);
+    if (i < 0) i = 0;
+    rcvSetZoom(RCV_STEPS[Math.max(0, Math.min(RCV_STEPS.length - 1, i + dir))]);
+  }
+
+  /* Click the invoice to go straight to a readable size and back again, on the line that was
+     clicked: the two-line address block on a Stripe receipt is the whole reason anyone opens
+     it, and a zoom that lands somewhere else means hunting for it again. */
+  function rcvWireShot() {
+    var img = rcvShotEl();
+    var box = $("#rcvZoomBox");
+    if (box) box.style.display = img ? "" : "none";
+    if (!img) return;
+    img.addEventListener("click", function (e) {
+      if (rcvZoom) { rcvSetZoom(0, null); return; }
+      var r = img.getBoundingClientRect();
+      rcvSetZoom(2, { fx: (e.clientX - r.left) / (r.width || 1), fy: (e.clientY - r.top) / (r.height || 1) });
+    });
+    if (img.complete) rcvApplyZoom(null);
+    else img.addEventListener("load", function () { rcvApplyZoom(null); });
   }
 
   function rcvStep(d) {
@@ -1818,7 +1938,11 @@
       '</div>';
 
     if (v.hasShot) {
-      html += '<div class="rcv-shot-wrap"><img class="rcv-shot" src="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=png" alt="' +
+      /* The invoice fills the width of the sheet and the pane scrolls, rather than the whole
+         page being squeezed into whatever height was left over: an invoice shrunk to fit is
+         an invoice nobody can read. Zoom goes up from there for the small print. */
+      html += '<div class="rcv-stage" id="rcvStage" title="Click the invoice to zoom in">' +
+        '<img class="rcv-shot" id="rcvShot" src="' + shotUrl(v) + '" alt="' +
         esc((v.vendor || "") + " receipt") + '" /></div>';
     } else if (v.source === "api") {
       html += apiStatement(v);
@@ -1829,7 +1953,7 @@
 
     html += '<div class="rcv-foot">';
     if (v.hasShot) {
-      html += '<a class="btn btn-ghost btn-sm" href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=png" target="_blank" rel="noopener">Open the image in a new tab</a>';
+      html += '<a class="btn btn-ghost btn-sm" href="' + shotUrl(v) + '" target="_blank" rel="noopener">Open the image in a new tab</a>';
     }
     if (v.hasFile) {
       html += '<a class="btn btn-ghost btn-sm" href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=file" target="_blank" rel="noopener">Download the original ' +
@@ -1842,6 +1966,10 @@
     $("#rcvBody").scrollTop = 0;
     $("#rcvDone").addEventListener("click", closeViewer);
     $("#rcvEdit").addEventListener("click", function () { closeViewer(); editReceipt(v.id); });
+    /* Every receipt opens at fit: stepping to the next one keeps the zoom of the last is a
+       nice idea until the next invoice is a different shape and opens mid-page. */
+    rcvZoom = 0;
+    rcvWireShot();
   }
 
   function fact(k, v) { return '<div class="rcv-fact"><div class="rcv-fact-k">' + esc(k) + '</div><div class="rcv-fact-v">' + v + '</div></div>'; }
@@ -1894,6 +2022,9 @@
     $("#rcvBody").scrollTop = 0;
     $("#rcvDone").addEventListener("click", closeViewer);
     $("#rcvAttach").addEventListener("click", function () { closeViewer(); openAttach(row, cell); });
+    /* No picture here, so the zoom control goes away with it. */
+    rcvZoom = 0;
+    rcvWireShot();
   }
 
   /* The editor behind the viewer: correcting what the parser read. */

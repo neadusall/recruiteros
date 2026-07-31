@@ -81,6 +81,8 @@ export interface Receipt {
   /** A PNG of the receipt exists on disk (id.png) — this is what the console shows. */
   hasShot?: boolean;
   shotError?: string;
+  /** Which renderer drew that PNG. See SHOT_VERSION: below it, the picture is re-drawn. */
+  shotVersion?: number;
   /** Everything the parser read, kept verbatim so a wrong figure can be traced. */
   excerpt?: string;
 
@@ -193,6 +195,31 @@ function extFromMime(mime: string, name: string): string {
 /* ============================ rendering the receipt ============================ */
 
 /**
+ * The renderer that drew a picture. Bump it whenever a change makes the picture materially
+ * better, and every receipt below it is re-drawn from the document still on disk by the
+ * repair pass — nothing has to be fetched from the vendor again.
+ *
+ * 2: draw at the screen's real pixels. Version 1 rendered each PDF page into a canvas whose
+ *    backing store was SMALLER than the device pixels the screenshot then captured, so
+ *    Chromium magnified every invoice ~2x on the way out and 8pt invoice type came back as
+ *    mush. The picture was always a blow-up of a half-size drawing, which is why zooming in
+ *    on it never helped.
+ */
+export const SHOT_VERSION = 2;
+
+/** CSS size of the render surface, and its device-pixel ratio. */
+const SHOT_WIDTH = 900;
+const SHOT_HEIGHT = 1200;
+const SHOT_DPR = 2;
+/**
+ * Device pixels across one rendered PDF page. A US Letter page is 612pt wide, so 1800px is
+ * ~210 DPI: enough that the line items on an invoice stay sharp when the viewer zooms in,
+ * without writing a 20MB PNG for a one-page receipt.
+ */
+const PDF_TARGET_PX = 1800;
+const PDF_MAX_PAGES = 4;
+
+/**
  * Turn a receipt into a PNG the owner can actually look at. Three inputs, in order of
  * fidelity: an image attachment (already a picture), a PDF attachment (rendered page 1
  * through pdf.js inside the same headless Chromium the role screenshots use), or the
@@ -217,7 +244,7 @@ async function renderShot(
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
     try {
-      const page = await browser.newPage({ viewport: { width: 820, height: 1100 }, deviceScaleFactor: 2 });
+      const page = await browser.newPage({ viewport: { width: SHOT_WIDTH, height: SHOT_HEIGHT }, deviceScaleFactor: SHOT_DPR });
 
       if (input.pdf) {
         await renderPdfPage(page, input.pdf);
@@ -235,11 +262,19 @@ async function renderShot(
           `<!doctype html><meta charset="utf-8"><style>
              body{margin:0;background:#fff;color:#111;font:14px/1.55 -apple-system,Segoe UI,Inter,Arial,sans-serif}
              img{max-width:100%}table{max-width:100%}
-           </style><div style="padding:24px;max-width:780px">${html}</div>`,
+           </style><div id="rcpt" style="padding:24px;max-width:852px">${html}</div>`,
           { waitUntil: "domcontentloaded", timeout: 20_000 },
         );
+        await fillFrame(page);
       }
-      const png = await page.screenshot({ fullPage: true, type: "png" });
+      /* fullPage grows the shot to the content but never SHRINKS it below the viewport, so a
+         two-line payment confirmation used to come back as a stamp at the top of a page of
+         white — and "fit the width" then fits mostly nothing. Clip to what was actually
+         drawn whenever that is shorter. */
+      const drawn = await contentHeight(page);
+      const png = drawn && drawn < SHOT_HEIGHT
+        ? await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: SHOT_WIDTH, height: drawn } })
+        : await page.screenshot({ fullPage: true, type: "png" });
       await saveArtifact(id, "png", Buffer.from(png));
       await makeThumb(id);
       await page.close().catch(() => {});
@@ -301,19 +336,37 @@ async function renderPdfPage(page: import("playwright").Page, pdf: Buffer): Prom
   const workerPath = require_.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
   const [lib, worker] = await Promise.all([readFile(pdfPath, "utf8"), readFile(workerPath, "utf8")]);
 
+  /*
+   * THE CANVAS IS DRAWN IN DEVICE PIXELS AND LAID OUT IN CSS PIXELS, AND THE TWO ARE NOT THE
+   * SAME NUMBER. The page is captured at deviceScaleFactor 2, so a canvas given a CSS width
+   * equal to its own backing store is photographed at twice the resolution it was drawn at —
+   * Chromium interpolates, and a crisp vector invoice comes out of the pipe as a blur that no
+   * amount of zooming can recover. So: draw the page at `scale` (its backing store), then
+   * pin the element's CSS width to `scale / DPR` of it. One drawn pixel, one captured pixel.
+   */
   const html = `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#fff">
      <div id="pages"></div>
      <script type="module">
        import * as pdfjs from './pdf.mjs';
+       const TARGET = ${PDF_TARGET_PX}, DPR = ${SHOT_DPR}, MAX = ${PDF_MAX_PAGES};
        try {
          pdfjs.GlobalWorkerOptions.workerSrc = './pdf.worker.mjs';
          const doc = await pdfjs.getDocument({ url: './doc.pdf' }).promise;
          const host = document.getElementById('pages');
-         for (let n = 1; n <= Math.min(doc.numPages, 3); n++) {
+         for (let n = 1; n <= Math.min(doc.numPages, MAX); n++) {
            const p = await doc.getPage(n);
-           const vp = p.getViewport({ scale: 1.6 });
+           /* Scale off this page's own size: an A4 invoice, a Letter one and the odd
+              half-height receipt all land at the same readable width. */
+           const base = p.getViewport({ scale: 1 });
+           const scale = Math.max(1.5, Math.min(4, TARGET / base.width));
+           const vp = p.getViewport({ scale });
            const c = document.createElement('canvas');
-           c.width = vp.width; c.height = vp.height; c.style.display = 'block';
+           c.width = Math.round(vp.width);
+           c.height = Math.round(vp.height);
+           c.style.display = 'block';
+           c.style.width = (c.width / DPR) + 'px';
+           c.style.height = (c.height / DPR) + 'px';
+           if (n > 1) c.style.marginTop = '10px';
            host.appendChild(c);
            await p.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
          }
@@ -341,6 +394,50 @@ async function renderPdfPage(page: import("playwright").Page, pdf: Buffer): Prom
   if (title.startsWith("failed")) throw new Error(title);
 }
 
+/**
+ * Most emailed receipts are a 600px-wide table, which leaves a third of the frame white and
+ * spends only two thirds of the pixels on the receipt itself. Scaling the page up before the
+ * capture re-lays the text out at the larger size — it is drawn bigger, not blown up, so it
+ * gets sharper rather than softer. Capped at 1.6x: past that a narrow receipt starts to look
+ * like a poster, and a receipt already using the full width is left alone.
+ */
+async function fillFrame(page: import("playwright").Page): Promise<void> {
+  try {
+    const width = await page.evaluate(() => {
+      const host = document.getElementById("rcpt");
+      if (!host) return 0;
+      let w = 0;
+      for (const el of Array.from(host.querySelectorAll<HTMLElement>("*"))) {
+        const r = el.getBoundingClientRect();
+        if (r.width > w && r.height > 0) w = r.width;
+      }
+      return Math.round(Math.max(w, host.getBoundingClientRect().width * 0.4));
+    });
+    if (!width || width <= 0) return;
+    const zoom = Math.min(1.6, (SHOT_WIDTH - 48) / width);
+    if (zoom <= 1.02) return;
+    await page.evaluate((z) => { document.body.style.zoom = String(z); }, zoom);
+    /* One frame for the re-layout to settle before the shutter. */
+    await page.waitForTimeout(120);
+  } catch { /* the unscaled render is still a perfectly good picture */ }
+}
+
+/** How tall the drawn receipt actually is, in CSS pixels. 0 when it cannot be measured. */
+async function contentHeight(page: import("playwright").Page): Promise<number> {
+  try {
+    return await page.evaluate(() => {
+      const b = document.body, d = document.documentElement;
+      /* The rendered thing itself when there is one (a canvas stack, or the receipt wrapper),
+         so a stray margin on the body does not add a strip of white to every receipt. */
+      const host = document.getElementById("rcpt") || document.getElementById("pages");
+      const own = host ? Math.ceil(host.getBoundingClientRect().bottom) : 0;
+      return Math.max(own, 0) || Math.ceil(Math.max(b.scrollHeight, d.scrollHeight));
+    });
+  } catch {
+    return 0;
+  }
+}
+
 async function toPng(bytes: Buffer): Promise<Buffer> {
   try {
     const sharp = (await import("sharp")).default;
@@ -350,13 +447,17 @@ async function toPng(bytes: Buffer): Promise<Buffer> {
   }
 }
 
-/** Small version for the month grid, so a 40-cell matrix is not 40 full-size PNGs. */
+/**
+ * Small version for the month grid, so a 40-cell matrix is not 40 full-size PNGs. Wide
+ * enough (640) that a tile face is still sharp on a retina screen, where a 190px tile is
+ * 380 real pixels and the old 420px thumb was being stretched to cover it.
+ */
 async function makeThumb(id: string): Promise<void> {
   try {
     const sharp = (await import("sharp")).default;
     const dir = receiptsDir();
     const src = await readFile(join(dir, `${id}.png`));
-    const out = await sharp(src).resize({ width: 420, withoutEnlargement: true }).png({ quality: 80 }).toBuffer();
+    const out = await sharp(src).resize({ width: 640, withoutEnlargement: true }).png({ quality: 90 }).toBuffer();
     await writeFile(join(dir, `${id}.thumb.png`), out);
   } catch { /* thumb is an optimisation; the full PNG is the fallback */ }
 }
@@ -393,6 +494,10 @@ export interface ShotRepair {
  * It also settles `hasShot` against what is actually on disk in both directions, so the
  * flag can never claim a picture that is not there or hide one that is. Safe to run on
  * every tick: a receipt with its PNG in place costs one `stat`.
+ *
+ * A picture drawn by a renderer older than SHOT_VERSION is treated the same as a missing
+ * one, so a quality fix reaches receipts filed months ago without anyone going back to the
+ * vendor for the document a second time.
  */
 export async function renderMissingShots(opts?: { force?: boolean; limit?: number }): Promise<ShotRepair> {
   await ensureReceiptsReady();
@@ -406,7 +511,10 @@ export async function renderMissingShots(opts?: { force?: boolean; limit?: numbe
     out.checked += 1;
 
     const hasPng = await fileSize(join(dir, `${r.id}.png`)) > 0;
-    if (hasPng && !opts?.force) {
+    /* A picture drawn by an older renderer counts as missing: the document is still on disk,
+       so it is re-drawn at the current quality rather than left blurry forever. */
+    const current = (r.shotVersion || 0) >= SHOT_VERSION;
+    if (hasPng && current && !opts?.force) {
       if (!r.hasShot) { r.hasShot = true; r.shotError = undefined; r.updatedAt = nowIso(); changed = true; }
       /* A PNG with no thumb happens when the thumbnailer failed on its own; the grid falls
          back to the full image, but it is 40 full-size PNGs, so mend it while we are here. */
@@ -417,7 +525,10 @@ export async function renderMissingShots(opts?: { force?: boolean; limit?: numbe
 
     const src = await readSourceDocument(r, dir);
     if (!src) {
-      if (r.hasShot) { r.hasShot = false; r.updatedAt = nowIso(); changed = true; }
+      /* Nothing to draw from. An old picture already on disk STAYS: it is worse than a fresh
+         render and better than nothing, and wiping the flag here would blank a receipt that
+         the owner can see perfectly well. It comes back the day the document is attached. */
+      if (!!r.hasShot !== hasPng) { r.hasShot = hasPng; r.updatedAt = nowIso(); changed = true; }
       out.noSource += 1;
       continue;
     }
@@ -425,6 +536,7 @@ export async function renderMissingShots(opts?: { force?: boolean; limit?: numbe
     const shot = await renderShot(r.id, shotInputFor(src));
     r.hasShot = shot.ok;
     r.shotError = shot.error;
+    if (shot.ok) r.shotVersion = SHOT_VERSION;
     r.updatedAt = nowIso();
     changed = true;
     if (shot.ok) out.rendered += 1;
@@ -942,7 +1054,7 @@ async function importMessage(
     fileName: (image || pdf)?.filename,
     fileMime: (image || pdf)?.contentType,
     fileBytes: (image || pdf)?.content?.length,
-    hasShot, shotError,
+    hasShot, shotError, shotVersion: hasShot ? SHOT_VERSION : undefined,
     excerpt: bodyText.replace(/\n{3,}/g, "\n\n").slice(0, 1200),
     confidence: Math.min(1, match.confidence * (parsed.approxFx ? 0.9 : 1)),
     matchedBy: match.matchedBy,
@@ -1025,7 +1137,8 @@ export async function addManualReceipt(input: {
     description: input.description, amountUsd: round2(input.amountUsd), currency: "USD",
     invoiceNumber: input.invoiceNumber, chargedAt, kind: input.amountUsd < 0 ? "refund" : "charge",
     source: "manual", fileName: input.file?.name, fileMime: input.file?.mime, fileBytes: input.file?.bytes.length,
-    hasShot, shotError, confidence: 1, matchedBy: "entered by the owner", reviewed: true,
+    hasShot, shotError, shotVersion: hasShot ? SHOT_VERSION : undefined,
+    confidence: 1, matchedBy: "entered by the owner", reviewed: true,
     notes: input.notes, createdAt: nowIso(), updatedAt: nowIso(),
   };
   store.receipts.push(r);
@@ -1136,6 +1249,7 @@ export async function recordPortalReceipt(input: {
     existing.fileBytes = input.file.bytes.length;
     existing.hasShot = shot.ok;
     existing.shotError = shot.error;
+    existing.shotVersion = shot.ok ? SHOT_VERSION : existing.shotVersion;
     existing.notes = input.notes ?? existing.notes;
     existing.updatedAt = nowIso();
     persist();
@@ -1149,8 +1263,8 @@ export async function recordPortalReceipt(input: {
     nativeAmount: input.nativeAmount, invoiceNumber: input.reference,
     chargedAt, kind: input.amountUsd < 0 ? "refund" : "charge", source: "portal",
     fileName: input.file.name, fileMime: input.file.mime, fileBytes: input.file.bytes.length,
-    hasShot: shot.ok, shotError: shot.error, confidence: 1,
-    matchedBy: "downloaded from the vendor's billing page", reviewed: true,
+    hasShot: shot.ok, shotError: shot.error, shotVersion: shot.ok ? SHOT_VERSION : undefined,
+    confidence: 1, matchedBy: "downloaded from the vendor's billing page", reviewed: true,
     notes: input.notes, createdAt: nowIso(), updatedAt: nowIso(),
   };
   store.receipts.push(r);
