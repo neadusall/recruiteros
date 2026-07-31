@@ -281,7 +281,7 @@ const SEED: SeedItem[] = [
     purpose: "Rotated-IP scraper fleet. Free name-discovery is rate-limited per IP, so these are currently low-yield.",
   },
   {
-    vendor: "RackNerd", label: "Mailcow mail server (8GB)", category: "email", billing: "annual",
+    vendor: "RackNerd", label: "Mailcow mail server (8GB)", category: "email", billing: "monthly",
     amountUsd: 0, needsAmount: true, at: "2026-06-01", status: "active",
     purpose: "mail.lumesp.com: the self-hosted mailbox fleet behind white-label sending.",
     impact: "Owning the mailboxes is what makes cold email economical: sending cost is the inbox, not a per-email API fee, and white-label tenants send from their own domain.",
@@ -307,7 +307,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 2;
+const SEED_VERSION = 3;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -327,6 +327,12 @@ const SEED_CORRECTIONS: Array<{ vendor: string; label: string; patch: Partial<Sp
       billing: "one_time", lifetime: true, needsAmount: false, amountUsd: 0,
       notes: SEED.find((s) => s.vendor === "Reoon")?.notes,
     },
+  },
+  {
+    // Seeded as annual off the RackNerd Black Friday-style yearly pricing; the owner
+    // confirmed (2026-07-31) the Mailcow box is billed MONTHLY.
+    vendor: "RackNerd", label: "Mailcow mail server (8GB)",
+    patch: { billing: "monthly" },
   },
 ];
 
