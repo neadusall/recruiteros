@@ -338,6 +338,31 @@ if [ "$LOCAL" = "$REMOTE" ] && [ -f "$DIR/.ostext-cutover-v1" ]; then
 fi
 
 echo "$(date -u) new commit $REMOTE (was $LOCAL), deploying..." >> "$LOG"
+
+# DISK FAIL-SAFE. Every `up -d --build` leaves the previous image dangling (~3GB
+# on this stack). Nothing reclaimed them, so a heavy push day quietly ate the
+# disk: on 2026-07-31, 31 dangling images took / to 99% (924MB free) and Postgres
+# began PANICking in a crash loop — "could not write to file
+# pg_logical/replorigin_checkpoint.tmp: No space left on device" — unable to
+# checkpoint, which is a data-loss risk for every tenant on the box.
+#
+# So: reclaim BEFORE building (the build is what needs the room), and refuse to
+# build at all if it is still too tight. Refusing costs one deploy cycle; filling
+# the disk mid-build costs the database. Dangling-only prune — Docker never
+# removes an image a container is using, so running services are untouched.
+FREE_GB=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+if [ "${FREE_GB:-0}" -lt 20 ]; then
+  echo "$(date -u) disk low (${FREE_GB}GB free) — reclaiming before build" >> "$LOG"
+  docker image prune -f >> "$LOG" 2>&1 || true
+  docker builder prune -f --keep-storage 5GB >> "$LOG" 2>&1 || true
+  FREE_GB=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+  echo "$(date -u) after reclaim: ${FREE_GB}GB free" >> "$LOG"
+fi
+if [ "${FREE_GB:-0}" -lt 8 ]; then
+  echo "$(date -u) DEPLOY ABORTED: only ${FREE_GB}GB free after reclaim — building would risk the database. Free space on the box." >> "$LOG"
+  exit 0
+fi
+
 git reset --hard "origin/$BRANCH" >> "$LOG" 2>&1
 # Pull/checkout submodules (OS Text lives in money-maker-sms). reset
 # --hard does NOT touch submodule working trees. TOLERATE failure (e.g. a private
@@ -366,6 +391,13 @@ else
   docker compose up -d --no-build --no-deps taltxt lume-jobs >> "$LOG" 2>&1 || true
   echo "$(date -u) deploy complete (core only, side services on previous images)" >> "$LOG"
 fi
+
+# Reclaim the image this deploy just superseded, so dangling images can never
+# accumulate across a busy day again. Runs after the deploy is up, so a rollback
+# to the still-tagged previous image is unaffected; only untagged, unused layers
+# go. Best-effort: a prune failure must never fail a deploy that already shipped.
+docker image prune -f >> "$LOG" 2>&1 || true
+echo "$(date -u) disk after deploy: $(df -h / | tail -1 | awk '{print $4" free ("$5" used)"}')" >> "$LOG"
 
 # ---- POST-DEPLOY HEALTH GATE (with rollback) --------------------------------
 # WHY: until 2026-07-30 this watcher shipped the main app BLIND. It built, swapped
