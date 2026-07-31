@@ -66,11 +66,30 @@ async function telnyxProducts(key: string): Promise<TelnyxProduct[]> {
     });
 }
 
+/**
+ * The reporting window for one month, with the end CLAMPED TO NOW. Telnyx rejects a window
+ * that ends in the future, and a rejected window is an excluded product: asking for the
+ * current month with an end of the 1st of next month silently dropped messaging, which is
+ * the largest line on the account.
+ */
 function monthWindow(period: string): { start: string; end: string } {
   const [y, m] = period.split("-").map(Number);
   const start = new Date(Date.UTC(y, m - 1, 1));
-  const end = new Date(Date.UTC(y, m, 1));
-  return { start: start.toISOString().replace(/\.\d{3}Z$/, "Z"), end: end.toISOString().replace(/\.\d{3}Z$/, "Z") };
+  const monthEnd = new Date(Date.UTC(y, m, 1));
+  const now = new Date();
+  const end = monthEnd.getTime() > now.getTime() ? now : monthEnd;
+  const iso = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
+  return { start: iso(start), end: iso(end) };
+}
+
+/** Run `work` over `items` a few at a time: 36 products across several months is hundreds
+ *  of calls, and serially that is minutes of wall clock for no reason. */
+async function inBatches<T, R>(items: T[], size: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(...(await Promise.all(items.slice(i, i + size).map(work))));
+  }
+  return out;
 }
 
 /**
@@ -114,22 +133,20 @@ export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
   const failed: string[] = [];
   for (const period of periods) {
     const { start, end } = monthWindow(period);
-    let total = 0;
-    for (const { product, dimension } of products) {
+    const perProduct = await inBatches(products, 6, async ({ product, dimension }) => {
       const base = `/v2/usage_reports?product=${encodeURIComponent(product)}&metrics=cost&start_date=${start}&end_date=${end}`;
       /* Dimension first, then a bare metrics-only call: a product that rejects every
          dimension still reports its total, and only a genuine failure is dropped. */
-      let got = false;
       for (const q of [`${base}&dimensions=${encodeURIComponent(dimension)}`, base]) {
         try {
           const j = await telnyx<{ data?: Array<{ cost?: number | string }> }>(q, key);
-          for (const row of j.data || []) total += Number(row.cost || 0);
-          got = true;
-          break;
+          return (j.data || []).reduce((sum, row) => sum + Number(row.cost || 0), 0);
         } catch { /* try the next shape */ }
       }
-      if (!got && !failed.includes(product)) failed.push(product);
-    }
+      if (!failed.includes(product)) failed.push(product);
+      return null;
+    });
+    let total = perProduct.reduce((sum: number, v) => sum + (v || 0), 0);
     total = Math.round(total * 100) / 100;
     if (total <= 0) continue;
 

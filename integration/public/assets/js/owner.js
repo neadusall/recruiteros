@@ -685,6 +685,7 @@
       html += receiptKpis(rcptData);
       html += receiptAlerts(rcptData);
       html += receiptMatrix(rcptData);
+      html += receiptGallery(rcptData);
       html += receiptSourcing(rcptData);
       html += receiptUnmatched(rcptData);
       html += burnAlert(b);
@@ -1004,6 +1005,8 @@
   var rcptData = null;
   var rcptMonths = Number(localStorage.getItem("owner_rcpt_months")) || 12;
   var rcptPoll = null;
+  var rcptLive = localStorage.getItem("owner_rcpt_live") !== "0";
+  var rcptLiveTimer = null;
 
   var CELL_LABEL = {
     paid: "receipt on file", mismatch: "amount differs from the register", missing: "no receipt",
@@ -1189,7 +1192,9 @@
         '<td><div class="lr-sub">' + esc(r.state === "lifetime" ? "Nothing recurring to receipt" : channelLabel(r.channel)) + '</div>' +
         (r.from && r.from.length ? '<div class="note" style="font-size:11px">from ' + esc(r.from.slice(0, 3).join(", ")) + '</div>' : "") +
         (r.api ? '<div class="note" style="font-size:11px">' + esc(r.api) + '</div>' : "") + '</td>' +
-        '<td class="num">' + (r.emailCount + r.manualCount) + (r.manualCount ? ' <span class="note">(' + r.manualCount + ' by hand)</span>' : "") + '</td>' +
+        '<td class="num">' + (r.emailCount + r.manualCount + (r.apiCount || 0)) +
+        (r.manualCount ? ' <span class="note">(' + r.manualCount + ' by hand)</span>' : "") +
+        (r.apiCount ? ' <span class="note">(' + r.apiCount + ' via API)</span>' : "") + '</td>' +
         '<td>' + esc((r.lastAt || "").slice(0, 10) || "-") + '</td>' +
         '<td><div class="lr-sub">' + esc(r.advice) + '</div>' +
         (r.portal ? '<a class="note" href="' + esc(r.portal) + '" target="_blank" rel="noopener">open the billing page</a>' : "") +
@@ -1203,6 +1208,63 @@
       : c === "email_processor" ? "A payment processor emails it (Stripe / Paddle / PayPal)"
       : c === "portal_only" ? "No email at all: download it from the portal"
       : c === "api" ? "Pulled from the vendor's billing API every night" : "Email";
+  }
+
+  /* EVERY receipt on file, newest month first. The matrix answers "what did this service
+     cost in June"; this answers "show me everything we have paid for, and let me look at
+     the paper". It refreshes itself so a pull running in the background fills it in
+     without anyone reloading the page. */
+  function receiptGallery(d) {
+    if (!d) return "";
+    var all = (d.receipts || []).slice().sort(function (a, b) {
+      return (b.period || "").localeCompare(a.period || "") || (b.chargedAt || "").localeCompare(a.chargedAt || "");
+    });
+    var html = '<div class="card" style="margin-top:14px" id="rcGalleryCard">' +
+      '<div class="burn-head"><h3>Every receipt</h3>' +
+      '<div class="btn-row" style="margin:0">' +
+      '<label class="rc-live"><input type="checkbox" id="rcLive"' + (rcptLive ? " checked" : "") + ' /> Keep it live</label>' +
+      '<button class="btn btn-sm" id="rcRefresh">Refresh</button></div></div>' +
+      '<div id="rcGalleryBody">' + galleryBody(all) + '</div></div>';
+    return html;
+  }
+
+  function galleryBody(all) {
+    if (!all.length) {
+      return '<p class="note">No receipts on file yet. Pull them from the mailbox above, or attach one by hand.</p>';
+    }
+    var months = [];
+    var byMonth = {};
+    all.forEach(function (r) {
+      var p = r.period || (r.chargedAt || "").slice(0, 7) || "unknown";
+      if (!byMonth[p]) { byMonth[p] = []; months.push(p); }
+      byMonth[p].push(r);
+    });
+    var html = '';
+    months.forEach(function (p) {
+      var rows = byMonth[p];
+      var total = rows.reduce(function (s2, r) { return s2 + (Number(r.amountUsd) || 0); }, 0);
+      html += '<div class="rc-month"><div class="rc-month-head"><span class="rc-month-name">' + esc(monthLabel(p)) + '</span>' +
+        '<span class="rc-month-sum">' + usd(total) + ' · ' + rows.length + ' receipt' + (rows.length > 1 ? 's' : '') + '</span></div>' +
+        '<div class="rc-tiles">';
+      rows.forEach(function (r) { html += receiptTile(r); });
+      html += '</div></div>';
+    });
+    return html;
+  }
+
+  function receiptTile(r) {
+    var badge = r.source === "api" ? '<span class="rc-badge api">API</span>'
+      : r.source === "manual" ? '<span class="rc-badge manual">By hand</span>'
+      : '<span class="rc-badge email">Email</span>';
+    var art = r.hasShot
+      ? '<img class="rc-tile-shot" src="' + API + '/owner/receipts/file/' + esc(r.id) + '?v=thumb" alt="receipt" loading="lazy" />'
+      : '<div class="rc-tile-shot rc-tile-none">' + (r.source === "api" ? "figure from the vendor API" : "no image") + '</div>';
+    return '<button class="rc-tile" data-receipt="' + esc(r.id) + '" title="' + esc((r.subject || r.description || r.vendor) + "") + '">' +
+      art +
+      '<div class="rc-tile-meta"><div class="rc-tile-top"><span class="rc-tile-vendor">' + esc(r.vendor) + '</span>' + badge + '</div>' +
+      '<div class="rc-tile-amt">' + usd(Math.abs(r.amountUsd)) + (r.kind && r.kind !== "charge" ? ' <span class="note">' + esc(r.kind.replace("_", " ")) + '</span>' : '') + '</div>' +
+      '<div class="rc-tile-date note">' + esc((r.chargedAt || "").slice(0, 10)) + (r.invoiceNumber ? ' · ' + esc(String(r.invoiceNumber).slice(0, 14)) : '') + '</div>' +
+      '</div></button>';
   }
 
   /* Charges with no line item behind them: the spend nobody catalogued. */
@@ -1260,6 +1322,46 @@
     });
 
     if (rcptData && rcptData.inbox && rcptData.inbox.harvest && rcptData.inbox.harvest.running) pollHarvest();
+
+    var live = $("#rcLive");
+    if (live) live.addEventListener("change", function () {
+      rcptLive = live.checked;
+      localStorage.setItem("owner_rcpt_live", rcptLive ? "1" : "0");
+      startLiveRefresh();
+    });
+    var refresh = $("#rcRefresh");
+    if (refresh) refresh.addEventListener("click", function () { refreshReceipts(true); });
+    startLiveRefresh();
+  }
+
+  /* Keep the gallery current without redrawing the page under someone who is reading it:
+     only the tiles and the headline figures are replaced, so scroll position and any open
+     drawer survive. Stops on its own when the view is no longer Spend master. */
+  function startLiveRefresh() {
+    if (rcptLiveTimer) { clearInterval(rcptLiveTimer); rcptLiveTimer = null; }
+    if (!rcptLive) return;
+    rcptLiveTimer = setInterval(function () {
+      if (location.hash.replace("#", "") !== "burn" || !$("#rcGalleryBody")) {
+        clearInterval(rcptLiveTimer); rcptLiveTimer = null; return;
+      }
+      refreshReceipts(false);
+    }, 30000);
+  }
+
+  function refreshReceipts(loud) {
+    return api("/owner/receipts?months=" + rcptMonths).then(function (d) {
+      rcptData = d;
+      var body = $("#rcGalleryBody");
+      if (body) {
+        body.innerHTML = galleryBody((d.receipts || []).slice().sort(function (a, b) {
+          return (b.period || "").localeCompare(a.period || "") || (b.chargedAt || "").localeCompare(a.chargedAt || "");
+        }));
+        $$("#rcGalleryBody [data-receipt]").forEach(function (b) {
+          b.addEventListener("click", function (e) { e.stopPropagation(); openReceipt(b.dataset.receipt); });
+        });
+      }
+      if (loud) toast(d.matrix.totals.receiptCount + " receipts on file · " + pct(d.matrix.totals.coveragePct) + " of spend proven");
+    }).catch(function () { if (loud) toast("Could not refresh"); });
   }
 
   /* A pull renders one screenshot per receipt, so it runs detached; poll until it lands. */

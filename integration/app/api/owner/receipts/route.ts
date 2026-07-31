@@ -40,8 +40,10 @@ export async function GET(req: Request) {
   return ok({
     matrix,
     sourcing: sourcingStatus(items, receipts),
-    /* The 25 most recent receipts power the drawer without shipping every artifact. */
-    receipts: receipts.slice(0, 60).map(publicReceipt),
+    /* EVERY receipt, newest first: the console's receipt gallery is a complete record of
+       what has been paid, not a recent-activity feed. Metadata only, so this stays small
+       however many there are; the images are fetched per receipt. */
+    receipts: receipts.slice(0, 500).map(publicReceipt),
     inbox: {
       configured: boxes.length > 0,
       mailboxes: boxes.map((b) => ({ user: b.user, host: b.host, port: b.port, inherited: !!b.inherited })),
