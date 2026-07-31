@@ -89,6 +89,13 @@ export interface SpendItem {
    *  put back on a paid plan (buying credits again makes it a normal credit row). */
   lifetime?: boolean;
   notes?: string;
+  /** The product name the VENDOR's own account page prints for this row, e.g. their
+   *  "KVM VPS - 8GB" against our "Mailcow mail server (8GB)". Recorded the first time a
+   *  plan check matches or a human confirms the pairing, so the vendor can be re-read
+   *  every month without asking again. */
+  vendorLabel?: string;
+  /** The vendor's own id for the service, which survives a product rename. */
+  vendorRef?: string;
   /** Came from the shipped seed rather than being hand-entered. */
   seeded?: boolean;
   createdAt: string;
@@ -282,9 +289,17 @@ const SEED: SeedItem[] = [
     impact: "Owning the mailboxes is what makes cold email economical: sending cost is the inbox, not a per-email API fee, and white-label tenants send from their own domain.",
   },
   {
-    vendor: "RackNerd", label: "Validation nodes (3 boxes)", category: "infra", billing: "monthly",
+    vendor: "RackNerd", label: "Validation nodes (3 boxes)", category: "infra", billing: "annual",
     amountUsd: 0, needsAmount: true, at: "2026-06-01", status: "active",
     purpose: "Port-25-open nodes for email validation probes.",
+    notes: "ANNUAL plans, per the owner (2026-07-31). RackNerd sells these boxes on a yearly term; only the 8GB mail server is monthly. `node plans.mjs check racknerd` in the spend-ledger tool reads the real term and price off the client area.",
+  },
+  {
+    vendor: "RackNerd", label: "Extra IPv4 address", category: "infra", billing: "annual",
+    amountUsd: 0, needsAmount: true, at: "2026-06-01", status: "active",
+    purpose: "Additional dedicated IPv4 on the RackNerd account, so sending is not pinned to one address.",
+    impact: "An extra IP is a second sending identity: reputation can be split across addresses, and one burnt IP does not take the whole mail server down with it.",
+    notes: "Billed as its own line on the RackNerd account rather than folded into a box. Term and price to be confirmed by the plan check.",
   },
   {
     vendor: "Object storage", label: "S3 bucket (video fleet, 30d retention)", category: "infra", billing: "metered",
@@ -421,7 +436,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 6;
+const SEED_VERSION = 7;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -449,10 +464,14 @@ const SEED_CORRECTIONS: Array<{ vendor: string; label: string; patch: Partial<Sp
     patch: { billing: "monthly" },
   },
   {
-    // Same guess, same correction: the three validation nodes sit on the same RackNerd
-    // account as the mail box and bill MONTHLY too (owner, 2026-07-31).
+    // The three validation nodes are NOT on the mail server's cycle: the owner corrected
+    // this to ANNUAL on 2026-07-31, having first been told monthly. Guessing from a
+    // sibling row is what got it wrong twice, which is why the plan check now exists.
     vendor: "RackNerd", label: "Validation nodes (3 boxes)",
-    patch: { billing: "monthly" },
+    patch: {
+      billing: "annual",
+      notes: SEED.find((s) => s.vendor === "RackNerd" && s.label.startsWith("Validation"))?.notes,
+    },
   },
 ];
 
@@ -624,6 +643,215 @@ export async function updateSpendItem(id: string, patch: Partial<SpendItem>): Pr
   item.updatedAt = nowIso();
   persist();
   return item;
+}
+
+/* ---------------- verified plans, read off the vendor's own account ---------------- */
+
+/**
+ * One service as the VENDOR states it: the product, the term it renews on, and what it
+ * costs per term. This is not a receipt (no money has necessarily moved yet); it is the
+ * subscription itself, which is the thing a receipt can never tell you. A yearly invoice
+ * and a monthly one look identical on a bank line: only the account page says which it is.
+ */
+export interface VerifiedPlan {
+  vendor: string;
+  /** Product name exactly as the vendor's account page prints it. */
+  label: string;
+  billing: BillingType;
+  amountUsd: number;
+  /** Vendor's own figure and currency, when it does not bill in USD. */
+  nativeAmount?: number;
+  currency?: string;
+  /** Next renewal date, ISO, when the account page states one. */
+  nextDueAt?: string;
+  /** Vendor-side status: an account can carry cancelled services that still show. */
+  status?: SpendStatus;
+  /** Vendor's own id for the service, so a rename does not orphan the row. */
+  reference?: string;
+  /** The page this was read from, recorded on the row so the claim is checkable. */
+  sourceUrl?: string;
+  /** ISO timestamp of the read. */
+  checkedAt?: string;
+  /** Category for a row that has to be created; never overrides an existing one. */
+  category?: SpendCategory;
+}
+
+export interface VerifiedPlanResult {
+  updated: Array<{ id: string; label: string; was: BillingType; now: BillingType; wasAmount: number; nowAmount: number }>;
+  unchanged: string[];
+  created: Array<{ id: string; label: string }>;
+  /** Register rows for this vendor the account page did not mention. Reported, never
+   *  deleted: a service can be absent because it was cancelled, or because the reader
+   *  missed a table, and those must not look the same. */
+  missingFromVendor: string[];
+  /** A vendor service that looks like it might be one of our rows but is not close
+   *  enough to act on. NOTHING is written for these. The alternative is worse in both
+   *  directions: guess yes and the wrong row gets rewritten, guess no and the register
+   *  grows a duplicate that double-counts the same box. One human answer settles it
+   *  permanently, because confirming stores the vendor's own product name on the row. */
+  needsMapping: Array<{
+    planLabel: string;
+    billing: BillingType;
+    amountUsd: number;
+    candidateId: string;
+    candidateLabel: string;
+    confidence: number;
+  }>;
+}
+
+/** Confidence that a register row and a vendor service are the same thing.
+ *
+ *  The vendor's own product name rarely resembles ours ("KVM VPS - 8GB" against
+ *  "Mailcow mail server (8GB)"), so an exact `vendorLabel` recorded from a previous
+ *  confirmation is checked first and is the only thing that ever scores certain. */
+function planMatches(item: SpendItem, planLabel: string, reference?: string): number {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const b = norm(planLabel);
+  if (!b) return 0;
+  if (item.vendorLabel && norm(item.vendorLabel) === b) return 1;
+  if (reference && item.vendorRef && item.vendorRef === reference) return 1;
+
+  const a = norm(item.label);
+  if (!a) return 0;
+  if (a === b) return 1;
+  if (a.includes(b) || b.includes(a)) return 0.8;
+  const at = new Set(a.split(" ").filter((t) => t.length > 2));
+  const bt = new Set(b.split(" ").filter((t) => t.length > 2));
+  if (!at.size || !bt.size) return 0;
+  let hit = 0;
+  for (const t of at) if (bt.has(t)) hit++;
+  return hit / Math.min(at.size, bt.size);
+}
+
+/** Confident enough to rewrite a row. */
+const MATCH_SURE = 0.6;
+/** Close enough to be worth a human glance, too close to act on. */
+const MATCH_MAYBE = 0.25;
+
+/**
+ * Write what the vendor's own account page says onto the register.
+ *
+ * This is the cure for the thing that keeps going wrong: a seeded row carries a GUESS at
+ * the billing term, the guess survives because nothing ever contradicts it, and the burn
+ * figure is wrong by 12x in whichever direction the guess fell. A plan read off the
+ * vendor's account page is the vendor's own statement, so it is allowed to overwrite a
+ * guess outright and is marked `verified`.
+ *
+ * It does NOT overwrite a figure the owner typed by hand unless `force` is set: the owner
+ * may be holding an invoice the page does not show. It never deletes.
+ */
+export async function applyVerifiedPlans(
+  vendor: string,
+  plans: VerifiedPlan[],
+  opts: {
+    force?: boolean;
+    sourceUrl?: string;
+    checkedAt?: string;
+    /** Confirmed mappings from the vendor's product name to a register row id. Applied
+     *  before matching and stored on the row, so the question is asked once, ever. */
+    map?: Record<string, string>;
+  } = {},
+): Promise<VerifiedPlanResult> {
+  await ensureSpendRegisterReady();
+  const out: VerifiedPlanResult = { updated: [], unchanged: [], created: [], missingFromVendor: [], needsMapping: [] };
+  const mine = store.items.filter((i) => i.vendor.toLowerCase() === vendor.toLowerCase());
+  const claimed = new Set<string>();
+
+  for (const [planLabel, itemId] of Object.entries(opts.map || {})) {
+    const item = mine.find((i) => i.id === itemId);
+    if (item) { item.vendorLabel = planLabel; item.updatedAt = nowIso(); }
+  }
+
+  for (const plan of plans) {
+    const scored = mine
+      .filter((i) => !claimed.has(i.id))
+      .map((i) => ({ i, score: planMatches(i, plan.label, plan.reference) }))
+      .sort((a, b) => b.score - a.score);
+    const best = scored[0] && scored[0].score >= MATCH_SURE ? scored[0].i : null;
+
+    /* Similar but not the same: say so and write nothing. */
+    if (!best && scored[0] && scored[0].score >= MATCH_MAYBE) {
+      out.needsMapping.push({
+        planLabel: plan.label,
+        billing: plan.billing,
+        amountUsd: num(plan.amountUsd),
+        candidateId: scored[0].i.id,
+        candidateLabel: scored[0].i.label,
+        confidence: Math.round(scored[0].score * 100) / 100,
+      });
+      continue;
+    }
+
+    const checkedAt = plan.checkedAt || opts.checkedAt || nowIso();
+    const stamp = `Read off ${vendor}'s own account page ${checkedAt.slice(0, 10)}: ${plan.label}, `
+      + `${plan.billing}${plan.amountUsd ? ` at $${plan.amountUsd.toFixed(2)}/term` : ""}`
+      + `${plan.nextDueAt ? `, next due ${plan.nextDueAt.slice(0, 10)}` : ""}.`
+      + `${plan.sourceUrl || opts.sourceUrl ? ` Source: ${plan.sourceUrl || opts.sourceUrl}` : ""}`;
+
+    if (!best) {
+      // A service on the account with no row is the "extra IP" case: real money the
+      // register was silent about. Creating it is not a guess, it is the vendor's word.
+      const item: SpendItem = {
+        id: rid("spend"), vendor, label: plan.label,
+        category: plan.category || "other",
+        billing: plan.billing,
+        amountUsd: num(plan.amountUsd),
+        needsAmount: !plan.amountUsd,
+        verified: plan.amountUsd > 0,
+        at: (plan.nextDueAt || checkedAt).slice(0, 10),
+        status: plan.status || "active",
+        purpose: `Found on the ${vendor} account by the plan check; it was not in the register.`,
+        notes: stamp,
+        vendorLabel: plan.label,
+        vendorRef: plan.reference,
+        createdAt: nowIso(), updatedAt: nowIso(),
+      };
+      store.items.push(item);
+      out.created.push({ id: item.id, label: item.label });
+      continue;
+    }
+
+    claimed.add(best.id);
+    /* Remember the vendor's own wording, so next month's read is an exact hit and this
+       row never has to be guessed at again. */
+    best.vendorLabel = plan.label;
+    if (plan.reference) best.vendorRef = plan.reference;
+    const wasBilling = best.billing;
+    const wasAmount = best.amountUsd;
+    const ownerTyped = best.verified && !best.seeded;
+    const takeAmount = plan.amountUsd > 0 && (opts.force || !ownerTyped || !best.amountUsd);
+
+    best.billing = plan.billing;
+    if (takeAmount) {
+      best.amountUsd = num(plan.amountUsd);
+      best.needsAmount = false;
+      best.verified = true;
+    }
+    if (plan.nextDueAt) best.expiresAt = plan.nextDueAt;
+    if (plan.status) best.status = plan.status;
+    best.notes = best.notes && !best.notes.includes("Read off ") ? `${best.notes} ${stamp}` : stamp;
+    best.updatedAt = nowIso();
+
+    if (wasBilling !== best.billing || wasAmount !== best.amountUsd) {
+      out.updated.push({
+        id: best.id, label: best.label,
+        was: wasBilling, now: best.billing,
+        wasAmount, nowAmount: best.amountUsd,
+      });
+    } else {
+      out.unchanged.push(best.label);
+    }
+  }
+
+  /* A row awaiting a mapping decision is not missing: it is unanswered. Reporting it as
+     both would tell the owner to check whether it was cancelled AND to confirm what it
+     pairs with, which are contradictory instructions about the same row. */
+  const pending = new Set(out.needsMapping.map((m) => m.candidateId));
+  for (const i of mine) {
+    if (!claimed.has(i.id) && !pending.has(i.id) && i.status === "active") out.missingFromVendor.push(i.label);
+  }
+  persist();
+  return out;
 }
 
 /* ---------------- domains ---------------- */
