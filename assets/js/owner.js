@@ -683,6 +683,7 @@
       var html = '<div class="v-head"><h2>Spend master</h2><p>Every dollar leaving the business: subscriptions, servers, domains, one-time buys and pay-per-use, checked against what the running system is actually calling. Metered cost is for the selected window (' + esc(win) + '); recurring cost is per month.</p></div>';
       html += burnKpis(b);
       html += receiptKpis(rcptData);
+      html += sweepAlert(rcptData);
       html += receiptAlerts(rcptData);
       html += receiptMatrix(rcptData);
       html += receiptGallery(rcptData);
@@ -1038,6 +1039,16 @@
 
   /* Everything the reconciler could not explain, worst first. This is the list that keeps
      a month from passing unreported. */
+  /* A pull that cannot sign in is the one failure that stops every receipt at once, so it
+     is said at the top rather than left as a line inside the sourcing panel. */
+  function sweepAlert(d) {
+    var sweep = d && d.inbox && (d.inbox.sweeps || [])[0];
+    if (!sweep || sweep.ok) return "";
+    return '<div class="burn-alert" style="margin-top:16px"><div class="ba-title">No receipt can be read: the mailbox turned the pull away</div>' +
+      '<p class="note">' + esc(sweep.error || "The last pull failed.") + '</p>' +
+      '<p class="note">Until this is fixed the months below can only show the register\'s estimate, because nothing new is arriving to prove them.</p></div>';
+  }
+
   function receiptAlerts(d) {
     if (!d) return "";
     var a = d.matrix.anomalies || [];

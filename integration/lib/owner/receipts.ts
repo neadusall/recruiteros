@@ -623,6 +623,31 @@ export function billingMailboxes(): MailboxCfg[] {
 const FOLDERS = ["INBOX", "Archive", "[Gmail]/All Mail", "Receipts", "Billing"];
 
 /**
+ * What actually went wrong, in words the owner can act on.
+ *
+ * IMAP reports a refused password as "Command failed", which reads like a bug in this code
+ * and is indistinguishable from the server being unreachable. Since a refused password is
+ * by far the most common cause (Gmail and Microsoft 365 both reject the account password
+ * over IMAP and want an app password), the console says so, names the mailbox, and gives
+ * the command that fixes it.
+ */
+function mailboxError(e: unknown, cfg: MailboxCfg): string {
+  const err = e as Error & { authenticationFailed?: boolean; responseText?: string; code?: string };
+  const msg = err?.message || "";
+  const rejected = err?.authenticationFailed || /auth/i.test(msg) || /^Command failed$/i.test(msg);
+  if (rejected) {
+    const said = (err.responseText || "").slice(0, 80);
+    return `${cfg.user} refused the sign-in${said ? ` (${said})` : ""}. ` +
+      `Gmail and Microsoft 365 both reject the account password over IMAP: issue an app password, then run ` +
+      `set-billing-inbox.sh ${cfg.user} '<app-password>' on the server.`;
+  }
+  if (/timeout|ETIMEOUT|ENOTFOUND|ECONNREFUSED|EAI_AGAIN/i.test(msg + (err?.code || ""))) {
+    return `Could not reach ${cfg.host}:${cfg.port} for ${cfg.user}. This is the connection, not the password: check the host and port.`;
+  }
+  return msg.slice(0, 300) || "mailbox error";
+}
+
+/**
  * Sweep one mailbox for receipts back to `since`. Read-only: the folder is opened without
  * write access, so nothing is deleted and nothing is marked read. Safe to re-run, which is
  * what makes backfilling two months of history a button rather than a project.
@@ -686,7 +711,7 @@ export async function harvestMailbox(cfg: MailboxCfg, since: Date, opts: { rende
     }
     report.ok = true;
   } catch (e) {
-    report.error = (e as Error)?.message?.slice(0, 300) || "mailbox error";
+    report.error = mailboxError(e, cfg);
   } finally {
     await client?.logout().catch(() => {});
   }
