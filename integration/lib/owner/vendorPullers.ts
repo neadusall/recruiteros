@@ -7,21 +7,23 @@
  *
  * TELNYX (the only one found so far, confirmed live against the production key):
  *   GET /v2/invoices        one record per billing month: invoice id, period, paid flag.
- *                           No amount and no downloadable PDF, so the invoice alone cannot
- *                           report a month.
- *   GET /v2/usage_reports   per-product usage with a `cost` metric. Summed across products
- *                           for the month, this IS the billed usage, straight from Telnyx.
+ *                           This is the SPINE: a month is filed only once Telnyx has closed
+ *                           and issued its invoice, so the console reads like a set of
+ *                           month-end invoices rather than a live meter.
+ *   GET /v2/usage_reports   per-product usage with a `cost` metric, summed over the closed
+ *                           billing period to get the total Telnyx exposes nowhere else.
  *   GET /v2/balance         the account balance behind auto-recharge.
- * Payments (the account top-ups shown in the portal's Payment History) are NOT exposed by
- * the API at all. Those still arrive by email or get attached by hand, which is why the
- * figure filed here is labelled as billed usage rather than cash paid.
+ *
+ * What is deliberately NOT here: the current, part-way month (daily movement belongs on a
+ * usage dashboard, not in the books) and the account top-ups in the portal's Payment
+ * History, which the API does not expose at all and which still arrive by email or by hand.
  *
  * Everything filed by a puller is marked source "api": authoritative on the number, with no
  * invoice image behind it, and the console shows it that way instead of implying a receipt
  * that was never issued.
  */
 
-import { recordApiReceipt } from "./receipts";
+import { recordApiReceipt, listReceipts } from "./receipts";
 import { listSpendItems } from "./spendRegister";
 
 export interface PullReport {
@@ -77,36 +79,26 @@ async function telnyxProducts(key: string): Promise<TelnyxProduct[]> {
     });
 }
 
-/**
- * The reporting window for one month, with the end CLAMPED TO NOW. Telnyx rejects a window
- * that ends in the future, and a rejected window is an excluded product: asking for the
- * current month with an end of the 1st of next month silently dropped messaging, which is
- * the largest line on the account.
- */
-function monthWindow(period: string): { start: string; end: string } {
-  const [y, m] = period.split("-").map(Number);
-  const start = new Date(Date.UTC(y, m - 1, 1));
-  const monthEnd = new Date(Date.UTC(y, m, 1));
-  const now = new Date();
-  const end = monthEnd.getTime() > now.getTime() ? now : monthEnd;
-  const iso = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
-  return { start: iso(start), end: iso(end) };
-}
-
 
 
 /**
- * Pull Telnyx's own billed usage for the last `monthsBack` months and file one figure per
- * month. Products are queried one at a time because that is the only shape the usage API
- * accepts; a product that errors is skipped and named in the report rather than silently
- * dropping its cost.
+ * Pull Telnyx month by month, driven by its INVOICE LIST.
+ *
+ * The Spend master is a record of what was billed, not a live meter: one line per closed
+ * month, the way an invoice reads. So the invoice list is the spine — a month appears here
+ * only once Telnyx has closed and issued it — and the current, part-way month is left out
+ * entirely. Daily movement belongs on the usage dashboards, not in the books.
+ *
+ * The amount still has to be summed from the usage API because Telnyx exposes no invoice
+ * total and no PDF, but a closed month's window is fixed, so the figure is stable once
+ * written and is not re-summed on later runs unless `force` says otherwise.
  */
-export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
+export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {}): Promise<PullReport> {
   const report: PullReport = { vendor: "Telnyx", ok: false, months: [], notes: [] };
   const key = process.env.TELNYX_API_KEY || "";
   if (!key) { report.error = "TELNYX_API_KEY is not set on the server"; return report; }
 
-  const items = await listSpendItems();
+  const [items, onFile] = await Promise.all([listSpendItems(), listReceipts()]);
   const item = items.find((i) => i.vendor.toLowerCase() === "telnyx");
 
   let products: TelnyxProduct[];
@@ -117,30 +109,49 @@ export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
     return report;
   }
 
-  /* The invoice list is what says a month was actually billed and settled. */
   let invoices: Array<{ invoice_id: string; period_start: string; period_end: string; paid: boolean }> = [];
   try {
     const j = await telnyx<{ data?: typeof invoices }>("/v2/invoices?page[size]=24&page[number]=1", key);
     invoices = j.data || [];
   } catch (e) {
-    report.notes.push(`Invoice list unavailable (${(e as Error).message}); months are still priced from the usage API.`);
+    report.error = `invoice list unavailable: ${(e as Error).message}`;
+    return report;
   }
 
-  const now = new Date();
-  const periods: string[] = [];
-  for (let i = 0; i < Math.max(1, Math.min(24, monthsBack)); i++) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    periods.push(d.toISOString().slice(0, 7));
+  const today = new Date().toISOString().slice(0, 10);
+  const cutoff = new Date();
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - Math.max(1, Math.min(24, monthsBack)));
+  const cutoffMonth = cutoff.toISOString().slice(0, 7);
+
+  const closed = invoices
+    .filter((v) => v.period_start && v.period_end)
+    .filter((v) => v.period_end < today)                      // the month has actually ended
+    .filter((v) => v.period_start.slice(0, 7) >= cutoffMonth)
+    .sort((a, b) => b.period_start.localeCompare(a.period_start));
+
+  if (!closed.length) {
+    report.notes.push("Telnyx has not closed an invoice inside this window yet.");
+    report.ok = true;
+    return report;
   }
 
   const failed: string[] = [];
   const lastError: Record<string, string> = {};
-  for (const period of periods) {
-    const { start, end } = monthWindow(period);
+  let skipped = 0;
+
+  for (const inv of closed) {
+    const period = inv.period_start.slice(0, 7);
+    /* A closed month cannot change, so once its figure is on file it is left alone. That
+       keeps the nightly run to one month of work instead of re-summing the year. */
+    const already = onFile.find(
+      (r) => r.source === "api" && r.vendor === "Telnyx" && r.invoiceNumber === inv.invoice_id && r.amountUsd > 0,
+    );
+    if (already && !opts.force) { skipped += 1; continue; }
+
+    const start = `${inv.period_start}T00:00:00Z`;
+    const end = `${nextDay(inv.period_end)}T00:00:00Z`;   // period_end is inclusive
     let total = 0;
     for (const { product, dimension } of products) {
-      /* A product that answered for one month is worth asking about every month; one that
-         has never answered is asked once more per month rather than being written off. */
       const base = `/v2/usage_reports?product=${encodeURIComponent(product)}&metrics=cost&start_date=${start}&end_date=${end}`;
       let answered = false;
       for (const q of [`${base}&dimensions=${encodeURIComponent(dimension)}`, base]) {
@@ -156,24 +167,22 @@ export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
       if (!answered && !failed.includes(product)) failed.push(product);
     }
     total = Math.round(total * 100) / 100;
-    if (total <= 0) continue;
+    if (total <= 0 && !already) continue;
 
-    const inv = invoices.find((v) => (v.period_start || "").slice(0, 7) === period);
     const { created } = await recordApiReceipt({
       vendor: "Telnyx",
       itemId: item?.id,
       period,
       amountUsd: total,
-      reference: inv?.invoice_id || `usage-${period}`,
-      description: "Billed usage across every Telnyx product",
-      chargedAt: inv?.period_end || undefined,
-      notes: inv
-        ? `Telnyx invoice ${inv.invoice_id} for ${inv.period_start} to ${inv.period_end}, ${inv.paid ? "settled" : "unpaid"}. Amount summed from the Telnyx usage API; Telnyx does not expose an invoice total or a downloadable PDF.`
-        : "Amount summed from the Telnyx usage API. No invoice record for this month yet, so this is the running figure.",
+      reference: inv.invoice_id,
+      description: `Month-end invoice, ${inv.period_start} to ${inv.period_end}`,
+      chargedAt: inv.period_end,
+      notes: `Telnyx invoice ${inv.invoice_id}, ${inv.paid ? "settled" : "unpaid"}. Total summed from the Telnyx usage API for the closed billing period: Telnyx exposes neither an invoice total nor a downloadable PDF.`,
     });
-    report.months.push({ period, amountUsd: total, reference: inv?.invoice_id || `usage-${period}`, created });
+    report.months.push({ period, amountUsd: total, reference: inv.invoice_id, created });
   }
 
+  if (skipped) report.notes.push(`${skipped} closed month${skipped > 1 ? "s were" : " was"} already on file and left untouched.`);
   if (failed.length) {
     const reasons = [...new Set(failed.map((f) => lastError[f]).filter(Boolean))].slice(0, 3).join(", ");
     report.notes.push(
@@ -181,13 +190,26 @@ export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
       (reasons ? ` (HTTP ${reasons})` : "") + ".",
     );
   }
+  const open = invoices.find((v) => v.period_end >= today);
+  report.notes.push(
+    open
+      ? `The current period (${open.period_start} onward) is still open, so it is deliberately not filed: this view records closed months only.`
+      : "The current month has no invoice yet, so it is not filed: this view records closed months only.",
+  );
   try {
-    const b = await telnyx<{ data?: { balance?: string; available_credit?: string } }>("/v2/balance", key);
-    if (b.data?.balance != null) report.notes.push(`Account balance is $${b.data.balance}; auto-recharge tops this up, and those payments are not in the API.`);
+    const b = await telnyx<{ data?: { balance?: string } }>("/v2/balance", key);
+    if (b.data?.balance != null) report.notes.push(`Account balance is $${b.data.balance}; auto-recharge top-ups are not exposed by the API.`);
   } catch { /* balance is a nicety */ }
 
   report.ok = true;
   return report;
+}
+
+/** The day after an inclusive period end, for an exclusive query window. */
+function nextDay(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /** Run every vendor that has a real billing API. */
