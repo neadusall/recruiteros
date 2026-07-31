@@ -94,6 +94,11 @@ export interface WarmupDomainRow {
    *  mailboxes (flat 2 cold/day each) or the internal SMTP server (warm-up ramp).
    *  Resolved from imported Email IDs first, then the domain's live MX records. */
   infra: { kind: "sending-ac" | "internal-smtp" | "unknown"; source: "email-ids" | "mx" | "none"; coldPerDay: number | null };
+  /** What KIND of mailboxes this domain runs, so Google Workspace domains (the
+   *  Zapmail-provisioned fleet, Gmail accounts on smtp.gmail.com) read as such
+   *  instead of looking identical to the Microsoft and internal-SMTP ones.
+   *  "mixed" = the domain's mailboxes disagree; null = not determinable yet. */
+  mailboxKind: "google" | "microsoft" | "smtp" | "mixed" | null;
   /** Warm-up throughput the upstream schedule is running at (emails/day, summed)
    *  and the average reply rate. Meaningful even when cumulative sends read 0. */
   warmupPerDay: number | null;
@@ -132,6 +137,29 @@ function classifyInfra(d: WarmupDomainRow, local: { provider?: string }[], p: Dn
   if (/protection\.outlook\.com/.test(mx)) return { kind: "sending-ac", source: "mx", coldPerDay: d.mailboxes * SENDING_AC_PER_INBOX };
   if (internalSmtpHosts().some((h) => mx.includes(h))) return { kind: "internal-smtp", source: "mx", coldPerDay: d.mailboxes * coldMaxPerInbox() };
   return { kind: "unknown", source: "none", coldPerDay: null };
+}
+
+/**
+ * What kind of mailbox one warm-up account is, from the warm-up connection the
+ * mailbox was added with. Google Workspace mailboxes (the Zapmail-provisioned
+ * fleet) authenticate to smtp.gmail.com; the Sending.ac fleet is Microsoft; our
+ * own mail server is anything else with a host we know how to reach.
+ */
+function accountKind(a: SmartleadAccount): "google" | "microsoft" | "smtp" | null {
+  const t = (a.accountType || "").toUpperCase();
+  const h = (a.smtpHost || "").toLowerCase();
+  if (t === "GMAIL" || h === "smtp.gmail.com" || h.endsWith(".gmail.com") || h.endsWith("googlemail.com")) return "google";
+  if (t === "OUTLOOK" || h.includes("office365") || h.includes("outlook")) return "microsoft";
+  return h ? "smtp" : null;
+}
+
+/** Roll the per-mailbox kinds up to the domain: one kind if they agree, "mixed"
+ *  if they do not, null while upstream has told us nothing either way. */
+function domainMailboxKind(list: SmartleadAccount[]): WarmupDomainRow["mailboxKind"] {
+  const kinds = new Set(list.map(accountKind).filter((k): k is "google" | "microsoft" | "smtp" => !!k));
+  if (!kinds.size) return null;
+  if (kinds.size > 1) return "mixed";
+  return [...kinds][0];
 }
 
 function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRow[] {
@@ -186,6 +214,7 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
       actions: [],
       emailIds: { total: 0, active: 0, error: 0 },
       infra: { kind: "unknown", source: "none", coldPerDay: null },
+      mailboxKind: domainMailboxKind(list),
       warmupPerDay,
       replyRatePct,
       accounts: list
@@ -356,6 +385,12 @@ export async function GET(req: Request) {
       }
     }
     d.infra = classifyInfra(d, local, p);
+    // Fallback when upstream reported no connection detail: Google-hosted mail
+    // answers on google.com MX, which is the same truth by another route.
+    if (!d.mailboxKind) {
+      const mx = (p?.mxHosts || []).join(" ").toLowerCase();
+      if (/google(mail)?\.com/.test(mx)) d.mailboxKind = "google";
+    }
     d.health = computeHealth(d);
     d.actions = computeActions(d);
   }

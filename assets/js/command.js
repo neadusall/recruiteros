@@ -6852,6 +6852,7 @@
       '.wu-badge.ready{background:rgba(26,127,55,.12);color:#1a7f37}' +
       '.wu-badge.warming{background:rgba(46,91,215,.10);color:var(--brand,#2e5bd7)}' +
       '.wu-badge.attention{background:rgba(179,38,30,.10);color:#b3261e}' +
+      '.wu-badge.gmail{background:rgba(217,48,37,.10);color:#c5221f}' +
       '.wu-mbwrap{padding:0 8px 10px 22px}' +
       '.wu-mbwrap .wu-table{font-size:12.5px}' +
       '.wu-scroll{overflow-x:auto}' +
@@ -6882,6 +6883,15 @@
   function wuBadge(r) {
     var label = r === "ready" ? "Ready to send" : r === "attention" ? "Needs attention" : "Warming";
     return '<span class="wu-badge ' + r + '">' + label + '</span>';
+  }
+
+  // Google Workspace domains carry a "Gmail Accounts" pill so the Google fleet is
+  // tellable at a glance from the Microsoft and internal-SMTP mailboxes, which
+  // otherwise show an identical status. Server resolves the kind from the warm-up
+  // connection (smtp.gmail.com) and falls back to the domain's Google MX.
+  function wuKindBadge(kind) {
+    if (kind !== "google") return "";
+    return '<div style="margin-top:4px"><span class="wu-badge gmail" title="Google Workspace mailboxes: these send and warm up through Gmail">Gmail Accounts</span></div>';
   }
 
   // Plain-English reason for a domain's reputation given how long it has been
@@ -6989,7 +6999,7 @@
         '<td>' + wuHealthChip(d.health) + '</td>' +
         '<td>' + wuDnsPills(d.dns) + '</td>' +
         '<td>' + (d.warmupPerDay != null ? '<b>' + d.warmupPerDay + '</b><span class="muted" style="font-size:11px">/day</span>' + (d.replyRatePct != null ? '<div class="muted" style="font-size:11px">' + d.replyRatePct + '% replies</div>' : '') : '<span class="muted">n/a</span>') + '</td>' +
-        '<td>' + wuBadge(d.readiness) + '</td>' +
+        '<td>' + wuBadge(d.readiness) + wuKindBadge(d.mailboxKind) + '</td>' +
       '</tr>';
       if (!open) return main;
       var acts = (d.actions && d.actions.length)

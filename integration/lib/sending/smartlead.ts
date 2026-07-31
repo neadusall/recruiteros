@@ -44,6 +44,12 @@ export interface SmartleadAccount {
   replyRatePct?: number;
   /** Upstream block reason if warm-up is halted (null/undefined = fine). */
   blockedReason?: string;
+  /** Upstream connection type: "SMTP" | "OUTLOOK" | "GMAIL" | ... Free on the
+   *  same payload, and the only signal that says what KIND of mailbox this is
+   *  (Google Workspace vs Microsoft vs our own mail server). */
+  accountType?: string;
+  /** SMTP host the mailbox sends through, e.g. smtp.gmail.com. */
+  smtpHost?: string;
 }
 
 function num(v: unknown): number | undefined {
@@ -106,6 +112,8 @@ export async function listSmartleadAccounts(): Promise<SmartleadAccount[]> {
         warmupPerDay: num(w?.max_email_per_day),
         replyRatePct: num(w?.reply_rate),
         blockedReason: w?.blocked_reason ? String(w.blocked_reason) : undefined,
+        accountType: a?.type ? String(a.type).toUpperCase() : undefined,
+        smtpHost: a?.smtp_host ? String(a.smtp_host) : undefined,
       });
     }
     if (rows.length < limit) break;
