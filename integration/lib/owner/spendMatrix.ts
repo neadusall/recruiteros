@@ -576,9 +576,11 @@ export interface SourcingRow {
   /** Receipts captured for this vendor, and how. */
   emailCount: number;
   manualCount: number;
+  /** Figures pulled straight from the vendor's own billing API. */
+  apiCount: number;
   lastAt?: string;
   /** What the owner still has to do, if anything. */
-  state: "auto" | "manual" | "unproven" | "not_billed";
+  state: "api" | "auto" | "manual" | "unproven" | "not_billed";
   advice: string;
 }
 
@@ -595,12 +597,16 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
     const mine = receipts.filter((r) => r.vendor.toLowerCase() === vendor.toLowerCase());
     const emailCount = mine.filter((r) => r.source === "email").length;
     const manualCount = mine.filter((r) => r.source === "manual").length;
+    const apiCount = mine.filter((r) => r.source === "api").length;
     const own = items.filter((i) => i.vendor === vendor);
     const billed = own.some((i) => i.status === "active" && (i.amountUsd > 0 || i.billing === "metered" || i.needsAmount));
 
     let state: SourcingRow["state"];
     let advice: string;
-    if (emailCount > 0) {
+    if (apiCount > 0) {
+      state = "api";
+      advice = `Pulled straight from the vendor's billing API every night (${apiCount} month${apiCount > 1 ? "s" : ""} on file)${emailCount ? `, plus ${emailCount} emailed receipt${emailCount > 1 ? "s" : ""}` : ""}. This one cannot go unreported.`;
+    } else if (emailCount > 0) {
       state = "auto";
       advice = `Receipts arrive by email and are captured automatically (${emailCount} on file).`;
     } else if (manualCount > 0) {
@@ -623,12 +629,12 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
       portal: src?.portal,
       api: src?.api,
       setup: src?.setup,
-      emailCount, manualCount,
+      emailCount, manualCount, apiCount,
       lastAt: mine.map((r) => r.chargedAt).sort().slice(-1)[0],
       state, advice,
     };
   }).sort((a, b) => rank(a.state) - rank(b.state) || a.vendor.localeCompare(b.vendor));
 }
 function rank(s: SourcingRow["state"]): number {
-  return s === "unproven" ? 0 : s === "manual" ? 1 : s === "auto" ? 2 : 3;
+  return s === "unproven" ? 0 : s === "manual" ? 1 : s === "auto" ? 2 : s === "api" ? 3 : 4;
 }

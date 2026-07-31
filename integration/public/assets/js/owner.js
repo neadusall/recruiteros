@@ -1107,7 +1107,9 @@
       inner = '<div class="rc-amt">' + usd(c.actualUsd) + '</div>' +
         (r.hasShot
           ? '<img class="rc-thumb" src="' + API + '/owner/receipts/file/' + esc(r.id) + '?v=thumb" alt="receipt" loading="lazy" />'
-          : '<div class="rc-noshot">no image</div>') +
+          : r.source === "api"
+            ? '<div class="rc-noshot">from the vendor API</div>'
+            : '<div class="rc-noshot">no image</div>') +
         (c.receipts.length > 1 ? '<div class="note" style="font-size:10.5px">' + c.receipts.length + ' receipts</div>' : "") +
         (c.note ? '<div class="note" style="font-size:10.5px">' + esc(c.note) + '</div>' : "");
     } else if (c.status === "missing") {
@@ -1169,7 +1171,8 @@
       '<th>Vendor</th><th>How the receipt arrives</th><th class="num">On file</th><th>Last</th><th>What is needed</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r) {
-      var pill = r.state === "auto" ? '<span class="pill active">Automatic</span>'
+      var pill = r.state === "api" ? '<span class="pill active">Pulled from the API</span>'
+        : r.state === "auto" ? '<span class="pill active">Automatic</span>'
         : r.state === "manual" ? '<span class="pill needs">By hand</span>'
         : r.state === "unproven" ? '<span class="pill dead">Not arriving</span>'
         : '<span class="pill unknown">Not billed</span>';
@@ -1190,7 +1193,7 @@
     return c === "email_vendor" ? "The vendor emails a receipt"
       : c === "email_processor" ? "A payment processor emails it (Stripe / Paddle / PayPal)"
       : c === "portal_only" ? "No email at all: download it from the portal"
-      : c === "api" ? "An invoice API exists" : "Email";
+      : c === "api" ? "Pulled from the vendor's billing API every night" : "Email";
   }
 
   /* Charges with no line item behind them: the spend nobody catalogued. */
@@ -1293,6 +1296,9 @@
       (v.shotError ? kv("Image", '<span class="bad-t">' + esc(v.shotError) + '</span>') : "") +
       '</div>';
 
+    if (!v.hasShot && v.source === "api") {
+      html += '<div class="impact-box"><div class="ib-label">No invoice image</div><p>This figure came straight from the vendor billing API, which is authoritative on the amount but issues no document. Nothing was drawn to stand in for a receipt.</p></div>';
+    }
     if (v.hasShot) {
       html += '<a href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=png" target="_blank" rel="noopener" class="rc-full">' +
         '<img src="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=png" alt="receipt" /></a>';

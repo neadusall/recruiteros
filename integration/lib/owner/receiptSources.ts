@@ -79,13 +79,13 @@ export const VENDOR_SOURCES: VendorSource[] = [
   },
   {
     vendor: "Telnyx",
-    channel: "email_vendor",
+    channel: "api",
     from: ["telnyx.com", "billing@telnyx.com", "noreply@telnyx.com"],
     subject: ["telnyx", "invoice", "receipt", "payment", "auto-recharge", "balance"],
-    portal: "https://portal.telnyx.com/#/app/billing/invoices",
+    portal: "https://portal.telnyx.com/#/billing/history",
     billingDay: 1,
-    api: "Telnyx Mission Control exposes a billing group report; invoices themselves are portal/email. Worth a check before relying on email alone.",
-    setup: "Auto-recharge fires whenever the balance drops, so expect several receipts a month. All of them count.",
+    api: "PULLED AUTOMATICALLY: GET /v2/invoices gives one record per billing month and GET /v2/usage_reports carries a cost metric, so the monthly figure comes straight from Telnyx with no mailbox involved. Neither the invoice total nor a PDF is exposed, and the portal's Payment History (account top-ups) is not in the API at all, so those still come from email or by hand.",
+    setup: "Auto-recharge fires whenever the balance drops, so expect several top-up receipts a month on top of the monthly usage figure. All of them count.",
   },
   {
     vendor: "Hetzner",

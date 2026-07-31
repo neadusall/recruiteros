@@ -19,6 +19,7 @@ import { requireCronAuth } from "../../../../../lib/linkedin/auth";
 import { harvestAll, listReceipts } from "../../../../../lib/owner/receipts";
 import { listSpendItems } from "../../../../../lib/owner/spendRegister";
 import { buildSpendMatrix } from "../../../../../lib/owner/spendMatrix";
+import { pullVendorApis } from "../../../../../lib/owner/vendorPullers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,10 +33,15 @@ async function run(req: Request) {
   const url = new URL(req.url);
   const monthsBack = Math.max(1, Math.min(24, Number(url.searchParams.get("monthsBack")) || 3));
   const wait = url.searchParams.get("wait") !== "0";
+  /* Vendors with a real billing API are pulled on every tick: an API cannot be filtered
+     into spam or deleted, so those months report themselves even if no mail arrives. */
+  const withVendors = url.searchParams.get("vendors") !== "0";
+
+  const pulls = withVendors ? await pullVendorApis(monthsBack).catch(() => []) : [];
 
   if (!wait) {
     const { startHarvest } = await import("../../../../../lib/owner/receipts");
-    return NextResponse.json({ ok: true, ...startHarvest(monthsBack) });
+    return NextResponse.json({ ok: true, pulls, ...startHarvest(monthsBack) });
   }
 
   const result = await harvestAll(monthsBack);
@@ -43,8 +49,9 @@ async function run(req: Request) {
   const matrix = buildSpendMatrix(items, receipts, { months: Math.max(6, monthsBack), inboxConfigured: true });
 
   return NextResponse.json({
-    ok: result.ok,
+    ok: result.ok || pulls.some((p) => p.ok),
     reason: result.reason,
+    pulls,
     reports: result.reports,
     books: {
       months: matrix.months,

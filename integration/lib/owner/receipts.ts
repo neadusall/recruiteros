@@ -39,7 +39,10 @@ import {
 /* ============================ types ============================ */
 
 export type ReceiptKind = "charge" | "refund" | "credit_note";
-export type ReceiptSource = "email" | "manual";
+/** Where a figure came from. `api` is the vendor's own billing API: authoritative on the
+ *  number, but there is no invoice image behind it, and the console says so rather than
+ *  drawing a receipt that was never issued. */
+export type ReceiptSource = "email" | "manual" | "api";
 
 export interface Receipt {
   id: string;
@@ -827,6 +830,41 @@ export async function addManualReceipt(input: {
   store.receipts.push(r);
   persist();
   return r;
+}
+
+/**
+ * File (or refresh) a figure pulled straight from a vendor's billing API. Keyed on
+ * vendor + period + reference so re-running a puller corrects the month in place instead
+ * of stacking duplicates: a mid-month pull is a running figure that the next pull
+ * finalises. Never claims to have a receipt image, because no receipt was issued.
+ */
+export async function recordApiReceipt(input: {
+  vendor: string; itemId?: string; period: string; amountUsd: number;
+  reference: string; description?: string; chargedAt?: string; notes?: string;
+}): Promise<{ receipt: Receipt; created: boolean }> {
+  await ensureReceiptsReady();
+  const existing = store.receipts.find(
+    (r) => r.source === "api" && r.vendor === input.vendor && r.period === input.period && r.invoiceNumber === input.reference,
+  );
+  if (existing) {
+    existing.amountUsd = round2(input.amountUsd);
+    existing.description = input.description ?? existing.description;
+    existing.notes = input.notes ?? existing.notes;
+    existing.updatedAt = nowIso();
+    persist();
+    return { receipt: existing, created: false };
+  }
+  const r: Receipt = {
+    id: rid("rcpt"), period: input.period, vendor: input.vendor, itemId: input.itemId,
+    description: input.description, amountUsd: round2(input.amountUsd), currency: "USD",
+    invoiceNumber: input.reference, chargedAt: input.chargedAt || `${input.period}-01`,
+    kind: "charge", source: "api", hasShot: false, confidence: 1,
+    matchedBy: "pulled from the vendor's billing API", notes: input.notes,
+    createdAt: nowIso(), updatedAt: nowIso(),
+  };
+  store.receipts.push(r);
+  persist();
+  return { receipt: r, created: true };
 }
 
 export async function listReceipts(): Promise<Receipt[]> {
