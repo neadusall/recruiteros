@@ -68,8 +68,43 @@ function minInvoiceUsd(): number {
   return Number.isFinite(n) && n >= 0 ? n : 1;
 }
 
-/** The usage-ledger key the Telnyx spend row is linked by. */
-const TELNYX_KEY = "telnyx";
+/**
+ * THIS BUSINESS RUNS MORE THAN ONE TELNYX ACCOUNT, AND THEY ARE SEPARATE BOOKS.
+ *
+ * The house account carries RecruitersOS's own numbers and the BD Phone; Lume's white-label
+ * account carries its five per-recruiter 929 lines and everything its recruiters send, on
+ * its own invoices. One key reads ONE account, so the house key showed the house account and
+ * the tenant's spend was simply absent — not small, absent. Each account is pulled with its
+ * own key onto its own register row and its own usage key, so neither can ever be read as
+ * the other's.
+ *
+ * Adding a third is one entry here plus the env key.
+ */
+interface TelnyxAccount {
+  /** Usage key the register row links by (`link.ledgerSource`). */
+  usageKey: string;
+  /** Env var holding this account's API key. */
+  envKey: string;
+  /** How the receipt names it, so two accounts never merge into one charge. */
+  vendorLabel: string;
+  /** Which register row it pays for, when the row carries no explicit link yet. */
+  matchLabel?: RegExp;
+  /** What to say when the key is missing. */
+  what: string;
+}
+
+const TELNYX_ACCOUNTS: TelnyxAccount[] = [
+  {
+    usageKey: "telnyx", envKey: "TELNYX_API_KEY", vendorLabel: "Telnyx",
+    matchLabel: /sms, voice/i,
+    what: "the house account: RecruitersOS numbers, the BD Phone and the cell check",
+  },
+  {
+    usageKey: "telnyx_lume", envKey: "TELNYX_API_KEY_LUME", vendorLabel: "Telnyx · Lume",
+    matchLabel: /lume/i,
+    what: "Lume's white-label account: its per-recruiter 929 lines and everything its recruiters send",
+  },
+];
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -126,13 +161,30 @@ async function telnyxProducts(key: string): Promise<TelnyxProduct[]> {
  * total and no PDF, but a closed month's window is fixed, so the figure is stable once
  * written and is not re-summed on later runs unless `force` says otherwise.
  */
-export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {}): Promise<PullReport> {
-  const report: PullReport = { vendor: "Telnyx", ok: false, months: [], notes: [] };
-  const key = process.env.TELNYX_API_KEY || "";
-  if (!key) { report.error = "TELNYX_API_KEY is not set on the server"; return report; }
+export async function pullTelnyx(
+  monthsBack = 6,
+  opts: { force?: boolean } = {},
+  account: TelnyxAccount = TELNYX_ACCOUNTS[0],
+): Promise<PullReport> {
+  const TELNYX_KEY = account.usageKey;
+  const VENDOR = account.vendorLabel;
+  const report: PullReport = { vendor: VENDOR, ok: false, months: [], notes: [] };
+  const key = process.env[account.envKey] || "";
+  if (!key) {
+    report.error = `${account.envKey} is not set on the server, so ${account.what} is not being read at all`;
+    return report;
+  }
 
   const [items, onFile] = await Promise.all([listSpendItems(), listReceipts(), ensureVendorUsageReady()]);
-  const item = items.find((i) => i.vendor.toLowerCase() === "telnyx");
+  /* The row this account pays for: the explicit link first, because that is the only thing
+     that can tell two accounts of the same vendor apart. */
+  const item = items.find((i) => (i.link?.ledgerSource || "").toLowerCase() === TELNYX_KEY)
+    || (account.matchLabel
+      ? items.find((i) => i.vendor.toLowerCase() === "telnyx" && account.matchLabel!.test(i.label))
+      : undefined);
+  if (!item) {
+    report.notes.push("No register row is linked to this account yet, so its months are recorded but not tied to a line.");
+  }
 
   const floor = minInvoiceUsd();
 
@@ -143,7 +195,7 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
      Only this puller's own rows are touched: an emailed, hand-attached or portal-downloaded
      receipt is a real document and is never removed by a pull. */
   const stale = onFile.filter(
-    (r) => r.source === "api" && r.vendor === "Telnyx" &&
+    (r) => r.source === "api" && r.vendor === VENDOR &&
       (String(r.invoiceNumber || "").startsWith("usage-") || Math.abs(r.amountUsd) < floor),
   );
   for (const r of stale) await deleteReceipt(r.id);
@@ -231,14 +283,14 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
        figure. Not even `force` overrides this: force exists to correct THIS puller's sums,
        and a documented month has no sum of ours left in it. */
     const documented = onFile.find(
-      (r) => !removed.has(r.id) && r.vendor === "Telnyx" && r.period === period &&
+      (r) => !removed.has(r.id) && r.vendor === VENDOR && r.period === period &&
         r.source !== "api" && r.amountUsd !== 0,
     );
     if (documented) {
       const said = vendorMonthFor(TELNYX_KEY, period);
       if (!said?.closed || said.amountUsd !== documented.amountUsd) {
         await recordVendorMonth({
-          key: TELNYX_KEY, vendor: "Telnyx", period, amountUsd: documented.amountUsd,
+          key: TELNYX_KEY, vendor: VENDOR, period, amountUsd: documented.amountUsd,
           reference: documented.invoiceNumber || inv.invoice_id, closed: true,
           note: "Taken from Telnyx's own invoice, which is already filed in the vault.",
         });
@@ -253,7 +305,7 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
        out above does not count as on file. */
     const already = onFile.find(
       (r) => !removed.has(r.id) &&
-        r.source === "api" && r.vendor === "Telnyx" && r.invoiceNumber === inv.invoice_id && r.amountUsd > 0,
+        r.source === "api" && r.vendor === VENDOR && r.invoiceNumber === inv.invoice_id && r.amountUsd > 0,
     );
     const said = vendorMonthFor(TELNYX_KEY, period);
     const settled = Boolean(said?.closed && said.reference === inv.invoice_id);
@@ -268,7 +320,7 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
       /* Filed as a receipt before this store existed. The figure is already proved by the
          receipt, so take it from there rather than spending 36 queries to agree with it. */
       await recordVendorMonth({
-        key: TELNYX_KEY, vendor: "Telnyx", period, amountUsd: already.amountUsd,
+        key: TELNYX_KEY, vendor: VENDOR, period, amountUsd: already.amountUsd,
         reference: inv.invoice_id, closed: true,
         note: "Read back from the month-end figure already on file.",
       });
@@ -287,7 +339,7 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
        at all, so the console fell back to the platform's internal usage ledger and reported
        a figure Telnyx had never charged. */
     await recordVendorMonth({
-      key: TELNYX_KEY, vendor: "Telnyx", period, amountUsd: total,
+      key: TELNYX_KEY, vendor: VENDOR, period, amountUsd: total,
       reference: inv.invoice_id, closed: true,
       note: `Summed from the Telnyx usage API across the closed period ${inv.period_start} to ${inv.period_end}.`,
     });
@@ -300,7 +352,7 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
     }
 
     const { created } = await recordApiReceipt({
-      vendor: "Telnyx",
+      vendor: VENDOR,
       itemId: item?.id,
       period,
       amountUsd: total,
@@ -341,7 +393,7 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
   const through = new Date(Date.now() - 5 * 60_000).toISOString().slice(0, 19) + "Z";
   const openTotal = await sumWindow(`${openStart}T00:00:00Z`, through);
   await recordVendorMonth({
-    key: TELNYX_KEY, vendor: "Telnyx", period: openPeriod, amountUsd: openTotal,
+    key: TELNYX_KEY, vendor: VENDOR, period: openPeriod, amountUsd: openTotal,
     reference: open?.invoice_id, closed: false,
     note: `Part month: ${openStart} through ${through.slice(0, 10)}. Telnyx has not closed or issued an invoice for it yet.`,
   });
@@ -366,8 +418,19 @@ function nextDay(isoDate: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Run every vendor that has a real billing API. `force` re-sums months already on file,
- *  which is what corrects a figure written by an older, wronger version of a puller. */
+/** Run every vendor that has a real billing API, and every ACCOUNT within one. `force`
+ *  re-sums months already on file, which is what corrects a figure written by an older,
+ *  wronger version of a puller.
+ *
+ *  Serial on purpose: the accounts share nothing but Telnyx's rate limiter, and two
+ *  accounts querying 25 products each in parallel is how a month comes back half-read. */
 export async function pullVendorApis(monthsBack = 3, opts: { force?: boolean } = {}): Promise<PullReport[]> {
-  return [await pullTelnyx(monthsBack, opts)];
+  const out: PullReport[] = [];
+  for (const account of TELNYX_ACCOUNTS) {
+    /* An account with no key is REPORTED, not skipped in silence. A missing key and a quiet
+       month look identical on the page otherwise, and this is exactly how Lume's whole
+       account sat at $0 without anyone being told it was never being read. */
+    out.push(await pullTelnyx(monthsBack, opts, account));
+  }
+  return out;
 }

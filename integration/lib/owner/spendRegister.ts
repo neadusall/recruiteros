@@ -350,6 +350,10 @@ const SEED: SeedItem[] = [
   {
     vendor: "Telnyx", label: "Lume account (white-label numbers)", category: "messaging", billing: "metered",
     amountUsd: 0, at: "2026-07-01", status: "active",
+    /* Its OWN meter and its OWN key. Two rows reading "Telnyx" cannot be told apart by name,
+       and while this one had no link it either sat at $0 or, worse, showed the house
+       account's figure a second time. */
+    link: { ledgerSource: "telnyx_lume", envKeys: ["TELNYX_API_KEY_LUME"], integrationId: "telnyx" },
     purpose: "Lume's own Telnyx account: its five per-recruiter 929 lines and everything its recruiters send.",
     notes: "A SEPARATE Telnyx account from the house one, with its own invoices. Keep the two apart or the tenant's usage lands on the house bill.",
   },
@@ -363,7 +367,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 15;
+const SEED_VERSION = 16;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -427,6 +431,14 @@ const SEED_CORRECTIONS: Array<{
     // confirmed (2026-07-31) the Mailcow box is billed MONTHLY.
     vendor: "RackNerd", label: "Mailcow mail server (8GB)",
     patch: { billing: "monthly" },
+  },
+  {
+    /* Seeded with no link at all, which left the row unable to say WHICH Telnyx account it
+       stands for. Two rows named "Telnyx" cannot be told apart by name, so this one either
+       read $0 forever or picked up the house account's figure a second time. Its own usage
+       key and its own API key settle it. */
+    vendor: "Telnyx", label: "Lume account (white-label numbers)",
+    patch: { link: { ledgerSource: "telnyx_lume", envKeys: ["TELNYX_API_KEY_LUME"], integrationId: "telnyx" } },
   },
   {
     // NOT a guess this time: the RapidAPI portal invoice of 2026-07-01 reads
