@@ -34,6 +34,7 @@ const pullers = pullerStates();
 const RECEIPTS = {
   matrix: buildSpendMatrix(base, receipts, { months: 12, inboxConfigured: boxes.length > 0 }),
   vault: await vaultHealth().catch(() => ({ unlinked: 0, duplicates: 0, linkable: 0 })),
+  close: JSON.parse(process.env.SHOT_CLOSE || '{"history":[],"judging":null,"notice":{"configured":true,"to":["neadusall@gmail.com"]}}'),
   registerStart: REGISTER_START_MONTH,
   sourcing: sourcingStatus(base, receipts, pullers),
   pullers: { lastReportAt: lastPullerReportAt(), count: pullers.length, states: pullers },
@@ -82,10 +83,10 @@ for (const width of [1280, 1024, 500]) {
   const page = await browser.newPage({ viewport: { width, height: 1400 } });
   await page.goto("http://127.0.0.1:4713/owner-console.html#burn", { waitUntil: "networkidle" });
   await page.waitForTimeout(2500);
-  const row = page.locator("text=Skip Tracing Working API").first();
+  const row = page.locator(process.env.SHOT_AT || "text=Skip Tracing Working API").first();
   if (await row.count()) await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
   await page.waitForTimeout(600);
-  await page.screenshot({ path: join(SHOT_DIR, `burn-${width}.png`), fullPage: width === 1280 });
+  await page.screenshot({ path: join(SHOT_DIR, `${process.env.SHOT_NAME || "burn"}-${width}.png`), fullPage: width === 1280 });
   console.log(`shot ${width}`);
   await page.close();
 }

@@ -30,6 +30,9 @@ import {
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
 import { VENDOR_SOURCES } from "../../../../lib/owner/receiptSources";
+import { closeHistory, monthToClose, ensureCloseReady } from "../../../../lib/owner/monthClose";
+import { noticeConfigured } from "../../../../lib/owner/ownerNotice";
+import { ownerEmails } from "../../../../lib/owner/emails";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,9 +58,24 @@ export async function GET(req: Request) {
      ever quietly rewriting the books. */
   const vault = await vaultHealth().catch(() => ({ unlinked: 0, duplicates: 0, linkable: 0 }));
 
+  /* Whether the books are closing themselves. Without this the page can say a month is
+     short but not whether anything is WATCHING for that, which is the difference between
+     a dashboard and something you can stop checking. */
+  await ensureCloseReady();
+
   return ok({
     matrix,
     vault,
+    close: {
+      /* The verdict per month, newest first: what the unattended job decided and when. */
+      history: closeHistory().slice(0, 6),
+      /* The month it is judging now, or null while the new one is still inside its grace
+         window and nothing can fairly be called missing yet. */
+      judging: monthToClose(),
+      /* Whether a verdict can actually reach anyone. A checker that cannot report is just
+         a log file. */
+      notice: { configured: noticeConfigured(), to: ownerEmails() },
+    },
     /* The month the books open on, so the page can say where it starts rather than
        leaving an accountant to wonder what happened to the months before it. */
     registerStart: REGISTER_START_MONTH,

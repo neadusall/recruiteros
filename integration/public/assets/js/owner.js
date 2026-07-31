@@ -685,6 +685,7 @@
       html += burnKpis(b);
       html += receiptKpis(rcptData);
       html += sweepAlert(rcptData);
+      html += closeWatch(rcptData);
       html += receiptAlerts(rcptData);
       html += receiptMatrix(rcptData);
       html += receiptGallery(rcptData);
@@ -1138,6 +1139,48 @@
        status, where the owner goes to fix it. */
     return '<div class="burn-alert" style="margin-top:16px"><div class="ba-title">No receipt can be read: the mailbox turned the pull away</div>' +
       '<p class="note">Until this is fixed the months below can only show the register\'s estimate, because nothing new is arriving to prove them.</p></div>';
+  }
+
+  /* Whether the books are closing themselves.
+
+     The rest of this page reports what IS; this one line reports that something is
+     watching it whether or not anyone opens the console. A monthly check that only runs
+     when someone remembers is not a check, so the state of the unattended job belongs on
+     the page next to the figures it is guarding. */
+  /* "today" / "yesterday" / "3 days ago": a date stamp makes the reader do arithmetic
+     to answer the only question they have, which is whether this ran recently. */
+  function ago(iso) {
+    if (!iso) return "never";
+    var days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    if (!isFinite(days) || days < 0) return "just now";
+    return days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago";
+  }
+
+  function closeWatch(d) {
+    var c = d && d.close;
+    if (!c) return "";
+    var last = (c.history || [])[0];
+    var line, cls;
+    if (!last) {
+      line = c.judging
+        ? "The books are checked every morning. " + monthLabelLong(c.judging) + " has not been judged yet."
+        : "The books are checked every morning. Last month is still inside its grace window, so nothing is called missing yet.";
+      cls = " warn";
+    } else if (last.state === "settled") {
+      line = monthLabelLong(last.period) + " closed with every charge proven by the vendor's own invoice. Checked " + ago(last.checkedAt) + ".";
+      cls = " ok";
+    } else if (last.state === "blocked") {
+      line = monthLabelLong(last.period) + " is not fully proven, and nothing is collecting the missing invoices. Reported " + (last.reportedAt ? ago(last.reportedAt) : "already") + " by email.";
+      cls = "";
+    } else {
+      line = monthLabelLong(last.period) + " is not fully proven yet. Collection is working, so it may still arrive on its own.";
+      cls = " warn";
+    }
+    var who = c.notice && c.notice.configured && (c.notice.to || []).length
+      ? "You are emailed at " + esc((c.notice.to || []).join(", ")) + " only when something needs you."
+      : "No email can be sent from here yet, so a problem would sit on this page unread.";
+    return '<div class="burn-alert' + cls + '" style="margin-top:16px"><div class="ba-title">' + esc(line) + '</div>' +
+      '<p class="note">' + who + '</p></div>';
   }
 
   function receiptAlerts(d) {
