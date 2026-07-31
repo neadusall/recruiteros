@@ -617,6 +617,10 @@ export interface SourcingRow {
 export function sourcingStatus(items: SpendItem[], receipts: Receipt[], pullers: PullerState[] = []): SourcingRow[] {
   const vendors = [...new Set(items.map((i) => i.vendor))];
   for (const r of receipts) if (!vendors.includes(r.vendor)) vendors.push(r.vendor);
+  /* A puller reporting on a vendor that is not in the register yet still has to show up.
+     Otherwise the one case that matters most, a vendor being paid that nothing is
+     collecting for, would be the one case invisible on this page. */
+  for (const p of pullers) if (!vendors.some((v) => v.toLowerCase() === p.vendor.toLowerCase())) vendors.push(p.vendor);
 
   const pullerByVendor = new Map(pullers.map((p) => [p.vendor.toLowerCase(), p]));
 
@@ -628,14 +632,19 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[], pullers:
     const apiCount = mine.filter((r) => r.source === "api").length;
     const portalCount = mine.filter((r) => r.source === "portal").length;
     const own = items.filter((i) => i.vendor === vendor);
-    const billed = own.some((i) => i.status === "active" && (i.amountUsd > 0 || i.billing === "metered" || i.needsAmount));
+    const pull = pullerRow(pullerByVendor.get(vendor.toLowerCase()));
+    /* A vendor a puller reports on is one we pay, whether or not the register lists it
+       yet, so its charges count as billed. Without this a vendor that is missing from the
+       register would be reported as "nothing is billed here", which is exactly backwards
+       when the reason there are no figures is that nothing is collecting them. */
+    const billed = own.some((i) => i.status === "active" && (i.amountUsd > 0 || i.billing === "metered" || i.needsAmount))
+      || Boolean(pull && ((pull.charges ?? 0) > 0 || !pull.ready));
     /* Bought outright: every live row for this vendor is a paid-once licence, so there is
        no recurring charge in existence to receipt. Checked FIRST, because "no receipt has
        ever arrived" is only a problem when something is actually being charged. */
     const live = own.filter((i) => i.status === "active");
     const lifetime = live.length > 0 && live.every((i) => i.lifetime);
 
-    const pull = pullerRow(pullerByVendor.get(vendor.toLowerCase()));
     /* A browser session is the answer when the vendor emails nothing at all, so email
        harvesting can never work for it, or when one has already been set up. */
     const pullerIsTheRoute = src?.channel === "portal_only" || Boolean(pull);
