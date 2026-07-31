@@ -817,6 +817,32 @@ export function classify(msg: MailMessage): { billing: boolean; reason?: string 
   return { billing: false, reason: "no billing signal in subject, sender or body" };
 }
 
+/**
+ * Is this vendor's name actually SAID in the message, as a word?
+ *
+ * ⚠️ THIS WAS A PLAIN `includes()` AND IT PUT PHANTOM CHARGES IN THE BOOKS. "aws" is a
+ * substring of draws, laws, saws and flaws; "resend" of "please resend"; "hume" of
+ * humectant. A marketing email full of the word "draws" was filed as an AWS invoice for
+ * $50,000, a Gusto payroll notice became a LinkedIn charge for $1,206.33, and a Wise
+ * email became AWS for $122. Every one of them then passed the relevance filter, because
+ * AWS and LinkedIn ARE real vendors here - the vendor was real, the charge was not.
+ *
+ * So: word boundaries, and a floor on how short a name may be before a body mention
+ * counts at all. A three-letter acronym in running text is not evidence of anything, and
+ * a vendor whose name is that short has to be identified by the sender domain or by the
+ * merchant name on a processor receipt, both of which are checked before this.
+ */
+const MIN_NAMED_LEN = 4;
+
+export function namedIn(hay: string, name: string): boolean {
+  const n = (name || "").trim().toLowerCase();
+  if (n.length < MIN_NAMED_LEN) return false;
+  const esc = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  /* \b does not fire next to a dot or a plus, so "serper.dev" and "sending.ac" would
+     never match with a bare \b on both ends. Anchor on a non-word character instead. */
+  return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(hay);
+}
+
 export interface VendorMatch {
   vendor: string;
   itemId?: string;
@@ -865,10 +891,10 @@ export function matchVendor(
     return { vendor: titleCase(named), processor, confidence: 0.55, matchedBy: `merchant "${named}", no register row` };
   }
 
-  const bySrc = VENDOR_SOURCES.find((s) => (s.merchant || []).some((mm) => hay.includes(mm)) || hay.includes(s.vendor.toLowerCase()));
+  const bySrc = VENDOR_SOURCES.find((s) => (s.merchant || []).some((mm) => namedIn(hay, mm)) || namedIn(hay, s.vendor));
   if (bySrc) return bind(bySrc.vendor, 0.7, `vendor named in the message`);
 
-  const byReg = items.find((i) => i.vendor.length > 3 && hay.includes(i.vendor.toLowerCase()));
+  const byReg = items.find((i) => namedIn(hay, i.vendor));
   if (byReg) return bind(byReg.vendor, 0.6, "register vendor named in the message");
 
   const fallback = domain.split(".").slice(-2)[0] || "Unknown";
@@ -1180,7 +1206,7 @@ async function importMessage(
      is not filed, and it is not silently dropped either: it comes back with its figures
      so the sweep can report it, because a vendor genuinely being paid and never
      registered is exactly what these books exist to catch. */
-  const rel = relevanceOf({ vendor: match.vendor, itemId: match.itemId }, items);
+  const rel = relevanceOf({ vendor: match.vendor, itemId: match.itemId, confidence: match.confidence }, items);
   if (!rel.ours && !filingUnknownVendors()) {
     return {
       status: "rejected", reason: rel.why, notOurs: true,
@@ -1648,7 +1674,7 @@ export async function purgeNotOurs(opts: { dryRun?: boolean } = {}): Promise<{
     if (r.source !== "email") continue;
     if (r.reviewed) continue;
     if (r.itemId) continue;
-    const rel = relevanceOf({ vendor: r.vendor, itemId: r.itemId }, items);
+    const rel = relevanceOf({ vendor: r.vendor, itemId: r.itemId, confidence: r.confidence }, items);
     if (rel.ours) continue;
     doomed.push({ id: r.id, vendor: r.vendor, amountUsd: r.amountUsd, chargedAt: r.chargedAt, from: r.from, why: rel.why });
   }

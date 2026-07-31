@@ -29,6 +29,14 @@ import { VENDOR_SOURCES } from "./receiptSources";
 
 const norm = (s: string) => (s || "").trim().toLowerCase();
 
+/**
+ * The confidence at which the vendor was identified by something OUTSIDE the message
+ * body: the sender's own domain (0.95), or the merchant named on a processor's receipt
+ * (0.85 to 0.9). Below this, matchVendor is telling you it found the name in running
+ * text, which is a guess and not evidence of who was paid.
+ */
+const NAMED_BY_SENDER = 0.85;
+
 /** Vendors the platform is catalogued as running on, whether or not they are priced. */
 let catalogued: Set<string> | null = null;
 function cataloguedVendors(): Set<string> {
@@ -56,13 +64,26 @@ export interface Relevance {
  * a wrong answer surfaces as an unattached charge instead of as silent inclusion.
  */
 export function relevanceOf(
-  charge: { vendor: string; itemId?: string },
+  charge: { vendor: string; itemId?: string; confidence?: number },
   items: SpendItem[],
 ): Relevance {
   if (charge.itemId) return { ours: true, why: "it pays a line on the register" };
 
   const v = norm(charge.vendor);
   if (!v) return { ours: false, why: "the charge names no vendor" };
+
+  /* ⚠️ HOW THE VENDOR WAS IDENTIFIED MATTERS AS MUCH AS WHICH VENDOR IT IS.
+     matchVendor scores its evidence: the sender's own domain is 0.95, a merchant named
+     on a processor receipt 0.85 to 0.9, and a name merely APPEARING SOMEWHERE IN THE
+     BODY is 0.6 to 0.7. That last one is a guess, and letting a guess through here is
+     what put a $50,000 marketing email in the books as AWS and a Gusto payroll notice in
+     as LinkedIn: the vendor was a real vendor, so "is this one of ours" answered yes,
+     and the charge was still fiction.
+     A vendor is only vouched for by NAME when something outside the body said so. */
+  const evidenced = charge.confidence === undefined || charge.confidence >= NAMED_BY_SENDER;
+  if (!evidenced) {
+    return { ours: false, why: `nothing but the body of the message says this is ${charge.vendor}` };
+  }
 
   if (cataloguedVendors().has(v)) return { ours: true, why: "a vendor the platform runs on" };
 
