@@ -265,20 +265,15 @@ const SEED: SeedItem[] = [
 
   /* ---- Infrastructure ---- */
   {
-    vendor: "Hetzner", label: "App server (ubuntu-8gb-ash-1, CCX13)", category: "infra", billing: "monthly",
+    // ONE line for every Hetzner box, by owner decision (2026-07-31): Hetzner bills the
+    // whole project on a single monthly invoice, so splitting it per box invented a
+    // reconciliation problem (three rows, one receipt, no way to prove any of them) in
+    // exchange for detail nobody was buying separately. Server cost is server cost.
+    vendor: "Hetzner", label: "Servers (all boxes)", category: "infra", billing: "monthly",
     amountUsd: 0, needsAmount: true, at: "2026-06-02", status: "active",
-    purpose: "Runs the portal, the API, Postgres, Caddy, OS Text and every worker container.",
-    impact: "The product. Everything the business sells runs on this one box.",
-  },
-  {
-    vendor: "Hetzner", label: "Sourcing worker (recruiteros-worker-2, CPX11)", category: "infra", billing: "monthly",
-    amountUsd: 0, needsAmount: true, at: "2026-06-02", status: "active",
-    purpose: "Self-sourcing worker box.",
-  },
-  {
-    vendor: "Hetzner", label: "Scraper fleet (5 boxes)", category: "infra", billing: "monthly",
-    amountUsd: 0, needsAmount: true, at: "2026-06-10", status: "active",
-    purpose: "Rotated-IP scraper fleet. Free name-discovery is rate-limited per IP, so these are currently low-yield.",
+    purpose: "All server cost in one line: the app server, the sourcing worker and the scraper fleet, on a single monthly invoice.",
+    impact: "The product itself. Everything the business sells runs on these boxes, so this is the fixed cost of being switched on rather than a line to trade against volume.",
+    notes: "Combined from three per-box rows on 2026-07-31, at the owner's direction. Covers the app server (ubuntu-8gb-ash-1, CCX13: portal, API, Postgres, Caddy, OS Text and every worker container), the sourcing worker (recruiteros-worker-2, CPX11) and the 5-box rotated-IP scraper fleet. Hetzner invoices all of them together, so one receipt now reconciles against one row instead of needing a guessed split across three.",
   },
   {
     vendor: "RackNerd", label: "Mailcow mail server (8GB)", category: "email", billing: "monthly",
@@ -307,7 +302,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 3;
+const SEED_VERSION = 4;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -333,6 +328,30 @@ const SEED_CORRECTIONS: Array<{ vendor: string; label: string; patch: Partial<Sp
     // confirmed (2026-07-31) the Mailcow box is billed MONTHLY.
     vendor: "RackNerd", label: "Mailcow mail server (8GB)",
     patch: { billing: "monthly" },
+  },
+];
+
+/**
+ * Rows that were seeded SEPARATELY but should have been ONE line, folded together once on
+ * a version bump. Different from a correction: a correction rewrites a row in place, a
+ * merge deletes rows from the live store, so it only ever runs against rows this seed put
+ * there and it carries their money forward rather than dropping it.
+ *
+ * First case: the three Hetzner boxes (owner, 2026-07-31, "just server cost"). Hetzner
+ * bills all of them on ONE monthly invoice, so three rows could never be reconciled
+ * against it individually and every per-box figure would have been a guess at a split.
+ */
+const SEED_MERGES: Array<{
+  into: { vendor: string; label: string };
+  from: Array<{ vendor: string; label: string }>;
+}> = [
+  {
+    into: { vendor: "Hetzner", label: "Servers (all boxes)" },
+    from: [
+      { vendor: "Hetzner", label: "App server (ubuntu-8gb-ash-1, CCX13)" },
+      { vendor: "Hetzner", label: "Sourcing worker (recruiteros-worker-2, CPX11)" },
+      { vendor: "Hetzner", label: "Scraper fleet (5 boxes)" },
+    ],
   },
 ];
 
@@ -372,8 +391,44 @@ function applySeed(): void {
     if (!item || !item.seeded || item.verified) continue;
     Object.assign(item, c.patch, { updatedAt: nowIso() });
   }
+  store.items = mergeSeedRows(store.items);
   store.seededVersion = SEED_VERSION;
   persist();
+}
+
+/** Fold the old per-item rows into the single row that replaced them, then drop them.
+ *  Money is carried forward, never dropped: if the owner had priced the separate rows, the
+ *  merged row inherits their total, so the burn figure cannot quietly fall on a redeploy.
+ *  A figure already sitting on the merged row wins over anything folded in.
+ *  Pure and exported so the fold can be pinned by scripts/test-spend-merge.mts. */
+export function mergeSeedRows(items: SpendItem[], merges: typeof SEED_MERGES = SEED_MERGES): SpendItem[] {
+  let out = items.slice();
+  for (const m of merges) {
+    const target = out.find((i) => key(i.vendor, i.label) === key(m.into.vendor, m.into.label));
+    if (!target) continue;
+    const sources = m.from
+      .map((f) => out.find((i) => key(i.vendor, i.label) === key(f.vendor, f.label)))
+      .filter((i): i is SpendItem => Boolean(i) && i !== target);
+    if (!sources.length) continue;
+
+    const priced = sources.filter((s) => Number(s.amountUsd) > 0);
+    if (priced.length && !(Number(target.amountUsd) > 0)) {
+      target.amountUsd = round2(priced.reduce((t, s) => t + Number(s.amountUsd || 0), 0));
+      target.needsAmount = false;
+      // Only as proven as the weakest figure that went into it.
+      target.verified = priced.every((s) => s.verified === true);
+    }
+    // Oldest start date wins: the spend started when the FIRST of these boxes was bought.
+    const earliest = sources.map((s) => s.at).filter(Boolean).sort()[0];
+    if (earliest && (!target.at || earliest < target.at)) target.at = earliest;
+    // Nothing left running means nothing left to pay for.
+    if (sources.every((s) => s.status === "cancelled")) target.status = "cancelled";
+
+    const gone = new Set(sources.map((s) => s.id));
+    out = out.filter((i) => !gone.has(i.id));
+    target.updatedAt = nowIso();
+  }
+  return out;
 }
 function key(vendor: string, label: string): string {
   return (vendor + "|" + label).toLowerCase();
