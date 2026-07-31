@@ -17,6 +17,8 @@ const { listReceipts, billingMailboxes, pullerStates, lastPullerReportAt, lastSw
 const { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } = await import("../lib/owner/spendMatrix");
 const { VENDOR_SOURCES } = await import("../lib/owner/receiptSources");
 const { spendRollup } = await import("../lib/billing/ledger");
+const { receiptRouting } = await import("../lib/owner/mailRoutes");
+const { listVault } = await import("../lib/owner/vault");
 
 const base = await listSpendItems();
 const items = await attachLive(base, "30d");
@@ -46,6 +48,10 @@ const RECEIPTS = {
     envKeys: ["BILLING_INBOX_USER"],
   },
   knownVendors: VENDOR_SOURCES.map((v) => ({ vendor: v.vendor, channel: v.channel, portal: v.portal, from: v.from })),
+  /* Which mailbox holds which vendor's receipts. With no DB the vault seeds itself from
+     the catalogue, so this shoots real vendor names and real addresses with no password
+     anywhere near it; BILLING_INBOX_USER decides which mailbox is being read. */
+  routing: receiptRouting({ entries: await listVault(), mailboxes: boxes, receipts: all }),
 };
 
 const MIME: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".json": "application/json" };

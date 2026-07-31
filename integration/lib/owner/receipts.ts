@@ -36,6 +36,7 @@ import {
   vendorSourceFor, type VendorSource,
 } from "./receiptSources";
 import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge } from "./receiptMatch";
+import { pullEmailDocument, type FetchedDocument, type PullResult } from "./receiptLinks";
 
 /* ============================ types ============================ */
 
@@ -78,6 +79,23 @@ export interface Receipt {
   fileName?: string;
   fileMime?: string;
   fileBytes?: number;
+  /**
+   * When the vendor did not attach the document but linked to it, the link that was
+   * followed to get it. Kept so the same invoice can be opened again at the source, and
+   * so a vendor whose link shape changes can be found and fixed.
+   */
+  documentUrl?: string;
+  /** Which of the link shapes it turned out to be ("Stripe hosted invoice", …). */
+  documentVia?: string;
+  /** Why no document could be fetched, when the message linked to one and it failed. */
+  documentError?: string;
+  /** What the card was charged, when prepaid credit made that less than the cost. */
+  amountPaidUsd?: number;
+  creditAppliedUsd?: number;
+  /** Recurring or one-off, read off the invoice rather than inferred from the wording. */
+  cadence?: "recurring" | "one_time" | "mixed";
+  recurringUsd?: number;
+  oneTimeUsd?: number;
   /** A PNG of the receipt exists on disk (id.png) — this is what the console shows. */
   hasShot?: boolean;
   shotError?: string;
@@ -112,6 +130,10 @@ export interface SweepReport {
   unparsedAmount: number;
   shotsRendered: number;
   shotFailures: number;
+  /** Documents fetched from a link in the message rather than an attachment. */
+  documentsLinked: number;
+  /** Messages that linked to a document which could not be fetched, with the reason. */
+  documentFailures: Array<{ subject: string; from: string; reason: string }>;
   /** Messages that looked like billing but could not be turned into a row, with why. */
   rejects: Array<{ subject: string; from: string; date: string; reason: string }>;
 }
@@ -921,11 +943,17 @@ function mailboxError(e: unknown, cfg: MailboxCfg): string {
  * write access, so nothing is deleted and nothing is marked read. Safe to re-run, which is
  * what makes backfilling two months of history a button rather than a project.
  */
-export async function harvestMailbox(cfg: MailboxCfg, since: Date, opts: { renderShots?: boolean } = {}): Promise<SweepReport> {
+export async function harvestMailbox(
+  cfg: MailboxCfg,
+  since: Date,
+  /** `followLinks: false` reads attachments only — a dry, offline sweep. */
+  opts: { renderShots?: boolean; followLinks?: boolean } = {},
+): Promise<SweepReport> {
   const report: SweepReport = {
     at: nowIso(), mailbox: cfg.user, ok: false, since: since.toISOString().slice(0, 10),
     scanned: 0, billingCandidates: 0, imported: 0, duplicates: 0, skippedNotCharge: 0,
-    unparsedAmount: 0, shotsRendered: 0, shotFailures: 0, rejects: [],
+    unparsedAmount: 0, shotsRendered: 0, shotFailures: 0,
+    documentsLinked: 0, documentFailures: [], rejects: [],
   };
   await ensureReceiptsReady();
   const items = await listSpendItems();
@@ -964,8 +992,21 @@ export async function harvestMailbox(cfg: MailboxCfg, since: Date, opts: { rende
           const c = classify(mm);
           if (!c.billing) { report.skippedNotCharge += 1; continue; }
           report.billingCandidates += 1;
-          const res = await importMessage(mm, items, cfg.user, { renderShot: opts.renderShots !== false });
-          if (res.status === "imported") { report.imported += 1; if (res.shot) report.shotsRendered += 1; if (res.shotError) report.shotFailures += 1; }
+          const res = await importMessage(mm, items, cfg.user, {
+            renderShot: opts.renderShots !== false,
+            followLinks: opts.followLinks,
+          });
+          /* A link that failed is worth reporting whatever became of the message: a
+             receipt filed from body text alone still has no invoice behind it. */
+          if (res.documentError && report.documentFailures.length < 20) {
+            report.documentFailures.push({ subject: mm.subject.slice(0, 120), from: mm.from, reason: res.documentError });
+          }
+          if (res.status === "imported") {
+            report.imported += 1;
+            if (res.linked) report.documentsLinked += 1;
+            if (res.shot) report.shotsRendered += 1;
+            if (res.shotError) report.shotFailures += 1;
+          }
           else if (res.status === "duplicate") report.duplicates += 1;
           else {
             if (res.reason?.includes("amount")) report.unparsedAmount += 1;
@@ -997,20 +1038,75 @@ async function importMessage(
   mm: MailMessage,
   items: SpendItem[],
   mailbox: string,
-  opts: { renderShot: boolean },
-): Promise<{ status: "imported" | "duplicate" | "rejected"; reason?: string; shot?: boolean; shotError?: string }> {
+  opts: { renderShot: boolean; followLinks?: boolean },
+): Promise<{
+  status: "imported" | "duplicate" | "rejected";
+  reason?: string;
+  shot?: boolean;
+  shotError?: string;
+  /** A document was fetched from a link rather than an attachment. */
+  linked?: boolean;
+  /** The message linked to a document and it could not be fetched. */
+  documentError?: string;
+}> {
   const bodyText = mm.text || stripHtml(mm.html || "");
   const pdf = mm.attachments.find((a) => a.contentType.includes("pdf") || /\.pdf$/i.test(a.filename));
   const image = mm.attachments.find((a) => a.contentType.startsWith("image/") && !/^image\/(gif)$/.test(a.contentType) && (a.content?.length || 0) > 8_000);
 
+  /* MOST VENDORS LINK TO THE DOCUMENT RATHER THAN ATTACHING IT. When nothing is
+     attached, follow the "View invoice" / "Download receipt" button and fetch what a
+     person clicking it would have got. That link is its own credential, which is why
+     this needs no password and works for vendors nobody has a portal session with.
+     Skipped entirely when an attachment is present: the vendor's own attached file is
+     already the best answer, and a network round trip for it would be waste. */
+  let linked: FetchedDocument | undefined;
+  let documentError: string | undefined;
+  if (!pdf && !image && opts.followLinks !== false) {
+    const pull: PullResult = await pullEmailDocument({ html: mm.html, text: bodyText }).catch((e) => ({
+      attempts: [], skipped: 0, reason: (e as Error)?.message?.slice(0, 200) || "the link could not be followed",
+    }));
+    linked = pull.document;
+    /* A message that links to nothing is ordinary and silent. A message that linked to
+       something which then failed is a fault, and it is reported so the shape can be
+       fixed rather than the vendor looking like it never billed. */
+    if (!linked && pull.attempts.length) documentError = pull.reason;
+  }
+
+  /** The document behind this receipt, whether it arrived attached or was fetched. */
+  const docPdf = pdf?.content || (linked?.mime === "application/pdf" ? linked.bytes : undefined);
+  const docImage = image
+    ? { bytes: image.content, mime: image.contentType }
+    : linked && linked.mime.startsWith("image/") ? { bytes: linked.bytes, mime: linked.mime } : undefined;
+
   let parsed = parseReceiptText(bodyText);
   // Some vendors send an empty body and put everything in the PDF.
-  if ((!parsed || !parsed.amountUsd) && pdf) {
-    const pdfText = await pdfToText(pdf.content).catch(() => "");
+  if ((!parsed || !parsed.amountUsd) && docPdf) {
+    const pdfText = await pdfToText(docPdf).catch(() => "");
     if (pdfText) parsed = parseReceiptText(pdfText) || parsed;
   }
+
+  /* WHAT STRIPE STATED BEATS WHAT THE EMAIL SAID. A hosted invoice names its own
+     number, total, payment date and — per line — whether that line recurs. Read off the
+     invoice those are facts; read out of the covering email they are a guess at best,
+     and a marketing line like "you saved $50" is exactly the kind of number a text
+     parser picks up by mistake. It is also the only way to know a one-off purchase is
+     one, which is what keeps it out of the monthly run rate. */
+  const st = linked?.stripe;
+  if (st && (st.amountUsd || 0) > 0) {
+    parsed = {
+      amount: st.amountUsd!, currency: st.currency || "USD", amountUsd: st.amountUsd!, approxFx: false,
+      chargedAt: st.paidOn || parsed?.chargedAt,
+      period: (st.paidOn || parsed?.chargedAt || "").slice(0, 7) || parsed?.period,
+      invoiceNumber: st.invoiceNumber || parsed?.invoiceNumber,
+      description: parsed?.description,
+      kind: "charge",
+      lines: parsed?.lines || [],
+    };
+  }
+
   if (!parsed || !(parsed.amountUsd > 0)) {
-    return { status: "rejected", reason: "no amount could be read from the message or its attachment" };
+    const why = documentError ? `; the document it links to could not be read (${documentError})` : "";
+    return { status: "rejected", reason: `no amount could be read from the message or its attachment${why}`, documentError };
   }
 
   const chargedAt = parsed.chargedAt || mm.date.slice(0, 10);
@@ -1028,18 +1124,26 @@ async function importMessage(
   const id = rid("rcpt");
   let hasShot = false, shotError: string | undefined;
   if (opts.renderShot) {
+    /* The document wins over the email that carried it: the picture on file should be
+       the vendor's invoice, not a screenshot of a covering note with a button on it. */
     const shot = await renderShot(id, {
-      image: image ? { bytes: image.content, mime: image.contentType } : undefined,
-      pdf: !image && pdf ? pdf.content : undefined,
-      html: !image && !pdf ? mm.html : undefined,
-      text: !image && !pdf && !mm.html ? bodyText : undefined,
+      image: docImage,
+      pdf: !docImage && docPdf ? docPdf : undefined,
+      html: !docImage && !docPdf ? mm.html : undefined,
+      text: !docImage && !docPdf && !mm.html ? bodyText : undefined,
     });
     hasShot = shot.ok;
     shotError = shot.error;
-    // Keep the original artifact too, so the PDF can be opened as the vendor sent it.
-    const src = image || pdf;
+    // Keep the original artifact too, so the PDF can be opened as the vendor issued it.
+    const src = image || pdf
+      ? { content: (image || pdf)!.content, contentType: (image || pdf)!.contentType, filename: (image || pdf)!.filename }
+      : linked
+        ? { content: linked.bytes, contentType: linked.mime, filename: linked.fileName }
+        : null;
     if (src) await saveArtifact(id, `src.${extFromMime(src.contentType, src.filename)}`, src.content).catch(() => {});
   }
+
+  const attached = image || pdf;
 
   const r: Receipt = {
     id, period, vendor: match.vendor, itemId: match.itemId,
@@ -1051,9 +1155,19 @@ async function importMessage(
     chargedAt, kind: parsed.kind, source: "email",
     mailbox, messageId: mm.messageId, subject: mm.subject.slice(0, 200), from: mm.from,
     processor: match.processor,
-    fileName: (image || pdf)?.filename,
-    fileMime: (image || pdf)?.contentType,
-    fileBytes: (image || pdf)?.content?.length,
+    fileName: attached?.filename || linked?.fileName,
+    fileMime: attached?.contentType || linked?.mime,
+    fileBytes: attached?.content?.length || linked?.bytes.length,
+    documentUrl: linked?.url,
+    documentVia: linked?.via,
+    documentError,
+    /* The card figure and the cost differ when prepaid credit covered part of the bill,
+       and the register wants the cost. Both are kept so a bank statement still ties out. */
+    amountPaidUsd: st?.amountPaidUsd,
+    creditAppliedUsd: st?.creditAppliedUsd,
+    cadence: st?.cadence,
+    recurringUsd: st?.recurringUsd ?? undefined,
+    oneTimeUsd: st?.oneTimeUsd ?? undefined,
     hasShot, shotError, shotVersion: hasShot ? SHOT_VERSION : undefined,
     excerpt: bodyText.replace(/\n{3,}/g, "\n\n").slice(0, 1200),
     confidence: Math.min(1, match.confidence * (parsed.approxFx ? 0.9 : 1)),
@@ -1062,7 +1176,7 @@ async function importMessage(
   };
   store.receipts.push(r);
   persist();
-  return { status: "imported", shot: hasShot, shotError };
+  return { status: "imported", shot: hasShot, shotError, linked: !!linked, documentError };
 }
 
 function fingerprintOf(r: Receipt): string {
@@ -1615,7 +1729,8 @@ export async function harvestAll(monthsBack = 3): Promise<{ ok: boolean; reason?
       reports.push(await harvestMailbox(box, since).catch((e: Error) => ({
         at: nowIso(), mailbox: box.user, ok: false, error: e?.message?.slice(0, 300) || "sweep failed",
         since: since.toISOString().slice(0, 10), scanned: 0, billingCandidates: 0, imported: 0,
-        duplicates: 0, skippedNotCharge: 0, unparsedAmount: 0, shotsRendered: 0, shotFailures: 0, rejects: [],
+        duplicates: 0, skippedNotCharge: 0, unparsedAmount: 0, shotsRendered: 0, shotFailures: 0,
+        documentsLinked: 0, documentFailures: [], rejects: [],
       })));
     }
   } finally {

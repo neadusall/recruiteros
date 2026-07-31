@@ -33,6 +33,12 @@ export interface CatalogEntry {
   used_for: string;
   /** Account identity already on record in the repo/runbooks. Blank = fill it in. */
   username?: string;
+  /**
+   * The mailbox this vendor's receipts arrive in, when it is known to be different from
+   * the sign-in username. Seeded only where it is actually known; everywhere else the
+   * owner fills it in once and the receipt harvester follows it (see ./mailRoutes).
+   */
+  billingEmail?: string;
   /** Which account, when there is more than one with the same vendor. */
   account?: string;
   /** Anything that makes signing in or recovering the account non-obvious. */

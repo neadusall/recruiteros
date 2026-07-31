@@ -1236,6 +1236,73 @@
      a month from passing unreported. */
   /* A pull that cannot sign in is the one failure that stops every receipt at once, so it
      is said at the top rather than left as a line inside the sourcing panel. */
+  /**
+   * Which mailbox holds which vendor's receipts.
+   *
+   * Every vendor here mails its invoice SOMEWHERE. Until this panel existed a blank cell
+   * meant four different things at once — the vendor did not charge, or it charged and
+   * mailed an address nobody reads, or nobody had said which address it uses, or no
+   * mailbox was connected at all — and only one of those is "nothing to do". Each row
+   * now carries the one thing that would fix it.
+   *
+   * Vendors that are already collecting are folded away. A working row is not a task,
+   * and forty of them buried the four that were.
+   */
+  function mailRouting(d) {
+    var r = d && d.routing;
+    if (!r || !r.routes || !r.routes.length) return "";
+
+    var todo = r.routes.filter(function (x) {
+      return x.status === "unswept" || x.status === "no_email" || x.status === "no_mailbox";
+    });
+    var live = r.routes.filter(function (x) { return x.status === "collecting"; });
+    var ready = r.routes.filter(function (x) { return x.status === "covered"; });
+
+    var head = !r.mailboxes.length
+      ? "No mailbox is connected, so no vendor can report by email"
+      : todo.length
+        ? todo.length + " vendor" + (todo.length === 1 ? "'s receipts are" : "s' receipts are") + " not reachable from any mailbox being read"
+        : "Every vendor's receipts land in a mailbox being read";
+    var cls = !r.mailboxes.length ? "" : todo.length ? " warn" : " ok";
+
+    var html = '<div class="burn-alert' + cls + '" style="margin:10px 0"><div class="ba-title">' + esc(head) + '</div>' +
+      '<p class="note">Email is the only collection route that needs no password, cannot be blocked by a captcha and covers vendors with no portal session. ' +
+      live.length + ' vendor' + (live.length === 1 ? ' is' : 's are') + ' already producing receipts this way' +
+      (ready.length
+        ? ', and ' + ready.length + (ready.length === 1 ? ' more bills' : ' more bill') + ' a mailbox being read but ' +
+          (ready.length === 1 ? 'has' : 'have') + ' not been heard from yet'
+        : '') + '.</p>';
+
+    if (r.mailboxes.length) {
+      html += '<p class="note">Reading ' + r.mailboxes.map(function (m) {
+        return '<span class="mono">' + esc(m.user) + '</span> (' + m.vendors + ' vendor' + (m.vendors === 1 ? '' : 's') + ')' +
+          (m.inherited ? ' <span class="dim">(borrowed from the resume inbox)</span>' : '');
+      }).join(", ") + '.</p>';
+    }
+    html += '</div>';
+
+    if (!todo.length) return html;
+
+    html += '<div class="otable-wrap"><table class="otable route-table"><thead><tr>' +
+      '<th>Vendor</th><th>Receipts arrive at</th><th>Read by</th><th>What is needed</th>' +
+      '</tr></thead><tbody>';
+    todo.forEach(function (x) {
+      var pill = x.status === "unswept" ? '<span class="pill dead">Nobody reads it</span>'
+        : x.status === "no_email" ? '<span class="pill needs">No address on file</span>'
+        : '<span class="pill dead">No mailbox</span>';
+      html += '<tr><td><div class="lr-main">' + esc(x.vendor) + '</div>' + pill + '</td>' +
+        '<td data-l="Bills">' + (x.email
+          ? '<span class="mono">' + esc(x.email) + '</span>' +
+            (x.emailFrom === "username" ? '<div class="note" style="font-size:11px">taken from the sign-in username</div>' : '')
+          : '<span class="note" style="margin:0">not set</span>') + '</td>' +
+        '<td data-l="Read by">' + (x.mailbox ? '<span class="mono">' + esc(x.mailbox) + '</span>' : '<span class="note" style="margin:0">no mailbox</span>') + '</td>' +
+        '<td data-l="To fix"><div class="lr-sub">' + esc(x.fix || "") + '</div>' +
+        (x.accountId ? '<a class="vault-mini" href="#passwords">Open in Passwords</a>' : '') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    return html;
+  }
+
   function sweepAlert(d) {
     var sweep = d && d.inbox && (d.inbox.sweeps || [])[0];
     if (!sweep || sweep.ok) return "";
@@ -1527,10 +1594,23 @@
         (inbox.lastSweepAt ? 'Last pull ' + esc(fmtDate(inbox.lastSweepAt)) + '. ' : 'No pull has run yet. ') +
         (sweep
           ? (sweep.ok
-            ? 'Scanned ' + sweep.scanned + ' messages back to ' + esc(sweep.since) + ': ' + sweep.imported + ' receipts imported, ' + sweep.duplicates + ' already on file, ' + sweep.shotFailures + ' images failed.'
+            ? 'Scanned ' + sweep.scanned + ' messages back to ' + esc(sweep.since) + ': ' + sweep.imported + ' receipts imported, ' +
+              (sweep.documentsLinked ? sweep.documentsLinked + ' of them fetched from a link in the message, ' : '') +
+              sweep.duplicates + ' already on file, ' + sweep.shotFailures + ' images failed.'
             : '<span class="bad-t">Last pull failed: ' + esc(sweep.error || "unknown error") + '</span>')
           : "") +
         '</p>';
+      /* A message that linked to a document which then failed is a different thing from
+         a message that linked to nothing: the vendor IS publishing an invoice and it is
+         not being collected, which is fixable and would otherwise be invisible. */
+      if (sweep && sweep.documentFailures && sweep.documentFailures.length) {
+        html += '<div class="rc-rejects"><p class="note">' + sweep.documentFailures.length +
+          ' message' + (sweep.documentFailures.length === 1 ? '' : 's') + ' linked to an invoice that could not be fetched</p><ul>';
+        sweep.documentFailures.forEach(function (r) {
+          html += '<li><strong>' + esc(r.subject) + '</strong> <span class="note">' + esc(r.from) + ' · ' + esc(r.reason) + '</span></li>';
+        });
+        html += '</ul></div>';
+      }
       if (sweep && sweep.rejects && sweep.rejects.length) {
         html += '<div class="rc-rejects"><p class="note">' + sweep.rejects.length + ' billing-looking messages were not imported</p><ul>';
         sweep.rejects.forEach(function (r) {
@@ -1543,6 +1623,8 @@
       }
       html += '</div></details>';
     }
+
+    html += mailRouting(d);
 
     var rows = d.sourcing || [];
 
@@ -2841,7 +2923,7 @@
     if (vaultFilter.cat && e.category !== vaultFilter.cat) return false;
     var q = vaultFilter.q.trim().toLowerCase();
     if (!q) return true;
-    return [e.service, e.url, e.username, e.account, e.used_for, e.notes, e.envKey]
+    return [e.service, e.url, e.username, e.billingEmail, e.account, e.used_for, e.notes, e.envKey]
       .join(" ").toLowerCase().indexOf(q) >= 0;
   }
 
@@ -2863,8 +2945,11 @@
 
     var html = "";
     Object.keys(byCat).forEach(function (cat) {
+      /* Six columns is past what a laptop fits, and without a scrolling container the
+         table simply ran off the right edge and took Edit/Delete with it. The wrap keeps
+         the overflow inside the card instead of on the page. */
       html += '<div class="card" style="margin-top:14px"><h3>' + esc(cat) + '</h3>' +
-        '<table class="otable vault-table"><thead><tr>' +
+        '<div class="otable-wrap"><table class="otable vault-table"><thead><tr>' +
         '<th class="vault-pick"><input type="checkbox" class="vault-box" data-pickall="1" title="Select every account in this group"></th>' +
         '<th>Service</th><th>Sign-in URL</th><th>Username / email</th><th>Password</th><th></th>' +
         '</tr></thead><tbody>';
@@ -2879,13 +2964,13 @@
           '<td data-l="Sign-in URL"><a class="vault-link" href="' + esc(e.url) + '" target="_blank" rel="noopener" title="' + esc(e.url) + '">' + esc(prettyUrl(e.url)) + '</a></td>' +
           '<td data-l="Username"><span>' + (e.username
             ? '<span class="mono vault-user">' + esc(e.username) + '</span><div class="vault-acts"><a class="vault-mini" data-copy="' + esc(e.username) + '">Copy</a></div>'
-            : '<span class="note" style="margin:0">not set</span>') + '</span></td>' +
+            : '<span class="note" style="margin:0">not set</span>') + vaultBillCell(e) + '</span></td>' +
           '<td class="vault-pw" data-l="Password" data-pwcell="' + esc(e.id) + '">' + vaultPwCell(e) + '</td>' +
           '<td class="num"><a class="vault-mini" data-edit="' + esc(e.id) + '">Edit</a>' +
             '<a class="vault-mini danger" data-del="' + esc(e.id) + '">Delete</a></td>' +
           '</tr>';
       });
-      html += '</tbody></table></div>';
+      html += '</tbody></table></div></div>';
     });
     $("#vaultRows").innerHTML = html;
 
@@ -2967,6 +3052,27 @@
     });
   }
 
+  /**
+   * The mailbox this vendor sends its receipts to, shown under the sign-in identity
+   * rather than in a column of its own: at six columns the table ran off the right edge
+   * and took Edit and Delete with it, and the two are the same address on nine tenths of
+   * these accounts anyway.
+   *
+   * So nothing is said when the username already IS that address — repeating it would
+   * double the length of the table to state the obvious. A line appears only when the
+   * answer is genuinely different, and a prompt only where the account signs in with a
+   * handle rather than an address, which is the row that really needs the owner.
+   */
+  function vaultBillCell(e) {
+    var stated = e.billingEmail || "";
+    var user = e.username || "";
+    if (stated && stated.toLowerCase() !== user.toLowerCase()) {
+      return '<div class="vault-sub dim">Receipts arrive at <span class="mono">' + esc(stated) + '</span></div>';
+    }
+    if (stated || user.indexOf("@") > 0) return "";
+    return '<div class="vault-sub"><a class="vault-mini" data-edit="' + esc(e.id) + '">Add the receipt address</a></div>';
+  }
+
   function vaultPwCell(e) {
     if (e.locked) return '<span class="pill susp">Locked</span>';
     if (!e.hasSecret) return '<span class="note" style="margin:0">not set</span>';
@@ -3037,6 +3143,8 @@
     }).join("") + '</select>');
     html += fld("Sign-in URL", '<input id="vfUrl" value="' + esc(e ? e.url : "") + '" placeholder="https://…">');
     html += fld("Username / email", '<input id="vfUser" value="' + esc(e ? e.username : "") + '" autocomplete="off">');
+    html += fld("Receipts arrive at", '<input id="vfBill" value="' + esc(e && e.billingEmail ? e.billingEmail : "") + '" autocomplete="off" placeholder="' +
+      (e && e.username && e.username.indexOf("@") > 0 ? esc(e.username) + " (same as the username)" : "the mailbox this vendor bills") + '">');
     html += fld("Password", '<input id="vfPw" type="password" autocomplete="new-password" placeholder="' +
       (e && e.hasSecret ? "Stored. Type to replace it" : "Not set") + '">');
     html += fld("Account label", '<input id="vfAccount" value="' + esc(e && e.account ? e.account : "") + '" placeholder="Which account, when there is more than one">');
@@ -3074,6 +3182,7 @@
       category: $("#vfCat").value,
       url: $("#vfUrl").value.trim(),
       username: $("#vfUser").value.trim(),
+      billingEmail: $("#vfBill").value.trim(),
       account: $("#vfAccount").value.trim(),
       mfa: $("#vfMfa").value.trim(),
       envKey: $("#vfEnv").value.trim(),

@@ -38,6 +38,11 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypt
 import { nowIso, rid } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 import { VAULT_CATALOG, type CatalogCategory } from "./vaultCatalog";
+/* One definition of "which address does this vendor bill", shared with the harvester.
+   Two copies of that rule is how the same account ends up covered in one view and
+   missing in another. mailRoutes imports only TYPES back from here, so there is no
+   runtime cycle. */
+import { receiptEmailFor } from "./mailRoutes";
 
 /* ---------------- shape ---------------- */
 
@@ -50,6 +55,17 @@ export interface VaultEntry {
   /** Where you sign in. */
   url: string;
   username: string;
+  /**
+   * The mailbox this vendor sends its receipts to.
+   *
+   * Usually the same address as `username`, and it defaults to it when that is an email,
+   * but the two are genuinely different things and conflating them loses receipts: a
+   * RackNerd client area signs in as `vmuser346309`, an AWS root account signs in as an
+   * account number, and several vendors here bill an address nobody signs in with. This
+   * is the one the receipt lands in, and it is what the harvester uses to work out which
+   * mailbox to open for which vendor — see ./mailRoutes.
+   */
+  billingEmail?: string;
   /** Which account, when a vendor holds more than one. */
   account?: string;
   /** What breaks without it (seeded from the catalogue, editable). */
@@ -165,6 +181,12 @@ function seedMissing(): number {
       category: c.category,
       url: c.url,
       username: c.username || "",
+      /* Left blank unless the catalogue names one: an address guessed from a sign-in
+         handle would look like a settled answer and quietly send the harvester to the
+         wrong mailbox. `receiptEmailFor` falls back to the username when it IS an email,
+         and reports the gap when it is not, which is the honest version of the same
+         convenience. */
+      billingEmail: c.billingEmail,
       account: c.account,
       used_for: c.used_for,
       notes: c.notes,
@@ -261,6 +283,7 @@ export interface VaultPatch {
   category?: string;
   url?: string;
   username?: string;
+  billingEmail?: string;
   account?: string;
   used_for?: string;
   notes?: string;
@@ -270,7 +293,7 @@ export interface VaultPatch {
   password?: string;
 }
 
-const FIELDS: Array<keyof VaultPatch> = ["service", "category", "url", "username", "account", "used_for", "notes", "mfa", "envKey"];
+const FIELDS: Array<keyof VaultPatch> = ["service", "category", "url", "username", "billingEmail", "account", "used_for", "notes", "mfa", "envKey"];
 
 export async function upsertEntry(id: string | undefined, patch: VaultPatch): Promise<{ ok: boolean; entry?: SafeEntry; error?: string }> {
   await ensureVaultReady();
@@ -359,7 +382,7 @@ export async function reseedVault(): Promise<number> {
 }
 
 /** Headline counts for the tab: how much of the vault is actually filled in. */
-export async function vaultSummary(): Promise<{ total: number; withPassword: number; withUsername: number; locked: number; missing: number }> {
+export async function vaultSummary(): Promise<{ total: number; withPassword: number; withUsername: number; withReceiptEmail: number; locked: number; missing: number }> {
   const entries = await listVault();
   const withPassword = entries.filter((e) => e.hasSecret && !e.locked).length;
   const locked = entries.filter((e) => e.locked).length;
@@ -367,6 +390,10 @@ export async function vaultSummary(): Promise<{ total: number; withPassword: num
     total: entries.length,
     withPassword,
     withUsername: entries.filter((e) => !!e.username).length,
+    /* Accounts whose receipts can be looked for at all. An account signing in with a
+       handle rather than an address has no answer here until the owner gives it one,
+       and that is the worklist the Spend master turns into one line per vendor. */
+    withReceiptEmail: entries.filter((e) => !!receiptEmailFor(e)).length,
     locked,
     missing: entries.length - withPassword - locked,
   };

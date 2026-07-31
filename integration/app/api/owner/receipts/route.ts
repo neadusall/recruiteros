@@ -30,6 +30,8 @@ import {
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
 import { VENDOR_SOURCES } from "../../../../lib/owner/receiptSources";
+import { receiptRouting } from "../../../../lib/owner/mailRoutes";
+import { listVault } from "../../../../lib/owner/vault";
 import { ensureVendorUsageReady } from "../../../../lib/owner/vendorUsage";
 import { closeHistory, monthToClose, ensureCloseReady } from "../../../../lib/owner/monthClose";
 import { noticeConfigured } from "../../../../lib/owner/ownerNotice";
@@ -67,6 +69,14 @@ export async function GET(req: Request) {
      a dashboard and something you can stop checking. */
   await ensureCloseReady();
 
+  /* The vault is the list of ACCOUNTS, and an account is the thing that has a mailbox
+     behind it. It is read here rather than in the matrix because a locked or unreadable
+     vault must not take the whole Spend master down with it: the routing panel is the
+     only part that needs it, so a failure costs that panel and nothing else. */
+  const routing = await listVault()
+    .then((entries) => receiptRouting({ entries, mailboxes: boxes, receipts: allReceipts }))
+    .catch(() => null);
+
   return ok({
     matrix,
     vault,
@@ -102,6 +112,13 @@ export async function GET(req: Request) {
          mailbox rather than the one the resume inbox already uses. */
       envKeys: ["BILLING_INBOX_USER", "BILLING_INBOX_PASS", "BILLING_INBOX_HOST", "BILLING_INBOX_PORT"],
     },
+    /* WHICH MAILBOX HOLDS WHICH VENDOR'S RECEIPTS. Built from the Passwords vault's
+       per-account billing address joined to the mailboxes actually being swept, so a
+       vendor billing an address nobody reads stops looking identical to one that never
+       charged anything. Read from the FULL receipt list rather than the register-window
+       one: whether a vendor has ever reported by email is a fact about the channel, and
+       an older receipt still proves the channel works. */
+    routing,
     knownVendors: VENDOR_SOURCES.map((v) => ({ vendor: v.vendor, channel: v.channel, portal: v.portal, from: v.from })),
   });
 }
