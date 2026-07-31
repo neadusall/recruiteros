@@ -63,6 +63,13 @@ const BOOT_ID = rid("boot");
  *  search over rather than hold the recovery net shut forever. */
 const RECOVERY_DEADMAN_MS = 45 * 60 * 1000;
 
+/** How many times the search stage may be attempted before the item gives up.
+ *  The search stage is the one rung with no partial state: a kill mid-pull leaves
+ *  nothing behind, so without a ledger an item caught in a run of back-to-back
+ *  deploys (this box has done nine in an hour) would re-run the PAID search on
+ *  every tick, forever, with no list to show for any of it. */
+const MAX_SEARCH_ATTEMPTS = 3;
+
 export type NightStage = "queued" | "search" | "kold" | "koldDb" | "laxis" | "boost" | "done" | "error";
 
 export interface NightItem {
@@ -121,6 +128,10 @@ export interface NightItem {
   error?: string;
   /** Contacts gained across the whole chain (for the morning readout). */
   added: { emails: number; phones: number };
+  /** How many times the search stage has been STARTED (kind:"search" only).
+   *  Stamped and persisted before each attempt, so an attempt killed mid-pull
+   *  still counts and a deploy storm cannot loop a paid search forever. */
+  searchAttempts?: number;
   /** One-shot retry markers per rung, so a transient worker death (a deploy
    *  recreating the container kills Chromium mid-job) re-runs the rung ONCE
    *  instead of silently abandoning its remaining rows. */
@@ -608,6 +619,17 @@ async function step(item: NightItem): Promise<void> {
   }
 
   if (item.stage === "search") {
+    // Attempt ledger, written BEFORE the expensive work and persisted immediately.
+    // A search killed mid-pull leaves no other trace of having run (that is the
+    // whole reason this net exists), and the tick loop only saves AFTER a step, so
+    // without this an item could re-run the paid search on every tick indefinitely.
+    item.searchAttempts = (item.searchAttempts ?? 0) + 1;
+    await save().catch(() => {});
+    if (item.searchAttempts > MAX_SEARCH_ATTEMPTS) {
+      finish(item, "error",
+        `the platform restarted mid-search ${MAX_SEARCH_ATTEMPTS} times running, so the search was stopped rather than started over again. Nothing was saved: run it again once updates have settled.`);
+      return;
+    }
     // A recovered LinkedIn-URL search: re-pull the pasted search and land it on the
     // same destination list the dead request was writing to (shared apply helper),
     // so the recruiter gets the list they asked for and never a duplicate of it.
@@ -627,6 +649,10 @@ async function step(item: NightItem): Promise<void> {
       }
       const applied = await applySalesNavResult(ws, result, {
         url: sn.url, name: sn.typedName, targetRunId: sn.targetRunId, createdBy: item.createdBy,
+        // The dead request may have saved its list moments before the connection
+        // died (or an earlier recovery attempt may have). With no typed name to
+        // match on, the URL is what proves it is the same search.
+        preferUrlMatch: true,
       });
       if ("missingTarget" in applied) {
         finish(item, "error", "the list this search was adding to no longer exists");

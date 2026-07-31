@@ -64,6 +64,18 @@ check("the recovered pull runs inside withWorkspaceCreds (Setup-pasted keys appl
   /withWorkspaceCreds\(ws,\s*\(\)\s*=>\s*runSalesNavSourcing\(/.test(queue));
 check("a recovered search hands enrichment on to the normal chain",
   /applied\.run\.id[\s\S]{0,120}item\.stage\s*=\s*"kold"/.test(queue));
+check("a recovery lands by URL too, so it cannot fork a list the dead request already saved",
+  /preferUrlMatch:\s*true/.test(queue) && /opts\.preferUrlMatch/.test(apply));
+
+/* --- attempts are bounded, so a deploy storm cannot loop a paid search ---- */
+
+const attemptAt = searchStage.indexOf("item.searchAttempts =");
+const attemptSaveAt = searchStage.indexOf("await save()");
+check("each search attempt is stamped on the item", attemptAt > -1);
+check("the stamp is persisted BEFORE the work (an attempt killed mid-pull still counts)",
+  attemptAt > -1 && attemptSaveAt > attemptAt && attemptSaveAt < searchStage.indexOf("runSalesNavSourcing"));
+check("a search interrupted too many times stops instead of re-running forever",
+  /searchAttempts\s*>\s*MAX_SEARCH_ATTEMPTS[\s\S]{0,200}finish\(item,\s*"error"/.test(searchStage));
 
 /* --- the tab hands a dead connection over instead of re-paying ------------ */
 

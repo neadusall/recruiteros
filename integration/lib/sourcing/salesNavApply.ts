@@ -27,6 +27,15 @@ export interface SalesNavApplyOptions {
   /** An explicitly picked destination list. */
   targetRunId?: string;
   createdBy?: { userId: string; name: string; email: string };
+  /**
+   * RECOVERY ONLY. With no picked list and no typed name there is no name to
+   * match on, so a re-run would create a second list for a search the recruiter
+   * ran once. Set this and the same pasted URL also counts as a match: a recovery
+   * lands on the list its own URL already produced (blanks filled, no duplicate
+   * people) instead of forking one. Left off for live searches, where a recruiter
+   * re-pasting a URL to build a separate list is a legitimate thing to do.
+   */
+  preferUrlMatch?: boolean;
 }
 
 export interface SalesNavApplied {
@@ -66,6 +75,12 @@ export async function applySalesNavResult(
     if (!target) return { missingTarget: opts.targetRunId };
   } else if (typedName) {
     target = existing.find((r) => r.name.trim().toLowerCase() === typedName.toLowerCase());
+  } else if (opts.preferUrlMatch) {
+    // Newest first: if this URL has been run more than once, a recovery joins the
+    // most recent list rather than resurrecting an old one.
+    target = [...existing]
+      .sort((a, c) => String(c.createdAt).localeCompare(String(a.createdAt)))
+      .find((r) => (r.jdUrl || "").trim() === url.trim());
   }
 
   if (target) {
