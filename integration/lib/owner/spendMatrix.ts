@@ -444,7 +444,15 @@ export function buildSpendMatrix(
            a metered line can read its true cost and $0 proven at the same time. */
         verified = actual !== 0;
         const said = vendorMonthFor(ledgerKey, period);
-        if (said && !said.closed) {
+        if (said?.kind === "consumption") {
+          /* Prepaid: the money left on a top-up, and this is what it was spent on. Said
+             out loud on the cell, because a metered row showing $0 next to a vendor that
+             plainly gets used reads as broken unless the reason is on the page. */
+          const drew = `used $${said.amountUsd.toFixed(2)}`;
+          note = actual !== 0
+            ? `${drew} of prepaid credit`
+            : `${drew} of credit; the money left on a top-up, none on file for this month`;
+        } else if (said && !said.closed) {
           /* A running figure sits on a month that has already ended for the few days
              between the month closing and the vendor issuing its invoice, so it must not
              keep claiming to be "this month". */

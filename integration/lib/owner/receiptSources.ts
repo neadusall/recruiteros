@@ -79,13 +79,13 @@ export const VENDOR_SOURCES: VendorSource[] = [
   },
   {
     vendor: "Telnyx",
-    channel: "api",
+    channel: "portal_only",
     from: ["telnyx.com", "billing@telnyx.com", "noreply@telnyx.com"],
     subject: ["telnyx", "invoice", "receipt", "payment", "auto-recharge", "balance"],
     portal: "https://portal.telnyx.com/#/billing/history",
     billingDay: 1,
-    api: "PULLED AUTOMATICALLY: GET /v2/invoices gives one record per billing month and GET /v2/usage_reports carries a cost metric, so the monthly figure comes straight from Telnyx with no mailbox involved. Neither the invoice total nor a PDF is exposed, and the portal's Payment History (account top-ups) is not in the API at all, so those still come from email or by hand.",
-    setup: "Auto-recharge fires whenever the balance drops, so expect several top-up receipts a month on top of the monthly usage figure. All of them count.",
+    api: "PARTLY. GET /v2/usage_reports prices USAGE per month, and that is pulled automatically as consumption. It is NOT the bill: its product list has no phone-number rental and no 10DLC line, so it prices traffic only (Lume's July: ~$13 of usage against $105 actually paid in). GET /v2/invoices states a period and a paid flag with no total and no PDF. Payment History is not in the API in any form.",
+    setup: "PREPAID: the account carries a balance and the money leaves when it is topped up, so the receipts that matter are the payment receipts under Billing > Payment History, each with its own Download. The portal puller collects them. Note there are TWO accounts, the house one and Lume's, with separate logins and separate balances.",
   },
   {
     vendor: "Hetzner",

@@ -38,6 +38,22 @@ export interface VendorMonth {
   reference?: string;
   /** False while the billing period is still running: a part-month figure, not a bill. */
   closed: boolean;
+  /**
+   * `billed`       the vendor charged this in this month. It is spend.
+   * `consumption`  the vendor METERED this in this month, against credit already bought.
+   *
+   * The distinction is not academic, it is the whole account. Telnyx is prepaid: money
+   * leaves the bank when the account is topped up, and usage draws the balance down
+   * afterwards. Counting the usage as spend would count the same dollar twice — once when
+   * it was paid in, once when it was used — and counting it INSTEAD of the top-ups would
+   * miss most of the bill outright, because Telnyx's usage API prices traffic only and
+   * knows nothing of number rentals or 10DLC fees. Lume's July: ~$13 of usage against
+   * $105 actually paid in.
+   *
+   * So consumption never counts as money. It is carried, shown beside the month it belongs
+   * to, and the top-up receipts are the spend.
+   */
+  kind?: "billed" | "consumption";
   /** Where the figure came from. Only a vendor's own billing API qualifies. */
   source: "api";
   note?: string;
@@ -110,7 +126,11 @@ export function vendorUsageByMonth(): Record<string, Record<string, number>> {
   for (const m of store.months) {
     if (!/^\d{4}-\d{2}$/.test(m.period)) continue;
     const month = out[m.period] || (out[m.period] = {});
-    month[m.key] = round2(m.amountUsd);
+    /* Consumption is not money, so it contributes ZERO — but it still writes the key,
+       deliberately, so it OVERRIDES the internal ledger's guess at the same usage. Leaving
+       that guess standing would report a figure that is neither the traffic (the vendor
+       measured that better) nor the spend (the top-ups are). */
+    month[m.key] = m.kind === "consumption" ? 0 : round2(m.amountUsd);
   }
   return out;
 }
@@ -153,6 +173,9 @@ export function vendorUsageWindow(days: number, now: number = Date.now()): Recor
   const from = days > 0 ? now - days * 86_400_000 : 0;
   for (const m of store.months) {
     if (!/^\d{4}-\d{2}$/.test(m.period)) continue;
+    /* Consumption is not cash and must not move the burn. It is drawn against credit that
+       already left the bank on a top-up, and the top-up is what the books count. */
+    if (m.kind === "consumption") { out[m.key] = out[m.key] || 0; continue; }
     const start = Date.parse(`${m.period}-01T00:00:00Z`);
     const [y, mo] = m.period.split("-").map(Number);
     const end = Date.UTC(mo === 12 ? y + 1 : y, mo === 12 ? 0 : mo, 1);

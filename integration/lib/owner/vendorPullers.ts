@@ -188,24 +188,22 @@ export async function pullTelnyx(
 
   const floor = minInvoiceUsd();
 
-  /* Two kinds of row get cleared out on every run, because both of them were filed as if a
-     receipt existed when none does:
-       · the running figure an earlier version wrote for the OPEN month, keyed `usage-<month>`
-       · a closed month that came to less than the floor — metering noise, not a bill
+  /* EVERY FIGURE THIS PULLER EVER FILED AS A RECEIPT IS REMOVED, and none is filed again.
+     They were month-end USAGE sums entered as though they were charges, and on a prepaid
+     account that is wrong twice over: the money left on a top-up, not on the invoice, so
+     counting the usage as spend counts the same dollar a second time; and the sum is not
+     even the whole invoice, because Telnyx's usage API prices traffic only — no number
+     rentals, no 10DLC. The month is still recorded, as CONSUMPTION, next door.
      Only this puller's own rows are touched: an emailed, hand-attached or portal-downloaded
      receipt is a real document and is never removed by a pull. */
-  const stale = onFile.filter(
-    (r) => r.source === "api" && r.vendor === VENDOR &&
-      (String(r.invoiceNumber || "").startsWith("usage-") || Math.abs(r.amountUsd) < floor),
-  );
+  const stale = onFile.filter((r) => r.source === "api" && r.vendor === VENDOR);
   for (const r of stale) await deleteReceipt(r.id);
-  const provisional = stale.filter((r) => String(r.invoiceNumber || "").startsWith("usage-")).length;
-  const trivial = stale.length - provisional;
-  if (provisional) {
-    report.notes.push(`${provisional} provisional part-month figure${provisional > 1 ? "s were" : " was"} removed: only closed invoices are recorded.`);
-  }
-  if (trivial) {
-    report.notes.push(`${trivial} month${trivial > 1 ? "s" : ""} under $${floor.toFixed(2)} ${trivial > 1 ? "were" : "was"} removed: metered small change is carried by the usage ledger, not filed as a receipt.`);
+  if (stale.length) {
+    report.notes.push(
+      `${stale.length} usage figure${stale.length > 1 ? "s were" : " was"} removed from the receipt vault: ` +
+      "on a prepaid account the spend is the top-up, and usage is what it was spent ON. " +
+      "The figures are kept as consumption against their months.",
+    );
   }
 
   let products: TelnyxProduct[];
@@ -244,9 +242,7 @@ export async function pullTelnyx(
 
   const failed: string[] = [];
   const lastError: Record<string, string> = {};
-  const removed = new Set(stale.map((r) => r.id));
   let skipped = 0;
-  const belowFloor: string[] = [];
 
   /**
    * What Telnyx billed over one window, summed across every product that reports a cost.
@@ -276,54 +272,11 @@ export async function pullTelnyx(
   for (const inv of closed) {
     const period = inv.period_start.slice(0, 7);
 
-    /* Telnyx's OWN DOCUMENT for this month, downloaded off their portal or emailed in. It
-       outranks anything summed from a usage API, and a stated figure filed beside it would
-       make the month read twice — a bill and a description of the same bill, counted as two
-       charges. So the month is left entirely alone, and the books take the document's
-       figure. Not even `force` overrides this: force exists to correct THIS puller's sums,
-       and a documented month has no sum of ours left in it. */
-    const documented = onFile.find(
-      (r) => !removed.has(r.id) && r.vendor === VENDOR && r.period === period &&
-        r.source !== "api" && r.amountUsd !== 0,
-    );
-    if (documented) {
-      const said = vendorMonthFor(TELNYX_KEY, period);
-      if (!said?.closed || said.amountUsd !== documented.amountUsd) {
-        await recordVendorMonth({
-          key: TELNYX_KEY, vendor: VENDOR, period, amountUsd: documented.amountUsd,
-          reference: documented.invoiceNumber || inv.invoice_id, closed: true,
-          note: "Taken from Telnyx's own invoice, which is already filed in the vault.",
-        });
-      }
-      skipped += 1;
-      continue;
-    }
-
-    /* A closed month cannot change, so once Telnyx's own figure for it is on file it is
-       left alone. That keeps a nightly run to the open month plus anything new, instead of
-       re-summing the year at 36 rate-limited queries per month. A receipt row just cleared
-       out above does not count as on file. */
-    const already = onFile.find(
-      (r) => !removed.has(r.id) &&
-        r.source === "api" && r.vendor === VENDOR && r.invoiceNumber === inv.invoice_id && r.amountUsd > 0,
-    );
+    /* A closed month's usage cannot change, so once it is on file it is left alone. That
+       keeps a nightly run to the open month plus anything new, instead of re-summing the
+       year at 25 rate-limited product queries per month. */
     const said = vendorMonthFor(TELNYX_KEY, period);
-    const settled = Boolean(said?.closed && said.reference === inv.invoice_id);
-    /* Settled AND accounted for: either the receipt is filed, or the month came to less
-       than the floor and was never going to be. Anything else is re-summed, so a run that
-       died between recording the figure and filing the receipt heals itself. */
-    if (!opts.force && settled && (already || (said as { amountUsd: number }).amountUsd < floor)) {
-      skipped += 1;
-      continue;
-    }
-    if (!opts.force && already && !settled) {
-      /* Filed as a receipt before this store existed. The figure is already proved by the
-         receipt, so take it from there rather than spending 36 queries to agree with it. */
-      await recordVendorMonth({
-        key: TELNYX_KEY, vendor: VENDOR, period, amountUsd: already.amountUsd,
-        reference: inv.invoice_id, closed: true,
-        note: "Read back from the month-end figure already on file.",
-      });
+    if (!opts.force && said?.closed && said.reference === inv.invoice_id) {
       skipped += 1;
       continue;
     }
@@ -333,44 +286,19 @@ export async function pullTelnyx(
       `${nextDay(inv.period_end)}T00:00:00Z`,   // period_end is inclusive
     );
 
-    /* EVERY closed month is recorded, whatever it came to. The receipt vault keeps its
-       materiality floor and should — nobody files a receipt for four cents — but the BOOKS
-       still have to carry those four cents. Before this, a sub-floor month landed nowhere
-       at all, so the console fell back to the platform's internal usage ledger and reported
-       a figure Telnyx had never charged. */
+    /* Recorded as CONSUMPTION, never as spend and never as a receipt. It is what the credit
+       was spent on, and it is worth having beside the month — it is the only per-month
+       usage figure that exists — but the money left the bank when the account was topped
+       up. It is also incomplete by construction: traffic only. */
     await recordVendorMonth({
       key: TELNYX_KEY, vendor: VENDOR, period, amountUsd: total,
-      reference: inv.invoice_id, closed: true,
-      note: `Summed from the Telnyx usage API across the closed period ${inv.period_start} to ${inv.period_end}.`,
+      reference: inv.invoice_id, closed: true, kind: "consumption",
+      note: `Usage summed from the Telnyx API across ${inv.period_start} to ${inv.period_end}. Traffic only: number rentals and 10DLC fees are not in that API, so the real invoice is higher.`,
     });
-
-    /* Billed in small change: the figure above carries the month and there is no receipt
-       behind it, so nothing goes in the vault. */
-    if (total < floor) {
-      if (total > 0) belowFloor.push(`${period} $${total.toFixed(2)}`);
-      continue;
-    }
-
-    const { created } = await recordApiReceipt({
-      vendor: VENDOR,
-      itemId: item?.id,
-      period,
-      amountUsd: total,
-      reference: inv.invoice_id,
-      description: `Month-end invoice, ${inv.period_start} to ${inv.period_end}`,
-      chargedAt: inv.period_end,
-      notes: `Telnyx invoice ${inv.invoice_id}, ${inv.paid ? "settled" : "unpaid"}. Total summed from the Telnyx usage API for the closed billing period: Telnyx exposes neither an invoice total nor a downloadable PDF.`,
-    });
-    report.months.push({ period, amountUsd: total, reference: inv.invoice_id, created });
+    report.months.push({ period, amountUsd: total, reference: inv.invoice_id, created: false });
   }
 
   if (skipped) report.notes.push(`${skipped} closed month${skipped > 1 ? "s were" : " was"} already on file and left untouched.`);
-  if (belowFloor.length) {
-    report.notes.push(
-      `${belowFloor.length} closed month${belowFloor.length > 1 ? "s came" : " came"} to under $${floor.toFixed(2)} and ${belowFloor.length > 1 ? "are" : "is"} not filed as a receipt (${belowFloor.slice(0, 6).join(", ")}). ` +
-      `Telnyx's own figure for each of those months is on file all the same, so the burn counts every cent of it.`,
-    );
-  }
   if (failed.length) {
     const reasons = [...new Set(failed.map((f) => lastError[f]).filter(Boolean))].slice(0, 3).join(", ");
     report.notes.push(
@@ -394,8 +322,8 @@ export async function pullTelnyx(
   const openTotal = await sumWindow(`${openStart}T00:00:00Z`, through);
   await recordVendorMonth({
     key: TELNYX_KEY, vendor: VENDOR, period: openPeriod, amountUsd: openTotal,
-    reference: open?.invoice_id, closed: false,
-    note: `Part month: ${openStart} through ${through.slice(0, 10)}. Telnyx has not closed or issued an invoice for it yet.`,
+    reference: open?.invoice_id, closed: false, kind: "consumption",
+    note: `Usage so far this month, ${openStart} through ${through.slice(0, 10)}. Traffic only, and drawn against credit already paid in.`,
   });
   report.openMonth = { period: openPeriod, amountUsd: openTotal, through: through.slice(0, 10) };
   report.notes.push(

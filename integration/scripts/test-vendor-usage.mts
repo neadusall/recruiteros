@@ -143,6 +143,49 @@ function invoicedReceipt(): Receipt {
   check("of which only the invoiced month is proven", row!.totalVerifiedUsd, 34.58);
 }
 
+/* ---- PREPAID: consumption is what the money bought, never the money ----
+ *
+ * Telnyx carries a balance, is topped up, and usage draws that balance down. Lume's July:
+ * ~$13 of usage against $105 actually paid in. Counting the usage as spend would count the
+ * same dollar twice — once paid in, once used — and it would still miss most of the bill,
+ * because Telnyx's usage API prices traffic only and knows nothing of number rentals or
+ * 10DLC fees. The top-up receipts are the spend; consumption rides along as the note.
+ */
+{
+  devVendorUsage().months = [];
+  await recordVendorMonth({ key: "telnyx", vendor: "Telnyx", period: SMALL, amountUsd: 13.33, closed: true, kind: "consumption" });
+
+  const m = buildSpendMatrix([telnyxRow()], [], { months: 4, inboxConfigured: true });
+  const cell = m.rows.find((r) => r.vendor === "Telnyx")!.cells.find((c) => c.period === SMALL)!;
+  check("consumption is not counted as money", cell.countedUsd, 0);
+  check("...and says where the money actually went", cell.note, "used $13.33 of credit; the money left on a top-up, none on file for this month");
+  check("...and never counts toward the burn", vendorUsageWindow(31, Date.UTC(2026, 7, 1)).telnyx || 0, 0);
+}
+{
+  /* The same month once a top-up receipt exists: the cash is the figure, and what it was
+     spent on rides along beside it. */
+  devVendorUsage().months = [];
+  await recordVendorMonth({ key: "telnyx", vendor: "Telnyx", period: SMALL, amountUsd: 13.33, closed: true, kind: "consumption" });
+  const topUp = {
+    id: "rcpt_top", period: SMALL, vendor: "Telnyx", itemId: "sp_telnyx", amountUsd: 105,
+    currency: "USD", kind: "charge", source: "portal", invoiceNumber: "PAY-1",
+    chargedAt: `${SMALL}-20`, createdAt: T, updatedAt: T,
+  } as Receipt;
+  const m = buildSpendMatrix([telnyxRow()], [topUp], { months: 4, inboxConfigured: true });
+  const cell = m.rows.find((r) => r.vendor === "Telnyx")!.cells.find((c) => c.period === SMALL)!;
+  check("the top-up is the spend", cell.countedUsd, 105);
+  check("...proven by its own document", cell.verified, true);
+  check("...with the usage alongside it", cell.note, "used $13.33 of prepaid credit");
+}
+{
+  /* And the internal ledger's own guess at that same usage is suppressed, not left to
+     stand in as if it were the bill. */
+  devVendorUsage().months = [];
+  await recordVendorMonth({ key: "telnyx", vendor: "Telnyx", period: SMALL, amountUsd: 13.33, closed: true, kind: "consumption" });
+  const merged = mergeVendorUsage({ [SMALL]: { telnyx: 0.12 } });
+  check("our own estimate does not survive the vendor's own measurement", merged[SMALL].telnyx, 0);
+}
+
 /* ---- the days between a month ending and the vendor invoicing it ---- */
 {
   devVendorUsage().months = [];
