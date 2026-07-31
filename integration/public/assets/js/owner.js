@@ -772,7 +772,7 @@
     rows.forEach(function (i) {
       html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' + pickCell(i) +
         '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div>' +
-        '<div class="lr-sub note">' + esc(i.purpose || labelFor(BURN_CATEGORIES, i.category)) + '</div>' + acts(i) + '</td>' +
+        '<div class="lr-sub note">' + esc(i.purpose || labelFor(BURN_CATEGORIES, i.category)) + '</div>' + acts(i.id) + '</td>' +
         '<td>' + esc(labelFor(BURN_BILLING, i.billing)) + '</td>' +
         '<td class="num">' + amountCell(i) + '</td>' +
         '<td>' + usageCell(i) + '</td>' +
@@ -959,7 +959,7 @@
       html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' + pickCell(i) +
         '<td><div class="lr-main">' + esc(i.domain) + '</div>' +
         (i.registryError ? '<div class="lr-sub bad-t">' + esc(i.registryError) + '</div>' : '') +
-        acts(i) + '</td>' +
+        acts(i.id) + '</td>' +
         '<td>' + (i.mailboxCount ? esc(i.mailboxCount + ' ' + (i.mailProvider || '') + ' inbox' + (i.mailboxCount === 1 ? '' : 'es')) : '<span class="note">no mailboxes</span>') + '</td>' +
         '<td>' + esc((i.registeredAt || i.at || "").slice(0, 10) || "-") + '</td>' +
         '<td>' + (i.expiresAt ? esc(i.expiresAt.slice(0, 10)) : '<span class="note">unknown</span>') + '</td>' +
@@ -984,7 +984,7 @@
       '<th>Vendor / item</th><th>Type</th><th>Date</th><th class="num">Amount</th></tr></thead><tbody>';
     rows.forEach(function (i) {
       html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' + pickCell(i) +
-        '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div><div class="lr-sub note">' + esc(i.purpose || "") + '</div>' + acts(i) + '</td>' +
+        '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div><div class="lr-sub note">' + esc(i.purpose || "") + '</div>' + acts(i.id) + '</td>' +
         '<td>' + esc(labelFor(BURN_BILLING, i.billing)) + (i.lifetime ? ' <span class="pill active">No ongoing fee</span>' : '') + '</td>' +
         '<td>' + esc(i.at || "") + '</td>' +
         '<td class="num">' + oneTimeAmountCell(i) + '</td></tr>';
@@ -1033,9 +1033,9 @@
     return '<td class="row-pick"><input type="checkbox" class="burn-box" data-pick="' + esc(i.id) + '"' +
       (burnPicked[i.id] ? ' checked' : '') + '></td>';
   }
-  function acts(i) {
-    return '<div class="row-acts"><a class="row-mini" data-bedit="' + esc(i.id) + '">Edit</a>' +
-      '<a class="row-mini danger" data-bdel="' + esc(i.id) + '">Delete</a></div>';
+  function acts(id) {
+    return '<div class="row-acts"><a class="row-mini" data-bedit="' + esc(id) + '">Edit</a>' +
+      '<a class="row-mini danger" data-bdel="' + esc(id) + '">Delete</a></div>';
   }
 
   function burnItem(id) {
@@ -1366,6 +1366,12 @@
         '<div class="lr-sub note">' + esc(r.label) + '</div>' +
         (r.missingCount ? '<div class="lr-sub bad-t">' + r.missingCount + ' month' + (r.missingCount > 1 ? "s" : "") + ' unreceipted</div>' : "") +
         (r.needsAmount ? '<div class="lr-sub bad-t">no price on file</div>' : "") +
+        /* Only a row backed by the register can be edited or removed. The other two kinds
+           here are a charge that arrived with nothing expecting it and pay-per-use the
+           usage ledger totted up, and neither has a line item to act on: their own chip
+           already says so, which beats offering links that would have to fail. The column
+           is sticky, so the pair stays put while the months scroll past. */
+        (r.itemId ? acts(r.itemId) : "") +
         '</th>';
       (r.cells || []).forEach(function (c) { html += matrixCell(r, c, ri); });
       html += '<td class="num rc-total"><strong>' + usd(r.totalCountedUsd) + '</strong>' +
@@ -2306,7 +2312,11 @@
   /* ---------------- spend item editor (drawer) ---------------- */
   function openSpendItem(id) {
     var i = (burnData && burnData.items || []).filter(function (x) { return x.id === id; })[0];
-    if (!i) return;
+    /* Reachable from the Month by month grid and the source table as well as the register
+       tables, and those are built from a second payload, so an id can name a line this
+       page no longer holds. Say so: an Edit that does nothing at all reads as a broken
+       page rather than as a row that has moved on. */
+    if (!i) { toast("That line is no longer on the register"); return; }
     var L = i.live || {};
     var html = '<div style="display:flex;justify-content:space-between;align-items:start">' +
       '<div><h2>' + esc(i.vendor) + '</h2><div class="sub">' + esc(i.label) + '</div></div>' +
