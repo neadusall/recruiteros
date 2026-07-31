@@ -12023,6 +12023,8 @@
       '.jd-prog.fail .jd-prog-pct{color:var(--warn,#e0a33e)}' +
       '.jd-err{font-size:13.5px;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid var(--warn,#e0a33e);border-radius:10px;padding:12px 14px;margin:10px 0 0;line-height:1.5}' +
       '.jd-err b{color:var(--text)}' +
+      '.jd-code{margin-top:8px;padding-top:7px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)}' +
+      '.jd-code b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.02em;color:var(--text)}' +
       '.jd-cardhead{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}' +
       '.jd-ratelink{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
       '.jd-ratelink:hover{color:var(--brand-2)}' +
@@ -12341,10 +12343,29 @@
     /** A failure the recruiter MUST see. Persistent, boxed, and it survives the
         progress bar hiding itself — a lost run used to leave nothing but one line of
         grey text that read like a normal status update. */
-    function msgErr(t) {
+    function msgErr(t) { msgStop("SRC-UNKNOWN", t); }
+    /** Codes that mean "the search worked, there was simply nobody to save" rather than
+        "something is broken". Only the headline differs: both stay on screen. */
+    var JD_NOMATCH = { "SRC-FILTERED": 1, "SRC-FRESHONLY": 1, "SRC-NONE": 1, "SRC-FREEENGINE": 1 };
+    /**
+     * The ONE place a stopped run explains itself.
+     *
+     * A run that ends with an empty screen and no reason is the worst outcome this tool
+     * has: the recruiter cannot tell "nobody matches" from "the platform is broken", and
+     * the report that reaches the engineer is "it went blank". So this is persistent (it
+     * outlives the progress bar and stays until the next run), it always says something,
+     * and it always carries a quotable code the recruiter can read out so the engineer
+     * knows exactly which failure to go fix. The code is the ONLY internal thing shown:
+     * no engine names, no keys, no queries.
+     */
+    function msgStop(code, text, headline) {
       var m = $("#jdMsg"); if (!m) return;
+      code = code || "SRC-UNKNOWN";
       m.className = "jd-err";
-      m.innerHTML = '<b>The search did not finish.</b><br>' + esc(t || "");
+      m.innerHTML =
+        '<b>' + esc(headline || (JD_NOMATCH[code] ? "No candidates to save." : "The search stopped early, and nothing was saved.")) + '</b><br>' +
+        esc(text || "No reason was reported, which is itself a fault worth reporting.") +
+        '<div class="jd-code">Reference <b>' + esc(code) + '</b> · quote this code when you report it, it says exactly what needs fixing</div>';
     }
     function chips(arr) { return (arr || []).map(function (x) { return '<span class="jd-chip">' + esc(x) + '</span>'; }).join("") || '<span class="muted">-</span>'; }
 
@@ -13072,13 +13093,18 @@
     function autoSendList(id, name, added) {
       showProgress('Sending "' + name + '" on', 30, "Sending to Candidates…");
       var bits = added ? [added] : [];
+      // Which legs actually FAILED, in recruiter words. A leg that legitimately had
+      // nothing to do (nobody has a phone yet) is not a failure and never lands here.
+      var failed = [];
       sendPatient("/sourcing", "POST", { action: "promote", id: id, listName: name, tag: "" }).then(function (p) {
         if (p.ok) {
           // Remember the new list so the Candidates tab opens straight onto it.
           try { if (p.data.listId) sessionStorage.setItem("ros_open_list", p.data.listId); } catch (err) {}
           bits.push("sent " + (p.data.added || 0) + " to Candidates" + (p.data.deduped ? (" (" + p.data.deduped + " already in pipeline)") : ""));
         } else {
-          bits.push("Candidates push failed: " + ((p.data && (p.data.detail || p.data.error)) || p.status));
+          var pr = (p.data && (p.data.detail || p.data.error)) || p.status || "no reason given";
+          failed.push("Candidates (" + pr + ")");
+          bits.push("Candidates push failed: " + pr);
         }
         setProgPhase("Building the OS Text campaign…");
         return sendPatient("/sourcing", "POST", { action: "ostext", id: id, name: name });
@@ -13090,16 +13116,35 @@
             ((d.protectedDnc || d.protectedRecent) ? (", " + ((d.protectedDnc || 0) + (d.protectedRecent || 0)) + " protected (already in an ATS conversation)") : ""));
           if (d.validation === "blocked_no_qstash") bits.push("WARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed");
         } else if (d.error === "no_contacts_with_phone") {
+          // A real, benign outcome: the list simply has no phones yet. Not a failure.
           bits.push("OS Text skipped: nobody on this list has a phone number yet");
         } else {
-          bits.push("OS Text push failed: " + ((d.detail || d.error) || (o && o.status)));
+          var or = (d.detail || d.error) || (o && o.status) || "no reason given";
+          failed.push("OS Text (" + or + ")");
+          bits.push("OS Text push failed: " + or);
         }
-        finishProgress('Done · "' + name + '" sent to Candidates and OS Text');
+        // TELL THE TRUTH ABOUT DELIVERY. This used to finish "sent to Candidates and OS
+        // Text" unconditionally, even when BOTH pushes had just failed, and the only
+        // trace of the failure was a toast that faded. That is precisely how a run gets
+        // reported as delivered while nothing ever appears in either tab.
+        if (failed.length) {
+          failProgress("Sending stopped");
+          msgStop("SRC-DELIVERY",
+            'The list "' + name + '" is saved and safe, but it could not be sent on to ' +
+            failed.join(" or ") + ". Nothing was lost: press Send on the list below to try again.",
+            "The list is saved, but sending it on did not work.");
+        } else {
+          finishProgress('Done · "' + name + '" sent to Candidates and OS Text');
+          // A lasting record of what happened, not just a toast that fades.
+          msg(bits.join(" · ") + ". Review and launch the texts in the OS Text tab.");
+        }
         toast(bits.join(" · ") + ". Review and launch the texts in the OS Text tab.");
         loadRuns();
       }).catch(function () {
         failProgress("Sending stopped");
-        toast('"' + name + '" is saved below, but sending it on failed (could not reach the server).');
+        msgStop("SRC-DELIVERY-NET",
+          'The list "' + name + '" is saved and safe, but the server could not be reached to send it on to Candidates and OS Text. Press Send on the list below to try again.',
+          "The list is saved, but sending it on did not work.");
         loadRuns();
       });
     }
@@ -13311,8 +13356,12 @@
           renderPlan(); renderResults();
           if (!state.candidates.length) {
             failProgress("No candidates found");
-            var why = (state.warnings || []).filter(function (w) { return w.indexOf("empty_run:") === 0; })[0];
-            throw { plain: (why ? why.replace("empty_run: ", "The search came back empty: ") : "The search came back empty.") };
+            // The engine says WHY, in recruiter language, with a quotable code. The old
+            // path spliced the raw engineer warning onto the screen instead, which named
+            // vendors and read like a stack trace; and when there was no warning at all
+            // it said "came back empty" and left the recruiter with nothing to report.
+            var sr = (r.data && r.data.stopReason) || null;
+            throw { stop: sr || { code: "SRC-NONE", message: "The search came back with nobody, and no reason was reported." } };
           }
         });
       }).then(function () {
@@ -13346,11 +13395,17 @@
         if (e && e.recover) return watchRecovery(e.recover, reset);
         reset();
         if (prog.timer) failProgress(((e && e.stage) || "Run") + " stopped");
-        // An empty search is a real answer, not a breakage: say so plainly, but still
-        // never paint the bar as a completed run that produced a list.
+        // An empty search is a real answer, not a breakage. It still gets a reason and a
+        // code, and it still stays on screen: "nobody matched" and "the platform broke"
+        // must never look the same to a recruiter.
+        if (e && e.stop) { msgStop(e.stop.code, e.stop.message); return; }
         if (e && e.plain) { msg(e.plain); return; }
-        var detail = (e && e.r && e.r.data && (e.r.data.detail || e.r.data.error)) || (e && e.r && e.r.status) || (e && e.message) || "error";
-        msgErr(((e && e.stage) || "Run") + " failed: " + detail + ". Nothing was saved.");
+        // A server-side failure. The recruiter gets the stage and a code, never the raw
+        // server text, which can carry internals.
+        var detail = (e && e.r && e.r.data && (e.r.data.detail || e.r.data.error)) || (e && e.r && e.r.status) || (e && e.message) || "";
+        var stage = (e && e.stage) || "Run";
+        msgStop("SRC-SERVER", "The " + stage.toLowerCase() + " step was refused by the server" +
+          (detail ? " (" + detail + ")" : "") + ". Nothing was saved, so running it again is safe.");
       });
     }
 
@@ -13369,7 +13424,7 @@
       function done(label, message) { finishProgress(label); msg(message); reset(); loadRuns(); }
       /** The recovery could not deliver a list. Loud, persistent, and never dressed up
           as a finished run. */
-      function lost(label, message) { failProgress(label); msgErr(message); reset(); loadRuns(); }
+      function lost(label, code, message) { failProgress(label); msgStop(code, message); reset(); loadRuns(); }
       function poll() {
         return api("/sourcing").then(function (d) {
           var items = (d && d.nightQueue) || [];
@@ -13381,8 +13436,8 @@
             return;
           }
           if (it && it.stage === "error") {
-            lost("Recovery stopped",
-              "The interrupted search could not be recovered (" + (it.error || "unknown") + "). Nothing was saved. Press Initiate Search to run it again.");
+            lost("Recovery stopped", "SRC-RECOVERY",
+              "The server picked this search back up after an update, but could not finish it (" + (it.error || "no reason given") + "). Nothing was saved. Press Initiate Search to run it again.");
             return;
           }
           if (it) {
@@ -13397,13 +13452,13 @@
           // The server now arms the checkpoint before its first slow step, so this
           // should be rare; when it does happen the recruiter gets told plainly
           // instead of watching the bar fill to 100% and vanish.
-          lost("Connection lost",
-            "The connection dropped before the search was registered on the server, so there was nothing to recover and no list was saved. Press Initiate Search to run it again.");
+          lost("Connection lost", "SRC-DEPLOY",
+            "The platform was updating and the search was lost before the server had registered it, so there was nothing to pick back up and no list was saved. Press Initiate Search to run it again.");
         }).catch(function () {
           // The app may still be restarting; keep knocking until the deadline.
           if (Date.now() < deadline) return delay(15000).then(poll);
           failProgress("Connection lost");
-          msgErr("The server did not come back in time. Reload the page and check Your saved candidate lists: the search may still have finished on its own. If it is not there, run it again.");
+          msgStop("SRC-TIMEOUT", "The platform did not come back within 30 minutes. Reload the page and check Your saved candidate lists: the search may still have finished on its own. If it is not there, run it again.");
           reset();
         });
       }

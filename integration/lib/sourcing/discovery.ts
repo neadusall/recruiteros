@@ -571,9 +571,32 @@ export function candidateKey(r: CandidateRow): string {
   return keyOf(r);
 }
 
+/**
+ * Why a run produced nobody, in a form the recruiter can READ and QUOTE.
+ *
+ * A search that finishes and shows nothing, with no reason on screen, is the worst
+ * outcome the product has: the recruiter cannot tell a real "nobody matches" from an
+ * outage, and the engineer gets a bug report that says "it went blank". So every empty
+ * run carries one of these, the UI keeps it on screen until the next run, and `code` is
+ * stable and safe to say out loud.
+ *
+ * `message` is recruiter-facing: plain, actionable, and it never names an engine, a key,
+ * a query or a vendor. `detail` is the engineer-facing specifics behind the same code.
+ */
+export interface StopReason {
+  /** Stable, quotable, e.g. "SRC-CREDITS". Safe to show and to read down the phone. */
+  code: string;
+  /** Recruiter-facing sentence. No vendor names, no internals. */
+  message: string;
+  /** Engineer-facing specifics. Shown only where internals are already allowed. */
+  detail?: string;
+}
+
 export interface DiscoveryResult {
   candidates: CandidateRow[];
   warnings: string[];
+  /** Present ONLY on an empty run: why, quotably. */
+  stopReason?: StopReason;
   /** Rows seen before threshold/cap filtering (for the UI's "scanned N" line). */
   scanned: number;
   /** Quota'd search-API requests this run spent, by engine: the saved list's credit
@@ -1041,6 +1064,7 @@ export async function runDiscovery(
   // ZERO-RESULT DIAGNOSIS: when a run STILL comes back empty after the rescue, say WHY
   // in plain English at the top of the warnings, so the recruiter sees the cause
   // instead of a silent zero. Outcome-first wording; setup detail stays parenthetical.
+  let stopReason: StopReason | undefined;
   if (!candidates.length) {
     const rapid404 = warnings.filter((w) => w.startsWith("rapidapi(") && / 404/.test(w)).length;
     const reasons: string[] = [];
@@ -1056,6 +1080,31 @@ export async function runDiscovery(
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
     if (scanned > 0) reasons.push(`${scanned} profiles were found but every one was ruled out by the search profile's hard disqualifiers or scored 0 fit; loosen the disqualifiers or the job location and run again`);
     warnings.unshift("empty_run: " + (reasons.length ? reasons.join("; ") : "no engine returned results"));
+
+    // QUOTABLE STOP REASON: the warning above is engineer-grade and names vendors, so it
+    // is NOT what the recruiter reads. Pick the single most actionable cause and pair a
+    // stable code with a plain sentence the recruiter can act on or read down the phone
+    // ("it stopped with SRC-CREDITS"), which points the engineer straight at the fix
+    // without the recruiter ever seeing an engine name, a key or a query.
+    // Ordered most-actionable first: the first match wins.
+    stopReason =
+      !useSerper && engines.includes("serper") && serperSearchConfigured()
+        ? { code: "SRC-CREDITS", message: "The wide web search stopped early: its account is out of credit, or its key was refused. Nobody could be pulled in. This one needs an admin, re-running it will not help." }
+      : !useGoogle && !useSerper && engines.includes("serper") && !serperSearchConfigured()
+        ? { code: "SRC-NOKEY", message: "The wide web search is not switched on for this workspace, so the main source never ran. An admin has to turn it on in Setup." }
+      : rapid404
+        ? { code: "SRC-PEOPLE", message: `The people search refused every request (${rapid404}), because it is pointed at the wrong address in Setup. An admin has to correct it.` }
+      : engines.includes("koldinfo") && !useKold
+        ? { code: "SRC-CONTACTDB", message: "The contact database is offline, so nobody could be looked up. An admin has to bring it back." }
+      : opts.excludeKeys?.size && scanned === 0
+        ? { code: "SRC-FRESHONLY", message: `Fresh only is ticked, and all ${opts.excludeKeys.size} people found had already been surfaced by an earlier search. Untick Fresh only and run again to see them.` }
+      : scanned > 0
+        ? { code: "SRC-FILTERED", message: `${scanned} people were found, but every one was ruled out by this search's must-haves or scored zero fit. Loosen the must-haves, or widen the location, and run again.` }
+      : !useSearx && engines.includes("searx")
+        ? { code: "SRC-FREEENGINE", message: "The free search engine did not answer and no other source returned anyone. Worth another run in a few minutes." }
+      : { code: "SRC-NONE", message: "No search source returned anyone for this profile. Try a broader job title or a wider location." };
+    // The engineer-facing specifics ride along separately, never in the sentence above.
+    stopReason.detail = reasons.length ? reasons.join("; ") : "no engine returned results";
   }
 
   // SUCCESSFUL-RUN CLEANUP: per-query engine failures emit one line per company/page,
@@ -1076,5 +1125,5 @@ export async function runDiscovery(
     }
   }
 
-  return { candidates, warnings, scanned, usage: { rapidapi: rapidUsed, serper: serperUsed, google: googleUsed } };
+  return { candidates, warnings, scanned, stopReason, usage: { rapidapi: rapidUsed, serper: serperUsed, google: googleUsed } };
 }
