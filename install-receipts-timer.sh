@@ -40,6 +40,26 @@ if [ -z "$SECRET" ]; then
   exit 1
 fi
 
+# THE APP IS NOT PUBLISHED ON THE HOST, SO THE DEFAULT URL HERE REACHES NOTHING.
+#
+# This is a second installer for the SAME unit name as install-receipt-sweep-timer.sh, which
+# drives the sweep with `docker exec` instead of curl. Running this one after that one
+# replaced a working unit with `curl http://127.0.0.1:3000`, and nothing binds host port 3000
+# on this box: every nightly tick died with "Failed to connect", which looks in Spend master
+# exactly like a quiet month with no receipts. Found 2026-07-31, hours after install.
+#
+# So prove the URL answers BEFORE overwriting anything. A loud refusal is recoverable; a
+# timer that fires nightly into a closed port is not, because nobody looks at it.
+if ! curl -fsS -m 10 -o /dev/null "$RECEIPTS_URL/api/health" 2>/dev/null \
+  && ! curl -fsS -m 10 -o /dev/null "$RECEIPTS_URL/" 2>/dev/null; then
+  echo "ERROR: nothing answers at $RECEIPTS_URL, so the nightly sweep would fail silently." >&2
+  echo "       On this box the app container publishes no host port. Either:" >&2
+  echo "         bash $DIR/install-receipt-sweep-timer.sh      # talks to the container directly" >&2
+  echo "       or re-run with a URL that answers, e.g.:" >&2
+  echo "         RECEIPTS_URL=https://recruitersos.co bash $0" >&2
+  exit 1
+fi
+
 ENVFILE=/etc/recruiteros-receipts.env
 umask 077
 cat > "$ENVFILE" <<EOF
