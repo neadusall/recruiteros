@@ -45,13 +45,25 @@ async function telnyx<T>(path: string, key: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Every product Telnyx can report usage for; the list is served by the API itself. */
-async function telnyxProducts(key: string): Promise<string[]> {
-  const j = await telnyx<{ data?: Array<{ product?: string; product_metrics?: string[] }> }>("/v2/usage_reports/options", key);
+interface TelnyxProduct { product: string; dimension: string }
+
+/**
+ * Every product Telnyx can report a COST for, each with a dimension it will actually accept.
+ * The dimension matters: `date` is valid for most products but not all, and asking for the
+ * wrong one returns a 400 that silently drops that product's spend from the month. The API
+ * publishes the legal dimensions per product, so take them from there rather than guessing.
+ */
+async function telnyxProducts(key: string): Promise<TelnyxProduct[]> {
+  const j = await telnyx<{ data?: Array<{ product?: string; product_metrics?: string[]; product_dimensions?: string[] }> }>(
+    "/v2/usage_reports/options", key,
+  );
   return (j.data || [])
-    .filter((d) => (d.product_metrics || []).includes("cost"))
-    .map((d) => String(d.product))
-    .filter(Boolean);
+    .filter((d) => (d.product_metrics || []).includes("cost") && d.product)
+    .map((d) => {
+      const dims = d.product_dimensions || [];
+      const dimension = dims.includes("date") ? "date" : dims.includes("date_time") ? "date_time" : (dims[0] || "date");
+      return { product: String(d.product), dimension };
+    });
 }
 
 function monthWindow(period: string): { start: string; end: string } {
@@ -75,7 +87,7 @@ export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
   const items = await listSpendItems();
   const item = items.find((i) => i.vendor.toLowerCase() === "telnyx");
 
-  let products: string[];
+  let products: TelnyxProduct[];
   try {
     products = await telnyxProducts(key);
   } catch (e) {
@@ -103,14 +115,20 @@ export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
   for (const period of periods) {
     const { start, end } = monthWindow(period);
     let total = 0;
-    for (const product of products) {
-      const q = `/v2/usage_reports?product=${encodeURIComponent(product)}&dimensions=date&metrics=cost&start_date=${start}&end_date=${end}`;
-      try {
-        const j = await telnyx<{ data?: Array<{ cost?: number | string }> }>(q, key);
-        for (const row of j.data || []) total += Number(row.cost || 0);
-      } catch {
-        if (!failed.includes(product)) failed.push(product);
+    for (const { product, dimension } of products) {
+      const base = `/v2/usage_reports?product=${encodeURIComponent(product)}&metrics=cost&start_date=${start}&end_date=${end}`;
+      /* Dimension first, then a bare metrics-only call: a product that rejects every
+         dimension still reports its total, and only a genuine failure is dropped. */
+      let got = false;
+      for (const q of [`${base}&dimensions=${encodeURIComponent(dimension)}`, base]) {
+        try {
+          const j = await telnyx<{ data?: Array<{ cost?: number | string }> }>(q, key);
+          for (const row of j.data || []) total += Number(row.cost || 0);
+          got = true;
+          break;
+        } catch { /* try the next shape */ }
       }
+      if (!got && !failed.includes(product)) failed.push(product);
     }
     total = Math.round(total * 100) / 100;
     if (total <= 0) continue;
