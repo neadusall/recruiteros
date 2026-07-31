@@ -2469,11 +2469,20 @@
         toast("Saved"); closeDrawer(); viewBurn();
       });
     });
+    /* Both of these used to report success without reading the reply, so a 404 or a
+       500 came back as "Confirmed" / "Removed" and the row was still there on the next
+       render. The owner hit exactly that: a receipt that said it was gone and was not,
+       with no way to tell which had happened. Say what actually occurred. */
     $("#rcConfirm").addEventListener("click", function () {
-      send("/owner/receipts", "PATCH", { id: v.id, reviewed: true }).then(function () { toast("Confirmed"); closeDrawer(); viewBurn(); });
+      send("/owner/receipts", "PATCH", { id: v.id, reviewed: true }).then(function (r2) {
+        if (!r2.ok) { toast(r2.status === 404 ? "That receipt is no longer on file" : "Could not confirm"); return; }
+        toast("Confirmed"); closeDrawer(); viewBurn();
+      });
     });
+    // One route for deleting a receipt, so the confirmation, the reply check and the
+    // wording cannot drift apart depending on which button was pressed.
     $("#rcDelete").addEventListener("click", function () {
-      send("/owner/receipts?id=" + encodeURIComponent(v.id), "DELETE").then(function () { toast("Removed"); closeDrawer(); viewBurn(); });
+      deleteReceipts([v.id], v.vendor || "this receipt", v.amountUsd);
     });
   }
 

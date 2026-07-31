@@ -151,6 +151,15 @@ export interface SweepReport {
 interface ReceiptStore {
   receipts: Receipt[];
   sweeps: SweepReport[];
+  /**
+   * Invoice fingerprints the owner deleted by hand.
+   *
+   * The sweep's only reason to skip an email is a receipt already in the store carrying
+   * its fingerprint, so a delete removed that reason along with the row and the next pull
+   * filed the same invoice again. These are remembered instead, and only a deliberate
+   * "Pull receipts from the mailbox" clears them.
+   */
+  dismissed?: string[];
   lastSweepAt?: string;
   /** Portal pullers, keyed by lowercased vendor. See PullerState. */
   pullers?: Record<string, PullerState>;
@@ -159,7 +168,7 @@ interface ReceiptStore {
 }
 
 const SNAP_KEY = "owner_spend_receipts_v1";
-const store: ReceiptStore = { receipts: [], sweeps: [], pullers: {} };
+const store: ReceiptStore = { receipts: [], sweeps: [], pullers: {}, dismissed: [] };
 const persist = debouncedSaver(SNAP_KEY, () => store);
 
 let hydrated: Promise<void> | null = null;
@@ -169,6 +178,7 @@ export function ensureReceiptsReady(): Promise<void> {
       .then((s) => {
         if (s && Array.isArray(s.receipts)) store.receipts = s.receipts;
         if (s && Array.isArray(s.sweeps)) store.sweeps = s.sweeps;
+        if (s && Array.isArray(s.dismissed)) store.dismissed = s.dismissed;
         if (s?.lastSweepAt) store.lastSweepAt = s.lastSweepAt;
         if (s?.pullers) store.pullers = s.pullers;
         if (s?.pullerReportAt) store.pullerReportAt = s.pullerReportAt;
@@ -1183,6 +1193,9 @@ async function importMessage(
     .digest("hex");
   // Same message, or the same charge arriving twice (invoice + payment confirmation).
   if (store.receipts.some((r) => fingerprintOf(r) === fingerprint)) return { status: "duplicate" };
+  // Deleted by hand: the email is still in the mailbox, but the owner has already said
+  // this one does not belong in the books.
+  if (isReceiptDismissed(fingerprint, store.dismissed || [])) return { status: "duplicate" };
 
   const id = rid("rcpt");
   let hasShot = false, shotError: string | undefined;
@@ -1566,12 +1579,42 @@ export async function updateReceipt(id: string, patch: Partial<Receipt>): Promis
 
 export async function deleteReceipt(id: string): Promise<boolean> {
   await ensureReceiptsReady();
-  const n = store.receipts.length;
+  const going = store.receipts.find((r) => r.id === id);
+  if (!going) return false;
+  /* Remember the invoice, not the row. The harvester skips anything whose fingerprint is
+     already in the store, so deleting a receipt also deleted the only reason the sweep
+     had to leave that email alone, and the next pull filed it straight back. The owner
+     deleted a RackNerd receipt and watched it return. */
+  dismissFingerprint(fingerprintOf(going));
   store.receipts = store.receipts.filter((r) => r.id !== id);
-  if (store.receipts.length === n) return false;
   await removeArtifacts(id);
   persist();
   return true;
+}
+
+/* ---- deletions the mailbox sweep must not undo --------------------------
+   Pure and exported so scripts/test-receipt-dismiss.mts can pin the rule, the same way
+   the spend register's is pinned. */
+
+/** Has this invoice been deleted by hand? */
+export function isReceiptDismissed(fingerprint: string, dismissed: string[]): boolean {
+  return dismissed.indexOf(fingerprint) >= 0;
+}
+
+/** Pressing "Pull receipts from the mailbox" is the owner asking for the mailbox again,
+ *  which is the one thing allowed to overrule an earlier delete. The NIGHTLY sweep calls
+ *  harvestAll() directly and never comes through here, so a receipt removed by hand stays
+ *  removed in between. Returns how many deletions were forgotten. */
+export function forgetReceiptDismissals(): number {
+  const n = (store.dismissed || []).length;
+  if (n) { store.dismissed = []; persist(); }
+  return n;
+}
+
+function dismissFingerprint(fp: string): void {
+  if (!fp) return;
+  if (!store.dismissed) store.dismissed = [];
+  if (store.dismissed.indexOf(fp) < 0) store.dismissed.push(fp);
 }
 
 /**
@@ -1808,12 +1851,15 @@ export function harvestState(): { running: boolean; startedAt?: string; mailboxe
 }
 
 /** Kick off a backfill over the last `monthsBack` calendar months. Returns immediately. */
-export function startHarvest(monthsBack = 3): { started: boolean; reason?: string; mailboxes: string[] } {
+export function startHarvest(monthsBack = 3): { started: boolean; reason?: string; mailboxes: string[]; readopted?: number } {
   if (inFlight) return { started: false, reason: "a sweep is already running", mailboxes: inFlight.mailboxes };
   const boxes = billingMailboxes();
   if (!boxes.length) return { started: false, reason: "no billing mailbox is configured", mailboxes: [] };
+  /* Asking for the mailbox by hand outranks an earlier delete: this is the only way a
+     deleted receipt can come back, and it is a deliberate press rather than a timer. */
+  const readopted = forgetReceiptDismissals();
   void harvestAll(monthsBack).catch(() => {});
-  return { started: true, mailboxes: boxes.map((b) => b.user) };
+  return { started: true, mailboxes: boxes.map((b) => b.user), readopted };
 }
 
 /**
