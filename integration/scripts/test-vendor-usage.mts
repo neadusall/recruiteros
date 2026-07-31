@@ -143,6 +143,30 @@ function invoicedReceipt(): Receipt {
   check("of which only the invoiced month is proven", row!.totalVerifiedUsd, 34.58);
 }
 
+/* ---- two accounts under one vendor name: the meter belongs to exactly one of them ----
+ *
+ * The house Telnyx account and Lume's white-label one are two separate accounts with two
+ * separate bills. The fallback that pairs a metered row to a ledger key BY VENDOR NAME gave
+ * both rows the same figure, so the house account's spend was reported a second time
+ * against the tenant, and the month totals carried it twice.
+ */
+{
+  devVendorUsage().months = [];
+  await recordVendorMonth({ key: "telnyx", vendor: "Telnyx", period: SMALL, amountUsd: 40, closed: true });
+  const lume: SpendItem = {
+    id: "sp_telnyx_lume", vendor: "Telnyx", label: "Lume account (white-label numbers)",
+    category: "messaging", billing: "metered", amountUsd: 0, at: `${INVOICED}-01`,
+    status: "active", seeded: true, createdAt: T, updatedAt: T,
+  } as SpendItem;
+
+  const m = buildSpendMatrix([telnyxRow(), lume], [], { months: 4, inboxConfigured: true });
+  const house = m.rows.find((r) => r.label.includes("SMS"))!;
+  const tenant = m.rows.find((r) => r.label.includes("Lume"))!;
+  check("the account that owns the meter reports it", house.cells.find((c) => c.period === SMALL)!.countedUsd, 40);
+  check("the other account does not report it too", tenant.cells.find((c) => c.period === SMALL)!.countedUsd, 0);
+  check("so the month counts it once", m.monthTotals.find((t) => t.period === SMALL)!.countedUsd, 40);
+}
+
 /* A live pay-per-use line with nothing from the vendor keeps behaving exactly as before. */
 {
   devVendorUsage().months = [];

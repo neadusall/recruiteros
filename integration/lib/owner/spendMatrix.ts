@@ -366,10 +366,27 @@ export function buildSpendMatrix(
      the money is plainly going out, so the vendor's own name counts as the link. */
   const ledgerKeys = new Set<string>();
   for (const period of months) for (const k of Object.keys(metered[period] || {})) ledgerKeys.add(k.toLowerCase());
+  /* ONE METER, ONE ROW. The fallback above is a guess from a name, and a name is not
+     unique: this business runs TWO Telnyx accounts, the house one and Lume's white-label
+     one, and both rows read "Telnyx". Letting both claim the meter put the house account's
+     spend on the tenant's line as well and counted it twice in the books. So a key an
+     explicit link already owns is off limits, and an ambiguous name claims nothing —
+     a row with no figure is a gap someone can close, a row with someone else's figure is a
+     wrong number nobody can see is wrong. */
+  const linkedKeys = new Set(
+    items.map((i) => (i.link?.ledgerSource || "").toLowerCase()).filter(Boolean),
+  );
+  const meteredNames = new Map<string, number>();
+  for (const i of items) {
+    if (i.billing !== "metered") continue;
+    const n = i.vendor.toLowerCase();
+    meteredNames.set(n, (meteredNames.get(n) || 0) + 1);
+  }
   const ledgerKeyFor = (i: SpendItem): string | undefined => {
     if (i.link?.ledgerSource) return i.link.ledgerSource;
     if (i.billing !== "metered") return undefined;
     const byName = i.vendor.toLowerCase();
+    if (linkedKeys.has(byName) || (meteredNames.get(byName) || 0) > 1) return undefined;
     return ledgerKeys.has(byName) ? byName : undefined;
   };
 
