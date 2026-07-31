@@ -47,6 +47,37 @@ PASS="$2"
 HOST="${3:-}"
 PORT="${4:-993}"
 
+# ⚠️ A PASSWORD THAT ARRIVED WORD-SPLIT MUST BE REFUSED HERE, NOT DISCOVERED LATER.
+# A Gmail app password is shown as four space-separated groups. A caller that loses the
+# quoting around it (Windows PowerShell 5.1 does exactly this when handing a string to a
+# native exe) delivers those groups as four SEPARATE arguments: group 1 lands as the
+# password, group 2 as the host, group 3 as the port, group 4 is dropped. Everything
+# then looks saved, and the only symptom is `getaddrinfo EAI_AGAIN logr` minutes later,
+# which reads like a network fault and names nothing that leads back to the real cause.
+# The shapes below are cheap to check and impossible to satisfy by accident.
+if ! printf %s "$PORT" | grep -qE '^[0-9]+$'; then
+  echo "The port reads '$PORT', which is not a number." >&2
+  echo "This is what a word-split app password looks like: the caller lost the quotes and" >&2
+  echo "its groups arrived as separate arguments. Nothing has been saved. Quote the" >&2
+  echo "password, or pass it with no spaces in it." >&2
+  exit 1
+fi
+if [ -n "$HOST" ] && ! printf %s "$HOST" | grep -qE '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'; then
+  echo "The IMAP host reads '$HOST', which is not a hostname. Nothing has been saved." >&2
+  exit 1
+fi
+if [ -n "$HOST" ] && ! printf %s "$HOST" | grep -q '\.'; then
+  echo "The IMAP host reads '$HOST', which has no dot in it, so it is not a mail server." >&2
+  echo "If you meant to let this work the host out, leave it off entirely. If a group of" >&2
+  echo "your app password has landed here, the caller lost the quotes around it." >&2
+  echo "Nothing has been saved." >&2
+  exit 1
+fi
+case "$ADDR" in
+  *@*.*) : ;;
+  *) echo "'$ADDR' is not an email address. Nothing has been saved." >&2; exit 1 ;;
+esac
+
 ENV=".env.production"
 touch "$ENV"
 chmod 600 "$ENV"
