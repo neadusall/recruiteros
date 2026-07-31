@@ -10,9 +10,9 @@
  *   - the merged row is only "verified" if every priced row folded in was;
  *   - the spend is dated from the FIRST box bought, not the last;
  *   - with no merged row present (seed never applied) nothing is deleted.
- * Also pins the retirement rule (owner, 2026-07-31): five vendors come OFF the register
- * entirely - two we do not use, three we use but are not billed for here - and a row is
- * only dropped while it still carries no owner-entered money.
+ * Also pins the retirement rule (owner, 2026-07-31): six vendors come OFF the register
+ * entirely - two we do not use, three we use but are not billed for here, one that costs
+ * nothing ongoing - and a row is only dropped while it still carries no owner-entered money.
  * The suite calls mergeSeedRows with its real shipped merge list, so a change to which
  * rows are folded shows up here.
  */
@@ -135,6 +135,7 @@ function hetzner(items: SpendItem[]): SpendItem[] {
   const out = retireSeedRows([
     row("Instantly", "Outreach sending (alternate provider)"),
     row("Loxo", "ATS seats"),
+    row("TidyCal", "Booking links"),
     row("Telnyx", "SMS and voice"),
   ]);
   check("retired seed rows are dropped", out.map((i) => i.vendor), ["Telnyx"]);

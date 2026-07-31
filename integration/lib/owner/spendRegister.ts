@@ -382,12 +382,6 @@ const SEED: SeedItem[] = [
     notes: "ElevenLabs carries this today, so confirm whether Cartesia is still subscribed.",
   },
   {
-    vendor: "TidyCal", label: "Booking links", category: "software", billing: "one_time",
-    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
-    purpose: "The booking link put in front of every interested reply.",
-    notes: "Usually sold as a lifetime deal rather than a subscription; if that is what was bought, mark it Paid once.",
-  },
-  {
     vendor: "Telnyx", label: "Lume account (white-label numbers)", category: "messaging", billing: "metered",
     amountUsd: 0, at: "2026-07-01", status: "active",
     purpose: "Lume's own Telnyx account: its five per-recruiter 929 lines and everything its recruiters send.",
@@ -403,19 +397,19 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 8;
+const SEED_VERSION = 9;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
  * Rows this register should never have carried, dropped once on a version bump.
  *
  * Taking a vendor out of SEED only stops it being re-added: a row already seeded into the
- * live store stays there forever. These five were all owner calls (2026-07-31): Instantly
- * and Hume are not used at all, and KoldInfo, Laxis and Loxo are used but are not billed
- * to this book, so a $0 "no price on file" line for them is noise the owner has to look
- * past every time. Guarded the same way a correction is: only a row that came from the
- * seed and carries no owner-entered money is removed, so a figure someone typed can never
- * be deleted by a redeploy.
+ * live store stays there forever. These were all owner calls (2026-07-31): Instantly and
+ * Hume are not used at all; KoldInfo, Laxis and Loxo are used but are not billed to this
+ * book; and TidyCal costs nothing ongoing, so a $0 "no price on file" line for any of them
+ * is noise the owner has to look past every time. Guarded the same way a correction is:
+ * only a row that came from the seed and carries no owner-entered money is removed, so a
+ * figure someone typed can never be deleted by a redeploy.
  */
 const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
   { vendor: "Instantly", label: "Outreach sending (alternate provider)" },
@@ -423,6 +417,7 @@ const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
   { vendor: "KoldInfo", label: "People and business email database" },
   { vendor: "Laxis", label: "Contact enrichment" },
   { vendor: "Loxo", label: "ATS seats" },
+  { vendor: "TidyCal", label: "Booking links" },
 ];
 
 /**
