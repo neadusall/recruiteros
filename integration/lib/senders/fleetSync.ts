@@ -6,9 +6,9 @@
  * module mirrors it into the per-portal Email ID pools so every mailbox is a
  * tracked row on its OWN portal's Senders tab:
  *
- *   - domain starts with a white-label brand token ("lume…") -> that tenant's
+ *   - domain carries a white-label brand token ("…lume…") -> that tenant's
  *     workspace (resolved exactly like the warm-up panel's portal split);
- *   - everything else ("tal…", house domains)               -> the house workspace.
+ *   - everything else ("tal…", house domains)             -> the house workspace.
  *
  * Provider + credentials, from what Smartlead knows about each account:
  *   - SMTP-type accounts carry real credentials -> imported ready to send from
@@ -21,7 +21,7 @@
  * an operator's status or recruiter assignment. Safe to run on every tick.
  */
 
-import { addInbox, findInboxByEmail, decodeBase64Password } from "./store";
+import { addInbox, findInboxByEmail, decodeBase64Password, relocateInbox } from "./store";
 import type { SenderProvider, SenderStatus } from "./types";
 
 export interface FleetSyncReport {
@@ -32,12 +32,35 @@ export interface FleetSyncReport {
   withCreds: number;
   credsless: number;
   skippedNoWorkspace: number;
+  /** Mailboxes pulled out of a portal they no longer belong to. */
+  relocated: number;
   byWorkspace: Record<string, number>;
   at: string;
 }
 
 function brandToken(name: string): string {
   return (name.split(/\s+/)[0] || "").toLowerCase();
+}
+
+/**
+ * Does this sending domain belong to the brand behind `token`?
+ *
+ * Outreach domains are lookalikes, not subdomains: a tenant buys a spread of
+ * near-miss names so no two prospects see the same sender. Those names put the
+ * brand wherever it reads best, so "starts with the token" only ever recognised
+ * half a fleet. Of 53 Lume mailboxes bought in one batch, the 26 on
+ * lumesearchgroup*.com were routed home and the 27 on artlumesearchgroup.com,
+ * bestlumesearchgroup.com and the like landed in the house pool: invisible to the
+ * tenant that paid for them, and parked in the one workspace whose cold email
+ * must never speak as Lume.
+ *
+ * So match the token anywhere in the registrable label. The label is the part a
+ * brand owns outright, which keeps the test off the TLD and off subdomains.
+ */
+function domainBelongsToBrand(domain: string, token: string): boolean {
+  if (!token) return false;
+  const label = domain.split(".")[0] || "";
+  return label.includes(token);
 }
 
 /** Hostnames of the internal SMTP server(s), same sources as the warm-up panel. */
@@ -85,7 +108,7 @@ export async function syncFleetInboxes(): Promise<FleetSyncReport> {
   const at = new Date().toISOString();
   const report: FleetSyncReport = {
     configured: false, accounts: 0, imported: 0, updated: 0,
-    withCreds: 0, credsless: 0, skippedNoWorkspace: 0, byWorkspace: {}, at,
+    withCreds: 0, credsless: 0, skippedNoWorkspace: 0, relocated: 0, byWorkspace: {}, at,
   };
   try {
     const { smartleadConfigured, listSmartleadAccountsFull } = await import("../sending/smartlead");
@@ -112,9 +135,16 @@ export async function syncFleetInboxes(): Promise<FleetSyncReport> {
     for (const a of accounts) {
       const domain = (a.email.split("@")[1] || "").toLowerCase();
       if (!domain) continue;
-      const tenant = tenants.find((t) => domain.startsWith(t.token));
+      const tenant = tenants.find((t) => domainBelongsToBrand(domain, t.token));
       const wsId = tenant ? tenant.wsId : houseWs;
       if (!wsId) { report.skippedNoWorkspace++; continue; }
+
+      // Routing can change under a mailbox (a widened brand match, a new tenant).
+      // Send any copy left in the previous portal home before writing this one,
+      // or the correction reads as a duplicate instead of a move.
+      try {
+        if (await relocateInbox(wsId, a.email)) report.relocated++;
+      } catch { /* one row; the add below still lands it in the right pool */ }
 
       const hasCreds = !!(a.username && a.password && a.smtpHost);
       if (hasCreds) report.withCreds++; else report.credsless++;

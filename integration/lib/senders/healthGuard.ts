@@ -10,7 +10,9 @@
  *   - warm-up is blocked upstream (blockedReason)
  *   - warm-up reputation collapses (< floor at any age, or < mature threshold
  *     once the inbox has warmed 7+ days; young inboxes at 50-80% are NORMAL and
- *     never held for reputation alone)
+ *     never held for reputation alone, and a mailbox younger than the grace
+ *     window is not judged on reputation at all: 0% there means "not measured
+ *     yet", not "bad")
  *   - our own bounce rate for the inbox crosses the ceiling (windowed from the
  *     last revive, min sample so one bounce never trips it)
  *
@@ -43,6 +45,7 @@ function envNum(name: string, fallback: number): number {
 const repFloor = () => envNum("SENDER_GUARD_REP_FLOOR", 45);        // hold at ANY age below this
 const repHoldMature = () => envNum("SENDER_GUARD_REP_HOLD", 60);    // hold below this once warmed 7+ days
 const repRecover = () => envNum("SENDER_GUARD_REP_RECOVER", 85);    // healthy again at/above this
+const repGraceDays = () => envNum("SENDER_GUARD_REP_GRACE_DAYS", 3); // reputation rules stay quiet before this age
 const bounceHoldRate = () => envNum("SENDER_GUARD_BOUNCE_RATE", 0.08);
 const BOUNCE_MIN_SAMPLE = 25;      // sends in the window before the bounce rule can trip
 const RECOVER_STREAK = 2;          // consecutive healthy checks required to revive
@@ -63,6 +66,8 @@ export interface GuardReport {
   revived: GuardAction[];
   /** Inboxes currently sitting in auto-hold after this run (fleet-wide). */
   holding: number;
+  /** Orphaned holds re-claimed from the journal this run (fleet-wide). */
+  adopted: number;
   smartleadData: boolean;
 }
 
@@ -169,7 +174,13 @@ function holdReason(
   if (lists && lists.length) return `domain on spam blocklist (${lists.join(", ")})`;
   if (acct?.blockedReason) return `warm-up blocked upstream: ${acct.blockedReason}`;
   const rep = acct?.reputationPct;
-  if (typeof rep === "number") {
+  // Reputation only means something once warm-up has run long enough to measure
+  // it. A mailbox created minutes ago reports 0%, which is the absence of a
+  // score rather than a bad one, and holding on it turned every new batch off on
+  // its first night: 18 of a 53-mailbox delivery were parked hours after arrival
+  // for "warm-up reputation 0%" while warm-up was working perfectly. Give a new
+  // mailbox its grace days before this rule can speak.
+  if (typeof rep === "number" && ageDays(m, acct) >= repGraceDays()) {
     if (rep < repFloor()) return `warm-up reputation ${rep}%`;
     if (rep < repHoldMature() && ageDays(m, acct) >= 7) return `warm-up reputation ${rep}% after 7+ days`;
   }
@@ -178,6 +189,18 @@ function holdReason(
     return `bounce rate ${(wb.rate * 100).toFixed(1)}% over ${wb.sample} sends`;
   }
   return null;
+}
+
+/**
+ * The guard's most recent journalled action for a mailbox (journal is newest
+ * first). Falls back to an email-only match so a mailbox that has since been
+ * relocated to its correct portal is still recognised as one this guard held:
+ * the journal records the workspace the row lived in at the time, and a routing
+ * correction would otherwise look like a mailbox with no history.
+ */
+function lastGuardActionFor(workspaceId: string, email: string): GuardAction | undefined {
+  return state.journal.find((a) => a.workspaceId === workspaceId && a.email === email)
+    || state.journal.find((a) => a.email === email);
 }
 
 /** Healthy enough to count toward the revive streak. */
@@ -200,6 +223,7 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
   const revived: GuardAction[] = [];
   let checked = 0;
   let holding = 0;
+  let adopted = 0;
 
   // One upstream fleet pull serves every workspace (same account list).
   let byEmail = new Map<string, SmartleadAccount>();
@@ -235,6 +259,23 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
       if (typeof rep === "number" && m.warmupRepPct !== rep) { m.warmupRepPct = rep; dirty = true; }
       if (acct && m.warmupStatus !== acct.warmupStatus) { m.warmupStatus = acct.warmupStatus; dirty = true; }
       m.healthCheckedAt = at;
+
+      // Re-adopt a hold this guard placed and then lost track of. A paused row
+      // with no autoHold flag is indistinguishable from an operator's own pause,
+      // so bounce-back skips it forever; that is how 68 mailboxes came to sit
+      // parked with nothing left to release them. The journal still remembers who
+      // pressed pause, so trust it and take the row back.
+      if (m.status === "paused" && !m.autoHold) {
+        const last = lastGuardActionFor(ws, m.email);
+        if (last?.action === "held") {
+          m.autoHold = true;
+          m.autoHoldAt = m.autoHoldAt || last.at;
+          m.autoHoldReason = m.autoHoldReason || last.reason;
+          m.pausedReason = m.pausedReason || `auto-hold: ${last.reason}`;
+          adopted++;
+          dirty = true;
+        }
+      }
 
       const reason = holdReason(m, acct, domainListed);
 
@@ -280,7 +321,7 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
     }
   }
 
-  const report: GuardReport = { at, checked, held, revived, holding, smartleadData: haveSmartlead };
+  const report: GuardReport = { at, checked, held, revived, holding, adopted, smartleadData: haveSmartlead };
   state.lastReport = report;
   state.journal = [...held, ...revived, ...state.journal].slice(0, 200);
   save();

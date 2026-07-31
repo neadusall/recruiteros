@@ -213,6 +213,25 @@ export async function addInbox(workspaceId: string, input: NewInboxInput): Promi
     m.lastError = prev.lastError;
     const prevVerify = (prev as unknown as { lastVerifyAt?: string }).lastVerifyAt;
     if (prevVerify) (m as unknown as { lastVerifyAt?: string }).lastVerifyAt = prevVerify;
+    // Carry the health-guard record for the same reason, and for a sharper one:
+    // the guard's auto-revive only ever touches a row it still recognises as its
+    // own (autoHold + paused). Rebuilding the row dropped that flag, so within an
+    // hour of a hold the inbox looked like an OPERATOR pause: permanently parked,
+    // absent from the "currently held" list, unreachable by bounce-back. Status
+    // survived the re-import while the right to undo it did not, so every mailbox
+    // the guard ever held stayed paused for good. Keep the flag with the status.
+    m.autoHold = prev.autoHold;
+    m.autoHoldAt = prev.autoHoldAt;
+    m.autoHoldReason = prev.autoHoldReason;
+    m.pausedReason = prev.pausedReason;
+    m.recoverStreak = prev.recoverStreak;
+    m.guardBaseSent = prev.guardBaseSent;
+    m.guardBaseBounced = prev.guardBaseBounced;
+    // Warm-up vitals are re-synced by the guard, but keep the last known values so
+    // the pool tables never flash empty between a fleet sync and the next guard run.
+    m.warmupRepPct = prev.warmupRepPct;
+    m.warmupStatus = prev.warmupStatus;
+    m.healthCheckedAt = prev.healthCheckedAt;
     state.inboxes[existingIdx] = m;
   } else {
     state.inboxes.push(m);
@@ -236,6 +255,45 @@ export async function deleteInbox(workspaceId: string, id: string): Promise<bool
   state.inboxes.splice(i, 1);
   save();
   return true;
+}
+
+/**
+ * Make `targetWorkspaceId` the sole home of `email`, moving or dropping any copy
+ * sitting in another portal's pool.
+ *
+ * Pools are keyed by (workspace, email), so a mailbox that was once routed to the
+ * wrong portal stays there forever: re-importing it under the right workspace
+ * ADDS a second row rather than correcting the first, and the tenant would see
+ * its own mailbox counted twice while the house pool kept a sender it must never
+ * speak as. Routing corrections therefore have to relocate, not re-add.
+ *
+ * The move keeps the row's identity and history (id, counters, status, warm-up
+ * vitals) but drops the recruiter assignment: an ownerId names a user inside the
+ * OLD workspace and would dangle in the new one.
+ *
+ * Returns what happened, or null when the mailbox had no stray copy.
+ */
+export async function relocateInbox(targetWorkspaceId: string, email: string): Promise<"moved" | "merged" | null> {
+  await hydrate();
+  const key = email.toLowerCase().trim();
+  const strays = state.inboxes.filter((m) => m.email === key && m.workspaceId !== targetWorkspaceId);
+  if (!strays.length) return null;
+  const alreadyHome = state.inboxes.some((m) => m.email === key && m.workspaceId === targetWorkspaceId);
+  let outcome: "moved" | "merged" = "merged";
+  if (!alreadyHome) {
+    const keep = strays.shift()!;
+    keep.workspaceId = targetWorkspaceId;
+    keep.ownerId = undefined;
+    keep.ownerName = undefined;
+    keep.updatedAt = nowIso();
+    outcome = "moved";
+  }
+  for (const dup of strays) {
+    const i = state.inboxes.indexOf(dup);
+    if (i >= 0) state.inboxes.splice(i, 1);
+  }
+  save();
+  return outcome;
 }
 
 /** Bulk assign a set of inboxes to a recruiter (owner). Returns count changed. */
