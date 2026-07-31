@@ -40,6 +40,18 @@ async function run(req: Request) {
      bug, never the default, because a settled month should not be recomputed nightly. */
   const force = url.searchParams.get("force") === "1";
 
+  /* Take out charges harvested from a mailbox that are not this company's: a personal
+     mailbox files personal spending, and it was in the books before the relevance filter
+     existed. `dryRun` is the DEFAULT so a mistyped call reports instead of deleting;
+     &purgeNotOurs=apply is the deliberate one. Nothing else on this tick is destructive,
+     which is why this asks for a word rather than a flag. */
+  const purge = url.searchParams.get("purgeNotOurs");
+  if (purge) {
+    const { purgeNotOurs } = await import("../../../../../lib/owner/receipts");
+    const r = await purgeNotOurs({ dryRun: purge !== "apply" });
+    return NextResponse.json({ ok: true, dryRun: purge !== "apply", ...r });
+  }
+
   const pulls = withVendors ? await pullVendorApis(monthsBack, { force }).catch(() => []) : [];
 
   if (!wait) {

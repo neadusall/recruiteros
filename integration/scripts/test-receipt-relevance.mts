@@ -26,7 +26,7 @@ function check(name: string, got: unknown, want: unknown): void {
 
 const now = "2026-07-01";
 function item(id: string, vendor: string, label: string, status = "active"): SpendItem {
-  return { id, vendor, label, category: "tools", billing: "monthly", amountUsd: 10, at: now, status, createdAt: now, updatedAt: now } as SpendItem;
+  return { id, vendor, label, category: "people", billing: "monthly", amountUsd: 10, at: now, status, createdAt: now, updatedAt: now } as unknown as SpendItem;
 }
 
 const REGISTER: SpendItem[] = [

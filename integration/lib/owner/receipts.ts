@@ -1540,6 +1540,51 @@ export async function deleteReceipt(id: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Take out charges that were harvested from a mailbox but are not this company's.
+ *
+ * The relevance filter stops NEW ones being filed; this is for the ones already in from
+ * before it existed. A personal mailbox put a pizza order and a phone bill in the books,
+ * and they have to come out for the burn figure to mean anything.
+ *
+ * Deliberately narrow, because this deletes:
+ *   - EMAIL receipts only. A portal or API receipt was fetched from a vendor's own
+ *     billing page, so it is by definition a vendor of ours and can never be personal.
+ *   - never one the owner has touched. `reviewed` means a person looked at this row and
+ *     kept it, which outranks any rule here.
+ *   - never one tied to a register row, which `relevanceOf` already guarantees, and
+ *     which is asserted again rather than assumed.
+ *
+ * `dryRun` reports exactly what would go without touching anything, and the caller is
+ * expected to look before it does not.
+ */
+export async function purgeNotOurs(opts: { dryRun?: boolean } = {}): Promise<{
+  removed: number;
+  kept: number;
+  charges: Array<{ id: string; vendor: string; amountUsd: number; chargedAt: string; from?: string; why: string }>;
+}> {
+  await ensureReceiptsReady();
+  const items = await listSpendItems();
+  const doomed: Array<{ id: string; vendor: string; amountUsd: number; chargedAt: string; from?: string; why: string }> = [];
+
+  for (const r of store.receipts) {
+    if (r.source !== "email") continue;
+    if (r.reviewed) continue;
+    if (r.itemId) continue;
+    const rel = relevanceOf({ vendor: r.vendor, itemId: r.itemId }, items);
+    if (rel.ours) continue;
+    doomed.push({ id: r.id, vendor: r.vendor, amountUsd: r.amountUsd, chargedAt: r.chargedAt, from: r.from, why: rel.why });
+  }
+
+  if (!opts.dryRun && doomed.length) {
+    const gone = new Set(doomed.map((d) => d.id));
+    store.receipts = store.receipts.filter((r) => !gone.has(r.id));
+    for (const d of doomed) await removeArtifacts(d.id).catch(() => {});
+    persist();
+  }
+  return { removed: opts.dryRun ? 0 : doomed.length, kept: store.receipts.length, charges: doomed };
+}
+
 /** Every file a receipt owns: the picture, the thumbnail, and the vendor's own document. */
 async function removeArtifacts(id: string): Promise<void> {
   const dir = receiptsDir();
