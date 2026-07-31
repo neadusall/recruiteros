@@ -305,10 +305,10 @@ const SEED: SeedItem[] = [
   },
   {
     vendor: "Zapmail", label: "Google Workspace mailboxes", category: "email", billing: "monthly",
-    amountUsd: 0, at: "2026-07-30", status: "active", needsAmount: true,
-    purpose: "53 Google Workspace inboxes across 31 domains, the newest slice of the sending fleet.",
+    amountUsd: 299, at: "2026-07-30", status: "active", verified: true,
+    purpose: "100 Google Workspace inboxes across 34 domains, the newest slice of the sending fleet.",
     impact: "Deliverability spread. Sending the same volume from a second mailbox estate on a different provider means one provider throttling the fleet cannot stop outbound on its own.",
-    notes: "Zapmail also REGISTERED those 31 domains, through its reseller registrar PDR Ltd, on the same day the mailboxes appeared (2026-07-30). That is why they show on no Dynadot or Porkbun order: the domain money and the mailbox money both go to Zapmail, and the Domains panel attributes them here.",
+    notes: "Pro plan: $299/month for 100 mailboxes, renewing on the 30th. The figure is not an estimate - it is read off Zapmail's own Stripe invoice (CJDLTZUT-0001, paid 2026-07-30) and re-proved every month with nobody present, because GET /v2/subscriptions hands over a Stripe hosted invoice link and a hosted link needs no sign-in. THE DOMAINS ARE SEPARATE MONEY AND ARE NOT IN THIS $299: Zapmail also REGISTERED all 34, through its reseller registrar PDR Ltd, on the day the mailboxes appeared (2026-07-30), which is why they show on no Dynadot or Porkbun order. That was a ONE-OFF, not a monthly commitment, and it is still unpriced - its invoice was never on a subscription, so the API cannot see it. Zapmail's API also reports every one of the 34 with autoRenew OFF and expiring 2027-07-30, so no renewal is scheduled and none of them will lapse quietly before then either.",
   },
   {
     vendor: "Microsoft 365", label: "lumesp.com mailboxes", category: "email", billing: "monthly",
@@ -376,7 +376,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 14;
+const SEED_VERSION = 15;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -466,6 +466,22 @@ const SEED_CORRECTIONS: Array<{
     force: true,
     when: (i) => String(i.at).slice(0, 10) === "2026-06-01",
     patch: { at: "2026-07-01" },
+  },
+  {
+    /* Seeded at $0 because nothing here could read Zapmail's billing. That changed:
+       GET /v2/subscriptions states the plan outright and hands over a Stripe hosted
+       invoice link, and the invoice behind it (CJDLTZUT-0001, paid 2026-07-30) reads
+       $299.00 for 100 mailboxes. So this arrives `verified` - a vendor invoice is the
+       standard for that, and the same read now happens every month unattended.
+       The 32 Zapmail DOMAIN rows are deliberately untouched: that was one-off money on
+       a different day and folding it into a monthly figure would overstate the run rate
+       by whatever the registrations cost, every month, forever. */
+    vendor: "Zapmail", label: "Google Workspace mailboxes",
+    patch: {
+      amountUsd: 299, verified: true, needsAmount: false,
+      purpose: SEED.find((s) => s.vendor === "Zapmail")?.purpose,
+      notes: SEED.find((s) => s.vendor === "Zapmail")?.notes,
+    },
   },
   {
     // The three validation nodes are NOT on the mail server's cycle: the owner corrected
