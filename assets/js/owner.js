@@ -998,7 +998,11 @@
    * month goes unaccounted for.
    *
    *   receiptKpis / receiptAlerts / receiptMatrix / receiptSourcing / receiptUnmatched
-   *   openReceipt      the receipt viewer (the actual invoice image)
+   *   openViewer       the popup: the invoice full size, ✕ to close, arrows to step
+   *   openReceipt      one receipt · openCell one service in one month
+   *   openMonthReceipts / openMonthAt   a whole month, in vendor order
+   *   openMissing      a month with nothing on file: where to get it, how to attach it
+   *   editReceipt      correct what the parser read (the drawer behind the popup)
    *   openAttach       hand-attach an invoice downloaded from a vendor portal
    *   Backend          GET/POST/PATCH/DELETE /api/owner/receipts
    */
@@ -1069,10 +1073,18 @@
       '<button class="btn btn-sm" id="rcHarvest">Pull receipts from the mailbox</button>' +
       '<button class="btn btn-sm" id="rcAttach">Attach an invoice</button>' +
       '</div></div>' +
-      '<p class="note" style="margin-top:2px">Each cell is one month for one service. Click a receipt to see the invoice itself; click an empty month to attach one. Solid figures are proven by a receipt, faded figures are the register\'s estimate.</p>';
+      '<p class="note" style="margin-top:2px">Each cell is one month for one service. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate.</p>';
 
     html += '<div class="otable-wrap rc-wrap"><table class="otable rc-matrix"><thead><tr><th class="rc-svc">Service</th>';
-    months.forEach(function (p) { html += '<th class="num">' + esc(monthLabel(p)) + '</th>'; });
+    months.forEach(function (p) {
+      var t = (m.monthTotals || []).filter(function (x) { return x.period === p; })[0];
+      var n = t ? t.receiptCount : 0;
+      html += '<th class="num"><button class="rc-mhead" data-month="' + esc(p) + '"' + (n ? "" : " disabled") +
+        ' title="' + esc(n ? "Open all " + n + " receipt" + (n > 1 ? "s" : "") + " for " + monthLabel(p) : "No receipts on file for " + monthLabel(p)) + '">' +
+        '<span class="rc-mhead-name">' + esc(monthLabel(p)) + '</span>' +
+        '<span class="rc-mhead-sub">' + (n ? n + ' receipt' + (n > 1 ? 's' : '') : 'none on file') + '</span>' +
+        '</button></th>';
+    });
     html += '<th class="num">Total</th></tr></thead><tbody>';
 
     (m.rows || []).forEach(function (r) {
@@ -1109,22 +1121,30 @@
     return html + '</tfoot></table></div></div>';
   }
 
+  /* One month of one service. Every month that has paper behind it carries a labelled
+     button, because "click the cell" is not a thing an accountant can be told over the
+     phone — a button that says View receipt is. Months with nothing on file carry the
+     opposite button, so the gap is one click from being filled. */
   function matrixCell(row, c) {
     var cls = "rc-cell rc-" + c.status;
-    var attr = ' data-cell="' + esc((row.itemId || "") + "|" + c.period) + '"';
+    var key = (row.itemId || "") + "|" + c.period;
+    var attr = ' data-cell="' + esc(key) + '"';
     var inner;
     if (c.receipts && c.receipts.length) {
       var r = c.receipts[0];
+      var many = c.receipts.length > 1;
       inner = '<div class="rc-amt">' + usd(c.actualUsd) + '</div>' +
         (r.hasShot
           ? '<img class="rc-thumb" src="' + API + '/owner/receipts/file/' + esc(r.id) + '?v=thumb" alt="receipt" loading="lazy" />'
           : r.source === "api"
-            ? '<div class="rc-noshot">from the vendor API</div>'
+            ? '<div class="rc-noshot">figure from the vendor API</div>'
             : '<div class="rc-noshot">no image</div>') +
-        (c.receipts.length > 1 ? '<div class="note" style="font-size:10.5px">' + c.receipts.length + ' receipts</div>' : "") +
+        '<button class="rc-view" data-view="' + esc(key) + '" title="' + esc("Open the " + monthLabel(c.period) + " receipt for " + row.vendor) + '">' +
+        (many ? "View " + c.receipts.length + " receipts" : "View receipt") + '</button>' +
         (c.note ? '<div class="note" style="font-size:10.5px">' + esc(c.note) + '</div>' : "");
     } else if (c.status === "missing") {
-      inner = '<div class="rc-amt est">' + usd(c.expectedUsd) + '</div><div class="rc-gap">no receipt</div>';
+      inner = '<div class="rc-amt est">' + usd(c.expectedUsd) + '</div><div class="rc-gap">no receipt</div>' +
+        '<button class="rc-view ghost" data-attach="' + esc(key) + '">Attach one</button>';
     } else if (c.status === "pending") {
       inner = '<div class="rc-amt est">' + usd(c.expectedUsd) + '</div><div class="note" style="font-size:10.5px">due</div>';
     } else if (c.status === "metered") {
@@ -1259,7 +1279,8 @@
     var art = r.hasShot
       ? '<img class="rc-tile-shot" src="' + API + '/owner/receipts/file/' + esc(r.id) + '?v=thumb" alt="receipt" loading="lazy" />'
       : '<div class="rc-tile-shot rc-tile-none">' + (r.source === "api" ? "figure from the vendor API" : "no image") + '</div>';
-    return '<button class="rc-tile" data-receipt="' + esc(r.id) + '" title="' + esc((r.subject || r.description || r.vendor) + "") + '">' +
+    return '<button class="rc-tile" data-receipt="' + esc(r.id) + '" data-month="' + esc(r.period || (r.chargedAt || "").slice(0, 7)) + '"' +
+      ' title="' + esc((r.subject || r.description || r.vendor) + "") + '">' +
       art +
       '<div class="rc-tile-meta"><div class="rc-tile-top"><span class="rc-tile-vendor">' + esc(r.vendor) + '</span>' + badge + '</div>' +
       '<div class="rc-tile-amt">' + usd(Math.abs(r.amountUsd)) + (r.kind && r.kind !== "charge" ? ' <span class="note">' + esc(r.kind.replace("_", " ")) + '</span>' : '') + '</div>' +
@@ -1307,18 +1328,27 @@
     var at = $("#rcAttach");
     if (at) at.addEventListener("click", function () { openAttach(null, null); });
 
+    /* The whole cell stays clickable — the button is for the people who need to be told
+       where to click. Both land in the same place. */
     $$("#view .rc-cell").forEach(function (td) {
-      td.addEventListener("click", function () {
-        var parts = (td.dataset.cell || "").split("|");
-        var row = ((rcptData && rcptData.matrix.rows) || []).filter(function (r) { return r.itemId === parts[0]; })[0];
-        var cell = row && (row.cells || []).filter(function (c) { return c.period === parts[1]; })[0];
-        if (cell && cell.receipts && cell.receipts.length) openReceipt(cell.receipts[0].id);
-        else if (row) openAttach(row, cell);
-      });
+      td.addEventListener("click", function () { openCell(td.dataset.cell); });
+    });
+    $$("#view .rc-view[data-view]").forEach(function (b) {
+      b.addEventListener("click", function (e) { e.stopPropagation(); openCell(b.dataset.view); });
+    });
+    $$("#view .rc-view[data-attach]").forEach(function (b) {
+      b.addEventListener("click", function (e) { e.stopPropagation(); openCell(b.dataset.attach); });
+    });
+    $$("#view .rc-mhead[data-month]").forEach(function (b) {
+      b.addEventListener("click", function (e) { e.stopPropagation(); openMonthReceipts(b.dataset.month); });
     });
 
     $$("#view [data-receipt]").forEach(function (b) {
-      b.addEventListener("click", function (e) { e.stopPropagation(); openReceipt(b.dataset.receipt); });
+      b.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (b.dataset.month) openMonthAt(b.dataset.month, b.dataset.receipt);
+        else openReceipt(b.dataset.receipt);
+      });
     });
 
     if (rcptData && rcptData.inbox && rcptData.inbox.harvest && rcptData.inbox.harvest.running) pollHarvest();
@@ -1357,7 +1387,11 @@
           return (b.period || "").localeCompare(a.period || "") || (b.chargedAt || "").localeCompare(a.chargedAt || "");
         }));
         $$("#rcGalleryBody [data-receipt]").forEach(function (b) {
-          b.addEventListener("click", function (e) { e.stopPropagation(); openReceipt(b.dataset.receipt); });
+          b.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (b.dataset.month) openMonthAt(b.dataset.month, b.dataset.receipt);
+        else openReceipt(b.dataset.receipt);
+      });
         });
       }
       if (loud) toast(d.matrix.totals.receiptCount + " receipts on file · " + pct(d.matrix.totals.coveragePct) + " of spend proven");
@@ -1378,17 +1412,262 @@
     }, 6000);
   }
 
-  /* The receipt itself. The image is the point: it is the thing an accountant asks for. */
-  function openReceipt(id) {
-    var r = ((rcptData && rcptData.receipts) || []).filter(function (x) { return x.id === id; })[0];
+  /* ---------------- the receipt viewer (the popup) ----------------
+   *
+   * The invoice, full size, in the middle of the screen, with an ✕ that closes it. This is
+   * the thing an accountant is shown: it opens over the console, it prints on its own, and
+   * it steps through a month's receipts one at a time without going back to the table.
+   *
+   *   openReceipt(id)          one receipt
+   *   openCell(key)            one service in one month (all its receipts, or attach)
+   *   openMonthReceipts(p)     every receipt filed to that month, provider by provider
+   */
+
+  var rcvList = [];      // receipts currently in the viewer
+  var rcvIndex = 0;
+  var rcvContext = "";   // what the viewer was opened from, shown under the title
+
+  /** The fullest record we hold for an id: the gallery record if we have it, else the
+      matrix's reference, which carries less but is always present for a cell. */
+  function receiptById(id) {
+    var full = ((rcptData && rcptData.receipts) || []).filter(function (x) { return x.id === id; })[0];
+    if (full) return full;
     var refs = [];
     ((rcptData && rcptData.matrix.rows) || []).forEach(function (row) {
-      (row.cells || []).forEach(function (c) { (c.receipts || []).forEach(function (x) { refs.push(x); }); });
+      (row.cells || []).forEach(function (c) {
+        (c.receipts || []).forEach(function (x) { refs.push(assign({}, x, { vendor: x.vendor || row.vendor, period: x.period || c.period })); });
+      });
     });
-    ((rcptData && rcptData.matrix.unmatched) || []).forEach(function (u) { u.receipts.forEach(function (x) { refs.push(x); }); });
-    var ref = refs.filter(function (x) { return x.id === id; })[0];
-    if (!r && !ref) return;
-    var v = r || ref;
+    ((rcptData && rcptData.matrix.unmatched) || []).forEach(function (u) {
+      u.receipts.forEach(function (x) { refs.push(assign({}, x, { vendor: x.vendor || u.vendor })); });
+    });
+    return refs.filter(function (x) { return x.id === id; })[0] || null;
+  }
+
+  function assign(t) {
+    for (var i = 1; i < arguments.length; i++) {
+      var s = arguments[i] || {};
+      for (var k in s) if (Object.prototype.hasOwnProperty.call(s, k) && s[k] !== undefined) t[k] = s[k];
+    }
+    return t;
+  }
+
+  function openReceipt(id) {
+    var v = receiptById(id);
+    if (!v) return;
+    openViewer([v], 0, monthLabel(v.period || (v.chargedAt || "").slice(0, 7)));
+  }
+
+  /** A cell of the matrix: one service, one month. */
+  function openCell(key) {
+    var parts = String(key || "").split("|");
+    var row = ((rcptData && rcptData.matrix.rows) || []).filter(function (r) { return (r.itemId || "") === parts[0]; })[0];
+    var cell = row && (row.cells || []).filter(function (c) { return c.period === parts[1]; })[0];
+    if (!row) return;
+    if (cell && cell.receipts && cell.receipts.length) {
+      openViewer(cell.receipts.map(function (r) { return receiptById(r.id) || r; }), 0, monthLabel(cell.period));
+      return;
+    }
+    /* Nothing on file. Rather than a dead click, say where this month's receipt lives and
+       offer the two ways to get it on file. */
+    openMissing(row, cell);
+  }
+
+  /** Every receipt filed to one month, in vendor order: "show me July". Takes the matrix's
+      own cells as well as the gallery list, so a month heading never opens empty over a
+      count the matrix itself put there. */
+  function monthReceipts(period) {
+    var seen = {}, out = [];
+    var push = function (r) { if (r && r.id && !seen[r.id]) { seen[r.id] = 1; out.push(r); } };
+    ((rcptData && rcptData.receipts) || []).forEach(function (r) {
+      if ((r.period || (r.chargedAt || "").slice(0, 7)) === period) push(r);
+    });
+    ((rcptData && rcptData.matrix && rcptData.matrix.rows) || []).forEach(function (row) {
+      (row.cells || []).forEach(function (c) {
+        if (c.period !== period) return;
+        (c.receipts || []).forEach(function (x) { push(receiptById(x.id) || assign({}, x, { vendor: x.vendor || row.vendor, period: period })); });
+      });
+    });
+    return out.sort(function (a, b) { return String(a.vendor).localeCompare(String(b.vendor)); });
+  }
+
+  function openMonthReceipts(period) {
+    var all = monthReceipts(period);
+    if (!all.length) { toast("No receipts on file for " + monthLabel(period)); return; }
+    openViewer(all, 0, monthLabel(period) + " · every receipt");
+  }
+
+  /** The month's receipts, opened at the one that was clicked, so the arrows carry on
+      through the rest of that month rather than dead-ending on one image. */
+  function openMonthAt(period, id) {
+    var all = monthReceipts(period);
+    var at = -1;
+    all.forEach(function (r, i) { if (r.id === id) at = i; });
+    if (at < 0) { openReceipt(id); return; }
+    openViewer(all, at, monthLabel(period) + " · every receipt");
+  }
+
+  function openViewer(list, index, context) {
+    rcvList = (list || []).filter(Boolean);
+    if (!rcvList.length) return;
+    rcvIndex = Math.max(0, Math.min(index || 0, rcvList.length - 1));
+    rcvContext = context || "";
+    ensureViewer();
+    document.body.classList.add("rcv-open");
+    $("#rcv").classList.add("show");
+    rcvRender();
+  }
+
+  function closeViewer() {
+    var el = $("#rcv");
+    if (el) el.classList.remove("show");
+    document.body.classList.remove("rcv-open");
+  }
+
+  /* Built once, on first use, so the console's markup does not carry a dialog nobody has
+     opened yet. */
+  function ensureViewer() {
+    if ($("#rcv")) return;
+    var el = document.createElement("div");
+    el.id = "rcv";
+    el.className = "rcv";
+    el.innerHTML =
+      '<div class="rcv-scrim" data-rcv-close></div>' +
+      '<div class="rcv-sheet" role="dialog" aria-modal="true" aria-labelledby="rcvTitle">' +
+      '<div class="rcv-head">' +
+      '<div class="rcv-title"><h2 id="rcvTitle"></h2><div class="rcv-sub" id="rcvSub"></div></div>' +
+      '<div class="rcv-tools">' +
+      '<div class="rcv-step" id="rcvStep">' +
+      '<button class="rcv-nav" id="rcvPrev" aria-label="Previous receipt">‹</button>' +
+      '<span id="rcvCount"></span>' +
+      '<button class="rcv-nav" id="rcvNext" aria-label="Next receipt">›</button></div>' +
+      '<button class="btn btn-ghost btn-sm" id="rcvPrint">Print</button>' +
+      '<button class="rcv-x" id="rcvClose" aria-label="Close" title="Close">✕</button>' +
+      '</div></div>' +
+      '<div class="rcv-body" id="rcvBody"></div></div>';
+    document.body.appendChild(el);
+
+    $$("#rcv [data-rcv-close]").forEach(function (n) { n.addEventListener("click", closeViewer); });
+    $("#rcvClose").addEventListener("click", closeViewer);
+    $("#rcvPrev").addEventListener("click", function () { rcvStep(-1); });
+    $("#rcvNext").addEventListener("click", function () { rcvStep(1); });
+    $("#rcvPrint").addEventListener("click", function () { window.print(); });
+    document.addEventListener("keydown", function (e) {
+      if (!document.body.classList.contains("rcv-open")) return;
+      if (e.key === "Escape") closeViewer();
+      else if (e.key === "ArrowLeft") rcvStep(-1);
+      else if (e.key === "ArrowRight") rcvStep(1);
+    });
+  }
+
+  function rcvStep(d) {
+    if (rcvList.length < 2) return;
+    rcvIndex = (rcvIndex + d + rcvList.length) % rcvList.length;
+    rcvRender();
+  }
+
+  function rcvRender() {
+    var v = rcvList[rcvIndex];
+    if (!v) return;
+    var many = rcvList.length > 1;
+    $("#rcvTitle").textContent = v.vendor || "Receipt";
+    $("#rcvSub").textContent = [rcvContext, v.subject || v.description || ""].filter(Boolean).join(" · ");
+    $("#rcvStep").style.display = many ? "" : "none";
+    $("#rcvCount").textContent = many ? (rcvIndex + 1) + " of " + rcvList.length : "";
+
+    var period = v.period || (v.chargedAt || "").slice(0, 7);
+    var html = '<div class="rcv-facts">' +
+      fact("Amount", usd(Math.abs(v.amountUsd)) + (v.kind && v.kind !== "charge" ? " " + esc(String(v.kind).replace("_", " ")) : "")) +
+      fact("Charged", esc((v.chargedAt || "").slice(0, 10) || "not stated")) +
+      fact("Counted in", esc(period ? monthLabel(period) : "not stated")) +
+      (v.invoiceNumber ? fact("Invoice #", esc(String(v.invoiceNumber))) : "") +
+      (v.currency && v.currency !== "USD" ? fact("Invoiced in", esc(v.nativeAmount + " " + v.currency)) : "") +
+      fact("Source", esc(v.source === "email" ? "Emailed by the vendor" : v.source === "api" ? "Vendor billing API" : "Attached by hand")) +
+      '</div>';
+
+    if (v.hasShot) {
+      html += '<div class="rcv-shot-wrap"><img class="rcv-shot" src="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=png" alt="' +
+        esc((v.vendor || "") + " receipt") + '" /></div>';
+    } else if (v.source === "api") {
+      html += apiStatement(v);
+    } else {
+      html += '<div class="rcv-none"><div class="rcv-none-t">No invoice image on file</div>' +
+        '<p class="note">The charge is recorded but the document was never captured. Attach the PDF or a screenshot and it will show here.</p></div>';
+    }
+
+    html += '<div class="rcv-foot">';
+    if (v.hasShot) {
+      html += '<a class="btn btn-ghost btn-sm" href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=png" target="_blank" rel="noopener">Open the image in a new tab</a>';
+    }
+    if (v.hasFile) {
+      html += '<a class="btn btn-ghost btn-sm" href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=file" target="_blank" rel="noopener">Download the original ' +
+        esc((v.fileMime || "").indexOf("pdf") >= 0 ? "PDF" : "file") + '</a>';
+    }
+    html += '<button class="btn btn-ghost btn-sm" id="rcvEdit">Correct the details</button>' +
+      '<button class="btn btn-ghost btn-sm" id="rcvDone">Close</button></div>';
+
+    $("#rcvBody").innerHTML = html;
+    $("#rcvBody").scrollTop = 0;
+    $("#rcvDone").addEventListener("click", closeViewer);
+    $("#rcvEdit").addEventListener("click", function () { closeViewer(); editReceipt(v.id); });
+  }
+
+  function fact(k, v) { return '<div class="rcv-fact"><div class="rcv-fact-k">' + esc(k) + '</div><div class="rcv-fact-v">' + v + '</div></div>'; }
+
+  /* Some vendors issue no document at all: the figure comes from their billing API. Rather
+     than draw a fake invoice, this states the charge and says plainly where it came from,
+     so the page is still something that can be printed and handed over. */
+  function apiStatement(v) {
+    var period = v.period || (v.chargedAt || "").slice(0, 7);
+    return '<div class="rcv-statement">' +
+      '<div class="rcv-st-head"><span class="rcv-st-vendor">' + esc(v.vendor || "") + '</span>' +
+      '<span class="rcv-st-tag">Billing API statement</span></div>' +
+      '<div class="rcv-st-amt">' + usd(Math.abs(v.amountUsd)) + '</div>' +
+      '<div class="rcv-st-line">' + esc(v.description || "Usage") + ' · ' + esc(period ? monthLabel(period) : "") + '</div>' +
+      '<p class="note rcv-st-note">' + esc(v.vendor || "This vendor") + ' issues no invoice document for this charge. ' +
+      'The figure was read from its own billing API, which is authoritative on the amount. Nothing has been drawn to stand in for a receipt. ' +
+      'If the accountant needs paper, download the invoice from the vendor portal and attach it here.</p>' +
+      '</div>';
+  }
+
+  /* A month with nothing on file. Says where that vendor's receipt comes from and offers
+     the two ways to close the gap, instead of a click that does nothing. */
+  function openMissing(row, cell) {
+    var period = (cell && cell.period) || "";
+    ensureViewer();
+    rcvList = []; rcvIndex = 0; rcvContext = "";
+    document.body.classList.add("rcv-open");
+    $("#rcv").classList.add("show");
+    $("#rcvTitle").textContent = row.vendor;
+    $("#rcvSub").textContent = (period ? monthLabel(period) + " · " : "") + "no receipt on file";
+    $("#rcvStep").style.display = "none";
+    $("#rcvCount").textContent = "";
+
+    var expected = cell ? (cell.expectedUsd || 0) : (row.monthlyUsd || 0);
+    var html = '<div class="rcv-facts">' +
+      fact("Expected", usd(expected)) +
+      fact("Month", esc(period ? monthLabel(period) : "not stated")) +
+      fact("How it should arrive", esc(channelLabel(row.channel))) +
+      '</div>' +
+      '<div class="rcv-none"><div class="rcv-none-t">Nothing on file for this month</div>' +
+      '<p class="note">This figure is the register\'s estimate, not a proven charge. Pull the mailbox again, or download the invoice from the vendor and attach it to ' +
+      esc(period ? monthLabel(period) : "the month") + '.</p></div>';
+
+    html += '<div class="rcv-foot">';
+    if (row.portal) html += '<a class="btn btn-ghost btn-sm" href="' + esc(row.portal) + '" target="_blank" rel="noopener">Open the ' + esc(row.vendor) + ' billing page</a>';
+    html += '<button class="btn btn-primary btn-sm" id="rcvAttach">Attach the invoice</button>' +
+      '<button class="btn btn-ghost btn-sm" id="rcvDone">Close</button></div>';
+
+    $("#rcvBody").innerHTML = html;
+    $("#rcvBody").scrollTop = 0;
+    $("#rcvDone").addEventListener("click", closeViewer);
+    $("#rcvAttach").addEventListener("click", function () { closeViewer(); openAttach(row, cell); });
+  }
+
+  /* The editor behind the viewer: correcting what the parser read. */
+  function editReceipt(id) {
+    var v = receiptById(id);
+    if (!v) return;
 
     var html = '<div style="display:flex;justify-content:space-between;align-items:start">' +
       '<div><h2>' + esc(v.vendor || "Receipt") + '</h2><div class="sub">' + esc(v.subject || v.description || "") + '</div></div>' +

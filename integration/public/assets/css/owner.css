@@ -293,3 +293,89 @@
 .rc-badge.email { background: var(--ok-bg); color: var(--ok); }
 .rc-badge.api { background: var(--brand-soft); color: var(--brand); }
 .rc-badge.manual { background: var(--warn-bg); color: var(--owner); }
+
+/* per-cell receipt buttons: the accountant is told "press View receipt", not "click the cell" */
+.rc-view {
+  display: inline-block; margin-top: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600;
+  color: #fff; background: var(--brand); border: 1px solid var(--brand); border-radius: var(--radius-sm);
+  cursor: pointer; white-space: nowrap; line-height: 1.5;
+}
+.rc-view:hover { filter: brightness(1.06); }
+.rc-view.ghost { color: var(--text-muted); background: transparent; border-color: var(--border-strong); font-weight: 500; }
+.rc-view.ghost:hover { color: var(--brand); border-color: var(--brand); background: var(--brand-soft); }
+.rc-mhead {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 1px; margin-left: auto;
+  padding: 2px 4px; background: none; border: 0; border-radius: var(--radius-sm); cursor: pointer; text-align: right;
+}
+.rc-mhead:hover:not([disabled]) { background: var(--brand-soft); }
+.rc-mhead[disabled] { cursor: default; opacity: 0.75; }
+.rc-mhead-name { font-weight: 700; font-size: 12px; color: var(--text); }
+.rc-mhead:hover:not([disabled]) .rc-mhead-name { color: var(--brand); }
+.rc-mhead-sub { font-size: 10px; font-weight: 500; color: var(--text-muted); }
+
+/* the receipt viewer: the invoice, full size, over the console, closed with the ✕ */
+.rcv { position: fixed; inset: 0; z-index: 120; display: none; }
+.rcv.show { display: block; }
+.rcv-scrim { position: absolute; inset: 0; background: rgba(16, 24, 40, 0.62); }
+.rcv-sheet {
+  position: relative; margin: 3vh auto; width: min(940px, 94vw); max-height: 94vh;
+  display: flex; flex-direction: column; background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.rcv-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  padding: 16px 18px; border-bottom: 1px solid var(--border); background: var(--bg-soft);
+}
+.rcv-title h2 { font-size: 19px; margin: 0; }
+.rcv-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; max-width: 62ch; }
+.rcv-tools { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.rcv-step { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.rcv-nav {
+  width: 26px; height: 26px; line-height: 1; font-size: 17px; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); cursor: pointer;
+}
+.rcv-nav:hover { border-color: var(--brand); color: var(--brand); }
+.rcv-x {
+  width: 30px; height: 30px; font-size: 15px; line-height: 1; color: var(--text-muted);
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); cursor: pointer;
+}
+.rcv-x:hover { color: var(--danger); border-color: var(--danger); }
+.rcv-body { padding: 16px 18px 20px; overflow-y: auto; }
+.rcv-facts { display: flex; flex-wrap: wrap; gap: 10px 26px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.rcv-fact-k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.rcv-fact-v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 1px; }
+.rcv-shot-wrap {
+  margin-top: 14px; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px; display: flex; justify-content: center;
+}
+/* fit the whole invoice on screen: an accountant reads it, they do not scroll it */
+.rcv-shot { display: block; max-width: 100%; max-height: 62vh; width: auto; height: auto; }
+.rcv-none { margin-top: 14px; padding: 18px; text-align: center; background: var(--bg-soft); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); }
+.rcv-none-t { font-weight: 600; font-size: 13.5px; }
+.rcv-none p { margin: 6px auto 0; max-width: 62ch; }
+.rcv-statement { margin-top: 14px; padding: 20px; background: #fff; color: #101828; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.rcv-st-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #e4e7ec; padding-bottom: 10px; }
+.rcv-st-vendor { font-size: 16px; font-weight: 700; }
+.rcv-st-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #475467; background: #f2f4f7; padding: 3px 7px; border-radius: 3px; }
+.rcv-st-amt { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 14px; }
+.rcv-st-line { font-size: 13px; color: #475467; margin-top: 2px; }
+.rcv-st-note { margin-top: 14px; max-width: 70ch; }
+.rcv-foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+@media (max-width: 720px) {
+  .rcv-sheet { margin: 0; width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; border: 0; }
+  .rcv-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .rcv-tools { justify-content: flex-end; }
+  .rcv-facts { gap: 8px 18px; }
+  .rcv-fact-v { font-size: 14px; }
+}
+
+/* printing an open receipt gives the accountant the page and nothing else */
+@media print {
+  body.rcv-open > *:not(.rcv) { display: none !important; }
+  body.rcv-open .rcv-scrim, body.rcv-open .rcv-tools, body.rcv-open .rcv-foot { display: none !important; }
+  body.rcv-open .rcv { position: static; }
+  body.rcv-open .rcv-sheet { margin: 0; width: 100%; max-height: none; border: 0; box-shadow: none; }
+  body.rcv-open .rcv-body { overflow: visible; }
+}
