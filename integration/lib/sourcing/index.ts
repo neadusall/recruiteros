@@ -54,6 +54,7 @@ export {
 export { promoteSourcingRun, type PromoteResult, type PromoteOptions } from "./promote";
 export { mergeSourcingRuns, type MergedRuns } from "./mergeRuns";
 export { runSalesNavSourcing, parseSalesNavUrl, searchKindOf, type SalesNavRunResult, type SalesNavRunOptions } from "./salesNav";
+export { applySalesNavResult, type SalesNavApplied, type SalesNavApplyOptions } from "./salesNavApply";
 export {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, sourcingKoldId,
   buildKoldInfoDbCsv, splitLocation,

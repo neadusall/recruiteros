@@ -37,6 +37,8 @@ import { pinIcpLocation } from "./pinLocation";
 import { parseRadiusMi } from "./geoRadius";
 import { generateQueries } from "./generateQueries";
 import { runDiscovery } from "./discovery";
+import { runSalesNavSourcing } from "./salesNav";
+import { applySalesNavResult } from "./salesNavApply";
 import { getSeenKeys, addSeenKeys } from "./seen";
 import {
   laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv,
@@ -91,6 +93,18 @@ export interface NightItem {
   /** A Dive-deeper refined profile (or the one the dead request already derived),
    *  so recovery searches the refined profile instead of re-parsing the JD. */
   icp?: CandidateICP;
+  /** kind:"search" driven by a pasted LinkedIn search URL rather than a JD. Set
+   *  only by the salesNav crash net: a recovery re-pulls THIS search and lands it
+   *  on the same destination list the dead request was writing to. */
+  salesNav?: {
+    url: string;
+    /** The recruiter's typed list name (blank = derived from the search). */
+    typedName?: string;
+    /** An explicitly picked destination list. */
+    targetRunId?: string;
+    expand?: boolean;
+    limit?: number;
+  };
   /** CRASH NET (interactive searches): armed by POST /sourcing {action:"run"} before
    *  discovery starts, removed when that request finishes. While the arming process
    *  is alive the item is INVISIBLE to the processor (the live request is doing the
@@ -202,6 +216,8 @@ export interface NightAddInput {
   radiusMi?: number;
   strictGeo?: boolean;
   icp?: CandidateICP;
+  /** kind:"search" from a pasted LinkedIn search URL (salesNav crash net only). */
+  salesNav?: NightItem["salesNav"];
   /** Arms the item as a held recovery checkpoint for a live interactive request. */
   recoveryToken?: string;
   /** kind:"boost" only: approved lookup count + the recruiter the spend bills to. */
@@ -227,6 +243,7 @@ export async function addNightItem(workspaceId: string, input: NightAddInput): P
     radiusMi: input.radiusMi,
     strictGeo: input.strictGeo,
     icp: input.icp,
+    salesNav: input.salesNav,
     recovery: input.recoveryToken
       ? { token: input.recoveryToken, bootId: BOOT_ID, armedAt: nowIso() }
       : undefined,
@@ -591,6 +608,36 @@ async function step(item: NightItem): Promise<void> {
   }
 
   if (item.stage === "search") {
+    // A recovered LinkedIn-URL search: re-pull the pasted search and land it on the
+    // same destination list the dead request was writing to (shared apply helper),
+    // so the recruiter gets the list they asked for and never a duplicate of it.
+    if (item.salesNav?.url) {
+      const sn = item.salesNav;
+      const result = await withWorkspaceCreds(ws, () => runSalesNavSourcing(ws, item.createdBy?.userId ?? "", {
+        url: sn.url,
+        limit: sn.limit,
+        expand: sn.expand !== false,
+        breadth: item.breadth,
+        cap: item.cap,
+        minFit: item.minFit,
+      }));
+      if (!result.candidates.length) {
+        finish(item, "error", "the LinkedIn search came back with nobody, so there was nothing to save");
+        return;
+      }
+      const applied = await applySalesNavResult(ws, result, {
+        url: sn.url, name: sn.typedName, targetRunId: sn.targetRunId, createdBy: item.createdBy,
+      });
+      if ("missingTarget" in applied) {
+        finish(item, "error", "the list this search was adding to no longer exists");
+        return;
+      }
+      item.runId = applied.run.id;
+      item.name = applied.name;
+      item.stage = "kold";
+      touch(item, `found ${applied.added} candidate(s), enriching…`);
+      return;
+    }
     if (!item.jd) { finish(item, "error", "no job description on the queued search"); return; }
     // The queued label carries the recruiter's radius ("Howell, NJ +25mi"), so read it
     // back and thread it EVERYWHERE the interactive path does. Pinning alone is not

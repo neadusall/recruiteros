@@ -41,7 +41,7 @@ import {
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv,
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
-  mergeSourcingRuns, getRapidQuota, runSalesNavSourcing, searchKindOf,
+  mergeSourcingRuns, getRapidQuota, runSalesNavSourcing, searchKindOf, applySalesNavResult,
   gapFillContacts, listNightItems, addNightItem, removeNightItem, attachNightIcp,
   landlineDbReady,
   premiumPhoneQuote, runPremiumPhoneBoost,
@@ -328,109 +328,82 @@ export async function POST(req: Request) {
     if (action === "salesNav") {
       const url = typeof b?.url === "string" ? b.url.trim() : "";
       if (!url) return fail("missing_url", 422, { detail: "paste a LinkedIn Sales Navigator, Recruiter, or people-search URL" });
-      const result = await withWorkspaceCreds(ws, () => runSalesNavSourcing(ws, g.ctx.user.id, {
-        url,
-        limit: typeof b.limit === "number" ? b.limit : undefined,
-        expand: b.expand !== false,
-        breadth: parseBreadth(b.breadth),
-        cap: typeof b.cap === "number" ? b.cap : undefined,
-        minFit: typeof b.minFit === "number" ? b.minFit : undefined,
-      }));
-      if (!result.candidates.length) {
-        // Say what actually happened, recruiter-facing: a filterless link (saved
-        // search / recent search / lead list) is by far the common cause, and the
-        // fix is on the recruiter's side of the screen.
-        const c = result.criteria;
-        const criteriaEmpty = !c.titles.length && !c.keywords.length && !c.geos.length && !c.companies.length && !c.industries.length;
-        const detail = criteriaEmpty
-          ? "This link doesn't include the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side), and the search's members couldn't be pulled directly. On LinkedIn, open the search so the filters are applied, then copy the full URL from the address bar (it will contain \"query=\") and paste that here. Connecting your LinkedIn with the button on this card also lets the search's own members be pulled."
-          : "The search's members couldn't be pulled from LinkedIn, and the expanded search found nobody for these filters. Add a title or keyword filter to the search and try again, or connect your LinkedIn with the button on this card so the search's own members can be pulled.";
-        return fail("empty_salesnav_run", 422, { detail, warnings: result.warnings });
-      }
-
-      // Resolve the destination list: explicit pick > case-insensitive name match
-      // (so re-using a name can never spawn a duplicate list) > brand-new list.
-      const existing = await listSourcingRuns(ws);
-      const typedName = typeof b.name === "string" ? b.name.trim() : "";
-      let target: SourcingRun | undefined;
-      if (typeof b.targetRunId === "string" && b.targetRunId) {
-        target = existing.find((r) => r.id === b.targetRunId);
-        if (!target) return fail("run_not_found", 404, { detail: b.targetRunId });
-      } else if (typedName) {
-        target = existing.find((r) => r.name.trim().toLowerCase() === typedName.toLowerCase());
-      }
-
-      if (target) {
-        // Merge into the existing list via the same regression-tested dedupe the
-        // Combine button uses: stronger row wins, blanks filled from the other
-        // side, so an under-enriched older list gains contact/identity data
-        // without ever gaining a duplicate person.
-        const incoming: SourcingRun = {
-          id: "salesnav_incoming", workspaceId: ws, name: target.name, motion: target.motion,
-          jd: "", jdUrl: url, icp: result.icp, queries: result.queries,
-          candidates: result.candidates, warnings: [], createdAt: nowIso(), updatedAt: nowIso(),
-        };
-        const before = target.candidates.length;
-        const { candidates, overlap } = mergeSourcingRuns([target, incoming]);
-        target.candidates = candidates;
-        const added = candidates.length - before;
-        // New people joined a list whose chunk ledger may already read "fully
-        // enriched"; left alone, the Laxis + gap-fill rungs would skip every new
-        // row forever. Re-open the chain honestly: the KoldInfo rungs only ever
-        // target blank-email rows, and the Laxis serializer never re-buys a row
-        // holding both an email and a phone, so re-running the chain only spends
-        // on rows that genuinely still need data.
-        if (added > 0) {
-          delete target.laxisProgress;
-          delete target.laxisSkipped;
-          // Re-arm the autoflow sweeper's one-resume rule for the reopened
-          // chain: if the tab driving this merge dies before restarting
-          // enrichment, the sweeper may queue a fresh server-side resume (and
-          // its top-up rule then pushes whatever new phones it finds on to
-          // Candidates + OS Text). A resumedAt left over from a PREVIOUS
-          // orphaning would otherwise block that forever.
-          if (target.autoflow) delete target.autoflow.resumedAt;
+      const snTypedName = typeof b.name === "string" ? b.name.trim() : "";
+      const snTargetId = typeof b.targetRunId === "string" ? b.targetRunId : "";
+      // CRASH NET, same one the JD search runs behind: this request pulls the
+      // LinkedIn search and then the whole waterfall on top of it, minutes during
+      // which nothing exists outside the request. An auto-deploy recreating the
+      // container mid-pull used to eat the entire search silently — the bar went
+      // blank and no list was ever written (2026-07-31, a Lume LinkedIn-URL search
+      // lost exactly this way). Park a held checkpoint carrying the URL and dials
+      // BEFORE the first slow step; the finally below removes it when this request
+      // answers either way, and if the process dies the next boot's queue tick
+      // re-runs the search server-side and lands it on the same list.
+      const snRecoveryToken = typeof b.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "";
+      let snRecoveryId = "";
+      if (snRecoveryToken) {
+        try {
+          const checkpoint = await addNightItem(ws, {
+            kind: "search",
+            name: snTypedName || `${searchKindOf(url)} search`,
+            breadth: parseBreadth(b.breadth),
+            createdBy: actor,
+            cap: typeof b.cap === "number" ? b.cap : undefined,
+            minFit: typeof b.minFit === "number" ? b.minFit : undefined,
+            salesNav: {
+              url,
+              typedName: snTypedName || undefined,
+              targetRunId: snTargetId || undefined,
+              expand: b.expand !== false,
+              limit: typeof b.limit === "number" ? b.limit : undefined,
+            },
+            recoveryToken: snRecoveryToken,
+          });
+          snRecoveryId = checkpoint.id;
+        } catch (err) {
+          console.warn("[sourcing] salesNav recovery checkpoint not armed:", (err as Error).message);
         }
-        // A list saved before its ICP could be built adopts the derived one, so
-        // scoring/vetting on the merged list has a real profile to work from.
-        if (!target.icp?.titles?.length && result.icp.titles.length) target.icp = result.icp;
-        if (!target.jdUrl) target.jdUrl = url;
-        target.queries = target.queries.concat(result.queries).slice(0, 200);
-        const saved = await saveSourcingRun(ws, { ...target });
-        await addSeenKeys(ws, result.candidates.map(candKey));
+      }
+      try {
+        const result = await withWorkspaceCreds(ws, () => runSalesNavSourcing(ws, g.ctx.user.id, {
+          url,
+          limit: typeof b.limit === "number" ? b.limit : undefined,
+          expand: b.expand !== false,
+          breadth: parseBreadth(b.breadth),
+          cap: typeof b.cap === "number" ? b.cap : undefined,
+          minFit: typeof b.minFit === "number" ? b.minFit : undefined,
+        }));
+        if (!result.candidates.length) {
+          // Say what actually happened, recruiter-facing: a filterless link (saved
+          // search / recent search / lead list) is by far the common cause, and the
+          // fix is on the recruiter's side of the screen.
+          const c = result.criteria;
+          const criteriaEmpty = !c.titles.length && !c.keywords.length && !c.geos.length && !c.companies.length && !c.industries.length;
+          const detail = criteriaEmpty
+            ? "This link doesn't include the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side), and the search's members couldn't be pulled directly. On LinkedIn, open the search so the filters are applied, then copy the full URL from the address bar (it will contain \"query=\") and paste that here. Connecting your LinkedIn with the button on this card also lets the search's own members be pulled."
+            : "The search's members couldn't be pulled from LinkedIn, and the expanded search found nobody for these filters. Add a title or keyword filter to the search and try again, or connect your LinkedIn with the button on this card so the search's own members can be pulled.";
+          return fail("empty_salesnav_run", 422, { detail, warnings: result.warnings });
+        }
+
+        // Landing the result (target resolution + Combine-lists dedupe + seen-set)
+        // is shared with the queue's crash recovery, so a recovered search lands on
+        // the SAME list this request would have written instead of a second one.
+        const applied = await applySalesNavResult(ws, result, {
+          url, name: snTypedName, targetRunId: snTargetId || undefined, createdBy: actor,
+        });
+        if ("missingTarget" in applied) return fail("run_not_found", 404, { detail: applied.missingTarget });
         return ok({
-          run: saved, mode: "merged", name: saved.name,
+          run: applied.run, mode: applied.mode, name: applied.name,
           linkedinFound: result.linkedinFound, expanded: result.expanded,
-          added, overlap, total: candidates.length,
+          added: applied.added, overlap: applied.overlap, total: applied.total,
           warnings: result.warnings, account: result.account,
         });
+      } finally {
+        // A real answer went back to the tab (a list, or a reasoned refusal), so
+        // the crash net stands down. A killed process never reaches this line —
+        // exactly the case the checkpoint exists for.
+        if (snRecoveryId) await removeNightItem(ws, snRecoveryId).catch(() => {});
       }
-
-      const name = typedName || result.icp.label || `${searchKindOf(url)} search`;
-      const saved = await saveSourcingRun(ws, {
-        name,
-        jd: `Sourced from a pasted ${searchKindOf(url)} search URL.\nURL: ${url}\n` +
-          `Titles: ${result.icp.titles.join(", ") || "(from results)"}\n` +
-          `Locations: ${result.icp.geos.join(", ") || "(any)"}` +
-          (result.icp.mustHave.length ? `\nKeywords: ${result.icp.mustHave.join(", ")}` : ""),
-        jdUrl: url,
-        location: result.icp.geos[0],
-        icp: result.icp, queries: result.queries, candidates: result.candidates,
-        warnings: result.warnings, motion: "recruiting",
-        createdBy: actor,
-        apiUsage: result.apiUsage ? {
-          rapidapi: Number(result.apiUsage.rapidapi) || 0,
-          serper: Number(result.apiUsage.serper) || 0,
-          google: Number(result.apiUsage.google) || 0,
-        } : undefined,
-      });
-      await addSeenKeys(ws, result.candidates.map(candKey));
-      return ok({
-        run: saved, mode: "created", name: saved.name,
-        linkedinFound: result.linkedinFound, expanded: result.expanded,
-        added: result.candidates.length, overlap: 0, total: result.candidates.length,
-        warnings: result.warnings, account: result.account,
-      });
     }
 
     /* --- Bulk decision-maker list builder (resumable) ---------------------

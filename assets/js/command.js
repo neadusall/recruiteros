@@ -13188,11 +13188,35 @@
       btn.disabled = true; btn.textContent = "Searching…";
       smsg("");
       showProgress("Running the LinkedIn search", 120, "Pulling the search's people from LinkedIn, then widening with the search waterfall…");
-      var payload = { action: "salesNav", url: url, breadth: jdBreadth() };
+      // Crash net, same one the JD search runs behind: the token rides along so the
+      // server can arm a durable checkpoint BEFORE it starts pulling. This request
+      // runs for minutes and writes nothing until it finishes, so a deploy recreating
+      // the container mid-pull used to leave the bar stalled and no list anywhere.
+      // Deliberately NOT sendPatient here: blindly re-POSTing would re-run the whole
+      // paid search (and could race the server-side recovery into a second list).
+      // A dead connection hands over to watchRecovery instead, which finds the
+      // checkpoint by this token and narrates the server finishing the job.
+      var snavToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      var payload = { action: "salesNav", url: url, breadth: jdBreadth(), recoveryToken: snavToken };
       if (targetId) payload.targetRunId = targetId;
       if (name) payload.name = name;
-      sendPatient("/sourcing", "POST", payload).then(function (r) {
-        btn.disabled = false; btn.textContent = "Search & Enrich";
+      function snavReset() { btn.disabled = false; btn.textContent = "Search & Enrich"; }
+      function snavRecover() {
+        return watchRecovery({ token: snavToken, name: name || "LinkedIn search", cap: 300 }, snavReset);
+      }
+      send("/sourcing", "POST", payload).catch(function () {
+        // fetch itself rejected: the connection died mid-request (a deploy
+        // recreating the server is the everyday cause). Not a server "no".
+        return { ok: false, status: 0, data: null };
+      }).then(function (r) {
+        snavReset();
+        if (!r.ok && (r.status === 0 || r.status === 502 || r.status === 503 || r.status === 504)) {
+          // The server (or the connection to it) died mid-search. The checkpoint
+          // armed above survives in the durable store, so the search finishes
+          // server-side and lands on the same list; watch it instead of failing.
+          smsg("");
+          return snavRecover();
+        }
         if (!r.ok) {
           failProgress("Search stopped");
           smsg("Sales Navigator search failed: " + ((r.data && (r.data.detail || r.data.error)) || gatewayMsg(r.status)));
@@ -13222,9 +13246,13 @@
           if (run.id) runAutoPipeline(run.id, run.name || d.name || "Candidate list");
         });
       }).catch(function () {
-        btn.disabled = false; btn.textContent = "Search & Enrich";
+        // Only the success path itself can land here (the dead-connection case is
+        // converted to a status-0 answer above and recovered), so the search may
+        // well have saved. Never claim a loss that did not happen.
+        snavReset();
         failProgress("Search stopped");
-        smsg("Could not reach the server. Nothing was lost: paste the URL and try again in a moment.");
+        smsg("Something went wrong while finishing up. Check Your saved candidate lists below before running it again.");
+        loadRuns();
       });
     }
 
