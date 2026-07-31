@@ -36,8 +36,11 @@ async function run(req: Request) {
   /* Vendors with a real billing API are pulled on every tick: an API cannot be filtered
      into spam or deleted, so those months report themselves even if no mail arrives. */
   const withVendors = url.searchParams.get("vendors") !== "0";
+  /* force=1 re-sums closed months that are already on file: the repair path after a puller
+     bug, never the default, because a settled month should not be recomputed nightly. */
+  const force = url.searchParams.get("force") === "1";
 
-  const pulls = withVendors ? await pullVendorApis(monthsBack).catch(() => []) : [];
+  const pulls = withVendors ? await pullVendorApis(monthsBack, { force }).catch(() => []) : [];
 
   if (!wait) {
     const { startHarvest } = await import("../../../../../lib/owner/receipts");

@@ -23,7 +23,7 @@
  * that was never issued.
  */
 
-import { recordApiReceipt, listReceipts } from "./receipts";
+import { recordApiReceipt, listReceipts, deleteReceipt } from "./receipts";
 import { listSpendItems } from "./spendRegister";
 
 export interface PullReport {
@@ -100,6 +100,17 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
 
   const [items, onFile] = await Promise.all([listSpendItems(), listReceipts()]);
   const item = items.find((i) => i.vendor.toLowerCase() === "telnyx");
+
+  /* An earlier version filed a running figure for the OPEN month, keyed `usage-<month>`.
+     Those are not month-end invoices and do not belong in the books, so they are cleared
+     out here rather than left to look like a settled charge. */
+  const provisional = onFile.filter(
+    (r) => r.source === "api" && r.vendor === "Telnyx" && String(r.invoiceNumber || "").startsWith("usage-"),
+  );
+  for (const r of provisional) await deleteReceipt(r.id);
+  if (provisional.length) {
+    report.notes.push(`${provisional.length} provisional part-month figure${provisional.length > 1 ? "s were" : " was"} removed: only closed invoices are recorded.`);
+  }
 
   let products: TelnyxProduct[];
   try {
@@ -212,7 +223,8 @@ function nextDay(isoDate: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Run every vendor that has a real billing API. */
-export async function pullVendorApis(monthsBack = 3): Promise<PullReport[]> {
-  return [await pullTelnyx(monthsBack)];
+/** Run every vendor that has a real billing API. `force` re-sums months already on file,
+ *  which is what corrects a figure written by an older, wronger version of a puller. */
+export async function pullVendorApis(monthsBack = 3, opts: { force?: boolean } = {}): Promise<PullReport[]> {
+  return [await pullTelnyx(monthsBack, opts)];
 }
