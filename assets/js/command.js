@@ -6852,7 +6852,6 @@
       '.wu-badge.ready{background:rgba(26,127,55,.12);color:#1a7f37}' +
       '.wu-badge.warming{background:rgba(46,91,215,.10);color:var(--brand,#2e5bd7)}' +
       '.wu-badge.attention{background:rgba(179,38,30,.10);color:#b3261e}' +
-      '.wu-badge.gmail{background:rgba(217,48,37,.10);color:#c5221f}' +
       '.wu-mbwrap{padding:0 8px 10px 22px}' +
       '.wu-mbwrap .wu-table{font-size:12.5px}' +
       '.wu-scroll{overflow-x:auto}' +
@@ -6885,13 +6884,14 @@
     return '<span class="wu-badge ' + r + '">' + label + '</span>';
   }
 
-  // Google Workspace domains carry a "Gmail Accounts" pill so the Google fleet is
-  // tellable at a glance from the Microsoft and internal-SMTP mailboxes, which
-  // otherwise show an identical status. Server resolves the kind from the warm-up
+  // Google Workspace domains carry a "Gmail Accounts" chip beside the domain name,
+  // the same slot the Internal SMTP and Sending.ac chips use, so one glance down
+  // that column says who runs each domain's mailboxes. It only appears where the
+  // Google mailboxes actually live: the server resolves the kind from the warm-up
   // connection (smtp.gmail.com) and falls back to the domain's Google MX.
-  function wuKindBadge(kind) {
+  function wuKindChip(kind) {
     if (kind !== "google") return "";
-    return '<div style="margin-top:4px"><span class="wu-badge gmail" title="Google Workspace mailboxes: these send and warm up through Gmail">Gmail Accounts</span></div>';
+    return ' <span class="snd-prov" style="border-color:#15803d;color:#15803d;font-size:10px;vertical-align:1px" title="Google Workspace mailboxes: these send and warm up through Gmail">Gmail Accounts</span>';
   }
 
   // Plain-English reason for a domain's reputation given how long it has been
@@ -6992,14 +6992,14 @@
       var open = !!wuOpen[d.domain];
       var days = d.days != null ? ('<span class="wu-days"><b>' + d.days.toFixed(1) + '</b> days</span>' + (d.since ? '<div class="muted" style="font-size:11px">since ' + esc(String(d.since).slice(0, 10)) + '</div>' : '')) : '<span class="muted">n/a</span>';
       var main = '<tr class="wu-dom" data-wu-dom="' + esc(d.domain) + '">' +
-        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + wuInfraChip(d.infra) + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
+        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + wuInfraChip(d.infra) + wuKindChip(d.mailboxKind) + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
         '<td>' + days + '</td>' +
         '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation) + '</td>' +
         '<td>' + wuHealthChip(d.health) + '</td>' +
         '<td>' + wuDnsPills(d.dns) + '</td>' +
         '<td>' + (d.warmupPerDay != null ? '<b>' + d.warmupPerDay + '</b><span class="muted" style="font-size:11px">/day</span>' + (d.replyRatePct != null ? '<div class="muted" style="font-size:11px">' + d.replyRatePct + '% replies</div>' : '') : '<span class="muted">n/a</span>') + '</td>' +
-        '<td>' + wuBadge(d.readiness) + wuKindBadge(d.mailboxKind) + '</td>' +
+        '<td>' + wuBadge(d.readiness) + '</td>' +
       '</tr>';
       if (!open) return main;
       var acts = (d.actions && d.actions.length)
