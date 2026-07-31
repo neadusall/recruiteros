@@ -18,6 +18,23 @@
 const TIMEOUT_MS = 12_000;
 /** Politeness cap: RDAP endpoints are free infrastructure, so refreshes run in small waves. */
 const CONCURRENCY = 4;
+/**
+ * A first pass over a 75-domain fleet does NOT come back clean, and pretending otherwise
+ * is how a third of the register ends up with no registrar on it. Measured against the
+ * live fleet on 2026-07-31: 48 of 76 answered, 24 timed out and 4 came back 429. Every
+ * one of those 28 resolved on a slower serial retry, so the failure is the pace, not the
+ * domain. Retries are therefore serial, spaced, and part of the lookup rather than
+ * something a person has to notice and press a button about.
+ */
+const RETRIES = 2;
+const RETRY_PAUSE_MS = 2_500;
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Worth trying again: the registry was busy or slow, as opposed to saying no. */
+function transient(error: string | undefined): boolean {
+  return !!error && /timed out|429|unreachable|50\d/.test(error);
+}
 
 export interface DomainFacts {
   domain: string;
@@ -78,11 +95,28 @@ export async function lookupDomain(domain: string): Promise<DomainFacts> {
   }
 }
 
-/** Look many up in small waves so a 40-domain fleet refreshes without hammering RDAP. */
+/**
+ * Look many up in small waves so a 40-domain fleet refreshes without hammering RDAP,
+ * then go back over whatever the waves lost, one at a time and slowly. The second pass is
+ * where most of a large fleet actually lands: running it four-wide is what makes the
+ * registry start refusing, so the fix for a refusal cannot also be four-wide.
+ */
 export async function lookupDomains(domains: string[]): Promise<DomainFacts[]> {
   const out: DomainFacts[] = [];
   for (let i = 0; i < domains.length; i += CONCURRENCY) {
     out.push(...(await Promise.all(domains.slice(i, i + CONCURRENCY).map(lookupDomain))));
+  }
+
+  for (let attempt = 1; attempt <= RETRIES; attempt += 1) {
+    const stragglers = out.map((f, idx) => ({ f, idx })).filter(({ f }) => transient(f.error));
+    if (!stragglers.length) break;
+    for (const { f, idx } of stragglers) {
+      await sleep(RETRY_PAUSE_MS * attempt);
+      const again = await lookupDomain(f.domain);
+      // Never trade a real answer for a fresh failure.
+      if (!again.error) out[idx] = again;
+      else out[idx] = { ...again, error: again.error };
+    }
   }
   return out;
 }

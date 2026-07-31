@@ -508,6 +508,7 @@ export function ensureSpendRegisterReady(): Promise<void> {
           store.seededVersion = Number(s.seededVersion) || 0;
         }
         if (store.seededVersion < SEED_VERSION) applySeed();
+        else void adoptDomainsOnce();
       })
       .catch(() => { if (store.seededVersion < SEED_VERSION) applySeed(); });
   }
@@ -538,28 +539,42 @@ function applySeed(): void {
 }
 
 /**
- * Pull the sending fleet's domains in and name their registrars, once, on a version bump.
+ * Pull the sending fleet's domains in and name their registrars, without anyone pressing
+ * anything.
  *
  * The Domains panel has always had an Import button and a Refresh button, and for as long
  * as nobody pressed them the register carried 75 domains it knew nothing about: no
  * registrar, no expiry, no renewal cost, and no way to notice one lapsing. Two buttons is
- * two more than a dashboard should need to tell the truth about money already spent, so
- * the first boot after the bump does both.
+ * two more than a dashboard should need to tell the truth about money already spent.
+ *
+ * It runs on the version bump AND on any later boot that finds work outstanding, because
+ * once was not enough in practice: the first live run resolved 48 of 76 domains and the
+ * container was recreated by a deploy before the rest were retried, which on a
+ * bump-only trigger would have left 28 rows permanently unattributed. Outstanding work is
+ * a domain with no registrar on it, so a finished fleet costs one array scan and no
+ * network at all.
  *
  * Deliberately fire-and-forget and deliberately quiet: this runs during hydration, and a
  * registry that is slow or down must never hold up the console or throw into it. Failure
  * leaves the buttons exactly where they were.
  */
-let adopted = false;
+let adopting = false;
 async function adoptDomainsOnce(): Promise<void> {
-  if (adopted) return;
-  adopted = true;
+  if (adopting) return;
+  const rows = store.items.filter((i) => i.domain);
+  const outstanding = rows.length === 0 || rows.some((i) => !i.registrar);
+  if (!outstanding) return;
+  adopting = true;
   try {
     await importSendingDomains();
-    // ~75 keyless RDAP lookups, four at a time. Slow, unattended, and only ever once.
-    await refreshDomainFacts();
+    // Keyless RDAP, four at a time with a slow serial retry behind it. Only the rows
+    // still missing a registrar are looked up, so a resumed run is cheap and the
+    // registry is not asked the same 48 questions it already answered.
+    await refreshDomainFacts({ onlyMissing: rows.length > 0 });
   } catch {
     /* the buttons remain the manual route */
+  } finally {
+    adopting = false;
   }
 }
 
@@ -1037,9 +1052,15 @@ function vendorForRegistrar(registrar: string, mailProvider?: string): string {
  * Refresh registration dates, expiry and registrar for every domain row from the public
  * registry. A lookup failure is recorded on the row and never clears a known date.
  */
-export async function refreshDomainFacts(): Promise<{ checked: number; updated: number; failed: number }> {
+export async function refreshDomainFacts(
+  opts: { onlyMissing?: boolean } = {},
+): Promise<{ checked: number; updated: number; failed: number }> {
   await ensureSpendRegisterReady();
-  const rows = store.items.filter((i) => i.domain);
+  /* onlyMissing is for the unattended resume: ask the registry about the rows that still
+     have no answer, and leave the ones that already do alone. The button in the console
+     always refreshes everything, because a person pressing Refresh means the dates, not
+     just the gaps. */
+  const rows = store.items.filter((i) => i.domain && (!opts.onlyMissing || !i.registrar));
   if (!rows.length) return { checked: 0, updated: 0, failed: 0 };
   const facts = await lookupDomains(rows.map((r) => r.domain as string));
   const byDomain = new Map(facts.map((f) => [f.domain, f]));
