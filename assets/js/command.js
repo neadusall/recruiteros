@@ -264,9 +264,20 @@
           if (!_retried) return delay(1200).then(function () { return api(path, true); });
           signOut(); throw 0;
         }
-        if (!r.ok || d === null) throw 0;
+        if (!r.ok || d === null) {
+          // A read that fails used to throw a bare 0, so callers rendered an empty
+          // screen and the person was left guessing whether the data was missing
+          // or the app was. Say so, once, with a code.
+          var code = breakCodeFor(r.status);
+          if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
+          throw 0;
+        }
         return d;
       });
+    }, function (e) {
+      // The request never landed at all (offline, server restarting mid-deploy).
+      reportBreak("ROS-NET", screenLabel(), { path: path, status: 0, detail: (e && e.message) || "fetch failed" });
+      throw 0;
     });
   }
   // Mutating call (POST/PUT/DELETE) -> { ok, status, data }. Same 401-retry guard.
@@ -281,9 +292,155 @@
           if (!_retried) return delay(1200).then(function () { return send(path, method, payload, true); });
           signOut(); throw 0;
         }
+        // Call sites handle their own 4xx (those are answers: "no candidates",
+        // "name taken"). A 5xx or a denial is the platform failing, and gets a
+        // coded notice whether or not the call site says anything.
+        if (!r.ok) {
+          var code = breakCodeFor(r.status);
+          if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
+        }
         return { ok: r.ok, status: r.status, data: d };
       });
+    }, function (e) {
+      // Connection died mid-request. Flows with their own recovery (a running
+      // search hands over to its checkpoint) catch this and carry on; the notice
+      // is what stops everything else from failing in silence.
+      reportBreak("ROS-NET", screenLabel(), { path: path, status: 0, detail: (e && e.message) || "fetch failed" });
+      throw e;
     });
+  }
+
+  /* ---------------- breaks: nothing fails silently ---------------------------
+     A screen that stops with no explanation is worse than an error: the person
+     using it cannot tell whether it worked, cannot report it usefully, and has
+     no idea whether to redo the work. So every break — a request that never
+     lands, a server that answers with an error, a crash in this file — puts a
+     plain-English notice on screen with a short code to quote, and files the
+     technical side (screen, request, status, browser) with the server where it
+     can be looked up later.
+
+     Deliberate split: the SCREEN says what happened and what to do about it, in
+     recruiter language with no internals; the CODE and the technical detail are
+     what travel to whoever fixes it (Copy details puts them on the clipboard).
+     One outage is one notice, not fifty: identical breaks fold for a minute. */
+  var BREAK_CODES = {
+    "ROS-NET": "The app could not reach the server. Nothing you typed is lost. Wait a moment and try that again.",
+    "ROS-SRV": "The server ran into a problem doing that, so it did not finish. Nothing was changed.",
+    "ROS-DENY": "Your account is not allowed to do that. An admin can grant access.",
+    "ROS-APP": "This screen hit a problem and may not have finished what it started. Reload the page before relying on what is on it.",
+  };
+  var breakSeen = {};
+  var breakLog = [];
+  /** The running progress bar's "stop honestly" hook, if a screen has one up.
+   *  Screens with a bar point this at their own failProgress while they render. */
+  var activeProgressFail = null;
+
+  /** The notice strip, created on first use so a healthy session never carries it. */
+  function breakHost() {
+    var el = document.getElementById("breakBar");
+    if (el) return el;
+    var view = document.getElementById("view");
+    if (!view || !view.parentNode) return null;
+    var css = document.createElement("style");
+    css.textContent =
+      '.break-bar{margin:0 0 14px;display:flex;flex-direction:column;gap:10px}' +
+      '.break-note{font-size:13.5px;line-height:1.5;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid var(--danger,#d4544e);border-radius:10px;padding:12px 14px}' +
+      '.break-note b{color:var(--text)}' +
+      '.break-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;padding-top:7px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)}' +
+      '.break-foot code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--text)}' +
+      '.break-act{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
+      '.break-act:hover{color:var(--text)}';
+    document.head.appendChild(css);
+    el = document.createElement("div");
+    el.id = "breakBar";
+    el.className = "break-bar";
+    view.parentNode.insertBefore(el, view);
+    return el;
+  }
+
+  /**
+   * Surface a break. `code` is one of BREAK_CODES (quotable, stable); `where` is
+   * what the person was doing, in their words ("the candidate search"); `tech` is
+   * everything an engineer needs and nobody else should have to read.
+   */
+  function reportBreak(code, where, tech) {
+    code = BREAK_CODES[code] ? code : "ROS-APP";
+    var key = code + "|" + (tech && tech.path ? tech.path : "") + "|" + (where || "");
+    var now = Date.now();
+    if (breakSeen[key] && now - breakSeen[key] < 60000) return;
+    breakSeen[key] = now;
+
+    var entry = {
+      code: code, where: where || "", at: new Date().toISOString(),
+      screen: (location.hash || "#overview").replace(/^#/, ""),
+      path: (tech && tech.path) || "", status: (tech && tech.status) || 0,
+      detail: (tech && tech.detail) || "", agent: navigator.userAgent,
+    };
+    breakLog.push(entry);
+    if (breakLog.length > 20) breakLog.shift();
+
+    // Any progress bar still running is now lying about work that stopped.
+    if (activeProgressFail) { try { activeProgressFail("Stopped"); } catch (e) { /* the notice below still shows */ } }
+    try { window.dispatchEvent(new CustomEvent("ros:break", { detail: entry })); } catch (e) { /* older browser: the notice below still shows */ }
+
+    var host = breakHost();
+    if (host) {
+      var note = document.createElement("div");
+      note.className = "break-note";
+      note.innerHTML =
+        '<b>' + esc(where ? ("Something went wrong with " + where + ".") : "Something went wrong.") + '</b><br>' +
+        esc(BREAK_CODES[code]) +
+        '<div class="break-foot">' +
+          '<span>Reference <code>' + esc(code) + '</code> · quote this when you report it</span>' +
+          '<button class="break-act" data-break-copy="1">Copy details</button>' +
+          '<button class="break-act" data-break-close="1">Dismiss</button>' +
+        '</div>';
+      note.querySelector("[data-break-copy]").onclick = function () {
+        var text = "RecruitersOS break report\n" + JSON.stringify(entry, null, 2);
+        var done = function () { this.textContent = "Copied"; }.bind(note.querySelector("[data-break-copy]"));
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, done);
+        else done();
+      };
+      note.querySelector("[data-break-close]").onclick = function () { note.remove(); };
+      host.appendChild(note);
+    }
+
+    // File it. Best effort by definition: this runs BECAUSE something is broken,
+    // so it must never throw, retry, or block anything on screen.
+    try {
+      fetch(API + "/breaks", {
+        method: "POST", credentials: "include",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(entry),
+        keepalive: true,
+      }).catch(function () { });
+    } catch (e) { /* nothing further to do: the person already sees the notice */ }
+  }
+
+  // A crash in this file used to leave a half-drawn screen and no explanation.
+  window.addEventListener("error", function (e) {
+    reportBreak("ROS-APP", "", { detail: (e && e.message) || "script error", path: (e && e.filename) || "" });
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e && e.reason;
+    if (r === 0 || r === undefined) return; // an already-reported request failure
+    reportBreak("ROS-APP", "", { detail: (r && (r.message || String(r))) || "unhandled rejection" });
+  });
+
+  /** What the person was doing, named the way the app names it on screen. */
+  function screenLabel() {
+    var hash = (location.hash || "").replace(/^#/, "").split("?")[0];
+    var route = (typeof ROUTES !== "undefined" && ROUTES) ? ROUTES[hash] : null;
+    return (route && route.title) || "";
+  }
+
+  /** Which code a failed request deserves. 401 is deliberately absent: a dead
+   *  session signs the user out, which is its own (clear) answer. */
+  function breakCodeFor(status) {
+    if (!status) return "ROS-NET";
+    if (status === 403) return "ROS-DENY";
+    if (status >= 500 || status === 0) return "ROS-SRV";
+    return "";
   }
 
   /* ---------------- reference content (product knowledge, not customer data) -- */
@@ -13586,6 +13743,10 @@
         from success and is exactly how a lost run got reported as a finished one
         (2026-07-31). This leaves the bar parked at the % it actually reached, in warning
         color, on screen, until the recruiter starts another run. */
+    // A break anywhere must stop this bar too: a bar still filling after the work
+    // behind it died is the exact lie this whole layer exists to prevent. One
+    // slot, re-pointed on every render, so old screens can never reach back.
+    activeProgressFail = function (label) { if (prog && prog.timer) failProgress(label || "Stopped"); };
     function failProgress(label) {
       var host = $("#jdProgress");
       if (host && host.dataset.progOwner && !progOwns(host)) { prog.timer = null; return; }

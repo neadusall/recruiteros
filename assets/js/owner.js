@@ -87,8 +87,8 @@
 
   /* ---------------- router ---------------- */
   // Projection calculator moved to the in-app command center (Measure → Spending).
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, security: viewSecurity };
-  var TITLES = { overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", security: "Security" };
+  var ROUTES = { overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, breaks: viewBreaks, security: viewSecurity };
+  var TITLES = { overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", breaks: "Breaks", security: "Security" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -2913,6 +2913,47 @@
   /* Authenticator-app two-factor on the owner sign-in. Enrolling here protects
    * every owner route behind a rolling code; one-time recovery codes are shown
    * once at activation so a lost device never locks you out. */
+  /* ================= BREAKS =================
+     Every break the app showed somebody, newest first. The person on the other
+     end saw a plain-English notice and a code; this is the same event with the
+     screen, the request and the status attached, so a report that arrives as
+     "it broke, ROS-SRV" is already actionable. Filed by assets/js/command.js;
+     stored in lib/breaks. */
+  function viewBreaks() {
+    api("/breaks?limit=100").then(function (d) {
+      var rows = d.breaks || [];
+      var html = '<div class="v-head"><h2>Breaks</h2><p>What the app told someone had gone wrong, newest first. Each one is what they saw on screen, plus the screen they were on and the request behind it. An empty list is the good outcome.</p></div>';
+      if (!rows.length) {
+        html += '<div class="card"><p class="note">Nothing has broken in front of anyone since the last restart.</p></div>';
+        $("#view").innerHTML = html;
+        return;
+      }
+      // Repeat offenders first: one code hitting many people is a different
+      // problem from a one-off, and it should not have to be counted by eye.
+      var byCode = {};
+      rows.forEach(function (b) { byCode[b.code] = (byCode[b.code] || 0) + 1; });
+      html += '<div class="stat-grid">' + Object.keys(byCode).sort(function (a, b) { return byCode[b] - byCode[a]; })
+        .slice(0, 4).map(function (c) { return stat(byCode[c], esc(c), byCode[c] > 5 ? "bad" : "amber"); }).join("") + '</div>';
+      // The reason column is the point of the table, so it must never be the one
+      // that falls off a narrow screen: the table scrolls inside the card.
+      html += '<div class="card" style="margin-top:18px"><div style="overflow-x:auto"><table class="otable"><thead><tr>' +
+        '<th>When</th><th>Code</th><th>Who</th><th>Where</th><th>Request</th><th>Reason</th></tr></thead><tbody>';
+      rows.forEach(function (b) {
+        html += '<tr>' +
+          '<td>' + esc(new Date(b.at).toLocaleString()) + '</td>' +
+          '<td><b>' + esc(b.code) + '</b></td>' +
+          '<td>' + esc(b.userEmail || "-") + '</td>' +
+          '<td>' + esc(b.where || b.screen || "-") + '</td>' +
+          '<td>' + esc(b.path || "-") + (b.status ? (" · " + esc(String(b.status))) : "") + '</td>' +
+          '<td>' + esc(b.detail || "-") + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+      $("#view").innerHTML = html;
+    });
+  }
+
+
   function viewSecurity() {
     api("/auth/2fa/status").then(function (st) {
       var html = '<div class="v-head"><h2>Security</h2><p>Two-factor authentication (2FA) puts an authenticator-app code in front of your sign-in, so a stolen or guessed password alone can\'t get in. This protects your account everywhere, the owner console and the main app.</p></div>';
