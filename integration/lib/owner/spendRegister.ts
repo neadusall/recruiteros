@@ -89,6 +89,16 @@ export interface SpendItem {
    *  as settled instead of chasing a missing invoice, and stops the moment the vendor is
    *  put back on a paid plan (buying credits again makes it a normal credit row). */
   lifetime?: boolean;
+  /** A live subscription the vendor has SUSPENDED: still ours, still due to bill again,
+   *  simply not charging right now. First month with no charge, "YYYY-MM" or a full date.
+   *  Different from cancelled (gone for good) and different from a missing receipt (a
+   *  charge happened and the paper did not arrive). Without this a paused month reads as
+   *  money unaccounted for, which is the loudest kind of wrong a spend report can be. */
+  pausedFrom?: string;
+  /** The date the vendor says billing starts again, from their own billing page. The month
+   *  it falls in expects the fee once more; the months between `pausedFrom` and it expect
+   *  nothing. Leave unset when the vendor has not said, and the pause runs open-ended. */
+  resumesAt?: string;
   notes?: string;
   /** The product name the VENDOR's own account page prints for this row, e.g. their
    *  "KVM VPS - 8GB" against our "Mailcow mail server (8GB)". Recorded the first time a
@@ -141,9 +151,11 @@ export interface SpendItem {
  * The five RapidAPI rows carry their real plan prices from the RapidAPI billing
  * dashboard, and their `rapidHost` binds each one to the live credit meter.
  */
-type SeedItem = Omit<SpendItem, "id" | "createdAt" | "updatedAt" | "seeded">;
+export type SeedItem = Omit<SpendItem, "id" | "createdAt" | "updatedAt" | "seeded">;
 
-const SEED: SeedItem[] = [
+/** Exported so a test can pin the figures read off a vendor's own billing page, which is
+ *  the only record of what that page said on the day someone looked at it. */
+export const SEED: SeedItem[] = [
   /* ---- RapidAPI subscriptions (prices verified on the RapidAPI billing dashboard) ---- */
   {
     vendor: "RapidAPI", label: "JSearch (Ultra)", category: "search", billing: "monthly",
@@ -290,10 +302,19 @@ const SEED: SeedItem[] = [
    * blank space is not. */
   {
     vendor: "Sending.ac", label: "Managed mailboxes (tal + lume domains)", category: "email", billing: "monthly",
-    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
-    purpose: "The 1,450 managed mailboxes the cold-email fleet actually sends from.",
+    amountUsd: 599, at: "2026-06-24", status: "active", verified: true,
+    vendorLabel: "Mailbox Slot",
+    pausedFrom: "2026-07", resumesAt: "2026-08-24",
+    purpose: "1,500 managed mailbox slots, the estate the cold-email fleet actually sends from.",
     impact: "Every BD email leaves through these. Losing them stops outbound entirely, and mailbox count is the hard ceiling on how many first emails a day the business can send.",
-    notes: "Billed per mailbox, so the figure moves with the fleet size. Sign-in goes through sso.ac.",
+    notes: [
+      "Read off the vendor's Stripe billing page on 2026-07-31, as it stood that day.",
+      "Price is built per slot, not quoted flat: 1,500 Mailbox Slots at $1.00 each = $1,500.00, less a bulk discount of $901.00, so $599.00 per month. Adding or dropping slots moves the subtotal AND the discount, so the next figure will not be $599 plus a round number.",
+      "SERVICE IS PAUSED and it did not bill in July. One invoice is on record, $599.00 on 2026-06-24, marked Paid against Mailbox Slot. The billing page then names the next period as 2026-08-24 to 2026-09-24 with an estimated $599.00, which is why this row expects nothing for July and expects the fee again around the 24th of August.",
+      "CHECK IN AUGUST: confirm the charge actually lands on the 24th and at $599.00. If it does, the pause was a billing skip and this row is right; if nothing lands, the estate is being kept at no cost and the monthly figure here is overstating burn.",
+      "The fleet import counts 1,450 Sending.ac inboxes across the 29 Dynadot domains (50 per domain), so roughly 50 slots are paid for and unused.",
+      "Pays on American Express ending 1024, expiry 06/2031, the default card on the account. Billing runs through Stripe, so the receipt arrives from Stripe with Sending.ac as the merchant. Sign-in goes through sso.ac.",
+    ].join(" "),
   },
   {
     vendor: "Zapmail", label: "Google Workspace mailboxes", category: "email", billing: "monthly",
@@ -463,6 +484,21 @@ const SEED_CORRECTIONS: Array<{
     force: true,
     when: (i) => String(i.at).slice(0, 10) === "2026-06-01",
     patch: { at: "2026-07-01" },
+  },
+  {
+    /* Read off Sending.ac's own Stripe billing page on 2026-07-31, so this arrives verified
+       rather than as a guess: $599.00/mo (1,500 slots at $1.00 less a $901.00 bulk
+       discount), one invoice paid 2026-06-24, service currently PAUSED with the next period
+       named as 2026-08-24 to 2026-09-24. The seeded row carried no price at all, which is
+       why the console has been reporting the largest email line in the book as $0. */
+    vendor: "Sending.ac", label: "Managed mailboxes (tal + lume domains)",
+    patch: {
+      amountUsd: 599, verified: true, needsAmount: false, at: "2026-06-24",
+      pausedFrom: "2026-07", resumesAt: "2026-08-24",
+      vendorLabel: "Mailbox Slot",
+      purpose: SEED.find((s) => s.vendor === "Sending.ac")?.purpose,
+      notes: SEED.find((s) => s.vendor === "Sending.ac")?.notes,
+    },
   },
   {
     // The three validation nodes are NOT on the mail server's cycle: the owner corrected
@@ -700,6 +736,12 @@ export async function updateSpendItem(id: string, patch: Partial<SpendItem>): Pr
     else if (!item.amountUsd) item.needsAmount = true;
   }
   if (patch.at != null) item.at = String(patch.at);
+  /* A pause is a fact about the vendor's billing, not about whether the service is still
+     wanted, so it sits beside the dates rather than inside `status`. Emptying either box
+     ends the pause and the row goes back to expecting its fee, which is what an owner who
+     has just seen the charge land will want to do. */
+  if (patch.pausedFrom != null) item.pausedFrom = String(patch.pausedFrom).trim() || undefined;
+  if (patch.resumesAt != null) item.resumesAt = String(patch.resumesAt).trim() || undefined;
   if (patch.status != null) item.status = patch.status === "cancelled" ? "cancelled" : "active";
   if (patch.purpose != null) item.purpose = String(patch.purpose);
   if (patch.notes != null) item.notes = String(patch.notes);

@@ -37,6 +37,7 @@ export type CellStatus =
   | "prepaid"        // annual plan, already paid in its anniversary month
   | "none"           // nothing expected and nothing charged (credit top-ups, free tiers)
   | "before"         // predates the service
+  | "paused"         // subscription suspended by the vendor: nothing due, and it comes back
   | "cancelled";     // service is off
 
 export interface ReceiptRef {
@@ -501,6 +502,14 @@ export function buildSpendMatrix(
           counted = expected; verified = false;
           note = "no receipt on file";
         }
+      } else if (members.every((m) => m.status !== "active" || pausedIn(m, period))
+        && members.some((m) => pausedIn(m, period))) {
+        /* Nothing was due and nothing arrived BECAUSE the vendor suspended the plan. Said
+           out loud, because an empty cell on a $599 line otherwise reads as a gap someone
+           has to go and chase. */
+        status = "paused";
+        const back = members.map((m) => m.resumesAt).filter(Boolean).sort()[0];
+        note = back ? `paused, billing again ${dayLabel(String(back))}` : "paused by the vendor";
       } else if (item.billing === "annual") {
         status = "prepaid";
       } else {
@@ -778,11 +787,40 @@ function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"], v = n % 100;
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
+/** "2026-08-24" as "24 Aug". A bare month is left as the month. */
+function dayLabel(iso: string): string {
+  const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(iso);
+  if (!m) return iso;
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m[2]) - 1] || m[2];
+  return m[3] ? `${Number(m[3])} ${mon}` : `${mon} ${m[1]}`;
+}
 
+
+/**
+ * Is this line suspended for the given month?
+ *
+ * A paused subscription is neither cancelled nor unpaid: the vendor stopped charging and
+ * said when it will start again. Sending.ac paused after its 2026-06-24 invoice and names
+ * 2026-08-24 as the next billing date, so July is due nothing at all while August is due
+ * the fee. Reading that month as a missing receipt would post $599 of "unaccounted for"
+ * money against a charge the vendor never made.
+ *
+ * The resume month is NOT paused: the fee falls due inside it, and `billingDay` on the
+ * vendor's receipt source keeps it `pending` until the date passes rather than flipping it
+ * to `missing` on the 4th. An open-ended pause (no `resumesAt`) runs until someone says
+ * otherwise, which is the honest reading of a vendor who has not named a date.
+ */
+export function pausedIn(item: SpendItem, period: string): boolean {
+  const from = String(item.pausedFrom || "").slice(0, 7);
+  if (!from || period < from) return false;
+  const until = String(item.resumesAt || "").slice(0, 7);
+  return !until || period < until;
+}
 
 /** What the register says a given month should cost for one line item. */
 function expectedFor(item: SpendItem, period: string): number {
   if (item.status !== "active") return 0;
+  if (pausedIn(item, period)) return 0;
   const startMonth = (item.at || "").slice(0, 7);
   if (startMonth && period < startMonth) return 0;
   if (item.billing === "monthly") return item.amountUsd;

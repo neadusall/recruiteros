@@ -233,6 +233,9 @@
 .rc-cell.rc-mismatch { background: var(--warn-bg); }
 .rc-cell.rc-missing { background: var(--danger-bg); }
 .rc-cell.rc-unexpected { background: var(--warn-bg); }
+/* Paused is not a gap: quiet grey, and the word never borrows the red of a missing receipt. */
+.rc-cell.rc-paused { background: var(--bg-soft); }
+.rc-cell.rc-paused .rc-gap { color: var(--text-muted); font-weight: 600; }
 .rc-total { background: var(--bg-soft); }
 
 .rcpt-anoms li { list-style: none; margin-left: -14px; padding-left: 12px; border-left: 3px solid transparent; }

@@ -241,9 +241,10 @@ export const VENDOR_SOURCES: VendorSource[] = [
     channel: "email_processor",
     from: ["sending.ac", "sso.ac", "stripe.com"],
     subject: ["sending", "mailbox", "receipt", "invoice", "subscription"],
-    merchant: ["sending.ac", "sending ac"],
+    merchant: ["sending.ac", "sending ac", "mailbox slot"],
     portal: "https://sso.ac/",
-    setup: "Billed per mailbox, so the figure moves with the fleet. Sign in through sso.ac and take the invoice from the billing page.",
+    billingDay: 24,
+    setup: "Billed per mailbox slot through Stripe, so the sender is Stripe and the merchant name identifies it. The 24th is the anniversary: the one invoice on record is $599.00 of 2026-06-24 and the next period the billing page names runs 2026-08-24 to 2026-09-24. Sign in through sso.ac, open the Stripe billing portal from there, and take the invoice out of Invoice history.",
   },
   {
     vendor: "Zapmail",

@@ -75,13 +75,16 @@ const server = createServer(async (req, res) => {
   }
   res.writeHead(404); res.end("not found");
 });
-await new Promise<void>((r) => server.listen(4713, r));
+/* SHOT_PORT because two sessions shooting this console at once both bind 4713 and the
+   second one dies on EADDRINUSE. */
+const PORT = Number(process.env.SHOT_PORT) || 4713;
+await new Promise<void>((r) => server.listen(PORT, r));
 
 const { chromium } = await import("playwright");
 const browser = await chromium.launch({ channel: "msedge" });
 for (const width of [1280, 1024, 500]) {
   const page = await browser.newPage({ viewport: { width, height: 1400 } });
-  await page.goto("http://127.0.0.1:4713/owner-console.html#burn", { waitUntil: "networkidle" });
+  await page.goto(`http://127.0.0.1:${PORT}/owner-console.html#burn`, { waitUntil: "networkidle" });
   await page.waitForTimeout(2500);
   const row = page.locator(process.env.SHOT_AT || "text=Skip Tracing Working API").first();
   if (await row.count()) await row.evaluate((el) => el.scrollIntoView({ block: "center" }));

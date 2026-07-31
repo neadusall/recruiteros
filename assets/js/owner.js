@@ -1107,7 +1107,7 @@
     paid: "receipt on file", mismatch: "amount differs from the register", missing: "no receipt",
     pending: "not charged yet", unexpected: "charged with nothing expected", metered: "pay per use",
     prepaid: "covered by the annual payment", none: "nothing charged", before: "before this service started",
-    cancelled: "cancelled"
+    paused: "paused by the vendor, nothing due", cancelled: "cancelled"
   };
 
   function receiptKpis(d) {
@@ -1348,6 +1348,11 @@
       inner = '<div class="rc-amt est">' + usd(c.expectedUsd) + '</div><div class="note" style="font-size:10.5px">due</div>';
     } else if (c.status === "metered") {
       inner = '<div class="rc-amt">' + usd(c.countedUsd) + '</div><div class="note" style="font-size:10.5px">metered</div>';
+    } else if (c.status === "paused") {
+      /* An empty cell on a live monthly line reads as a gap to chase. This one is not:
+         the vendor stopped charging, and the note says when it starts again. */
+      inner = '<div class="rc-gap">paused</div>' +
+        (c.note ? '<div class="note" style="font-size:10.5px">' + esc(c.note) + '</div>' : "");
     } else {
       inner = '<div class="rc-dash">·</div>';
     }
@@ -2237,6 +2242,10 @@
       fld("Notes", '<input id="seNotes" value="' + esc(i.notes || "") + '" />') +
       fld("Active", '<select id="seStatus"><option value="active"' + (i.status === "active" ? " selected" : "") + '>Active</option><option value="cancelled"' + (i.status === "cancelled" ? " selected" : "") + '>Cancelled</option></select>') +
       fld("Paid once", '<select id="seLifetime"><option value="0"' + (i.lifetime ? "" : " selected") + '>No, it charges again</option><option value="1"' + (i.lifetime ? " selected" : "") + '>Yes, bought outright: no ongoing fee</option></select>') +
+      /* A vendor that has suspended billing is not cancelled and is not late paying. Two
+         boxes say so, and emptying them ends the pause. */
+      fld("Paused since", '<input id="sePaused" type="month" value="' + esc((i.pausedFrom || "").slice(0, 7)) + '" />') +
+      fld("Bills again", '<input id="seResumes" type="date" value="' + esc((i.resumesAt || "").slice(0, 10)) + '" />') +
       (i.domain ? fld("Renewal price (USD)", '<input id="seRenewal" type="number" min="0" step="0.01" value="' + (i.renewalUsd || "") + '" />') : "") +
       (i.domain ? fld("Expires", '<input id="seExpires" type="date" value="' + esc((i.expiresAt || "").slice(0, 10)) + '" />') : "") +
       (i.domain ? fld("Auto-renew", '<select id="seAuto"><option value="">Not set</option><option value="1"' + (i.autoRenew ? " selected" : "") + '>On</option><option value="0"' + (i.autoRenew === false ? " selected" : "") + '>Off</option></select>') : "") +
@@ -2263,6 +2272,8 @@
         purpose: $("#sePurpose").value.trim(),
         notes: $("#seNotes").value.trim(),
         lifetime: $("#seLifetime").value === "1",
+        pausedFrom: $("#sePaused") ? $("#sePaused").value : undefined,
+        resumesAt: $("#seResumes") ? $("#seResumes").value : undefined,
         status: $("#seStatus").value
       }).then(function (r) {
         if (!r.ok) { toast("Could not save"); return; }
