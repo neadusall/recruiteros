@@ -36,12 +36,23 @@ export interface PullReport {
 
 const TELNYX_API = "https://api.telnyx.com";
 
-async function telnyx<T>(path: string, key: string): Promise<T> {
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * One Telnyx call, with a backoff on rate limiting. The usage API throttles hard: firing
+ * six product queries at once turned 13 failed feeds into 25 and emptied every month, so
+ * a 429 is waited out rather than counted as "this product has no cost".
+ */
+async function telnyx<T>(path: string, key: string, attempt = 0): Promise<T> {
   const res = await fetch(TELNYX_API + path, {
     headers: { authorization: `Bearer ${key}` },
     signal: AbortSignal.timeout(30_000),
   });
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  if ((res.status === 429 || res.status >= 500) && attempt < 4) {
+    await sleep(600 * Math.pow(2, attempt));
+    return telnyx<T>(path, key, attempt + 1);
+  }
+  if (!res.ok) throw new Error(`${res.status}`);
   return (await res.json()) as T;
 }
 
@@ -82,15 +93,7 @@ function monthWindow(period: string): { start: string; end: string } {
   return { start: iso(start), end: iso(end) };
 }
 
-/** Run `work` over `items` a few at a time: 36 products across several months is hundreds
- *  of calls, and serially that is minutes of wall clock for no reason. */
-async function inBatches<T, R>(items: T[], size: number, work: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = [];
-  for (let i = 0; i < items.length; i += size) {
-    out.push(...(await Promise.all(items.slice(i, i + size).map(work))));
-  }
-  return out;
-}
+
 
 /**
  * Pull Telnyx's own billed usage for the last `monthsBack` months and file one figure per
@@ -131,22 +134,27 @@ export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
   }
 
   const failed: string[] = [];
+  const lastError: Record<string, string> = {};
   for (const period of periods) {
     const { start, end } = monthWindow(period);
-    const perProduct = await inBatches(products, 6, async ({ product, dimension }) => {
+    let total = 0;
+    for (const { product, dimension } of products) {
+      /* A product that answered for one month is worth asking about every month; one that
+         has never answered is asked once more per month rather than being written off. */
       const base = `/v2/usage_reports?product=${encodeURIComponent(product)}&metrics=cost&start_date=${start}&end_date=${end}`;
-      /* Dimension first, then a bare metrics-only call: a product that rejects every
-         dimension still reports its total, and only a genuine failure is dropped. */
+      let answered = false;
       for (const q of [`${base}&dimensions=${encodeURIComponent(dimension)}`, base]) {
         try {
           const j = await telnyx<{ data?: Array<{ cost?: number | string }> }>(q, key);
-          return (j.data || []).reduce((sum, row) => sum + Number(row.cost || 0), 0);
-        } catch { /* try the next shape */ }
+          total += (j.data || []).reduce((sum, row) => sum + Number(row.cost || 0), 0);
+          answered = true;
+          break;
+        } catch (e) {
+          lastError[product] = (e as Error).message;
+        }
       }
-      if (!failed.includes(product)) failed.push(product);
-      return null;
-    });
-    let total = perProduct.reduce((sum: number, v) => sum + (v || 0), 0);
+      if (!answered && !failed.includes(product)) failed.push(product);
+    }
     total = Math.round(total * 100) / 100;
     if (total <= 0) continue;
 
@@ -166,7 +174,13 @@ export async function pullTelnyx(monthsBack = 3): Promise<PullReport> {
     report.months.push({ period, amountUsd: total, reference: inv?.invoice_id || `usage-${period}`, created });
   }
 
-  if (failed.length) report.notes.push(`${failed.length} product feeds did not answer and are excluded: ${failed.slice(0, 6).join(", ")}.`);
+  if (failed.length) {
+    const reasons = [...new Set(failed.map((f) => lastError[f]).filter(Boolean))].slice(0, 3).join(", ");
+    report.notes.push(
+      `${failed.length} of ${products.length} product feeds did not answer and are excluded: ${failed.slice(0, 6).join(", ")}` +
+      (reasons ? ` (HTTP ${reasons})` : "") + ".",
+    );
+  }
   try {
     const b = await telnyx<{ data?: { balance?: string; available_credit?: string } }>("/v2/balance", key);
     if (b.data?.balance != null) report.notes.push(`Account balance is $${b.data.balance}; auto-recharge tops this up, and those payments are not in the API.`);
