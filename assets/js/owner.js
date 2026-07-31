@@ -1078,6 +1078,7 @@
   function receiptMatrix(d) {
     if (!d) return "";
     var m = d.matrix, months = m.months || [];
+    var gaps = unrendered(d).length;
     var html = '<div class="card" style="margin-top:14px"><div class="burn-head"><h3>Month by month</h3>' +
       '<div class="btn-row" style="margin:0">' +
       '<select id="rcMonths" class="rc-months">' +
@@ -1085,6 +1086,10 @@
       '</select>' +
       '<button class="btn btn-sm" id="rcHarvest">Pull receipts from the mailbox</button>' +
       '<button class="btn btn-sm" id="rcAttach">Attach an invoice</button>' +
+      /* Only when there is something to mend: a receipt whose document is filed but whose
+         picture never rendered. Those cells read "no image" with the real invoice sitting
+         on disk behind them, and one click puts it back. */
+      (gaps ? '<button class="btn btn-sm" id="rcRender">Show ' + gaps + ' missing image' + (gaps > 1 ? 's' : '') + '</button>' : '') +
       '</div></div>' +
       '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate.' +
       /* Where the books open. Said out loud so the missing earlier months read as a
@@ -1196,6 +1201,14 @@
       inner = '<div class="rc-dash">·</div>';
     }
     return '<td class="' + cls + '"' + attr + ' title="' + esc(monthLabel(c.period) + " · " + (CELL_LABEL[c.status] || c.status)) + '">' + inner + '</td>';
+  }
+
+  /* Receipts whose document is on file but whose picture is not. An API figure never had a
+     document and is not a gap; a real invoice showing "no image" always is. */
+  function unrendered(d) {
+    return (d && d.receipts || []).filter(function (r) {
+      return !r.hasShot && r.source !== "api" && (r.fileName || r.fileMime || r.source === "portal");
+    });
   }
 
   function monthLabel(p) {
@@ -1365,6 +1378,9 @@
   function receiptTile(r) {
     var badge = r.source === "api" ? '<span class="rc-badge api">API</span>'
       : r.source === "manual" ? '<span class="rc-badge manual">By hand</span>'
+      /* A portal pull is not an email, and saying "Email" on it sends anyone looking for
+         the original to a mailbox that never had it. */
+      : r.source === "portal" ? '<span class="rc-badge portal">Portal</span>'
       : '<span class="rc-badge email">Email</span>';
     var art = r.hasShot
       ? '<img class="rc-tile-shot" src="' + API + '/owner/receipts/file/' + esc(r.id) + '?v=thumb" alt="receipt" loading="lazy" />'
@@ -1400,6 +1416,25 @@
 
     var at = $("#rcAttach");
     if (at) at.addEventListener("click", function () { openAttach(null, null); });
+
+    /* Render the invoices that are already on file. Each one is a headless browser launch,
+       so this is tens of seconds, not instant — say so rather than looking hung. */
+    var rr = $("#rcRender");
+    if (rr) rr.addEventListener("click", function () {
+      var was = rr.textContent;
+      rr.classList.add("disabled");
+      rr.textContent = "Rendering…";
+      send("/owner/receipts", "POST", { action: "render" }).then(function (r) {
+        rr.classList.remove("disabled");
+        rr.textContent = was;
+        var s = r.ok && r.data && r.data.shots;
+        if (!s) { toast("Could not render the receipts"); return; }
+        toast(s.rendered
+          ? s.rendered + " receipt" + (s.rendered > 1 ? "s" : "") + " now show the invoice"
+          : s.failed ? "Nothing rendered: " + ((s.failures || [])[0] || {}).error : "Every receipt on file already has its image");
+        viewBurn();
+      });
+    });
 
     /* The whole cell stays clickable — the button is for the people who need to be told
        where to click. Both land in the same place. */

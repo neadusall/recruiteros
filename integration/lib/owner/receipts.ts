@@ -26,7 +26,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, writeFile, readFile, unlink } from "node:fs/promises";
+import { mkdir, writeFile, readFile, unlink, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
@@ -263,11 +263,39 @@ async function renderShot(
  */
 const PDF_ORIGIN = "https://receipt.local";
 
+/**
+ * `require` as seen from the app root, for reading pdf.js off disk.
+ *
+ * THIS IS WHY EVERY PDF INVOICE SHOWED "no image". The obvious spelling —
+ * `const { createRequire } = await import("node:module")` — silently yields `undefined` in
+ * the compiled server bundle. Webpack builds the namespace object for an external by
+ * copying the export's own property names, and that loop only runs when the export is an
+ * OBJECT. `node:module` exports the Module *function*, so nothing is copied and the
+ * namespace has exactly one key: `default`. Destructuring got undefined, calling it threw
+ * "x is not a function", and `renderShot` recorded that as a render failure on every single
+ * PDF receipt while the document itself sat perfectly readable on disk.
+ *
+ * So: read it off `default` when the namespace is bare. Any `await import()` of a module
+ * whose export is a function — `node:module`, `sharp` — has the same trap, and the fix is
+ * always to go through `default`.
+ */
+type CreateRequire = (path: string) => NodeRequire;
+
+async function appRequire(): Promise<NodeRequire> {
+  const ns = (await import("node:module")) as unknown as
+    { createRequire?: CreateRequire; default?: { createRequire?: CreateRequire } };
+  const createRequire =
+    typeof ns.createRequire === "function" ? ns.createRequire
+      : typeof ns.default?.createRequire === "function" ? ns.default.createRequire
+        : null;
+  if (!createRequire) throw new Error("node:module.createRequire unavailable in this runtime");
+  return createRequire(join(process.cwd(), "noop.js"));
+}
+
 async function renderPdfPage(page: import("playwright").Page, pdf: Buffer): Promise<void> {
-  const { createRequire } = await import("node:module");
   // Resolve from the app root rather than import.meta.url: the compiled server bundle is
   // CJS, where import.meta is not available.
-  const require_ = createRequire(join(process.cwd(), "noop.js"));
+  const require_ = await appRequire();
   const pdfPath = require_.resolve("pdfjs-dist/legacy/build/pdf.mjs");
   const workerPath = require_.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
   const [lib, worker] = await Promise.all([readFile(pdfPath, "utf8"), readFile(workerPath, "utf8")]);
@@ -334,6 +362,126 @@ async function makeThumb(id: string): Promise<void> {
 
 function escapeHtml(s: string): string {
   return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+}
+
+/* ==================== repairing receipts that lost their picture ==================== */
+
+export interface ShotRepair {
+  checked: number;
+  /** Rendered from the vendor's own document on this run. */
+  rendered: number;
+  /** Picture already on disk. */
+  alreadyOk: number;
+  /** No document to render: an API figure, or an email whose body was never kept. */
+  noSource: number;
+  failed: number;
+  failures: Array<{ id: string; vendor: string; period: string; error: string }>;
+}
+
+/**
+ * Give every receipt back the picture of its own document.
+ *
+ * A render can fail long after the document is safely filed — a bad bundle (see
+ * `appRequire`), a missing Chromium, a PDF that took too long — and when it does the row
+ * says "no image" forever, because nothing ever looked at it again. The document is still
+ * sitting in `/data/receipts/<id>.src.<ext>`, so the picture is always recoverable: this
+ * walks the vault, finds every receipt whose document is on disk but whose PNG is not, and
+ * renders it from that document. The console then shows the vendor's real invoice, not a
+ * placeholder.
+ *
+ * It also settles `hasShot` against what is actually on disk in both directions, so the
+ * flag can never claim a picture that is not there or hide one that is. Safe to run on
+ * every tick: a receipt with its PNG in place costs one `stat`.
+ */
+export async function renderMissingShots(opts?: { force?: boolean; limit?: number }): Promise<ShotRepair> {
+  await ensureReceiptsReady();
+  const dir = receiptsDir();
+  const limit = Math.max(1, Math.min(500, opts?.limit || 200));
+  const out: ShotRepair = { checked: 0, rendered: 0, alreadyOk: 0, noSource: 0, failed: 0, failures: [] };
+  let changed = false;
+
+  for (const r of store.receipts) {
+    if (out.rendered + out.failed >= limit) break;
+    out.checked += 1;
+
+    const hasPng = await fileSize(join(dir, `${r.id}.png`)) > 0;
+    if (hasPng && !opts?.force) {
+      if (!r.hasShot) { r.hasShot = true; r.shotError = undefined; r.updatedAt = nowIso(); changed = true; }
+      /* A PNG with no thumb happens when the thumbnailer failed on its own; the grid falls
+         back to the full image, but it is 40 full-size PNGs, so mend it while we are here. */
+      if (await fileSize(join(dir, `${r.id}.thumb.png`)) === 0) await makeThumb(r.id);
+      out.alreadyOk += 1;
+      continue;
+    }
+
+    const src = await readSourceDocument(r, dir);
+    if (!src) {
+      if (r.hasShot) { r.hasShot = false; r.updatedAt = nowIso(); changed = true; }
+      out.noSource += 1;
+      continue;
+    }
+
+    const shot = await renderShot(r.id, shotInputFor(src));
+    r.hasShot = shot.ok;
+    r.shotError = shot.error;
+    r.updatedAt = nowIso();
+    changed = true;
+    if (shot.ok) out.rendered += 1;
+    else {
+      out.failed += 1;
+      out.failures.push({ id: r.id, vendor: r.vendor, period: r.period, error: shot.error || "render failed" });
+    }
+  }
+
+  if (changed) persist();
+  return out;
+}
+
+async function fileSize(path: string): Promise<number> {
+  try { return (await stat(path)).size; } catch { return 0; }
+}
+
+/**
+ * The original document for a receipt, off disk. The recorded mime/name is tried first,
+ * then every extension the vault writes: a row whose `fileMime` was never set (an early
+ * puller push) still has its PDF sitting there under a predictable name.
+ */
+async function readSourceDocument(
+  r: Receipt, dir: string,
+): Promise<{ bytes: Buffer; mime: string; name: string } | null> {
+  const exts: string[] = [];
+  if (r.fileMime || r.fileName) exts.push(extFromMime(r.fileMime || "", r.fileName || ""));
+  for (const e of ["pdf", "png", "jpg", "jpeg", "webp", "html", "htm", "txt", "bin"]) {
+    if (!exts.includes(e)) exts.push(e);
+  }
+  for (const ext of exts) {
+    try {
+      const bytes = await readFile(join(dir, `${r.id}.src.${ext}`));
+      if (bytes.length) return { bytes, mime: r.fileMime || mimeFromExt(ext), name: r.fileName || `receipt.${ext}` };
+    } catch { /* next extension */ }
+  }
+  return null;
+}
+
+function mimeFromExt(ext: string): string {
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "png") return "image/png";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "webp") return "image/webp";
+  if (ext === "html" || ext === "htm") return "text/html";
+  if (ext === "txt") return "text/plain";
+  return "application/octet-stream";
+}
+
+/** Pick the render input a document deserves. Same ladder the portal push uses. */
+function shotInputFor(file: { bytes: Buffer; mime: string; name: string }) {
+  const isPdf = file.mime.includes("pdf") || /\.pdf$/i.test(file.name);
+  const isImage = file.mime.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name);
+  const isHtml = file.mime.includes("html") || /\.html?$/i.test(file.name);
+  if (isPdf) return { pdf: file.bytes };
+  if (isImage) return { image: { bytes: file.bytes, mime: file.mime } };
+  if (isHtml) return { html: file.bytes.toString("utf8") };
+  return { text: file.bytes.toString("utf8").slice(0, 20_000) };
 }
 
 /* ============================ parsing a receipt ============================ */
@@ -836,18 +984,9 @@ export async function addManualReceipt(input: {
        rendered, and anything else (a saved HTML receipt, a text export) is laid out as a
        page first — feeding non-image bytes to the image branch produced an unopenable file
        the first time round. */
-    const isPdf = input.file.mime.includes("pdf") || /\.pdf$/i.test(input.file.name);
-    const isImage = input.file.mime.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(input.file.name);
-    const isHtml = input.file.mime.includes("html") || /\.html?$/i.test(input.file.name);
-    const shot = await renderShot(id, isPdf
-      ? { pdf: input.file.bytes }
-      : isImage
-        ? { image: { bytes: input.file.bytes, mime: input.file.mime } }
-        : isHtml
-          ? { html: input.file.bytes.toString("utf8") }
-          : { text: input.file.bytes.toString("utf8").slice(0, 20_000) });
-    hasShot = shot.ok; shotError = shot.error;
     await saveArtifact(id, `src.${extFromMime(input.file.mime, input.file.name)}`, input.file.bytes).catch(() => {});
+    const shot = await renderShot(id, shotInputFor(input.file));
+    hasShot = shot.ok; shotError = shot.error;
   }
   const chargedAt = input.chargedAt || `${input.period}-01`;
   const r: Receipt = {
@@ -926,17 +1065,11 @@ export async function recordPortalReceipt(input: {
   );
   const id = existing?.id || rid("rcpt");
 
-  const isPdf = input.file.mime.includes("pdf") || /\.pdf$/i.test(input.file.name);
-  const isImage = input.file.mime.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(input.file.name);
-  const isHtml = input.file.mime.includes("html") || /\.html?$/i.test(input.file.name);
-  const shot = await renderShot(id, isPdf
-    ? { pdf: input.file.bytes }
-    : isImage
-      ? { image: { bytes: input.file.bytes, mime: input.file.mime } }
-      : isHtml
-        ? { html: input.file.bytes.toString("utf8") }
-        : { text: input.file.bytes.toString("utf8").slice(0, 20_000) });
+  /* The document goes to disk before the render is attempted. The render is the fragile
+     half and the file is the valuable one: filing it first means a failed render is only
+     ever a missing picture, and `renderMissingShots` can come back for it later. */
   await saveArtifact(id, `src.${extFromMime(input.file.mime, input.file.name)}`, input.file.bytes).catch(() => {});
+  const shot = await renderShot(id, shotInputFor(input.file));
 
   const chargedAt = input.chargedAt || `${input.period}-01`;
   const amountUsd = round2(input.amountUsd);

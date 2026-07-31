@@ -295,6 +295,7 @@
 .rc-badge.email { background: var(--ok-bg); color: var(--ok); }
 .rc-badge.api { background: var(--brand-soft); color: var(--brand); }
 .rc-badge.manual { background: var(--warn-bg); color: var(--owner); }
+.rc-badge.portal { background: var(--brand-soft); color: var(--brand); }
 
 /* per-cell receipt buttons: the accountant is told "press View receipt", not "click the cell" */
 .rc-view {

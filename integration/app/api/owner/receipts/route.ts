@@ -7,6 +7,8 @@
  *   GET    ?months=12          -> the reconciled matrix, the per-vendor sourcing status,
  *                                 the anomaly list, and the state of the billing mailbox
  *   POST   { action:"harvest", monthsBack } -> sweep the mailbox (detached; poll the GET)
+ *   POST   { action:"render", force? }      -> re-render every receipt whose document is on
+ *                                              disk but whose picture is missing
  *   POST   multipart/form-data -> attach a receipt downloaded by hand
  *   PATCH  { id, ... }         -> correct a parsed figure / reassign a vendor / mark reviewed
  *   DELETE ?id=…               -> drop one
@@ -20,7 +22,7 @@ import { listSpendItems } from "../../../../lib/owner/spendRegister";
 import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
-  pullerStates, lastPullerReportAt,
+  pullerStates, lastPullerReportAt, renderMissingShots,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
@@ -28,6 +30,8 @@ import { VENDOR_SOURCES } from "../../../../lib/owner/receiptSources";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/* Re-rendering a backlog of receipts is a Chromium launch each, so this is minutes. */
+export const maxDuration = 900;
 
 export async function GET(req: Request) {
   const g = requireOwner(req);
@@ -114,12 +118,15 @@ export async function POST(req: Request) {
     return ok({ receipt: publicReceipt(receipt) });
   }
 
-  const b = await body<{ action?: string; monthsBack?: number }>(req);
+  const b = await body<{ action?: string; monthsBack?: number; force?: boolean }>(req);
   if (b?.action === "harvest") {
     const res = startHarvest(Number(b.monthsBack) || 3);
     if (!res.started) return ok({ started: false, reason: res.reason, mailboxes: res.mailboxes });
     return ok({ started: true, mailboxes: res.mailboxes });
   }
+  /* Put the picture back on rows that already have the document. The nightly tick does this
+     on its own; the button is for the owner who is looking at "no image" right now. */
+  if (b?.action === "render") return ok({ shots: await renderMissingShots({ force: !!b.force }) });
   return fail("unknown_action", 400);
 }
 

@@ -16,7 +16,7 @@
 
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../../lib/linkedin/auth";
-import { harvestAll, listReceipts } from "../../../../../lib/owner/receipts";
+import { harvestAll, listReceipts, renderMissingShots } from "../../../../../lib/owner/receipts";
 import { listSpendItems } from "../../../../../lib/owner/spendRegister";
 import { buildSpendMatrix } from "../../../../../lib/owner/spendMatrix";
 import { pullVendorApis } from "../../../../../lib/owner/vendorPullers";
@@ -48,6 +48,15 @@ async function run(req: Request) {
   }
 
   const result = await harvestAll(monthsBack);
+
+  /* Then give every receipt back the picture of its own document. A render can fail long
+     after the document is safely filed, and until this ran nothing ever went back for it:
+     the row said "no image" forever with the vendor's invoice sitting on disk beside it. */
+  const shots = await renderMissingShots().catch((e) => ({
+    checked: 0, rendered: 0, alreadyOk: 0, noSource: 0, failed: 0,
+    failures: [{ id: "-", vendor: "-", period: "-", error: (e as Error)?.message || "repair failed" }],
+  }));
+
   const [items, receipts] = await Promise.all([listSpendItems(), listReceipts()]);
   const matrix = buildSpendMatrix(items, receipts, { months: Math.max(6, monthsBack), inboxConfigured: true });
 
@@ -56,6 +65,7 @@ async function run(req: Request) {
     reason: result.reason,
     pulls,
     reports: result.reports,
+    shots,
     books: {
       months: matrix.months,
       monthTotals: matrix.monthTotals.map((m) => ({
