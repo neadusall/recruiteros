@@ -154,7 +154,7 @@ const SEED: SeedItem[] = [
   },
   {
     vendor: "RapidAPI", label: "Real-Time Web Search", category: "search", billing: "monthly",
-    amountUsd: 150, at: "2026-06-01", status: "active", verified: true,
+    amountUsd: 150, at: "2026-07-01", status: "active", verified: true,
     purpose: "Paid Google SERP for decision-maker naming (the site:linkedin.com/in X-ray), bought to replace the throttled free scrapers.",
     impact: "The naming bottleneck. A company lead is worth nothing until it has a named decision maker attached, and that step currently runs on free scrapers measured at a 0% success rate. This is the piece that turns company signals into people you can actually contact.",
     notes: "PRICE PROVED BY THE INVOICE: $150/mo, Mega plan, charged 2026-07-01 (rapidapi-2026-07-01-real-time-web-search, filed in the receipt vault). It was seeded at $75 off an ambiguous billing screenshot. Still active, and RAPID_WEBSEARCH_KEY is not set anywhere, so lib/inmarket/webSearch.ts no-ops: this is the most expensive line in the business that the engine cannot call at all, $1,800/yr for a feed that has never answered a request. Wire it or cancel it.",
@@ -398,7 +398,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 12;
+const SEED_VERSION = 13;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -433,8 +433,16 @@ const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
  * bought outright years ago with no recurring fee at all. That is a correction to a guess,
  * not a change to anything the owner entered, so it is applied once, on the version bump,
  * and ONLY while the row is still untouched (`seeded`, no owner-entered amount).
+ *
+ * `force` lifts the untouched guard, for the one case it cannot handle: a row an EARLIER
+ * correction marked verified, which is this list's own mark, not the owner's. Pair it with
+ * `when` so the patch still only lands on the value known to be wrong; a bare `force` would
+ * overwrite whatever the owner has since typed on every deploy.
  */
-const SEED_CORRECTIONS: Array<{ vendor: string; label: string; patch: Partial<SpendItem> }> = [
+const SEED_CORRECTIONS: Array<{
+  vendor: string; label: string; patch: Partial<SpendItem>;
+  force?: boolean; when?: (i: SpendItem) => boolean;
+}> = [
   {
     vendor: "Reoon", label: "Email verifier",
     patch: {
@@ -457,6 +465,20 @@ const SEED_CORRECTIONS: Array<{ vendor: string; label: string; patch: Partial<Sp
       amountUsd: 150, verified: true, needsAmount: false,
       notes: SEED.find((s) => s.label === "Real-Time Web Search")?.notes,
     },
+  },
+  {
+    /* This line started in JULY, not June. RapidAPI's invoices for June are 0001 (Jun 16),
+       0002 (Jun 19) and 0004 (Jun 24), none of them Web Search; its first is 0005, dated
+       2026-07-01. A June start date makes Month by month expect $150 that was never
+       charged, which reads as a missing receipt for a charge that does not exist and drags
+       the coverage figure down with it.
+       Forced past the verified guard because `verified` here is this list's own doing (the
+       $150 correction above set it), not a figure the owner typed. `when` keeps that narrow:
+       only the wrong seeded date is rewritten, so a date the owner has since set stands. */
+    vendor: "RapidAPI", label: "Real-Time Web Search",
+    force: true,
+    when: (i) => String(i.at).slice(0, 10) === "2026-06-01",
+    patch: { at: "2026-07-01" },
   },
   {
     // The three validation nodes are NOT on the mail server's cycle: the owner corrected
@@ -528,7 +550,9 @@ function applySeed(): void {
   for (const c of SEED_CORRECTIONS) {
     const item = store.items.find((i) => key(i.vendor, i.label) === key(c.vendor, c.label));
     // Untouched means: it came from the seed and no owner-entered figure sits on it.
-    if (!item || !item.seeded || item.verified) continue;
+    if (!item || !item.seeded) continue;
+    if (item.verified && !c.force) continue;
+    if (c.when && !c.when(item)) continue;
     Object.assign(item, c.patch, { updatedAt: nowIso() });
   }
   store.items = mergeSeedRows(store.items);

@@ -270,12 +270,7 @@ export function findDuplicates<T extends DupeCandidate>(receipts: T[]): Array<Du
   const buckets = new Map<string, T[]>();
   for (const r of receipts) {
     if (!r || !r.chargedAt) continue;
-    const key = [
-      String(r.vendor || "").trim().toLowerCase(),
-      Math.abs(round2(r.amountUsd)).toFixed(2),
-      String(r.chargedAt).slice(0, 10),
-    ].join("|");
-    buckets.set(key, [...(buckets.get(key) || []), r]);
+    buckets.set(chargeKey(r), [...(buckets.get(chargeKey(r)) || []), r]);
   }
 
   const out: Array<DuplicateGroup<T>> = [];
@@ -305,11 +300,33 @@ export function findDuplicates<T extends DupeCandidate>(receipts: T[]): Array<Du
   return out.sort((a, b) => String(a.keep.chargedAt).localeCompare(String(b.keep.chargedAt)));
 }
 
+/** One vendor, one amount, one day: the bucket inside which two rows can be one charge. */
+function chargeKey(r: DupeCandidate): string {
+  return [
+    String(r.vendor || "").trim().toLowerCase(),
+    Math.abs(round2(r.amountUsd)).toFixed(2),
+    String(r.chargedAt || "").slice(0, 10),
+  ].join("|");
+}
+
 /** Two rows in the same vendor/amount/day bucket that are not provably separate charges. */
 function sameCharge(a: DupeCandidate, b: DupeCandidate): boolean {
   return compatible(a.invoiceNumber, b.invoiceNumber)
     && compatible(a.itemId, b.itemId)
     && compatible(a.period, b.period);
+}
+
+/**
+ * The same test, for a charge arriving from outside the vault.
+ *
+ * Ingest used to have its own rule and it disagreed with this one: a push carrying no
+ * invoice number REFUSED to match a row that had one, so pushing the same eight RapidAPI
+ * invoices twice - once with the numbers, once without - filed every charge twice and a
+ * $60 line read $120. Deciding "already on file" and "duplicate" by two different rules is
+ * how that happens, so both now ask this.
+ */
+export function isSameCharge(a: DupeCandidate, b: DupeCandidate): boolean {
+  return chargeKey(a) === chargeKey(b) && sameCharge(a, b);
 }
 
 /** Two values agree, or at least one of them says nothing. */

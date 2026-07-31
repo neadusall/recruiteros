@@ -35,7 +35,7 @@ import {
   VENDOR_SOURCES, PROCESSOR_DOMAINS, GENERIC_SUBJECT_HINTS, NON_CHARGE_HINTS,
   vendorSourceFor, type VendorSource,
 } from "./receiptSources";
-import { resolveSpendItem, findDuplicates, mergeFields } from "./receiptMatch";
+import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge } from "./receiptMatch";
 
 /* ============================ types ============================ */
 
@@ -1093,19 +1093,25 @@ export async function recordPortalReceipt(input: {
 
   /* Which row already holds this charge, if any.
    *
-   * The invoice number is the vendor's own identifier and settles it outright. Without one,
-   * vendor + period ALONE is far too coarse: RapidAPI bills five listings inside a single
-   * month, so that key made every charge after the first overwrite the one before it and a
-   * $433.99 month would have filed as a single $75 row. Falling back to the charge date and
-   * the amount keeps a re-run correcting the charge it actually re-read. */
+   * The invoice number is the vendor's own identifier and settles it outright, wherever the
+   * charge landed: a re-read that corrects the date or the figure is still that invoice.
+   *
+   * Everything else goes through the SAME test the duplicate sweep uses (`isSameCharge`:
+   * one vendor, one amount, one day, and nothing on either row proving they are separate).
+   * Ingest used to have its own weaker rule - vendor + period + day + amount, but ONLY
+   * against rows that carried no invoice number - and that exception is what filed all
+   * eight RapidAPI invoices twice on 2026-07-31: the second push omitted the numbers, so
+   * it matched nothing and doubled every line ($60 Skip Tracing read $120). A charge
+   * already on file is updated, never filed again, whichever push knows its number. */
   const chargedDay = (input.chargedAt || "").slice(0, 10);
   const amt = round2(input.amountUsd);
-  const existing = store.receipts.find((r) => {
-    if (r.source !== "portal" || r.vendor !== input.vendor || r.period !== input.period) return false;
-    if (input.reference) return r.invoiceNumber === input.reference;
-    if (r.invoiceNumber) return false;
-    return (r.chargedAt || "").slice(0, 10) === chargedDay && Math.abs(round2(r.amountUsd)) === Math.abs(amt);
-  });
+  const incoming = {
+    id: "", vendor: input.vendor, amountUsd: amt, chargedAt: chargedDay,
+    period: input.period, invoiceNumber: input.reference, itemId: input.itemId,
+  };
+  const mine = store.receipts.filter((r) => r.source === "portal" && r.vendor === input.vendor);
+  const existing = (input.reference && mine.find((r) => r.invoiceNumber === input.reference))
+    || mine.find((r) => isSameCharge(r, incoming));
   const id = existing?.id || rid("rcpt");
 
   /* The document goes to disk before the render is attempted. The render is the fragile

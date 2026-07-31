@@ -24,7 +24,7 @@
 import { requireOwner, ok, fail, body, context } from "../../../../../lib/api";
 import { isOwnerEmail } from "../../../../../lib/owner";
 import {
-  recordPortalReceipt, recordPullerStates, pullerStates, lastPullerReportAt,
+  recordPortalReceipt, recordPullerStates, pullerStates, lastPullerReportAt, repairVault,
   type PullerState,
 } from "../../../../../lib/owner/receipts";
 
@@ -94,5 +94,15 @@ export async function POST(req: Request) {
   const b = await body<{ host?: string; pullers?: Array<Partial<PullerState> & { vendor: string }> }>(req);
   if (!b || !Array.isArray(b.pullers)) return fail("pullers[] required", 400);
   const states = recordPullerStates({ host: b.host, pullers: b.pullers });
-  return ok({ recorded: states.length, lastReportAt: lastPullerReportAt() });
+
+  /* The heartbeat is the last thing a sweep sends, so this is where a run is known to be
+     finished: settle the vault now rather than leaving a doubled figure on the console
+     until the nightly tick. Ingest should no longer produce one, and the books being wrong
+     for a night is too high a price for trusting that. */
+  const vault = await repairVault().catch(() => null);
+  return ok({
+    recorded: states.length,
+    lastReportAt: lastPullerReportAt(),
+    vault: vault ? { linked: vault.linked, deduped: vault.deduped, unlinked: vault.unlinked } : null,
+  });
 }
