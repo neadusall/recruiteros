@@ -51,18 +51,24 @@ export function decodeBase64Password(cur: string): string | null {
 /**
  * Self-healing repair for a historical import bug: the warm-up engine exports
  * mailbox passwords base64-ENCODED, and an early importer stored them without
- * decoding, so every own-smtp login was rejected (535/454 authentication failed).
- * We repair a stored password IN PLACE only when the inbox is an own-smtp mailbox
- * that is currently in ERROR (a credential that authenticates is status active or
- * warming, never error, so a working password is never touched whatever its shape)
- * AND the stored value is unambiguously base64 per decodeBase64Password. Runs at
- * hydrate (once per boot), which also inoculates against a base64 password
- * reappearing after a re-import once that inbox fails and is marked in error.
+ * decoding, so those logins were rejected (535/454 authentication failed).
+ * We repair a stored password IN PLACE only when the inbox is currently in ERROR
+ * (a credential that authenticates is status active or warming, never error, so a
+ * working password is never touched whatever its shape) AND the stored value is
+ * unambiguously base64 per decodeBase64Password. Runs at hydrate (once per boot),
+ * which also inoculates against a base64 password reappearing after a re-import
+ * once that inbox fails and is marked in error.
+ *
+ * Deliberately NOT gated on provider. Base64 encoding is a property of the
+ * upstream export, not of how we classify the mailbox: the warm-up fleet serves
+ * externally-hosted SMTP accounts (provider "other", e.g. Google-hosted domains
+ * on smtp.gmail.com) the same encoded way it serves our own server's. Gating on
+ * own-smtp left every such mailbox latched in error with no way out.
  */
 function healBase64Passwords(inboxes: SenderInbox[]): number {
   let fixed = 0;
   for (const m of inboxes) {
-    if (m.provider !== "own-smtp" || m.status !== "error") continue;
+    if (m.status !== "error") continue;
     if (!m.smtpPassEnc) continue;
     const dec = decodeBase64Password(decryptSecret(m.smtpPassEnc));
     if (dec) { m.smtpPassEnc = encryptSecret(dec); m.updatedAt = nowIso(); fixed++; }
@@ -197,6 +203,16 @@ export async function addInbox(workspaceId: string, input: NewInboxInput): Promi
     m.createdAt = prev.createdAt;
     // keep the prior owner if the re-import didn't specify one
     if (!m.ownerId && prev.ownerId) { m.ownerId = prev.ownerId; m.ownerName = prev.ownerName; }
+    // Carry the login-health record across a re-import. The hourly fleet sync
+    // re-adds every mailbox, and rebuilding the row from scratch used to drop
+    // both fields: the WHY behind a failing Email ID was erased within the hour
+    // (Senders showed "N in error" with a blank Recent errors column), and the
+    // auth sweep saw every mailbox as never-verified forever, so "N due a
+    // re-check" could never settle. Status already survives a re-import; the
+    // evidence for that status has to survive with it.
+    m.lastError = prev.lastError;
+    const prevVerify = (prev as unknown as { lastVerifyAt?: string }).lastVerifyAt;
+    if (prevVerify) (m as unknown as { lastVerifyAt?: string }).lastVerifyAt = prevVerify;
     state.inboxes[existingIdx] = m;
   } else {
     state.inboxes.push(m);

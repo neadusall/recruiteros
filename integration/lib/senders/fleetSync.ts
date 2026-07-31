@@ -120,13 +120,19 @@ export async function syncFleetInboxes(): Promise<FleetSyncReport> {
       if (hasCreds) report.withCreds++; else report.credsless++;
 
       const provider = providerFor(a.accountType, a.smtpHost, internal);
-      // The warm-up engine serves internal-SMTP passwords base64-ENCODED. Decode
-      // here so the mailbox is stored ready to authenticate; without this the
-      // sync re-introduces the encoded password on every tick and clobbers the
+      // The warm-up engine serves mailbox passwords base64-ENCODED. Decode here so
+      // the mailbox is stored ready to authenticate; without this the sync
+      // re-introduces the encoded password on every tick and clobbers the
       // hydrate-time self-heal. decodeBase64Password only touches values that are
       // unambiguously base64, so a plaintext password passes through untouched.
+      //
+      // Applies to every account that carries real credentials, not just own-smtp:
+      // the encoding comes from the upstream export, so externally-hosted SMTP
+      // accounts (provider "other", Google-hosted domains on smtp.gmail.com) arrive
+      // encoded exactly the same way. Decoding only for own-smtp left those latched
+      // in error, re-broken on every hourly tick even after a repair.
       const rawPass = hasCreds ? (a.password as string) : "";
-      const smtpPass = provider === "own-smtp" ? (decodeBase64Password(rawPass) ?? rawPass) : rawPass;
+      const smtpPass = decodeBase64Password(rawPass) ?? rawPass;
 
       const existing = await findInboxByEmail(wsId, a.email);
       const status: SenderStatus = existing?.status ?? "warming";
