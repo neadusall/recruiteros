@@ -191,11 +191,32 @@ export async function PATCH(req: Request) {
   return ok({ receipt: publicReceipt(r) });
 }
 
+/**
+ * DELETE ?id=<id>          drop one receipt
+ * DELETE ?ids=a,b,c        drop several, for clearing a whole row or a whole cell
+ *
+ * The list form takes explicit ids rather than a vendor or a row id, so the server never
+ * has to decide what "this row" means. The grid already knows exactly which receipts it
+ * is showing where — including the ones an account fold claims at report time, which no
+ * server-side filter on vendor would reproduce — so it sends them, and a click can only
+ * ever delete what the person was actually looking at.
+ */
 export async function DELETE(req: Request) {
   const g = requireOwner(req);
   if ("response" in g) return g.response;
-  const id = new URL(req.url).searchParams.get("id");
-  if (!id) return fail("id_required", 400);
-  if (!(await deleteReceipt(id))) return fail("not_found", 404);
-  return ok({ deleted: true });
+
+  const p = new URL(req.url).searchParams;
+  const ids = [...(p.get("ids") || "").split(","), p.get("id") || ""]
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!ids.length) return fail("id_required", 400);
+
+  let deleted = 0;
+  for (const id of [...new Set(ids)]) if (await deleteReceipt(id)) deleted++;
+  // Nothing matched: the rows are already gone, which is worth saying rather than
+  // reporting a success the page would not reflect.
+  if (!deleted) return fail("not_found", 404);
+  // A partial result is still a success: what existed is gone, and the page reloads from
+  // the server anyway, so a stale id cannot leave the grid wrong.
+  return ok({ deleted, missing: ids.length - deleted });
 }

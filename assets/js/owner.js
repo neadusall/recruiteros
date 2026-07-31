@@ -1433,12 +1433,22 @@
         '<div class="lr-sub note">' + esc(r.label) + '</div>' +
         (r.missingCount ? '<div class="lr-sub bad-t">' + r.missingCount + ' month' + (r.missingCount > 1 ? "s" : "") + ' unreceipted</div>' : "") +
         (r.needsAmount ? '<div class="lr-sub bad-t">no price on file</div>' : "") +
-        /* Only a row backed by the register can be edited or removed. The other two kinds
-           here are a charge that arrived with nothing expecting it and pay-per-use the
-           usage ledger totted up, and neither has a line item to act on: their own chip
-           already says so, which beats offering links that would have to fail. The column
-           is sticky, so the pair stays put while the months scroll past. */
-        (r.itemId ? acts(r.itemId) : "") +
+        /* EVERY row is actionable, including the two kinds that have no line item behind
+           them: a charge that arrived with nothing expecting it, and pay-per-use the usage
+           ledger totted up. Those used to show nothing at all, which reads as a dead row
+           on a page where every neighbour can be edited.
+           They still cannot be "edited", because there is no register line to edit - so
+           they are offered the thing that would create one, prefilled from what the grid
+           already knows. That is the honest version of Edit here: it does something, and
+           what it does is what the row needs. The column is sticky, so the actions stay
+           put while the months scroll past. */
+        (r.itemId ? acts(r.itemId) : registerAct(r, ri)) +
+        /* Clearing a row's paperwork is a different act from deleting the register line,
+           so it is its own control and only appears when there is something to clear.
+           It counts the receipts the GRID is showing on this row, which includes the ones
+           an account fold claims at report time, so the number always matches what is
+           drawn above it. */
+        rowReceiptAct(r, ri) +
         '</th>';
       (r.cells || []).forEach(function (c) { html += matrixCell(r, c, ri); });
       html += '<td class="num rc-total"><strong>' + usd(r.totalCountedUsd) + '</strong>' +
@@ -1500,6 +1510,32 @@
     if (r.billing === "monthly" || r.billing === "annual") return "k-recur";
     if (r.billing === "metered" || r.ledgerOnly) return "k-use";
     return "k-once";
+  }
+
+  /**
+   * What a row with no register line behind it can do.
+   *
+   * "Edit" is meaningless without a line item, so the offer is the one that fixes that:
+   * put this vendor ON the register, prefilled from what the grid already knows about it.
+   * A charge that arrived unexpected and a pay-per-use total both want the same thing.
+   */
+  function registerAct(r, ri) {
+    return '<div class="row-acts"><a class="row-mini" data-badd="' + ri + '">Add to the register</a></div>';
+  }
+
+  /** Every receipt this row is showing, across all its months, in grid order. */
+  function rowReceipts(r) {
+    var out = [];
+    (r.cells || []).forEach(function (c) { (c.receipts || []).forEach(function (x) { out.push(x); }); });
+    return out;
+  }
+
+  /** "Delete N receipts" on a row, shown only when the row actually has some. */
+  function rowReceiptAct(r, ri) {
+    var n = rowReceipts(r).length;
+    if (!n) return "";
+    return '<div class="row-acts"><a class="row-mini danger" data-rowdel="' + ri + '">Delete ' +
+      n + ' receipt' + (n > 1 ? 's' : '') + '</a></div>';
   }
 
   function matrixCell(row, c, ri) {
@@ -1869,6 +1905,44 @@
     $$("#view .rc-mhead[data-month]").forEach(function (b) {
       b.addEventListener("click", function (e) { e.stopPropagation(); openMonthReceipts(b.dataset.month); });
     });
+    /* Put a row that has no line item onto the register, prefilled. The amount comes from
+       what was actually charged in the window rather than being left at zero, because a
+       row created at $0 immediately reports itself as "no price on file" and the person
+       has to go and type the number they were just looking at. */
+    $$("#view [data-badd]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var r = ((rcptData && rcptData.matrix && rcptData.matrix.rows) || [])[Number(a.dataset.badd)];
+        if (!r) return;
+        var months = (r.cells || []).filter(function (c) { return c.actualUsd > 0; });
+        var typical = months.length ? months[months.length - 1].actualUsd : 0;
+        send("/owner/burn", "POST", {
+          vendor: r.vendor,
+          label: r.label || r.vendor,
+          category: "infra",
+          billing: r.ledgerOnly ? "metered" : "monthly",
+          amountUsd: typical,
+          purpose: "Added from Month by month, from a charge that had no line on the register."
+        }).then(function (res) {
+          if (!res.ok) { toast("Could not add that"); return; }
+          toast(r.vendor + " added to the register");
+          viewBurn();
+        });
+      });
+    });
+    /* Clear a whole row's paperwork. stopPropagation because the row header sits next to
+       cells that open the viewer, and a delete that also opened something would be read
+       as having done nothing. */
+    $$("#view [data-rowdel]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var r = ((rcptData && rcptData.matrix && rcptData.matrix.rows) || [])[Number(a.dataset.rowdel)];
+        if (!r) return;
+        var list = rowReceipts(r);
+        var total = list.reduce(function (t, x) { return t + Math.abs(x.amountUsd || 0); }, 0);
+        deleteReceipts(list.map(function (x) { return x.id; }), r.vendor + " · " + r.label, total);
+      });
+    });
 
     $$("#view [data-receipt]").forEach(function (b) {
       b.addEventListener("click", function (e) {
@@ -2230,17 +2304,56 @@
       html += '<a class="btn btn-ghost btn-sm" href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=file" target="_blank" rel="noopener">Download the original ' +
         esc((v.fileMime || "").indexOf("pdf") >= 0 ? "PDF" : "file") + '</a>';
     }
+    /* Deleting used to be three clicks down, behind "Correct the details", which is the
+       wrong place: correcting a figure and throwing the receipt out are different
+       intentions and only one of them is reachable from wanting to look at it. */
     html += '<button class="btn btn-ghost btn-sm" id="rcvEdit">Correct the details</button>' +
+      '<button class="btn btn-ghost btn-sm rcv-del" id="rcvDel">Delete this receipt</button>' +
       '<button class="btn btn-ghost btn-sm" id="rcvDone">Close</button></div>';
 
     $("#rcvBody").innerHTML = html;
     $("#rcvBody").scrollTop = 0;
     $("#rcvDone").addEventListener("click", closeViewer);
     $("#rcvEdit").addEventListener("click", function () { closeViewer(); editReceipt(v.id); });
+    $("#rcvDel").addEventListener("click", function () {
+      deleteReceipts([v.id], v.vendor + " " + usd(Math.abs(v.amountUsd)) + " of " + (v.chargedAt || "").slice(0, 10));
+    });
     /* Every receipt opens at fit: stepping to the next one keeps the zoom of the last is a
        nice idea until the next invoice is a different shape and opens mid-page. */
     rcvZoom = 0;
     rcvWireShot();
+  }
+
+  /**
+   * Remove one receipt, or every receipt in a cell or a row.
+   *
+   * The caller passes the exact ids it is showing, so a click can only ever delete what
+   * the person was looking at. The confirmation says WHAT is going and what it is worth,
+   * because "delete 6 receipts?" is not enough to check against: the whole risk here is
+   * clearing the wrong row, and the money is what makes that obvious.
+   *
+   * A receipt is not the charge. Deleting it removes the proof, and the register line it
+   * belonged to goes back to expecting one, so the month reads as unreceipted rather than
+   * as never having happened. Said out loud in the prompt, because it is the thing people
+   * get wrong about a books tool.
+   */
+  function deleteReceipts(ids, what, totalUsd) {
+    if (!ids || !ids.length) return;
+    var many = ids.length > 1;
+    var msg = many
+      ? "Delete " + ids.length + " receipts from " + what + (totalUsd ? " (" + usd(totalUsd) + ")" : "") + "?"
+      : "Delete the receipt for " + what + "?";
+    if (!confirm(msg + "\n\nThe charge stops being proven and the month goes back to asking for a receipt. " +
+      "The invoice image is deleted with it. If the email is still in the mailbox, the next pull will find it again.")) return;
+
+    send("/owner/receipts?ids=" + encodeURIComponent(ids.join(",")), "DELETE").then(function (res) {
+      if (!res.ok) { toast(res.status === 404 ? "Already gone" : "Could not delete"); return; }
+      var n = (res.data && res.data.deleted) || ids.length;
+      toast(n === 1 ? "Receipt deleted" : n + " receipts deleted");
+      closeViewer();
+      closeDrawer();
+      viewBurn();
+    });
   }
 
   function fact(k, v) { return '<div class="rcv-fact"><div class="rcv-fact-k">' + esc(k) + '</div><div class="rcv-fact-v">' + v + '</div></div>'; }

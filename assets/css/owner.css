@@ -390,7 +390,15 @@
   box-shadow: 0 -10px 14px -10px rgba(16, 24, 40, 0.22);
 }
 
+/* Deleting sits in the same row as Close, so it says what it does in red rather than
+   looking like one more neutral button next to the one people press to get out. */
+.rcv-foot .rcv-del { color: var(--danger); margin-left: auto; }
+.rcv-foot .rcv-del:hover { background: var(--danger-bg); }
+
 @media (max-width: 720px) {
+  /* Stacked, the auto margin would push Delete away from the group and put it directly
+     under the thumb where Close used to be. */
+  .rcv-foot .rcv-del { margin-left: 0; }
   .rcv-sheet { margin: 0; width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; border: 0; }
   .rcv-head { flex-direction: column; align-items: stretch; gap: 10px; }
   .rcv-tools { justify-content: flex-end; flex-wrap: wrap; }
