@@ -282,7 +282,7 @@ const SEED: SeedItem[] = [
     impact: "Owning the mailboxes is what makes cold email economical: sending cost is the inbox, not a per-email API fee, and white-label tenants send from their own domain.",
   },
   {
-    vendor: "RackNerd", label: "Validation nodes (3 boxes)", category: "infra", billing: "annual",
+    vendor: "RackNerd", label: "Validation nodes (3 boxes)", category: "infra", billing: "monthly",
     amountUsd: 0, needsAmount: true, at: "2026-06-01", status: "active",
     purpose: "Port-25-open nodes for email validation probes.",
   },
@@ -302,7 +302,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 4;
+const SEED_VERSION = 5;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -327,6 +327,12 @@ const SEED_CORRECTIONS: Array<{ vendor: string; label: string; patch: Partial<Sp
     // Seeded as annual off the RackNerd Black Friday-style yearly pricing; the owner
     // confirmed (2026-07-31) the Mailcow box is billed MONTHLY.
     vendor: "RackNerd", label: "Mailcow mail server (8GB)",
+    patch: { billing: "monthly" },
+  },
+  {
+    // Same guess, same correction: the three validation nodes sit on the same RackNerd
+    // account as the mail box and bill MONTHLY too (owner, 2026-07-31).
+    vendor: "RackNerd", label: "Validation nodes (3 boxes)",
     patch: { billing: "monthly" },
   },
 ];
