@@ -39,6 +39,7 @@ import {
   ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
 } from "../ostextImport";
 import { dedupeProspectLists } from "../prospect-lists";
+import { preflightPush, reconcilePush, summarizePreflight } from "./preflight";
 
 const SETTLE_MS = 5 * 60_000;      // chain-finished lists rest this long first (live tab pushes within seconds)
 const IDLE_MS = 45 * 60_000;       // a stalled / never-started chain still flows on after this
@@ -239,10 +240,28 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       // 2026-07-21). A creator-less legacy run lands Unassigned; the admin ping
       // in notifyNewCandidates covers it and the owner chip reassigns.
       const recruiter = run.createdBy;
+      const template = ostextStarterTemplate(recruiter?.name || "", run.name);
+
+      // PREFLIGHT: check the exact payload against the exact template BEFORE it
+      // leaves. A blocking verdict means this push would text nobody for a
+      // fixable reason, so it is not sent — the run keeps its retry budget and
+      // the reason is stamped where a human can read it, instead of the campaign
+      // quietly reporting 0 sent an hour later.
+      const pre = preflightPush(run, contacts, template);
+      run.preflight = pre;
+      console.log(summarizePreflight(run, pre));
+      if (!pre.ok) {
+        stamp.error = `preflight: ${pre.issues.find((i) => i.severity === "block")?.message ?? "blocked"}`;
+        run.autoflow = stamp;
+        await saveSourcingRun(ws, { ...run });
+        console.error(`[sourcing-autoflow] "${run.name}" (${run.id}) push BLOCKED by preflight — ${stamp.error}`);
+        return;
+      }
+
       try {
         const imported = await ostextImport({
           name: run.name,
-          template: ostextStarterTemplate(recruiter?.name || "", run.name),
+          template,
           positionSummary: `Pushed from JD Sourcing list "${run.name}" (${contacts.length} contacts, server auto-send).`,
           recruiterName: recruiter?.name || "",
           recruiterEmail: recruiter?.email || "",
@@ -264,6 +283,15 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
           knownNonMobile: Number(imported.knownNonMobile) || 0,
           confirmedCell: Number(imported.confirmedCell) || 0,
         };
+        // RECONCILE: every contact we sent must come back accounted for. A gap
+        // between "sent" and "added + judged non-mobile" is the exact shape of
+        // silent loss, so it is recorded on the run rather than averaged away.
+        const gap = reconcilePush(pre, stamp.lastImport);
+        if (gap) {
+          pre.issues.push(gap);
+          run.preflight = pre;
+          console.warn(`[sourcing-autoflow] "${run.name}" (${run.id}) ${gap.message}`);
+        }
       } catch (e) {
         // Everyone on the list being protected is the guard WORKING, not a failure.
         if ((e as Error & { code?: string }).code !== "all_contacts_protected") throw e;

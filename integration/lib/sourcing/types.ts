@@ -13,6 +13,7 @@
  */
 
 import type { Motion } from "../core/types";
+import type { PreflightReport } from "./preflight";
 
 /**
  * How wide a discovery run casts its net (the Sales-Navigator-style breadth dial).
@@ -274,6 +275,14 @@ export interface SourcingRun {
      */
     lastImport?: { at: string; added: number; knownNonMobile: number; confirmedCell: number };
   };
+  /**
+   * Verdict from the last pre-push preflight (lib/sourcing/preflight): how many
+   * people would actually be textable, what happens to everyone who wouldn't,
+   * and any shortfall the engine's answer couldn't account for. Stamped on every
+   * push attempt — including a blocked one, which is the point: a push that
+   * can't deliver leaves its reason here instead of leaving an empty campaign.
+   */
+  preflight?: PreflightReport;
   /**
    * Skip the settle/idle waits: auto-send this run on the very next sweep (and the
    * merge handler fires one immediately in-request). Set on runs born finished,
