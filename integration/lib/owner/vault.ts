@@ -23,6 +23,11 @@
  * page load cannot spill 40 passwords into a browser cache, a screenshot or a log. That
  * is also what makes "reveal" auditable, every reveal is one deliberate request.
  *
+ * ── Deleting ────────────────────────────────────────────────────────────────────
+ * A deleted account stays deleted. The catalogue seeds only ids the vault has never
+ * held, so a built-in that was removed on purpose is remembered as dismissed instead of
+ * reappearing at the next restart. "Restore defaults" is the deliberate way back.
+ *
  * ── Rotation ────────────────────────────────────────────────────────────────────
  * Changing OWNER_VAULT_KEY does not migrate anything: records encrypted under the old
  * key fail to decrypt and are reported as locked rather than lost, so the wrong key is
@@ -127,10 +132,16 @@ function decrypt(blob: string): string | null {
 
 /* ---------------- store ---------------- */
 
-const store: { entries: Map<string, VaultEntry> } = { entries: new Map() };
+const store: { entries: Map<string, VaultEntry>; dismissed: Set<string> } = { entries: new Map(), dismissed: new Set() };
 
 const SNAP_KEY = "owner_vault_v1";
-const persist = debouncedSaver(SNAP_KEY, () => ({ entries: [...store.entries.values()] }));
+const persist = debouncedSaver(SNAP_KEY, () => ({
+  entries: [...store.entries.values()],
+  dismissed: [...store.dismissed],
+}));
+
+/** Ids the catalogue knows about, so a delete can tell a built-in from a typed-in row. */
+const CATALOG_IDS = new Set(VAULT_CATALOG.map((c) => c.id));
 
 /**
  * Add every catalogue service the vault does not already hold.
@@ -138,11 +149,15 @@ const persist = debouncedSaver(SNAP_KEY, () => ({ entries: [...store.entries.val
  * Only MISSING ids are written, so an edited row (a corrected URL, a filled-in username)
  * survives every future deploy, while a vendor added to the catalogue shows up on the
  * next load without a migration.
+ *
+ * A built-in the owner DELETED is skipped as well. Seeding runs on every cold start, so
+ * without that a deleted row would quietly come back on the next deploy and the delete
+ * would look like it had never worked. Only "Restore defaults" forgets those deletions.
  */
 function seedMissing(): number {
   let added = 0;
   for (const c of VAULT_CATALOG) {
-    if (store.entries.has(c.id)) continue;
+    if (store.entries.has(c.id) || store.dismissed.has(c.id)) continue;
     store.entries.set(c.id, {
       id: c.id,
       service: c.service,
@@ -188,9 +203,10 @@ let hydrated: Promise<void> | null = null;
 export function ensureVaultReady(): Promise<void> {
   if (!hydrated) {
     const load = dbEnabled()
-      ? loadSnapshot<{ entries?: VaultEntry[] }>(SNAP_KEY)
+      ? loadSnapshot<{ entries?: VaultEntry[]; dismissed?: string[] }>(SNAP_KEY)
           .then((s) => {
             for (const e of s?.entries || []) if (e?.id) store.entries.set(e.id, e);
+            for (const id of s?.dismissed || []) if (id) store.dismissed.add(id);
           })
           .catch(() => {})
       : Promise.resolve();
@@ -299,18 +315,46 @@ export async function upsertEntry(id: string | undefined, patch: VaultPatch): Pr
   return { ok: true, entry: safe(entry) };
 }
 
-export async function deleteEntry(id: string): Promise<boolean> {
+/**
+ * Delete records, and mean it.
+ *
+ * A built-in row is not just dropped: its catalogue id is remembered, because seeding
+ * runs again on every cold start and would otherwise put the row straight back. Anything
+ * the owner typed in themselves simply goes. The password goes with the row either way.
+ *
+ * Takes a list because deleting forty accounts one confirmation at a time is not a
+ * feature, and one call means one write rather than forty.
+ */
+export async function deleteEntries(ids: string[]): Promise<{ deleted: number; missing: number }> {
   await ensureVaultReady();
-  const had = store.entries.delete(id);
-  if (had) persist();
-  return had;
+  let deleted = 0;
+  for (const id of ids) {
+    if (!store.entries.delete(id)) continue;
+    if (CATALOG_IDS.has(id)) store.dismissed.add(id);
+    deleted++;
+  }
+  if (deleted) persist();
+  return { deleted, missing: ids.length - deleted };
 }
 
-/** Put back any catalogue service that was deleted, without touching what is there. */
+export async function deleteEntry(id: string): Promise<boolean> {
+  const r = await deleteEntries([id]);
+  return r.deleted > 0;
+}
+
+/**
+ * Put back every catalogue service that was deleted, without touching what is there.
+ *
+ * This is the one undo for a delete, so it also forgets which built-ins were dismissed.
+ * Rows that still exist are left exactly as they are: restoring defaults never overwrites
+ * a password or an edited URL.
+ */
 export async function reseedVault(): Promise<number> {
   await ensureVaultReady();
+  const forgot = store.dismissed.size;
+  store.dismissed.clear();
   const added = seedMissing();
-  if (added) persist();
+  if (added || forgot) persist();
   return added;
 }
 

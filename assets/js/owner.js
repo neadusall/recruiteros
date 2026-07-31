@@ -2675,6 +2675,9 @@
    * (or a screenshot of it) from spilling the whole vault. */
   var vaultData = null;
   var vaultFilter = { q: "", cat: "" };
+  /* Which rows are ticked, by id. Kept outside the render so a search, a category
+     change or a reload after a delete does not lose a selection half made. */
+  var vaultPicked = {};
 
   function viewPasswords() {
     api("/owner/vault").then(function (v) {
@@ -2716,6 +2719,7 @@
       '<a class="btn btn-primary btn-sm" id="vaultAdd">Add account</a>' +
       '</div>';
 
+    html += '<div id="vaultSel" class="vault-sel" hidden></div>';
     html += '<div id="vaultRows"></div>';
     $("#view").innerHTML = html;
 
@@ -2740,9 +2744,16 @@
   }
 
   function renderVaultRows() {
-    var rows = (vaultData.entries || []).filter(vaultMatches);
+    var all = vaultData.entries || [];
+    var rows = all.filter(vaultMatches);
     if (!rows.length) {
-      $("#vaultRows").innerHTML = '<div class="card"><p class="note">Nothing matches that search.</p></div>';
+      // Deleting everything is now possible, so "nothing matches that search" would be
+      // the wrong sentence when there is simply nothing left.
+      $("#vaultRows").innerHTML = '<div class="card"><p class="note">' + (all.length
+        ? 'Nothing matches that search.'
+        : 'The vault is empty. Add an account, or use Restore defaults to bring the built-in list back.') +
+        '</p></div>';
+      syncVaultSel();
       return;
     }
     var byCat = {};
@@ -2752,10 +2763,13 @@
     Object.keys(byCat).forEach(function (cat) {
       html += '<div class="card" style="margin-top:14px"><h3>' + esc(cat) + '</h3>' +
         '<table class="otable vault-table"><thead><tr>' +
+        '<th class="vault-pick"><input type="checkbox" class="vault-box" data-pickall="1" title="Select every account in this group"></th>' +
         '<th>Service</th><th>Sign-in URL</th><th>Username / email</th><th>Password</th><th></th>' +
         '</tr></thead><tbody>';
       byCat[cat].forEach(function (e) {
         html += '<tr data-vid="' + esc(e.id) + '">' +
+          '<td class="vault-pick"><input type="checkbox" class="vault-box" data-pick="' + esc(e.id) + '"' +
+            (vaultPicked[e.id] ? ' checked' : '') + '></td>' +
           '<td><div class="lr-main">' + esc(e.service) + '</div>' +
             (e.account ? '<div class="vault-sub">' + esc(e.account) + '</div>' : '') +
             (e.vendor && e.vendor !== e.service ? '<div class="vault-sub dim">Billed as ' + esc(e.vendor) + ' on Spend master</div>' : '') +
@@ -2765,7 +2779,8 @@
             ? '<span class="mono vault-user">' + esc(e.username) + '</span><div class="vault-acts"><a class="vault-mini" data-copy="' + esc(e.username) + '">Copy</a></div>'
             : '<span class="note" style="margin:0">not set</span>') + '</span></td>' +
           '<td class="vault-pw" data-l="Password" data-pwcell="' + esc(e.id) + '">' + vaultPwCell(e) + '</td>' +
-          '<td class="num"><a class="vault-mini" data-edit="' + esc(e.id) + '">Edit</a></td>' +
+          '<td class="num"><a class="vault-mini" data-edit="' + esc(e.id) + '">Edit</a>' +
+            '<a class="vault-mini danger" data-del="' + esc(e.id) + '">Delete</a></td>' +
           '</tr>';
       });
       html += '</tbody></table></div>';
@@ -2778,7 +2793,76 @@
     $$("#vaultRows [data-copy]").forEach(function (a) {
       a.addEventListener("click", function () { copyText(a.dataset.copy, "Username copied"); });
     });
+    $$("#vaultRows [data-del]").forEach(function (a) {
+      a.addEventListener("click", function () {
+        var e = vaultEntry(a.dataset.del);
+        deleteVaultRows([a.dataset.del], e ? e.service : "this account");
+      });
+    });
+    $$("#vaultRows [data-pick]").forEach(function (c) {
+      c.addEventListener("change", function () { pickVault(c.dataset.pick, c.checked); syncVaultSel(); });
+    });
+    // Select-all is per category table, because that is the group you can actually see.
+    $$("#vaultRows [data-pickall]").forEach(function (c) {
+      c.addEventListener("change", function () {
+        $$("[data-pick]", c.closest("table")).forEach(function (b) {
+          b.checked = c.checked;
+          pickVault(b.dataset.pick, c.checked);
+        });
+        syncVaultSel();
+      });
+    });
     wireVaultPwCells();
+    syncVaultSel();
+  }
+
+  function vaultEntry(id) {
+    return (vaultData.entries || []).filter(function (x) { return x.id === id; })[0];
+  }
+
+  function pickVault(id, on) {
+    if (on) vaultPicked[id] = true; else delete vaultPicked[id];
+  }
+
+  /* The selection bar only exists while something is selected: an empty toolbar sitting
+     above the table would be one more thing to read on a page that is already dense.
+     It also prunes ids that are no longer on screen, so a delete cannot leave a phantom
+     count behind. */
+  function syncVaultSel() {
+    var live = {};
+    (vaultData.entries || []).forEach(function (e) { if (vaultPicked[e.id]) live[e.id] = true; });
+    vaultPicked = live;
+    var ids = Object.keys(vaultPicked);
+    var bar = $("#vaultSel");
+    if (!bar) return;
+    if (!ids.length) { bar.hidden = true; bar.innerHTML = ""; return; }
+    bar.hidden = false;
+    bar.innerHTML = '<span class="vault-sel-n">' + ids.length + ' selected</span>' +
+      '<span style="flex:1"></span>' +
+      '<a class="vault-mini" id="vaultSelNone">Clear selection</a>' +
+      '<a class="btn btn-danger btn-sm" id="vaultSelDel">Delete selected</a>';
+    $("#vaultSelNone").addEventListener("click", function () {
+      vaultPicked = {};
+      $$("#vaultRows input[type=checkbox]").forEach(function (c) { c.checked = false; });
+      syncVaultSel();
+    });
+    $("#vaultSelDel").addEventListener("click", function () {
+      deleteVaultRows(ids, ids.length === 1 ? (vaultEntry(ids[0]) || {}).service : ids.length + " accounts");
+    });
+  }
+
+  /* One confirmation, one request, whether it is a row or forty. */
+  function deleteVaultRows(ids, what) {
+    if (!ids.length) return;
+    if (!confirm("Delete " + (what || "this account") + "?\n\nThe stored password goes with it. A built-in service stays gone until you use Restore defaults.")) return;
+    send("/owner/vault?ids=" + encodeURIComponent(ids.join(",")), "DELETE").then(function (res) {
+      if (!res.ok) { toast(res.status === 404 ? "Already gone" : "Could not delete"); return; }
+      var n = (res.data && res.data.deleted) || ids.length;
+      ids.forEach(function (id) { delete vaultPicked[id]; });
+      toast(n === 1 ? "Account deleted" : n + " accounts deleted");
+      closeDrawer();
+      viewPasswords();
+    });
   }
 
   function vaultPwCell(e) {
@@ -2869,7 +2953,7 @@
 
     if (e) {
       html += '<div class="danger-zone"><h3>Remove</h3>' +
-        '<p class="note" style="margin-top:0">Deletes this row and its stored password. Built-in services come back with Restore defaults, with the password gone.</p>' +
+        '<p class="note" style="margin-top:0">Deletes this row and its stored password. A built-in service stays gone, including across deploys, until you bring it back with Restore defaults.</p>' +
         '<a class="btn btn-danger btn-sm" id="vfDelete">Delete account</a></div>';
     }
 
@@ -2912,12 +2996,7 @@
   }
 
   function deleteVault(e) {
-    if (!confirm("Delete " + e.service + " and its stored password?")) return;
-    send("/owner/vault?id=" + encodeURIComponent(e.id), "DELETE").then(function (res) {
-      toast(res.ok ? "Deleted" : "Could not delete");
-      closeDrawer();
-      viewPasswords();
-    });
+    deleteVaultRows([e.id], e.service);
   }
 
   /* ================= SECURITY (2FA) ================= */

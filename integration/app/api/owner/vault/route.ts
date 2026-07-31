@@ -9,7 +9,9 @@
  *                           Omit `password` to leave the stored one untouched; send ""
  *                           to clear it.
  *   POST   { action:"reseed" } -> put back any catalogue service that was deleted.
- *   DELETE ?id=<id>      -> remove a record.
+ *   DELETE ?id=<id>      -> remove a record, password and all.
+ *   DELETE ?ids=a,b,c    -> remove several in one call, for a multi-row selection.
+ *                           Deleting a built-in also stops it being seeded back.
  *
  * Owner-walled like every /api/owner/* route: a non-owner gets 404, not 401, so the
  * existence of the vault is not advertised.
@@ -20,7 +22,7 @@ import {
   listVault,
   revealSecret,
   upsertEntry,
-  deleteEntry,
+  deleteEntries,
   reseedVault,
   vaultSummary,
   vaultKeyStatus,
@@ -72,9 +74,18 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   const g = requireOwner(req);
   if ("response" in g) return g.response;
-  const id = new URL(req.url).searchParams.get("id");
-  if (!id) return fail("bad_request", 400);
-  const removed = await deleteEntry(id);
-  if (!removed) return fail("not_found", 404);
-  return ok({ deleted: true, summary: await vaultSummary() });
+
+  const p = new URL(req.url).searchParams;
+  const ids = [...(p.get("ids") || "").split(","), p.get("id") || ""]
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!ids.length) return fail("bad_request", 400);
+
+  const r = await deleteEntries([...new Set(ids)]);
+  // Nothing matched: the row is already gone, which is worth saying rather than
+  // reporting a success the table would not reflect.
+  if (!r.deleted) return fail("not_found", 404);
+  // A partial result is still a success: the rows that existed are gone, and the
+  // page reloads from the server anyway, so a stale id cannot leave the table wrong.
+  return ok({ deleted: r.deleted, missing: r.missing, entries: await listVault(), summary: await vaultSummary() });
 }
