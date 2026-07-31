@@ -30,11 +30,12 @@ import { mkdir, writeFile, readFile, unlink, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
-import { listSpendItems, type SpendItem, monthlyEquivalent } from "./spendRegister";
+import { listSpendItems, type SpendItem } from "./spendRegister";
 import {
   VENDOR_SOURCES, PROCESSOR_DOMAINS, GENERIC_SUBJECT_HINTS, NON_CHARGE_HINTS,
   vendorSourceFor, type VendorSource,
 } from "./receiptSources";
+import { resolveSpendItem, findDuplicates, mergeFields } from "./receiptMatch";
 
 /* ============================ types ============================ */
 
@@ -677,13 +678,17 @@ export interface VendorMatch {
  * message. An unmatched charge is still recorded — an uncatalogued vendor is exactly the
  * thing this report exists to surface.
  */
-export function matchVendor(msg: MailMessage, items: SpendItem[]): VendorMatch {
+export function matchVendor(
+  msg: MailMessage,
+  items: SpendItem[],
+  charge: { amountUsd?: number; period?: string; description?: string } = {},
+): VendorMatch {
   const domain = (msg.from.split("@")[1] || "").toLowerCase();
-  const hay = `${msg.subject} ${msg.fromName || ""} ${msg.text || ""}`.toLowerCase();
+  const hay = `${charge.description || ""} ${msg.subject} ${msg.fromName || ""} ${msg.text || ""}`.toLowerCase();
   const processor = PROCESSOR_DOMAINS.find((p) => domain === p || domain.endsWith("." + p));
 
   const bind = (vendor: string, confidence: number, matchedBy: string): VendorMatch => {
-    const item = pickItem(vendor, hay, items);
+    const item = pickItem(vendor, hay, items, charge.amountUsd, charge.period);
     return { vendor, itemId: item?.id, processor, confidence, matchedBy };
   };
 
@@ -702,7 +707,7 @@ export function matchVendor(msg: MailMessage, items: SpendItem[]): VendorMatch {
       (s.merchant || []).some((mm) => named.toLowerCase().includes(mm)));
     if (src) return bind(src.vendor, 0.9, `merchant "${named}" via ${processor || "receipt"}`);
     const reg = items.find((i) => i.vendor.toLowerCase() === named.toLowerCase());
-    if (reg) return { vendor: reg.vendor, itemId: reg.id, processor, confidence: 0.85, matchedBy: `merchant "${named}"` };
+    if (reg) return bind(reg.vendor, 0.85, `merchant "${named}"`);
     return { vendor: titleCase(named), processor, confidence: 0.55, matchedBy: `merchant "${named}", no register row` };
   }
 
@@ -710,27 +715,25 @@ export function matchVendor(msg: MailMessage, items: SpendItem[]): VendorMatch {
   if (bySrc) return bind(bySrc.vendor, 0.7, `vendor named in the message`);
 
   const byReg = items.find((i) => i.vendor.length > 3 && hay.includes(i.vendor.toLowerCase()));
-  if (byReg) return { vendor: byReg.vendor, itemId: byReg.id, processor, confidence: 0.6, matchedBy: "register vendor named in the message" };
+  if (byReg) return bind(byReg.vendor, 0.6, "register vendor named in the message");
 
   const fallback = domain.split(".").slice(-2)[0] || "Unknown";
   return { vendor: titleCase(fallback), processor, confidence: 0.3, matchedBy: `unrecognised sender ${domain}` };
 }
 
 /**
- * A vendor can own several register rows (RapidAPI owns five). Prefer the row whose label
- * is actually named in the receipt; otherwise the most expensive active row, which is the
- * safest default because it is the one an owner would notice being wrong.
+ * A vendor can own several register rows (RapidAPI owns five, one per listing, each billed
+ * separately). Which row a charge belongs to is decided by `resolveSpendItem`: the name
+ * the vendor printed on the invoice against the names we hold for each row, with the price
+ * as the tie-break.
+ *
+ * It returns nothing when the charge does not clearly belong to any of them, and that is
+ * the point: an unattached charge is reported as spend with no line item behind it, which
+ * is true. The previous rule handed an ambiguous charge to the most expensive active row,
+ * which quietly credited one listing with another listing's money.
  */
-function pickItem(vendor: string, hay: string, items: SpendItem[]): SpendItem | undefined {
-  const own = items.filter((i) => i.vendor.toLowerCase() === vendor.toLowerCase());
-  if (!own.length) return undefined;
-  if (own.length === 1) return own[0];
-  const named = own.find((i) => {
-    const core = i.label.replace(/\(.*?\)/g, "").trim().toLowerCase();
-    return core.length > 3 && hay.includes(core);
-  });
-  if (named) return named;
-  return own.slice().sort((a, b) => monthlyEquivalent(b) - monthlyEquivalent(a))[0];
+function pickItem(vendor: string, hay: string, items: SpendItem[], amountUsd?: number, period?: string): SpendItem | undefined {
+  return resolveSpendItem({ vendor, hay, amountUsd, period }, items)?.item;
 }
 
 function titleCase(s: string): string {
@@ -898,9 +901,11 @@ async function importMessage(
     return { status: "rejected", reason: "no amount could be read from the message or its attachment" };
   }
 
-  const match = matchVendor(mm, items);
   const chargedAt = parsed.chargedAt || mm.date.slice(0, 10);
   const period = parsed.period || chargedAt.slice(0, 7);
+  /* The amount and the line-item label are what tell one of a vendor's listings from
+     another, so the router gets them rather than the raw message alone. */
+  const match = matchVendor(mm, items, { amountUsd: parsed.amountUsd, period, description: parsed.description });
 
   const fingerprint = createHash("sha1")
     .update([mm.messageId || "", match.vendor, parsed.amountUsd.toFixed(2), chargedAt, parsed.invoiceNumber || ""].join("|"))
@@ -968,6 +973,31 @@ async function pdfToText(buf: Buffer): Promise<string> {
   finally { try { await (parser as unknown as { destroy?: () => Promise<void> }).destroy?.(); } catch { /* best effort */ } }
 }
 
+/* ============================ tying a charge to its line ============================ */
+
+/**
+ * Which register row a charge belongs to, for the three channels that arrive with no
+ * message to read: a hand-attached invoice, a figure off a billing API, and a document a
+ * portal puller downloaded.
+ *
+ * None of them used to resolve one at all, which is why eight RapidAPI invoices (five
+ * separate listings, five separate charges, five register rows waiting for exactly those
+ * receipts) piled up under one "not on the register" heading while every one of the rows
+ * said "no receipt".
+ */
+async function lineItemFor(input: {
+  vendor: string; description?: string; amountUsd?: number; period?: string; notes?: string;
+}): Promise<SpendItem | undefined> {
+  const items = await listSpendItems().catch(() => [] as SpendItem[]);
+  return resolveSpendItem({
+    vendor: input.vendor,
+    description: input.description,
+    hay: input.notes,
+    amountUsd: input.amountUsd,
+    period: input.period,
+  }, items)?.item;
+}
+
 /* ============================ manual entry ============================ */
 
 /** Attach a receipt the owner downloaded by hand (the backfill path for portal-only vendors). */
@@ -989,8 +1019,9 @@ export async function addManualReceipt(input: {
     hasShot = shot.ok; shotError = shot.error;
   }
   const chargedAt = input.chargedAt || `${input.period}-01`;
+  const itemId = input.itemId || (await lineItemFor(input))?.id;
   const r: Receipt = {
-    id, period: input.period, vendor: input.vendor, itemId: input.itemId,
+    id, period: input.period, vendor: input.vendor, itemId,
     description: input.description, amountUsd: round2(input.amountUsd), currency: "USD",
     invoiceNumber: input.invoiceNumber, chargedAt, kind: input.amountUsd < 0 ? "refund" : "charge",
     source: "manual", fileName: input.file?.name, fileMime: input.file?.mime, fileBytes: input.file?.bytes.length,
@@ -1025,7 +1056,8 @@ export async function recordApiReceipt(input: {
     return { receipt: existing, created: false };
   }
   const r: Receipt = {
-    id: rid("rcpt"), period: input.period, vendor: input.vendor, itemId: input.itemId,
+    id: rid("rcpt"), period: input.period, vendor: input.vendor,
+    itemId: input.itemId || (await lineItemFor(input))?.id,
     description: input.description, amountUsd: round2(input.amountUsd), currency: "USD",
     invoiceNumber: input.reference, chargedAt: input.chargedAt || `${input.period}-01`,
     kind: "charge", source: "api", hasShot: false, confidence: 1,
@@ -1059,10 +1091,21 @@ export async function recordPortalReceipt(input: {
 }): Promise<{ receipt: Receipt; created: boolean }> {
   await ensureReceiptsReady();
 
-  const existing = store.receipts.find(
-    (r) => r.source === "portal" && r.vendor === input.vendor && r.period === input.period &&
-      (input.reference ? r.invoiceNumber === input.reference : true),
-  );
+  /* Which row already holds this charge, if any.
+   *
+   * The invoice number is the vendor's own identifier and settles it outright. Without one,
+   * vendor + period ALONE is far too coarse: RapidAPI bills five listings inside a single
+   * month, so that key made every charge after the first overwrite the one before it and a
+   * $433.99 month would have filed as a single $75 row. Falling back to the charge date and
+   * the amount keeps a re-run correcting the charge it actually re-read. */
+  const chargedDay = (input.chargedAt || "").slice(0, 10);
+  const amt = round2(input.amountUsd);
+  const existing = store.receipts.find((r) => {
+    if (r.source !== "portal" || r.vendor !== input.vendor || r.period !== input.period) return false;
+    if (input.reference) return r.invoiceNumber === input.reference;
+    if (r.invoiceNumber) return false;
+    return (r.chargedAt || "").slice(0, 10) === chargedDay && Math.abs(round2(r.amountUsd)) === Math.abs(amt);
+  });
   const id = existing?.id || rid("rcpt");
 
   /* The document goes to disk before the render is attempted. The render is the fragile
@@ -1077,6 +1120,7 @@ export async function recordPortalReceipt(input: {
   if (existing) {
     existing.amountUsd = amountUsd;
     existing.chargedAt = chargedAt;
+    existing.itemId = existing.itemId || input.itemId || (await lineItemFor(input))?.id;
     existing.description = input.description ?? existing.description;
     existing.invoiceNumber = input.reference ?? existing.invoiceNumber;
     existing.currency = input.currency || existing.currency;
@@ -1093,7 +1137,8 @@ export async function recordPortalReceipt(input: {
   }
 
   const r: Receipt = {
-    id, period: input.period, vendor: input.vendor, itemId: input.itemId,
+    id, period: input.period, vendor: input.vendor,
+    itemId: input.itemId || (await lineItemFor(input))?.id,
     description: input.description, amountUsd, currency: input.currency || "USD",
     nativeAmount: input.nativeAmount, invoiceNumber: input.reference,
     chargedAt, kind: input.amountUsd < 0 ? "refund" : "charge", source: "portal",
@@ -1202,14 +1247,115 @@ export async function deleteReceipt(id: string): Promise<boolean> {
   const n = store.receipts.length;
   store.receipts = store.receipts.filter((r) => r.id !== id);
   if (store.receipts.length === n) return false;
-  const dir = receiptsDir();
-  for (const f of [`${id}.png`, `${id}.thumb.png`]) await unlink(join(dir, f)).catch(() => {});
+  await removeArtifacts(id);
   persist();
   return true;
 }
 
+/** Every file a receipt owns: the picture, the thumbnail, and the vendor's own document. */
+async function removeArtifacts(id: string): Promise<void> {
+  const dir = receiptsDir();
+  const names = [`${id}.png`, `${id}.thumb.png`];
+  for (const e of ["pdf", "png", "jpg", "jpeg", "webp", "html", "htm", "txt", "bin"]) names.push(`${id}.src.${e}`);
+  for (const f of names) await unlink(join(dir, f)).catch(() => {});
+}
+
 export function lastSweeps(): SweepReport[] { return store.sweeps.slice(0, 10); }
 export function lastSweepAt(): string | undefined { return store.lastSweepAt; }
+
+/* ==================== putting every charge on its own line ==================== */
+
+export interface VaultRepair {
+  checked: number;
+  /** Charges newly tied to the register row they actually paid for. */
+  linked: number;
+  /** Charges that still belong to no row, so they report as unregistered spend. */
+  unlinked: number;
+  /** Copies of a charge that was already on file, removed. */
+  deduped: number;
+  /** What moved, so the change is readable rather than something that just happened. */
+  links: Array<{ id: string; vendor: string; description?: string; amountUsd: number; period: string; label: string; why: string }>;
+  removed: Array<{ id: string; vendor: string; amountUsd: number; chargedAt: string; keptId: string; reason: string }>;
+}
+
+/**
+ * Put every charge on the line it paid for, and take out the copies.
+ *
+ * Two jobs the vault cannot do at the moment a receipt lands: a charge filed before the
+ * register knew about that listing, and the same charge arriving twice through different
+ * channels. Both only become visible with the whole vault in view, so this is a sweep, not
+ * an ingest rule, and it runs on the nightly tick.
+ *
+ * It never overrules a person. A charge whose row was set by hand (anything `reviewed`,
+ * anything already pointing at a row that still exists) is left exactly where it is; only
+ * the unattached and the dangling get routed. Dry-run reports without touching anything.
+ */
+export async function repairVault(opts: { dryRun?: boolean } = {}): Promise<VaultRepair> {
+  await ensureReceiptsReady();
+  const items = await listSpendItems().catch(() => [] as SpendItem[]);
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const out: VaultRepair = { checked: 0, linked: 0, unlinked: 0, deduped: 0, links: [], removed: [] };
+  let changed = false;
+
+  /* ---- 1. every charge on its own line ---- */
+  for (const r of store.receipts) {
+    out.checked += 1;
+    /* Already on a row that exists, or the owner put it there: nothing to do. */
+    if (r.itemId && byId.has(r.itemId)) continue;
+    if (r.reviewed && r.itemId) continue;
+
+    const hit = resolveSpendItem({
+      vendor: r.vendor,
+      description: r.description,
+      hay: [r.subject, r.notes, r.excerpt].filter(Boolean).join(" \n "),
+      amountUsd: r.amountUsd,
+      period: r.period,
+    }, items);
+
+    if (!hit) { out.unlinked += 1; continue; }
+
+    out.linked += 1;
+    out.links.push({
+      id: r.id, vendor: r.vendor, description: r.description, amountUsd: r.amountUsd,
+      period: r.period, label: hit.item.label, why: hit.matchedBy,
+    });
+    if (!opts.dryRun) {
+      r.itemId = hit.item.id;
+      r.matchedBy = hit.matchedBy;
+      r.updatedAt = nowIso();
+      changed = true;
+    }
+  }
+
+  /* ---- 2. the same charge, filed twice ---- */
+  for (const g of findDuplicates(store.receipts)) {
+    for (const d of g.drop) {
+      out.deduped += 1;
+      out.removed.push({
+        id: d.id, vendor: d.vendor, amountUsd: d.amountUsd, chargedAt: d.chargedAt,
+        keptId: g.keep.id, reason: g.reason,
+      });
+    }
+    if (opts.dryRun) continue;
+    /* Anything the discarded copies knew that the keeper does not is carried across before
+       they go, so removing a duplicate never loses an invoice number. */
+    Object.assign(g.keep, mergeFields(g.keep, g.drop));
+    g.keep.updatedAt = nowIso();
+    const gone = new Set(g.drop.map((d) => d.id));
+    store.receipts = store.receipts.filter((r) => !gone.has(r.id));
+    for (const id of gone) await removeArtifacts(id);
+    changed = true;
+  }
+
+  if (changed) persist();
+  return out;
+}
+
+/** What the console needs to know about whether the vault is tidy, without changing it. */
+export async function vaultHealth(): Promise<{ unlinked: number; duplicates: number; linkable: number }> {
+  const dry = await repairVault({ dryRun: true });
+  return { unlinked: dry.unlinked, duplicates: dry.deduped, linkable: dry.linked };
+}
 
 /* ============================ running the sweep ============================ */
 

@@ -9,6 +9,9 @@
  *   POST   { action:"harvest", monthsBack } -> sweep the mailbox (detached; poll the GET)
  *   POST   { action:"render", force? }      -> re-render every receipt whose document is on
  *                                              disk but whose picture is missing
+ *   POST   { action:"relink", dryRun? }     -> put every charge on the register line it
+ *                                              paid for, and drop any copy of a charge
+ *                                              already on file
  *   POST   multipart/form-data -> attach a receipt downloaded by hand
  *   PATCH  { id, ... }         -> correct a parsed figure / reassign a vendor / mark reviewed
  *   DELETE ?id=…               -> drop one
@@ -22,7 +25,7 @@ import { listSpendItems } from "../../../../lib/owner/spendRegister";
 import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
-  pullerStates, lastPullerReportAt, renderMissingShots,
+  pullerStates, lastPullerReportAt, renderMissingShots, repairVault, vaultHealth,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
@@ -47,9 +50,14 @@ export async function GET(req: Request) {
   const matrix = buildSpendMatrix(items, receipts, { months, inboxConfigured: boxes.length > 0 });
 
   const pullers = pullerStates();
+  /* Whether every charge is on its own line and nothing is filed twice. Read-only: it
+     reports what a repair WOULD do, so the console can offer the fix without a page view
+     ever quietly rewriting the books. */
+  const vault = await vaultHealth().catch(() => ({ unlinked: 0, duplicates: 0, linkable: 0 }));
 
   return ok({
     matrix,
+    vault,
     /* The month the books open on, so the page can say where it starts rather than
        leaving an accountant to wonder what happened to the months before it. */
     registerStart: REGISTER_START_MONTH,
@@ -118,7 +126,7 @@ export async function POST(req: Request) {
     return ok({ receipt: publicReceipt(receipt) });
   }
 
-  const b = await body<{ action?: string; monthsBack?: number; force?: boolean }>(req);
+  const b = await body<{ action?: string; monthsBack?: number; force?: boolean; dryRun?: boolean }>(req);
   if (b?.action === "harvest") {
     const res = startHarvest(Number(b.monthsBack) || 3);
     if (!res.started) return ok({ started: false, reason: res.reason, mailboxes: res.mailboxes });
@@ -127,6 +135,10 @@ export async function POST(req: Request) {
   /* Put the picture back on rows that already have the document. The nightly tick does this
      on its own; the button is for the owner who is looking at "no image" right now. */
   if (b?.action === "render") return ok({ shots: await renderMissingShots({ force: !!b.force }) });
+  /* Split a vendor's charges onto the individual lines they paid for, and drop any copy of
+     a charge already on file. The nightly tick does this too; the button is for the owner
+     looking at one merged block right now. */
+  if (b?.action === "relink") return ok({ vault: await repairVault({ dryRun: !!b.dryRun }) });
   return fail("unknown_action", 400);
 }
 

@@ -16,7 +16,7 @@
 
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../../lib/linkedin/auth";
-import { harvestAll, listReceipts, renderMissingShots } from "../../../../../lib/owner/receipts";
+import { harvestAll, listReceipts, renderMissingShots, repairVault } from "../../../../../lib/owner/receipts";
 import { listSpendItems } from "../../../../../lib/owner/spendRegister";
 import { buildSpendMatrix } from "../../../../../lib/owner/spendMatrix";
 import { pullVendorApis } from "../../../../../lib/owner/vendorPullers";
@@ -49,6 +49,13 @@ async function run(req: Request) {
 
   const result = await harvestAll(monthsBack);
 
+  /* Put every charge on the line it actually paid for, and take out any copy of a charge
+     already on file. A vendor that bills several listings separately (RapidAPI bills five)
+     produces one receipt per listing, and each belongs against its own register row rather
+     than in a single undifferentiated block under the vendor's name. Cheap: no browser, no
+     network, just the vault against the register. */
+  const vault = await repairVault().catch(() => null);
+
   /* Then give every receipt back the picture of its own document. A render can fail long
      after the document is safely filed, and until this ran nothing ever went back for it:
      the row said "no image" forever with the vendor's invoice sitting on disk beside it. */
@@ -65,6 +72,7 @@ async function run(req: Request) {
     reason: result.reason,
     pulls,
     reports: result.reports,
+    vault,
     shots,
     books: {
       months: matrix.months,

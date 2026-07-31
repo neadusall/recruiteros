@@ -1168,6 +1168,7 @@
     if (!d) return "";
     var m = d.matrix, months = m.months || [];
     var gaps = unrendered(d).length;
+    var loose = d.vault ? (d.vault.linkable || 0) + (d.vault.duplicates || 0) : 0;
     var html = '<div class="card" style="margin-top:14px"><div class="burn-head"><h3>Month by month</h3>' +
       '<div class="btn-row" style="margin:0">' +
       '<select id="rcMonths" class="rc-months">' +
@@ -1179,6 +1180,11 @@
          picture never rendered. Those cells read "no image" with the real invoice sitting
          on disk behind them, and one click puts it back. */
       (gaps ? '<button class="btn btn-sm" id="rcRender">Show ' + gaps + ' missing image' + (gaps > 1 ? 's' : '') + '</button>' : '') +
+      /* A vendor that bills several listings separately (RapidAPI bills five) sends one
+         invoice per listing. Until each is tied to the row it paid for they pile up as a
+         single "not on the register" block worth hundreds while every row underneath it
+         reads "no receipt". Offered only when there is something to split or drop. */
+      (loose ? '<button class="btn btn-sm" id="rcRelink">' + esc(looseLabel(d)) + '</button>' : "") +
       '</div></div>' +
       '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate.' +
       /* Where the books open. Said out loud so the missing earlier months read as a
@@ -1254,6 +1260,14 @@
     if (r.billing === "metered") return "Pay per use";
     return r.billing || "";
   }
+  /* The button says what it is about to do, in the numbers it found. */
+  function looseLabel(d) {
+    var v = d.vault || {}, bits = [];
+    if (v.linkable) bits.push("Split " + v.linkable + " charge" + (v.linkable > 1 ? "s" : "") + " onto their own lines");
+    if (v.duplicates) bits.push((bits.length ? "drop " : "Drop ") + v.duplicates + " duplicate" + (v.duplicates > 1 ? "s" : ""));
+    return bits.join(" and ");
+  }
+
   function kindClass(r) {
     if (r.unregistered) return "k-loose";
     if (r.lifetime) return "k-once";
@@ -1508,6 +1522,27 @@
 
     /* Render the invoices that are already on file. Each one is a headless browser launch,
        so this is tens of seconds, not instant — say so rather than looking hung. */
+    /* Split a vendor's charges onto the individual lines they paid for, and drop any copy
+       of a charge already on file. Instant: no browser and no mailbox, just the vault read
+       against the register. */
+    var rl = $("#rcRelink");
+    if (rl) rl.addEventListener("click", function () {
+      var was = rl.textContent;
+      rl.classList.add("disabled");
+      rl.textContent = "Sorting…";
+      send("/owner/receipts", "POST", { action: "relink" }).then(function (r) {
+        rl.classList.remove("disabled");
+        rl.textContent = was;
+        var v = r.ok && r.data && r.data.vault;
+        if (!v) { toast("Could not sort the receipts"); return; }
+        var said = [];
+        if (v.linked) said.push(v.linked + " charge" + (v.linked > 1 ? "s" : "") + " now on their own line");
+        if (v.deduped) said.push(v.deduped + " duplicate" + (v.deduped > 1 ? "s" : "") + " removed");
+        toast(said.length ? said.join(" · ") : "Every charge was already on its own line");
+        viewBurn();
+      });
+    });
+
     var rr = $("#rcRender");
     if (rr) rr.addEventListener("click", function () {
       var was = rr.textContent;
