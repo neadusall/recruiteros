@@ -37,6 +37,7 @@ import {
 } from "./receiptSources";
 import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge } from "./receiptMatch";
 import { pullEmailDocument, type FetchedDocument, type PullResult } from "./receiptLinks";
+import { relevanceOf, filingUnknownVendors } from "./receiptRelevance";
 
 /* ============================ types ============================ */
 
@@ -132,6 +133,11 @@ export interface SweepReport {
   shotFailures: number;
   /** Documents fetched from a link in the message rather than an attachment. */
   documentsLinked: number;
+  /** Real charges from senders that are not this company's vendors: personal spending
+   *  in a personal mailbox, and the occasional genuinely-new vendor. Counted and SHOWN
+   *  rather than dropped, so the second kind cannot hide among the first. */
+  skippedNotOurs: number;
+  otherSpend: Array<{ vendor: string; amountUsd: number; chargedAt: string; from: string }>;
   /** Messages that linked to a document which could not be fetched, with the reason. */
   documentFailures: Array<{ subject: string; from: string; reason: string }>;
   /** Messages that looked like billing but could not be turned into a row, with why. */
@@ -953,7 +959,7 @@ export async function harvestMailbox(
     at: nowIso(), mailbox: cfg.user, ok: false, since: since.toISOString().slice(0, 10),
     scanned: 0, billingCandidates: 0, imported: 0, duplicates: 0, skippedNotCharge: 0,
     unparsedAmount: 0, shotsRendered: 0, shotFailures: 0,
-    documentsLinked: 0, documentFailures: [], rejects: [],
+    documentsLinked: 0, documentFailures: [], skippedNotOurs: 0, otherSpend: [], rejects: [],
   };
   await ensureReceiptsReady();
   const items = await listSpendItems();
@@ -1000,6 +1006,13 @@ export async function harvestMailbox(
              receipt filed from body text alone still has no invoice behind it. */
           if (res.documentError && report.documentFailures.length < 20) {
             report.documentFailures.push({ subject: mm.subject.slice(0, 120), from: mm.from, reason: res.documentError });
+          }
+          /* Not ours: counted, and a sample kept with its figures so the console can
+             show it. A genuinely new vendor must not hide among the personal charges. */
+          if (res.notOurs) {
+            report.skippedNotOurs += 1;
+            if (res.other && report.otherSpend.length < 30) report.otherSpend.push(res.other);
+            continue;
           }
           if (res.status === "imported") {
             report.imported += 1;
@@ -1048,6 +1061,9 @@ async function importMessage(
   linked?: boolean;
   /** The message linked to a document and it could not be fetched. */
   documentError?: string;
+  /** A real charge, from a sender that is not one of this company's vendors. */
+  notOurs?: boolean;
+  other?: { vendor: string; amountUsd: number; chargedAt: string; from: string };
 }> {
   const bodyText = mm.text || stripHtml(mm.html || "");
   const pdf = mm.attachments.find((a) => a.contentType.includes("pdf") || /\.pdf$/i.test(a.filename));
@@ -1114,6 +1130,19 @@ async function importMessage(
   /* The amount and the line-item label are what tell one of a vendor's listings from
      another, so the router gets them rather than the raw message alone. */
   const match = matchVendor(mm, items, { amountUsd: parsed.amountUsd, period, description: parsed.description });
+
+  /* A MAILBOX BELONGS TO A PERSON, AND THE BOOKS DO NOT. The first live sweep filed
+     Anthropic and Hetzner invoices alongside a pizza order and a phone bill. A stranger
+     is not filed, and it is not silently dropped either: it comes back with its figures
+     so the sweep can report it, because a vendor genuinely being paid and never
+     registered is exactly what these books exist to catch. */
+  const rel = relevanceOf({ vendor: match.vendor, itemId: match.itemId }, items);
+  if (!rel.ours && !filingUnknownVendors()) {
+    return {
+      status: "rejected", reason: rel.why, notOurs: true,
+      other: { vendor: match.vendor, amountUsd: parsed.amountUsd, chargedAt, from: mm.from },
+    };
+  }
 
   const fingerprint = createHash("sha1")
     .update([mm.messageId || "", match.vendor, parsed.amountUsd.toFixed(2), chargedAt, parsed.invoiceNumber || ""].join("|"))
@@ -1730,7 +1759,7 @@ export async function harvestAll(monthsBack = 3): Promise<{ ok: boolean; reason?
         at: nowIso(), mailbox: box.user, ok: false, error: e?.message?.slice(0, 300) || "sweep failed",
         since: since.toISOString().slice(0, 10), scanned: 0, billingCandidates: 0, imported: 0,
         duplicates: 0, skippedNotCharge: 0, unparsedAmount: 0, shotsRendered: 0, shotFailures: 0,
-        documentsLinked: 0, documentFailures: [], rejects: [],
+        documentsLinked: 0, documentFailures: [], skippedNotOurs: 0, otherSpend: [], rejects: [],
       })));
     }
   } finally {
