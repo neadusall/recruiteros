@@ -15,8 +15,10 @@
  *   GET /v2/balance         the account balance behind auto-recharge.
  *
  * What is deliberately NOT here: the current, part-way month (daily movement belongs on a
- * usage dashboard, not in the books) and the account top-ups in the portal's Payment
- * History, which the API does not expose at all and which still arrive by email or by hand.
+ * usage dashboard, not in the books); months whose invoice came to small change, which are
+ * metering noise rather than a bill anyone would keep a receipt for; and the account top-ups
+ * in the portal's Payment History, which the API does not expose at all and which still
+ * arrive by email or by hand.
  *
  * Everything filed by a puller is marked source "api": authoritative on the number, with no
  * invoice image behind it, and the console shows it that way instead of implying a receipt
@@ -37,6 +39,29 @@ export interface PullReport {
 }
 
 const TELNYX_API = "https://api.telnyx.com";
+
+/**
+ * The floor under which a month is not worth filing.
+ *
+ * A metered account issues an invoice every month whether or not anything happened on it,
+ * so a quiet month arrives as one or two cents. Those are not spend anybody tracks, no
+ * receipt is ever issued for them, and a year of them buries the months that do matter
+ * under a row of pennies. Below this figure the month is counted by the usage ledger and
+ * left out of the receipt vault.
+ */
+function minInvoiceUsd(): number {
+  const n = Number(process.env.OWNER_MIN_RECEIPT_USD);
+  return Number.isFinite(n) && n >= 0 ? n : 1;
+}
+
+/**
+ * Invoices already found to be under the floor. A filed month is skipped because it is on
+ * file; a month that is deliberately NOT filed has nothing to skip on, so without this it
+ * would be re-summed — 36 serial product queries against a rate-limited API — on every
+ * single run, forever. The set is per-process and deliberately not persisted: it costs one
+ * re-check after a restart, which is also how a corrected figure gets a second chance.
+ */
+const belowFloorSeen = new Set<string>();
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -101,15 +126,26 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
   const [items, onFile] = await Promise.all([listSpendItems(), listReceipts()]);
   const item = items.find((i) => i.vendor.toLowerCase() === "telnyx");
 
-  /* An earlier version filed a running figure for the OPEN month, keyed `usage-<month>`.
-     Those are not month-end invoices and do not belong in the books, so they are cleared
-     out here rather than left to look like a settled charge. */
-  const provisional = onFile.filter(
-    (r) => r.source === "api" && r.vendor === "Telnyx" && String(r.invoiceNumber || "").startsWith("usage-"),
+  const floor = minInvoiceUsd();
+
+  /* Two kinds of row get cleared out on every run, because both of them were filed as if a
+     receipt existed when none does:
+       · the running figure an earlier version wrote for the OPEN month, keyed `usage-<month>`
+       · a closed month that came to less than the floor — metering noise, not a bill
+     Only this puller's own rows are touched: an emailed, hand-attached or portal-downloaded
+     receipt is a real document and is never removed by a pull. */
+  const stale = onFile.filter(
+    (r) => r.source === "api" && r.vendor === "Telnyx" &&
+      (String(r.invoiceNumber || "").startsWith("usage-") || Math.abs(r.amountUsd) < floor),
   );
-  for (const r of provisional) await deleteReceipt(r.id);
-  if (provisional.length) {
-    report.notes.push(`${provisional.length} provisional part-month figure${provisional.length > 1 ? "s were" : " was"} removed: only closed invoices are recorded.`);
+  for (const r of stale) await deleteReceipt(r.id);
+  const provisional = stale.filter((r) => String(r.invoiceNumber || "").startsWith("usage-")).length;
+  const trivial = stale.length - provisional;
+  if (provisional) {
+    report.notes.push(`${provisional} provisional part-month figure${provisional > 1 ? "s were" : " was"} removed: only closed invoices are recorded.`);
+  }
+  if (trivial) {
+    report.notes.push(`${trivial} month${trivial > 1 ? "s" : ""} under $${floor.toFixed(2)} ${trivial > 1 ? "were" : "was"} removed: metered small change is carried by the usage ledger, not filed as a receipt.`);
   }
 
   let products: TelnyxProduct[];
@@ -148,16 +184,21 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
 
   const failed: string[] = [];
   const lastError: Record<string, string> = {};
+  const removed = new Set(stale.map((r) => r.id));
   let skipped = 0;
+  const belowFloor: string[] = [];
 
   for (const inv of closed) {
     const period = inv.period_start.slice(0, 7);
     /* A closed month cannot change, so once its figure is on file it is left alone. That
-       keeps the nightly run to one month of work instead of re-summing the year. */
+       keeps the nightly run to one month of work instead of re-summing the year. A row
+       just cleared out above does not count as on file. */
     const already = onFile.find(
-      (r) => r.source === "api" && r.vendor === "Telnyx" && r.invoiceNumber === inv.invoice_id && r.amountUsd > 0,
+      (r) => !removed.has(r.id) &&
+        r.source === "api" && r.vendor === "Telnyx" && r.invoiceNumber === inv.invoice_id && r.amountUsd > 0,
     );
     if (already && !opts.force) { skipped += 1; continue; }
+    if (belowFloorSeen.has(inv.invoice_id) && !opts.force) { skipped += 1; continue; }
 
     const start = `${inv.period_start}T00:00:00Z`;
     const end = `${nextDay(inv.period_end)}T00:00:00Z`;   // period_end is inclusive
@@ -178,7 +219,14 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
       if (!answered && !failed.includes(product)) failed.push(product);
     }
     total = Math.round(total * 100) / 100;
-    if (total <= 0 && !already) continue;
+    /* Nothing billed, or billed in small change: the ledger already carries the figure and
+       there is no receipt behind it, so the month is not filed. */
+    if (total < floor) {
+      belowFloorSeen.add(inv.invoice_id);
+      if (total > 0) belowFloor.push(`${period} $${total.toFixed(2)}`);
+      continue;
+    }
+    belowFloorSeen.delete(inv.invoice_id);
 
     const { created } = await recordApiReceipt({
       vendor: "Telnyx",
@@ -194,6 +242,12 @@ export async function pullTelnyx(monthsBack = 6, opts: { force?: boolean } = {})
   }
 
   if (skipped) report.notes.push(`${skipped} closed month${skipped > 1 ? "s were" : " was"} already on file and left untouched.`);
+  if (belowFloor.length) {
+    report.notes.push(
+      `${belowFloor.length} closed month${belowFloor.length > 1 ? "s came" : " came"} to under $${floor.toFixed(2)} and ${belowFloor.length > 1 ? "are" : "is"} not filed as a receipt (${belowFloor.slice(0, 6).join(", ")}). ` +
+      `The usage ledger still counts every cent of it in the monthly burn.`,
+    );
+  }
   if (failed.length) {
     const reasons = [...new Set(failed.map((f) => lastError[f]).filter(Boolean))].slice(0, 3).join(", ");
     report.notes.push(
