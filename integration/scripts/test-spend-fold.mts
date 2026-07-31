@@ -11,7 +11,9 @@
  *   - a vendor's domain lines fold into that vendor's account line, so the grid shows ONE
  *     row per account and the register keeps every domain for the Domains panel;
  *   - the money folds with them: expected figures, receipts and monthly equivalents;
- *   - a vendor with one domain, or none, is left exactly as it was;
+ *   - the unit is the ACCOUNT, never the number of things inside it: one domain folds like
+ *     thirty-two, while lines that bill separately under one vendor name (two Telnyx
+ *     accounts, five RapidAPI listings) stay the separate rows they are;
  *   - a folded row carries a recurring fee AND one-time charges in the same month without
  *     that reading as a mismatch, a duplicate charge or a price rise;
  *   - a charge from a folded vendor that was never tied to a row lands on that one row
@@ -93,17 +95,33 @@ function zapmail(domains = 32): SpendItem[] {
   check("named for what it is", groups[0].label, "Domain registrations · 2 names on one account");
 }
 
-/* 4. Nothing to fold is left alone. */
+/* 4. The unit is the ACCOUNT, never the number of things inside it: one domain folds for
+      the same reason thirty-two do, and a vendor with nothing to fold is left alone. */
 {
   const one = accountGroups([item("Namecheap", "Domain registrations"), domain("Namecheap", "glassnwa.com")]);
-  check("a single domain does not fold", one.length, 2);
-  check("and keeps its own name", one[1].label, "glassnwa.com");
+  check("a single domain folds into its account too", one.length, 1);
+  check("and the row is the account", one[0].label, "Domain registrations · 1 name on one account");
+  const lone = accountGroups([domain("Domain registrar", "orphan.com")]);
+  check("a lone domain with no account line stays itself", lone.map((g) => g.label), ["orphan.com"]);
+  check("and is not dressed up as a fold", lone[0].folded, false);
   const none = accountGroups([item("Telnyx", "SMS and voice"), item("Hetzner", "Servers (all boxes)")]);
   check("vendors with no domains are untouched", none.map((g) => g.label), ["SMS and voice", "Servers (all boxes)"]);
   check("and are not marked as folded", none.every((g) => !g.folded), true);
 }
 
-/* 5. Vendors do not bleed into each other. */
+/* 5. Separately billed lines under one vendor name are separate accounts, and stay rows:
+      two Telnyx accounts, five RapidAPI listings each on their own invoice. */
+{
+  const groups = accountGroups([
+    item("Telnyx", "SMS, voice and numbers", { billing: "metered" }),
+    item("Telnyx", "Lume account (white-label numbers)", { billing: "metered" }),
+    item("RapidAPI", "JSearch (Ultra)"), item("RapidAPI", "Skip Tracing Working API"),
+  ]);
+  check("nothing folds on vendor name alone", groups.length, 4);
+  check("and none of them claims to be an account fold", groups.every((g) => !g.folded), true);
+}
+
+/* 6. Vendors do not bleed into each other. */
 {
   const groups = accountGroups([
     ...zapmail(3),
@@ -114,7 +132,7 @@ function zapmail(domains = 32): SpendItem[] {
   check("Dynadot keeps its own", groups[1].members.length, 3);
 }
 
-/* 6. The money folds with the lines: one row, one running total. */
+/* 7. The money folds with the lines: one row, one running total. */
 {
   const mailboxes = item("Zapmail", "Google Workspace mailboxes",
     { amountUsd: 120, needsAmount: false, at: "2026-06-01" });
@@ -133,7 +151,7 @@ function zapmail(domains = 32): SpendItem[] {
   check("an ordinary month expects the fee alone", july.expectedUsd, 120);
 }
 
-/* 7. A fee and a one-time buy in one month is an account, not a billing error. */
+/* 8. A fee and a one-time buy in one month is an account, not a billing error. */
 {
   const mailboxes = item("Zapmail", "Google Workspace mailboxes",
     { amountUsd: 120, needsAmount: false, at: "2026-06-01" });
@@ -156,7 +174,7 @@ function zapmail(domains = 32): SpendItem[] {
     m.anomalies.filter((a) => a.kind === "price_change").length, 0);
 }
 
-/* 8. An untied charge from a folded vendor lands on the one row it can belong to. */
+/* 9. An untied charge from a folded vendor lands on the one row it can belong to. */
 {
   const items = zapmail(2);
   const receipts = [receipt("Zapmail", "2026-07", 79)];
@@ -169,14 +187,14 @@ function zapmail(domains = 32): SpendItem[] {
     m.rows.filter((r) => r.unregistered).length, 0);
 }
 
-/* 9. A charge from a vendor with no register line at all is still reported. */
+/* 10. A charge from a vendor with no register line at all is still reported. */
 {
   const m = buildSpendMatrix(zapmail(2), [receipt("Stripe", "2026-07", 42)], { months: 2, inboxConfigured: true });
   check("unknown vendors still surface", m.unmatched.map((u) => u.vendor), ["Stripe"]);
   check("with a row of their own", m.rows.filter((r) => r.unregistered).length, 1);
 }
 
-/* 10. Receipts on a folded domain line are the account's receipts. */
+/* 11. Receipts on a folded domain line are the account's receipts. */
 {
   const items = zapmail(2);
   const m = buildSpendMatrix(items, [receipt("Zapmail", "2026-07", 25, { itemId: items[2].id })], {
@@ -187,7 +205,7 @@ function zapmail(domains = 32): SpendItem[] {
   check("and is proven money", row.totalVerifiedUsd, 25);
 }
 
-/* 11. Priced receipts against an unpriced row ask for the price, once, and nothing else. */
+/* 12. Priced receipts against an unpriced row ask for the price, once, and nothing else. */
 {
   const items = zapmail(2);
   const m = buildSpendMatrix(items, [receipt("Zapmail", "2026-07", 79)], { months: 2, inboxConfigured: true });

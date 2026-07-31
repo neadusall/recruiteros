@@ -227,9 +227,17 @@ function daysInto(period: string): number {
  * in the register itself: the Domains panel still shows every name with its own expiry,
  * which is where per-domain detail actually gets used.
  *
- * Folding is by DATA, not by a vendor list: two or more domain lines under one vendor fold,
- * because that is what "one registrar account" looks like in the register. A vendor with a
- * single domain has nothing to fold.
+ * THE UNIT IS THE ACCOUNT, NEVER THE COUNT INSIDE IT (owner, 2026-07-31: "make sure it is
+ * right based on accounts, not number of accounts in each account"). One domain folds for
+ * exactly the same reason thirty-two do: the bill comes from the account, and how many
+ * names, mailboxes or seats sit behind it changes nothing about how it reconciles. A rule
+ * that folded only a big estate would leave a one-domain registrar drawn as two rows and
+ * two gaps, which is the same error at a smaller size.
+ *
+ * Folding is by DATA, not by a vendor list: a vendor's domain lines fold into that vendor's
+ * account line, whatever the number. Two Telnyx lines stay two rows because they are two
+ * separate Telnyx accounts, and five RapidAPI listings stay five because RapidAPI invoices
+ * each listing separately: the register already says so, and this reads the register.
  */
 export interface AccountGroup {
   /** The row's identity: id, vendor, category, billing and the rest come from here. */
@@ -247,21 +255,19 @@ export interface AccountGroup {
 const vkey = (v: string): string => String(v || "").trim().toLowerCase();
 
 export function accountGroups(items: SpendItem[]): AccountGroup[] {
-  /* Which vendors have a domain estate worth folding. */
+  /* Every vendor that registers domains. No threshold: one name is an account too. */
   const domainsBy = new Map<string, SpendItem[]>();
   for (const i of items) {
     if (!i.domain) continue;
     const k = vkey(i.vendor);
     domainsBy.set(k, [...(domainsBy.get(k) || []), i]);
   }
-  const folding = new Map<string, SpendItem[]>();
-  domainsBy.forEach((rows, k) => { if (rows.length >= 2) folding.set(k, rows); });
 
   /* The line the estate folds INTO: the vendor's own account row when it has one (the
      registrar's "Domain registrations" line, or Zapmail's mailbox line), otherwise the
      first domain itself stands in for the account so the money still has a home. */
   const hostFor = new Map<string, string>();
-  for (const [k, rows] of folding) {
+  for (const [k, rows] of domainsBy) {
     const accounts = items.filter((i) => vkey(i.vendor) === k && !i.domain);
     const host = accounts.find((a) => /domain/i.test(a.label)) || accounts[0] || rows[0];
     hostFor.set(k, host.id);
@@ -272,14 +278,19 @@ export function accountGroups(items: SpendItem[]): AccountGroup[] {
     const k = vkey(item.vendor);
     const hostId = hostFor.get(k);
     if (hostId === item.id) {
-      const domains = folding.get(k) || [];
+      const domains = domainsBy.get(k) || [];
       const members = item.domain ? [...domains] : [item, ...domains];
+      /* A vendor whose only line IS the one domain is already one row: it needs no fold
+         and no explaining, so it keeps its own name. */
+      const folded = members.length > 1;
       out.push({
         display: item,
         members,
-        label: foldLabel(item, domains.length),
-        purpose: [item.purpose, foldNote(item.vendor, domains.length)].filter(Boolean).join(" "),
-        folded: members.length > 1,
+        label: folded ? foldLabel(item, domains.length) : item.label,
+        purpose: folded
+          ? [item.purpose, foldNote(item.vendor, domains.length)].filter(Boolean).join(" ")
+          : item.purpose,
+        folded,
         domainCount: domains.length,
         needsAmount: members.some((m) => m.needsAmount && m.status === "active"),
       });
