@@ -39,6 +39,8 @@ import { VAULT_CATALOG, type CatalogCategory } from "./vaultCatalog";
 export interface VaultEntry {
   id: string;
   service: string;
+  /** The Spend master line this account pays for, so the logins and the money agree. */
+  vendor?: string;
   category: CatalogCategory | string;
   /** Where you sign in. */
   url: string;
@@ -144,6 +146,7 @@ function seedMissing(): number {
     store.entries.set(c.id, {
       id: c.id,
       service: c.service,
+      vendor: c.vendor,
       category: c.category,
       url: c.url,
       username: c.username || "",
@@ -160,6 +163,27 @@ function seedMissing(): number {
   return added;
 }
 
+/**
+ * Drop the built-in rows that are no longer in the catalogue.
+ *
+ * The vault started out holding the platform's own logins as well as its vendors, which
+ * made the page a list of everything rather than a list of the accounts behind the money.
+ * Removing a service from the catalogue now removes its row too, but ONLY while the row is
+ * untouched: a saved password, a typed username or an edited note means the owner has put
+ * something there, and nothing the owner put in is ever deleted by a deploy.
+ */
+function pruneRetired(): number {
+  const live = new Set(VAULT_CATALOG.map((c) => c.id));
+  let removed = 0;
+  for (const [id, e] of store.entries) {
+    if (live.has(id) || !e.seeded) continue;
+    if (e.secret || e.username || e.mfa) continue;
+    store.entries.delete(id);
+    removed++;
+  }
+  return removed;
+}
+
 let hydrated: Promise<void> | null = null;
 export function ensureVaultReady(): Promise<void> {
   if (!hydrated) {
@@ -171,7 +195,8 @@ export function ensureVaultReady(): Promise<void> {
           .catch(() => {})
       : Promise.resolve();
     hydrated = load.then(() => {
-      if (seedMissing()) persist();
+      const changed = seedMissing() + pruneRetired();
+      if (changed) persist();
     });
   }
   return hydrated;
@@ -193,7 +218,13 @@ export async function listVault(): Promise<SafeEntry[]> {
   await ensureVaultReady();
   return [...store.entries.values()]
     .map(safe)
-    .sort((a, b) => a.category.localeCompare(b.category) || a.service.localeCompare(b.service));
+    /* Accounts of the same vendor sit together, in account order, so three RackNerd
+       client areas read as one vendor with three logins rather than three strangers. */
+    .sort((a, b) =>
+      a.category.localeCompare(b.category) ||
+      (a.vendor || a.service).localeCompare(b.vendor || b.service) ||
+      a.service.localeCompare(b.service) ||
+      (a.account || "").localeCompare(b.account || ""));
 }
 
 /** The one call that returns a password, for exactly one record. */

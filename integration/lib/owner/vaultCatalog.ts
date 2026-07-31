@@ -22,6 +22,10 @@ export interface CatalogEntry {
   /** Stable id: also the vault key, so re-seeding never duplicates a row. */
   id: string;
   service: string;
+  /** The Spend master line this account pays for, spelled exactly as the register spells
+   *  it. One vendor can hold several accounts (three RackNerd, three Dynadot), and this is
+   *  what keeps them together and joined to the money. */
+  vendor?: string;
   category: CatalogCategory;
   /** Where you actually sign in (resolved, not guessed). */
   url: string;
@@ -63,6 +67,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "hetzner-cloud",
     service: "Hetzner Cloud",
+    vendor: "Hetzner",
     category: "Infrastructure",
     url: "https://console.hetzner.com/",
     used_for: "ros (app server), ros-worker, the scraper fleet, the video workers and object storage",
@@ -73,6 +78,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "hetzner-accounts",
     service: "Hetzner Accounts (billing)",
+    vendor: "Hetzner",
     category: "Infrastructure",
     url: "https://accounts.hetzner.com/invoice",
     used_for: "The monthly invoice covering every Hetzner box on the project",
@@ -81,6 +87,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "hetzner-dns",
     service: "Hetzner DNS Console",
+    vendor: "Hetzner",
     category: "Domains & DNS",
     url: "https://dns.hetzner.com/",
     used_for: "DNS zones served by Hetzner rather than Cloudflare",
@@ -89,6 +96,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "racknerd-billing",
     service: "RackNerd (billing / client area)",
+    vendor: "RackNerd",
     category: "Infrastructure",
     url: "https://my.racknerd.com/clientarea.php",
     used_for: "The 8GB Mailcow sending box and the email-validation nodes",
@@ -96,8 +104,29 @@ export const VAULT_CATALOG: CatalogEntry[] = [
       "TWO separate RackNerd accounts: one under Lume Search Partners (the 8GB mail box) and one under the Recruiters account (validation nodes). WHMCS. rDNS is NOT set here, open a ticket, or use the NerdVM panel.",
   },
   {
+    id: "racknerd-billing-2",
+    service: "RackNerd (billing / client area)",
+    vendor: "RackNerd",
+    category: "Infrastructure",
+    url: "https://my.racknerd.com/clientarea.php",
+    account: "Account 2",
+    used_for: "The second RackNerd client area: the validation nodes sit under one of these accounts",
+    notes: "Three RackNerd client areas exist. Record here which boxes this one holds, because the invoices arrive per account and a box under the wrong account is a receipt that never reconciles.",
+  },
+  {
+    id: "racknerd-billing-3",
+    service: "RackNerd (billing / client area)",
+    vendor: "RackNerd",
+    category: "Infrastructure",
+    url: "https://my.racknerd.com/clientarea.php",
+    account: "Account 3",
+    used_for: "The third RackNerd client area",
+    notes: "Record which boxes this one holds.",
+  },
+  {
     id: "racknerd-nerdvm",
     service: "RackNerd NerdVM (SolusVM panel)",
+    vendor: "RackNerd",
     category: "Infrastructure",
     url: "https://nerdvm.racknerd.com/login.php",
     used_for: "Reboot/rebuild the VPS boxes and set rDNS",
@@ -109,6 +138,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "vercel",
     service: "Vercel",
+    vendor: "Vercel",
     category: "Infrastructure",
     url: "https://vercel.com/login",
     used_for: "Hosting for the Claimie, GTM OS and GlassNWA marketing sites",
@@ -118,6 +148,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "aws",
     service: "AWS",
+    vendor: "AWS",
     category: "Infrastructure",
     url: "https://console.aws.amazon.com/",
     used_for: "S3 for the video fleet, if that bucket is billed by AWS rather than Hetzner object storage",
@@ -127,6 +158,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "github",
     service: "GitHub",
+    vendor: "GitHub",
     category: "Infrastructure",
     url: "https://github.com/login",
     used_for: "neadusall/recruiteros and every other repo; the deploy watcher pulls from here",
@@ -138,6 +170,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "cloudflare",
     service: "Cloudflare",
+    vendor: "Cloudflare",
     category: "Domains & DNS",
     url: "https://dash.cloudflare.com/login",
     used_for: "DNS for the tal fleet, talentrecru.com and the sending domains",
@@ -149,6 +182,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "dynadot",
     service: "Dynadot",
+    vendor: "Dynadot",
     category: "Domains & DNS",
     url: "https://www.dynadot.com/account/sign-in",
     used_for: "The tal-brand fleet domains, talentrecru.com and the lume* batch",
@@ -157,8 +191,28 @@ export const VAULT_CATALOG: CatalogEntry[] = [
     envKey: "DYNADOT_API_KEY",
   },
   {
+    id: "dynadot-2",
+    service: "Dynadot",
+    vendor: "Dynadot",
+    category: "Domains & DNS",
+    url: "https://www.dynadot.com/account/sign-in",
+    account: "Account 2",
+    used_for: "The second Dynadot account: record which names it holds",
+    notes: "Each Dynadot account carries its own prepaid balance and its own IP allowlist for the API, so a script that works on one account fails on another until its IP is added there too.",
+  },
+  {
+    id: "dynadot-3",
+    service: "Dynadot",
+    vendor: "Dynadot",
+    category: "Domains & DNS",
+    url: "https://www.dynadot.com/account/sign-in",
+    account: "Account 3",
+    used_for: "The third Dynadot account, if it exists: record which names it holds",
+  },
+  {
     id: "porkbun",
     service: "Porkbun",
+    vendor: "Porkbun",
     category: "Domains & DNS",
     url: "https://porkbun.com/account/login",
     used_for: "The 15 Lume sending domains, and the registrar of record for Claimie",
@@ -169,6 +223,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "godaddy",
     service: "GoDaddy",
+    vendor: "GoDaddy",
     category: "Domains & DNS",
     url: "https://sso.godaddy.com/",
     used_for: "lumesp.com, claimie.ai and mytal.co, DNS included (ns*.domaincontrol.com)",
@@ -178,6 +233,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "namecheap",
     service: "Namecheap",
+    vendor: "Namecheap",
     category: "Domains & DNS",
     url: "https://www.namecheap.com/myaccount/login/",
     used_for: "glassnwa.com (BasicDNS, pointed at Vercel)",
@@ -187,6 +243,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "mailcow",
     service: "Mailcow admin (mail.lumesp.com)",
+    vendor: "Mailcow",
     category: "Email sending",
     url: "https://mail.lumesp.com/admin",
     used_for: "The self-hosted mail server behind the 75-mailbox Lume sending fleet",
@@ -196,6 +253,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "smartlead",
     service: "Smartlead",
+    vendor: "Smartlead",
     category: "Email sending",
     url: "https://app.smartlead.ai/login",
     used_for: "Warm-up for the whole sending fleet (1,525 mailboxes)",
@@ -205,6 +263,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "sending-ac",
     service: "Sending.ac",
+    vendor: "Sending.ac",
     category: "Email sending",
     url: "https://sso.ac/login?from=app.sending.ac",
     used_for: "The 1,450 managed mailboxes on the tal and lume domains",
@@ -213,6 +272,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "resend",
     service: "Resend",
+    vendor: "Resend",
     category: "Email sending",
     url: "https://resend.com/login",
     used_for: "Portal and transactional email, and the Lume white-label SMTP relay",
@@ -223,6 +283,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "microsoft365",
     service: "Microsoft 365 admin",
+    vendor: "Microsoft 365",
     category: "Email sending",
     url: "https://admin.microsoft.com/",
     used_for: "lumesp.com mailboxes (ryan@lumesp.com) and the DKIM records for the M365 sending domains",
@@ -233,6 +294,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "reoon",
     service: "Reoon Email Verifier",
+    vendor: "Reoon",
     category: "Email sending",
     url: "https://emailverifier.reoon.com/login/",
     used_for: "Verifying decision-maker emails before anything is sent to them",
@@ -243,6 +305,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "instantly",
     service: "Instantly",
+    vendor: "Instantly",
     category: "Email sending",
     url: "https://app.instantly.ai/auth/login",
     used_for: "Alternate outreach sending provider wired behind a feature flag",
@@ -262,6 +325,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "telnyx-house",
     service: "Telnyx (house account)",
+    vendor: "Telnyx",
     category: "Telephony & voice",
     url: "https://portal.telnyx.com/",
     used_for: "OS Text SMS, BD Phone voice, number lookups and AI vetting minutes",
@@ -272,6 +336,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "telnyx-lume",
     service: "Telnyx (Lume account)",
+    vendor: "Telnyx",
     category: "Telephony & voice",
     url: "https://portal.telnyx.com/",
     used_for: "Lume's own numbers, the five per-recruiter 929 lines, white-labelled off the house account",
@@ -281,6 +346,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "elevenlabs",
     service: "ElevenLabs",
+    vendor: "ElevenLabs",
     category: "Telephony & voice",
     url: "https://elevenlabs.io/app/home",
     used_for: "The AI Vetting agent voice and the personalised-video voice (the Lukas clone)",
@@ -289,6 +355,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "hume",
     service: "Hume AI",
+    vendor: "Hume",
     category: "Telephony & voice",
     url: "https://app.hume.ai/",
     used_for: "Alternate voice engine for the vetting agent",
@@ -298,6 +365,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "cartesia",
     service: "Cartesia",
+    vendor: "Cartesia",
     category: "Telephony & voice",
     url: "https://play.cartesia.ai/",
     used_for: "Voice cloning fallback for the vetting and video stack",
@@ -308,6 +376,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "anthropic",
     service: "Anthropic Console",
+    vendor: "Anthropic",
     category: "AI",
     url: "https://platform.claude.com/login",
     used_for: "Claude API: personalisation, reply classification, AI vetting, call notes",
@@ -320,6 +389,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "rapidapi",
     service: "RapidAPI",
+    vendor: "RapidAPI",
     category: "Data & sourcing",
     url: "https://rapidapi.com/developer/dashboard",
     used_for: "JSearch job feed, skip tracing for Boost phones, and the LinkedIn people search",
@@ -331,6 +401,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "serper",
     service: "Serper",
+    vendor: "Serper.dev",
     category: "Data & sourcing",
     url: "https://serper.dev/dashboard",
     used_for: "The search credits behind the JD Sourcing wide pass",
@@ -340,6 +411,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "apify",
     service: "Apify",
+    vendor: "Apify",
     category: "Data & sourcing",
     url: "https://console.apify.com/",
     used_for: "The direct-dial phone number finder actor",
@@ -348,6 +420,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "koldinfo",
     service: "KoldInfo",
+    vendor: "KoldInfo",
     category: "Data & sourcing",
     url: "https://app.koldinfo.com/",
     used_for: "The 129M people database and 57M business-email database behind DB enrichment",
@@ -356,6 +429,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "laxis",
     service: "Laxis",
+    vendor: "Laxis",
     category: "Data & sourcing",
     url: "https://app.laxis.tech/prospect-search",
     used_for: "The Laxis enrichment rung in the JD Sourcing chain",
@@ -365,6 +439,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "icypeas",
     service: "Icypeas",
+    vendor: "Icypeas",
     category: "Data & sourcing",
     url: "https://app.icypeas.com/",
     used_for: "Email finding and verification in the enrichment chain",
@@ -373,6 +448,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "peopledatalabs",
     service: "People Data Labs",
+    vendor: "People Data Labs",
     category: "Data & sourcing",
     url: "https://dashboard.peopledatalabs.com/",
     used_for: "Person enrichment fallback",
@@ -381,6 +457,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "adzuna",
     service: "Adzuna Developer",
+    vendor: "Adzuna",
     category: "Data & sourcing",
     url: "https://developer.adzuna.com/login",
     used_for: "Job-posting feed for Hire Signals",
@@ -391,6 +468,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "loxo",
     service: "Loxo",
+    vendor: "Loxo",
     category: "Recruiting stack",
     url: "https://app.loxo.co/login",
     used_for: "The ATS: the People DB merged into Candidates, and the two-way activity sync",
@@ -401,6 +479,7 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "unipile",
     service: "Unipile",
+    vendor: "Unipile",
     category: "Recruiting stack",
     url: "https://dashboard.unipile.com/",
     used_for: "LinkedIn OS: connected recruiter accounts and all LinkedIn messaging",
@@ -410,54 +489,20 @@ export const VAULT_CATALOG: CatalogEntry[] = [
   {
     id: "linkedin",
     service: "LinkedIn (Ryan's account + Sales Navigator)",
+    vendor: "LinkedIn",
     category: "Recruiting stack",
     url: "https://www.linkedin.com/login",
     used_for: "Sales Navigator searches pulled into JD Sourcing, and the account Unipile connects",
     username: "ryan@dev.co",
   },
   {
-    id: "linkedin-developers",
-    service: "LinkedIn Developers",
-    category: "Recruiting stack",
-    url: "https://www.linkedin.com/developers/apps",
-    used_for: "The OAuth app behind LinkedIn posting",
-    envKey: "LINKEDIN_CLIENT_ID",
-  },
-  {
     id: "tidycal",
     service: "TidyCal",
+    vendor: "TidyCal",
     category: "Recruiting stack",
     url: "https://tidycal.com/login",
     used_for: "Booking links in outreach sequences",
     envKey: "TIDYCAL_API_TOKEN",
   },
 
-  /* ---------------- Platform ---------------- */
-  {
-    id: "recruitersos-owner",
-    service: "RecruitersOS Owner Console",
-    category: "Platform",
-    url: "https://recruitersos.co/owner-login",
-    used_for: "This console, the single-operator back office",
-    username: "neadusall@gmail.com",
-    notes:
-      "Every /api/owner/* route answers 404 rather than 401 to anyone who is not the owner, so a 404 here means 'not signed in as owner', not 'broken'.",
-  },
-  {
-    id: "recruitersos-app",
-    service: "RecruitersOS (house workspace)",
-    category: "Platform",
-    url: "https://recruitersos.co/login",
-    used_for: "The operator's own workspace inside the product",
-    username: "neadusall@gmail.com",
-  },
-  {
-    id: "lume-portal",
-    service: "Lume (white-label tenant)",
-    category: "Platform",
-    url: "https://app.lumesp.com/login",
-    used_for: "The Lume Search Partners tenant, its own recruiters, numbers and sending identity",
-    account: "ws_mqf6o989003",
-    notes: "Mail to Lume's people must go out from lumesp.com, never recruitersos.co; the send guard fails closed on this.",
-  },
 ];

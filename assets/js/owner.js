@@ -2404,6 +2404,7 @@
         html += '<tr data-vid="' + esc(e.id) + '">' +
           '<td><div class="lr-main">' + esc(e.service) + '</div>' +
             (e.account ? '<div class="vault-sub">' + esc(e.account) + '</div>' : '') +
+            (e.vendor && e.vendor !== e.service ? '<div class="vault-sub dim">Billed as ' + esc(e.vendor) + ' on Spend master</div>' : '') +
             (e.used_for ? '<div class="vault-sub dim">' + esc(e.used_for) + '</div>' : '') + '</td>' +
           '<td data-l="Sign-in URL"><a class="vault-link" href="' + esc(e.url) + '" target="_blank" rel="noopener" title="' + esc(e.url) + '">' + esc(prettyUrl(e.url)) + '</a></td>' +
           '<td data-l="Username"><span>' + (e.username
