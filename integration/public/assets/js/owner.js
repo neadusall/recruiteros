@@ -1183,6 +1183,8 @@
       '</tr></thead><tbody>';
     rows.forEach(function (r) {
       var pill = r.state === "api" ? '<span class="pill active">Pulled from the API</span>'
+        : r.state === "portal" ? '<span class="pill active">Downloaded for you</span>'
+        : r.state === "pull_failed" ? '<span class="pill dead">Could not pull</span>'
         : r.state === "auto" ? '<span class="pill active">Automatic</span>'
         : r.state === "manual" ? '<span class="pill needs">By hand</span>'
         : r.state === "unproven" ? '<span class="pill dead">Not arriving</span>'
@@ -1192,15 +1194,52 @@
         '<td><div class="lr-sub">' + esc(r.state === "lifetime" ? "Nothing recurring to receipt" : channelLabel(r.channel)) + '</div>' +
         (r.from && r.from.length ? '<div class="note" style="font-size:11px">from ' + esc(r.from.slice(0, 3).join(", ")) + '</div>' : "") +
         (r.api ? '<div class="note" style="font-size:11px">' + esc(r.api) + '</div>' : "") + '</td>' +
-        '<td class="num">' + (r.emailCount + r.manualCount + (r.apiCount || 0)) +
+        '<td class="num">' + (r.emailCount + r.manualCount + (r.apiCount || 0) + (r.portalCount || 0)) +
         (r.manualCount ? ' <span class="note">(' + r.manualCount + ' by hand)</span>' : "") +
-        (r.apiCount ? ' <span class="note">(' + r.apiCount + ' via API)</span>' : "") + '</td>' +
+        (r.apiCount ? ' <span class="note">(' + r.apiCount + ' via API)</span>' : "") +
+        (r.portalCount ? ' <span class="note">(' + r.portalCount + ' downloaded)</span>' : "") + '</td>' +
         '<td>' + esc((r.lastAt || "").slice(0, 10) || "-") + '</td>' +
-        '<td><div class="lr-sub">' + esc(r.advice) + '</div>' +
+        /* A failed pull states its own case in the block below, fix included, so the plain
+           advice line would only repeat it back. */
+        '<td>' + (r.state === "pull_failed" ? "" : '<div class="lr-sub">' + esc(r.advice) + '</div>') +
         (r.portal ? '<a class="note" href="' + esc(r.portal) + '" target="_blank" rel="noopener">open the billing page</a>' : "") +
+        pullStatus(r) +
         (r.setup ? '<div class="note" style="font-size:11px">' + esc(r.setup) + '</div>' : "") + '</td></tr>';
     });
     return html + '</tbody></table></div></div>';
+  }
+
+  /**
+   * Health of the automatic invoice download, for vendors that have one.
+   *
+   * A puller that stopped working is worse than never having had one: nobody is watching
+   * the mailbox for that vendor any more, so the months quietly stop being provable. This
+   * block is what makes that impossible to miss, and it always says what to do next.
+   */
+  function pullStatus(r) {
+    var p = r.pull;
+    if (!p || !p.configured) return "";
+
+    if (p.ok) {
+      return '<div class="note" style="font-size:11px;margin-top:4px">Downloaded automatically' +
+        (p.at ? ', last checked ' + esc(fmtDate(p.at)) : "") +
+        (p.filed ? ', ' + p.filed + ' filed that run' : "") + '. ' +
+        '<a href="#" data-pull="' + esc(r.vendor) + '">Pull now</a></div>';
+    }
+
+    /* Bounded and wrap-anywhere: the reason usually carries a portal URL, and an unbroken
+       URL in a table cell drags the whole column off the side of a narrow screen. */
+    return '<div class="burn-alert" style="margin:8px 0 0;max-width:460px;overflow-wrap:anywhere">' +
+      '<div class="ba-title">' + (p.needsLogin ? "Sign-in needed before it can pull" : "The automatic download failed") +
+      (p.at ? ' <span class="note">' + esc(fmtDate(p.at)) + '</span>' : "") + '</div>' +
+      (p.error ? '<p class="note">' + esc(p.error) + '</p>' : "") +
+      (p.fix ? '<p class="note">' + esc(p.fix) + '</p>' : "") +
+      '<div class="btn-row" style="margin-top:6px">' +
+      '<button class="btn btn-sm" data-pull="' + esc(r.vendor) + '">Try again now</button>' +
+      (p.shot
+        ? '<a class="btn btn-sm" href="' + API + '/owner/receipts/pull-shot/' + encodeURIComponent(p.shot) + '" target="_blank" rel="noopener">See what the browser saw</a>'
+        : "") +
+      '</div></div>';
   }
 
   function channelLabel(c) {
@@ -1319,6 +1358,29 @@
 
     $$("#view [data-receipt]").forEach(function (b) {
       b.addEventListener("click", function (e) { e.stopPropagation(); openReceipt(b.dataset.receipt); });
+    });
+
+    /* Retry a portal download from the console. Awaited on purpose: the owner pressed this
+       to find out whether it works now, so they get the real answer, failure included. */
+    $$("#view [data-pull]").forEach(function (b) {
+      b.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (b.classList.contains("disabled")) return;
+        b.classList.add("disabled");
+        var was = b.textContent;
+        b.textContent = "Pulling…";
+        send("/owner/receipts", "POST", { action: "pullPortal", vendor: b.dataset.pull, monthsBack: Math.min(24, rcptMonths) })
+          .then(function (r) {
+            b.classList.remove("disabled");
+            b.textContent = was;
+            var p = r.ok && r.data && (r.data.pulls || [])[0];
+            if (!p) { toast("The pull could not be started"); return; }
+            toast(p.ok
+              ? (p.filed ? "Filed " + p.filed + " invoice(s) from " + p.vendor : "Nothing new to file for " + p.vendor)
+              : (p.fix || p.error || "The pull failed again"));
+            viewBurn();
+          });
+      });
     });
 
     if (rcptData && rcptData.inbox && rcptData.inbox.harvest && rcptData.inbox.harvest.running) pollHarvest();

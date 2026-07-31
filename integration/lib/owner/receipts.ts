@@ -41,8 +41,10 @@ import {
 export type ReceiptKind = "charge" | "refund" | "credit_note";
 /** Where a figure came from. `api` is the vendor's own billing API: authoritative on the
  *  number, but there is no invoice image behind it, and the console says so rather than
- *  drawing a receipt that was never issued. */
-export type ReceiptSource = "email" | "manual" | "api";
+ *  drawing a receipt that was never issued. `portal` is the vendor's own PDF, downloaded
+ *  from their billing page by a logged-in browser: the same document a human would have
+ *  fetched by hand, so it carries a real image and counts as proof. */
+export type ReceiptSource = "email" | "manual" | "api" | "portal";
 
 export interface Receipt {
   id: string;
@@ -861,6 +863,78 @@ export async function recordApiReceipt(input: {
     kind: "charge", source: "api", hasShot: false, confidence: 1,
     matchedBy: "pulled from the vendor's billing API", notes: input.notes,
     createdAt: nowIso(), updatedAt: nowIso(),
+  };
+  store.receipts.push(r);
+  persist();
+  return { receipt: r, created: true };
+}
+
+/**
+ * File a receipt downloaded from a vendor's own billing page by the portal puller.
+ *
+ * Unlike an API figure, this HAS a document behind it: the vendor's PDF, saved as-is and
+ * rendered like any hand-attached receipt, so the console shows the real invoice.
+ *
+ * Keyed on vendor + period + reference so the nightly run is idempotent: the same invoice
+ * re-read next week updates its row instead of stacking a duplicate. An existing row is
+ * never downgraded — if the picture already rendered, a later run that arrives without one
+ * leaves it alone rather than replacing proof with a blank.
+ */
+export async function recordPortalReceipt(input: {
+  vendor: string; itemId?: string; period: string; amountUsd: number;
+  reference: string; chargedAt?: string; description?: string; notes?: string;
+  file?: { bytes: Buffer; mime: string; name: string };
+}): Promise<{ receipt: Receipt; created: boolean }> {
+  await ensureReceiptsReady();
+  const existing = store.receipts.find(
+    (r) => r.source === "portal" && r.vendor === input.vendor && r.period === input.period && r.invoiceNumber === input.reference,
+  );
+
+  const id = existing?.id || rid("rcpt");
+  let hasShot = existing?.hasShot || false;
+  let shotError = existing?.shotError;
+
+  /* Render only when there is something new to render: a re-run over a month already on
+     file should cost nothing. */
+  if (input.file && !hasShot) {
+    const isPdf = input.file.mime.includes("pdf") || /\.pdf$/i.test(input.file.name);
+    const isImage = input.file.mime.startsWith("image/");
+    const shot = await renderShot(id, isPdf
+      ? { pdf: input.file.bytes }
+      : isImage
+        ? { image: { bytes: input.file.bytes, mime: input.file.mime } }
+        : { html: input.file.bytes.toString("utf8").slice(0, 400_000) });
+    hasShot = shot.ok;
+    shotError = shot.error;
+    await saveArtifact(id, `src.${extFromMime(input.file.mime, input.file.name)}`, input.file.bytes).catch(() => {});
+  }
+
+  if (existing) {
+    existing.amountUsd = round2(input.amountUsd);
+    existing.description = input.description ?? existing.description;
+    existing.chargedAt = input.chargedAt || existing.chargedAt;
+    existing.notes = input.notes ?? existing.notes;
+    existing.hasShot = hasShot;
+    existing.shotError = shotError;
+    if (input.file) {
+      existing.fileName = input.file.name;
+      existing.fileMime = input.file.mime;
+      existing.fileBytes = input.file.bytes.length;
+    }
+    existing.updatedAt = nowIso();
+    persist();
+    return { receipt: existing, created: false };
+  }
+
+  const r: Receipt = {
+    id, period: input.period, vendor: input.vendor, itemId: input.itemId,
+    description: input.description, amountUsd: round2(input.amountUsd), currency: "USD",
+    invoiceNumber: input.reference, chargedAt: input.chargedAt || `${input.period}-01`,
+    kind: input.amountUsd < 0 ? "refund" : "charge", source: "portal",
+    fileName: input.file?.name, fileMime: input.file?.mime, fileBytes: input.file?.bytes.length,
+    hasShot, shotError, confidence: 1,
+    matchedBy: "downloaded from the vendor's billing page",
+    notes: input.notes, createdAt: nowIso(), updatedAt: nowIso(),
   };
   store.receipts.push(r);
   persist();
