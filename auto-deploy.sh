@@ -281,6 +281,50 @@ if [ ! -f "$DIR/.ostext-watchdog-v2" ] && [ -f "$DIR/ostext-watchdog.sh" ] \
   fi
 fi
 
+# ---- ENGINE-HEALTH WATCH CONVERGE (every tick, BEFORE the up-to-date exit) ----
+# The hourly engine watch is what turns "Serper silently hit zero and JD Sourcing
+# lost 62% of its supply" into an alert. But a watch that can quietly stop is worth
+# very little: the failure it exists to catch is exactly the kind nobody notices.
+# So this runs on EVERY tick (~2 min), before the no-new-commit early exit, and is
+# deliberately placed here rather than in the deploy path — it must converge even
+# when nothing is being deployed, which is almost always.
+#
+# Two independent failure modes, both self-healed:
+#   1. unit missing / disabled / not active (fresh box, someone ran systemctl
+#      disable, a botched reinstall) -> re-run the installer, which is idempotent.
+#   2. unit looks fine but is not actually producing results (container restart
+#      loop, cron secret rotated, the route 500ing) -> the success stamp goes
+#      stale, so kick the service once. Threshold is 3h against an hourly timer,
+#      so a single missed run is tolerated and a real stall is not.
+ENGINE_STAMP=/var/lib/recruiteros/engine-health.last
+ENGINE_KICK=/var/lib/recruiteros/engine-health.kick
+ENGINE_RUNNER=/usr/local/bin/recruiteros-engine-health.sh
+# Bump this marker (and the one in the runner heredoc) to force a re-install.
+ENGINE_RUNNER_VERSION="engine-health-runner-v2"
+stamp_age() { # <file> -> seconds since it was written, or a huge number
+  local v; v=$(cat "$1" 2>/dev/null || echo 0)
+  case "$v" in (*[!0-9]*|"") v=0 ;; esac
+  echo $(( $(date -u +%s) - v ))
+}
+if [ -x "$DIR/install-engine-health-timer.sh" ]; then
+  if ! systemctl is-enabled --quiet recruiteros-engine-health.timer 2>/dev/null \
+     || ! systemctl is-active --quiet recruiteros-engine-health.timer 2>/dev/null \
+     || ! grep -q "$ENGINE_RUNNER_VERSION" "$ENGINE_RUNNER" 2>/dev/null; then
+    # Also covers UPGRADES: an older runner (no success stamp) would otherwise look
+    # permanently stale below and get kicked every single tick, which on Serper means
+    # burning a paid credit every 2 minutes. Version-check first, kick second.
+    echo "$(date -u) CONVERGE: engine-health timer missing/inactive/outdated, reinstalling..." >> "$LOG"
+    bash "$DIR/install-engine-health-timer.sh" >> "$LOG" 2>&1 || true
+  elif [ "$(stamp_age "$ENGINE_STAMP")" -gt 10800 ] && [ "$(stamp_age "$ENGINE_KICK")" -gt 3600 ]; then
+    # Stalled despite a healthy-looking unit (container restart loop, rotated cron
+    # secret, route 500ing). Kick it, but at most once an hour so a persistent
+    # failure cannot turn into a credit-burning retry storm.
+    echo "$(date -u) CONVERGE: engine-health stale >3h, kicking (rate-limited to 1/h)..." >> "$LOG"
+    date -u +%s > "$ENGINE_KICK" 2>/dev/null || true
+    systemctl start recruiteros-engine-health.service >> "$LOG" 2>&1 || true
+  fi
+fi
+
 # Fetch quietly; compare local vs remote.
 git fetch origin "$BRANCH" --quiet
 LOCAL=$(git rev-parse HEAD)

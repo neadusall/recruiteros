@@ -15,13 +15,31 @@ UNIT=/etc/systemd/system/recruiteros-engine-health.service
 TIMER=/etc/systemd/system/recruiteros-engine-health.timer
 RUNNER=/usr/local/bin/recruiteros-engine-health.sh
 
+install -d -m 755 /var/lib/recruiteros
+
 cat > "$RUNNER" <<'EOF'
 #!/usr/bin/env bash
+# engine-health-runner-v2
 # Hourly JD Sourcing discovery-engine check (Serper live canary + RapidAPI quota),
 # via /api/sourcing/engine-health inside the app container. Alerts the workspace
 # owner in-app on any transition to low/down.
-set -euo pipefail
-docker exec recruiteros-app-1 node -e "
+#
+# RETRIES on purpose. The single most common reason an hourly check silently does
+# nothing is that it fired while the app container was mid-restart, and this box
+# redeploys often. One missed tick is a missed hour of coverage, so try 3 times
+# over ~40s before giving up.
+#
+# STAMP on purpose. On success we write /var/lib/recruiteros/engine-health.last.
+# auto-deploy.sh (which runs every ~2 min and is the most reliable process on the
+# box) converges on that stamp: if it goes stale, it reinstalls/kicks this watch.
+# A monitor nobody monitors is how the thing it was meant to catch comes back.
+set -uo pipefail
+
+STAMP=/var/lib/recruiteros/engine-health.last
+ATTEMPTS=3
+
+run_once() {
+  docker exec recruiteros-app-1 node -e "
 fetch('http://localhost:3000/api/sourcing/engine-health', {
   headers: { 'x-cron-secret': process.env.RECRUITEROS_CRON_SECRET || '' },
 })
@@ -32,6 +50,18 @@ fetch('http://localhost:3000/api/sourcing/engine-health', {
   })
   .catch((e) => { console.error(String(e)); process.exit(1); });
 "
+}
+
+for i in $(seq 1 "$ATTEMPTS"); do
+  if run_once; then
+    date -u +%s > "$STAMP"
+    exit 0
+  fi
+  echo "engine-health attempt $i/$ATTEMPTS failed" >&2
+  [ "$i" -lt "$ATTEMPTS" ] && sleep 20
+done
+echo "engine-health FAILED after $ATTEMPTS attempts - engines are UNMONITORED this hour" >&2
+exit 1
 EOF
 chmod +x "$RUNNER"
 
