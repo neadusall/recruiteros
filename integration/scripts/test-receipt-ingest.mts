@@ -23,7 +23,7 @@ import { join } from "node:path";
 
 process.env.ROS_DATA_DIR = mkdtempSync(join(tmpdir(), "ros-ingest-"));
 
-const { recordPortalReceipt, listReceipts } = await import("../lib/owner/receipts");
+const { recordPortalReceipt, recordApiReceipt, listReceipts } = await import("../lib/owner/receipts");
 const { findDuplicates } = await import("../lib/owner/receiptMatch");
 
 let failures = 0;
@@ -55,10 +55,12 @@ const pdf = (name: string) => ({
   name: `${name}.pdf`,
 });
 
-async function file(o: { at: string; amt: number; what: string; inv?: string; vendor?: string }) {
+async function file(o: { at: string; amt: number; what: string; inv?: string; vendor?: string; period?: string }) {
   return recordPortalReceipt({
     vendor: o.vendor || "RapidAPI",
-    period: o.at.slice(0, 7),
+    /* An invoice is usually issued after the month it bills for, so the period is not
+       always the charge date's month. */
+    period: o.period || o.at.slice(0, 7),
     chargedAt: o.at,
     amountUsd: o.amt,
     reference: o.inv,
@@ -117,7 +119,57 @@ check(
   check("...on the row it was already on", redo.receipt.id, fixed.receipt.id);
 }
 
-/* ---- 6. nothing for the duplicate sweep to clean up afterwards ---- */
+/* ---- 6. a vendor's PDF lands ON its own API figure, not beside it ----
+ *
+ * Telnyx is priced from its usage API (a figure, no document) and its invoice PDF exists
+ * only on the portal. Both describe ONE bill. Filed as two rows, Telnyx would have read
+ * twice its real cost the first night the portal puller ran — the RapidAPI bug above,
+ * wearing different clothes. The API dates a month to its period end and the invoice to its
+ * issue date, so `isSameCharge` cannot catch this pair on its own.
+ */
+{
+  await recordApiReceipt({
+    vendor: "Telnyx", period: "2026-06", amountUsd: 0.42, reference: "63776a02",
+    chargedAt: "2026-06-30", description: "Month-end invoice",
+  });
+  const pulled = await file({
+    vendor: "Telnyx", at: "2026-07-01", amt: 0.42, what: "Telnyx invoice", inv: "INV-0042", period: "2026-06",
+  });
+  const telnyx = (await listReceipts()).filter((r) => r.vendor === "Telnyx" && r.period === "2026-06");
+  check("the document joins the figure instead of doubling the month", telnyx.length, 1);
+  check("...on the row that was already there", pulled.created, false);
+  check("...now a filed document, not a stated figure", telnyx[0].source, "portal");
+  check("...carrying the vendor's own invoice number", telnyx[0].invoiceNumber, "INV-0042");
+}
+{
+  await recordApiReceipt({
+    vendor: "Telnyx", period: "2026-05", amountUsd: 34.11, reference: "b29695cc", chargedAt: "2026-05-31",
+  });
+  const pulled = await file({
+    vendor: "Telnyx", at: "2026-06-01", amt: 34.58, what: "Telnyx invoice", inv: "INV-0041", period: "2026-05",
+  });
+  check("the invoice corrects a figure summed from usage feeds", pulled.receipt.amountUsd, 34.58);
+}
+{
+  await recordApiReceipt({
+    vendor: "Telnyx", period: "2026-04", amountUsd: 12.5, reference: "a8edbdd6", chargedAt: "2026-04-30",
+  });
+  const pulled = await file({
+    vendor: "Telnyx", at: "2026-05-01", amt: 0, what: "Telnyx invoice", inv: "INV-0040", period: "2026-04",
+  });
+  check("a puller that could not read an amount never erases one", pulled.receipt.amountUsd, 12.5);
+}
+{
+  await recordApiReceipt({
+    vendor: "Telnyx", period: "2026-03", amountUsd: 9, reference: "d96fd661", chargedAt: "2026-03-31",
+  });
+  await file({ vendor: "Telnyx", at: "2026-04-02", amt: 9, what: "Telnyx invoice", inv: "INV-0039", period: "2026-04" });
+  const march = (await listReceipts()).filter((r) => r.vendor === "Telnyx" && r.period === "2026-03");
+  check("a different month is still its own charge", march.length, 1);
+  check("...and keeps its stated figure", march[0].source, "api");
+}
+
+/* ---- 7. nothing for the duplicate sweep to clean up afterwards ---- */
 {
   const dupes = findDuplicates(await listReceipts());
   check("the duplicate sweep finds nothing to remove", dupes.map((d) => d.reason), []);

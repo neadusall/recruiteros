@@ -1222,9 +1222,20 @@ export async function recordPortalReceipt(input: {
     id: "", vendor: input.vendor, amountUsd: amt, chargedAt: chargedDay,
     period: input.period, invoiceNumber: input.reference, itemId: input.itemId,
   };
-  const mine = store.receipts.filter((r) => r.source === "portal" && r.vendor === input.vendor);
+  const mine = store.receipts.filter(
+    (r) => r.vendor === input.vendor && (r.source === "portal" || r.source === "api"),
+  );
   const existing = (input.reference && mine.find((r) => r.invoiceNumber === input.reference))
-    || mine.find((r) => isSameCharge(r, incoming));
+    || mine.find((r) => r.source === "portal" && isSameCharge(r, incoming))
+    /* THE VENDOR'S OWN PDF FOR A MONTH ITS BILLING API ALREADY PRICED IS THAT FIGURE'S
+       DOCUMENT, NOT A SECOND CHARGE. An `api` row is a month-end statement by construction
+       (pullVendorApis writes one per billing month), so the document belongs on it and the
+       row is upgraded in place. Filing it separately would double the vendor — Telnyx would
+       have read twice its real cost the day its portal puller first ran, which is exactly
+       how RapidAPI came to show $120 against a $60 line. The two never agree on a day (the
+       API dates a month to its period end, the invoice to its issue date) and rarely on an
+       invoice number, so `isSameCharge` cannot catch this one on its own. */
+    || mine.find((r) => r.source === "api" && r.period === input.period);
   const id = existing?.id || rid("rcpt");
 
   /* The document goes to disk before the render is attempted. The render is the fragile
@@ -1237,7 +1248,17 @@ export async function recordPortalReceipt(input: {
   const amountUsd = round2(input.amountUsd);
 
   if (existing) {
-    existing.amountUsd = amountUsd;
+    /* The document's own figure wins — it is the bill, where the API total was a sum of
+       usage feeds. But a puller that could not read an amount reports 0, and a 0 must never
+       erase a figure that is already on file. */
+    existing.amountUsd = amountUsd !== 0 || existing.amountUsd === 0 ? amountUsd : existing.amountUsd;
+    if (existing.source === "api") {
+      /* Upgraded from a stated figure to a filed document. */
+      existing.source = "portal";
+      existing.matchedBy = "the vendor's own invoice, downloaded from their billing page";
+      existing.reviewed = true;
+      existing.confidence = 1;
+    }
     existing.chargedAt = chargedAt;
     existing.itemId = existing.itemId || input.itemId || (await lineItemFor(input))?.id;
     existing.description = input.description ?? existing.description;

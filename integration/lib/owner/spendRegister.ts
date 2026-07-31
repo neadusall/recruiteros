@@ -22,6 +22,7 @@
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 import { spendRollup, type SpendWindow } from "../billing/ledger";
+import { vendorUsageWindow, vendorUsageDelta } from "./vendorUsage";
 import { getRapidQuota, getRapidQuotaHistory, type RapidQuotaSnapshot } from "../sourcing/rapidQuota";
 import { lookupDomains, daysUntil } from "./domainLookup";
 
@@ -1290,6 +1291,7 @@ export async function attachLive(
   ]);
   const byHost = new Map(quotas.map((q) => [q.host, q]));
   const ledger = spendRollup(window);
+  const vendorWindow = vendorUsageWindow(windowDays(window));
   const now = Date.now();
 
   const out: Array<SpendItem & { live: LiveSignal }> = [];
@@ -1322,7 +1324,14 @@ export async function attachLive(
     }
 
     const q = link.rapidHost ? byHost.get(link.rapidHost) : undefined;
-    const meteredUsd = link.ledgerSource ? ledger.bySource[link.ledgerSource] : undefined;
+    /* The vendor's own billed figure outranks our estimate of it: Telnyx's usage API reads
+       every number, lookup and minute on the account, while the internal ledger only sees
+       the sends this code priced on the way out. */
+    const meteredUsd = link.ledgerSource
+      ? (vendorWindow[link.ledgerSource.toLowerCase()] ?? ledger.bySource[link.ledgerSource])
+      : undefined;
+    const meteredFromVendor = link.ledgerSource != null
+      && vendorWindow[link.ledgerSource.toLowerCase()] != null;
     const configured = envPresent.length > 0 || credConfigured;
 
     let state: LiveState = "unknown";
@@ -1356,7 +1365,9 @@ export async function attachLive(
       reason = `Not configured. Missing: ${envMissing.join(", ")}.`;
     } else if (meteredUsd != null && meteredUsd > 0) {
       state = "live";
-      reason = `${usd(meteredUsd)} of metered cost recorded in this window.`;
+      reason = meteredFromVendor
+        ? `${usd(meteredUsd)} of metered cost over this window, taken from ${item.vendor}'s own billing API and apportioned across the months it spans.`
+        : `${usd(meteredUsd)} of metered cost recorded in this window.`;
     } else if (configured) {
       state = item.billing === "metered" ? "idle" : "idle";
       reason = "Configured and reachable, but no usage recorded in this window.";
@@ -1470,7 +1481,11 @@ export function rollupBurn(items: Array<SpendItem & { live?: LiveSignal }>, wind
     }
   }
   committed = round2(committed);
-  const metered = round2(ledger.totalCostUsd);
+  /* The internal ledger prices only what this app did. Where a vendor's own billing API has
+     since told us what it actually charged, that figure replaces our estimate of it — so
+     the burn moves by the difference, not by the whole amount, or the same traffic would be
+     counted twice. */
+  const metered = round2(ledger.totalCostUsd + vendorUsageDelta(ledger.bySource, windowDays(window)).total);
   return {
     window,
     committedMonthlyUsd: committed,
@@ -1492,6 +1507,11 @@ export function rollupBurn(items: Array<SpendItem & { live?: LiveSignal }>, wind
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+/** The ledger's own window, in days, so a vendor's monthly figure can be cut to match it.
+ *  `all` is 0, which the vendor-usage helpers read as "every month on file, whole". */
+function windowDays(window: SpendWindow): number {
+  return window === "today" ? 1 : window === "7d" ? 7 : window === "all" ? 0 : 30;
 }
 function usd(n: number): string {
   return "$" + (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("en-US");

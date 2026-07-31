@@ -23,6 +23,7 @@ import type { Receipt, PullerState } from "./receipts";
 import { PULLER_STALE_DAYS } from "./receipts";
 import { vendorSourceFor, VENDOR_SOURCES } from "./receiptSources";
 import { meteredByMonth } from "../billing/ledger";
+import { mergeVendorUsage, vendorMonthFor } from "./vendorUsage";
 
 /* ============================ types ============================ */
 
@@ -344,7 +345,11 @@ export function buildSpendMatrix(
   const start = wanted < REGISTER_START_MONTH ? REGISTER_START_MONTH : wanted;
   const months = monthsBetween(start, nowMonth);
 
-  const metered = meteredByMonth();
+  /* The platform's own usage ledger, with the vendor's own billed figure laid over it
+     wherever a billing API has reported one. The internal ledger only knows what this app
+     priced itself: for Telnyx that was twelve voice minutes, $0.12, against a real invoice
+     of $34.58 in the same window. Where the vendor has spoken, the vendor is right. */
+  const metered = mergeVendorUsage(meteredByMonth());
   const byItem = new Map<string, Receipt[]>();
   const byVendor = new Map<string, Receipt[]>();
   for (const r of receipts) {
@@ -416,8 +421,18 @@ export function buildSpendMatrix(
       } else if (item.billing === "metered") {
         status = "metered";
         counted = actual !== 0 ? actual : meteredUsd;
+        /* A figure is not proof. The vendor's API is authoritative on the number and still
+           leaves the month unproven until its own invoice is on file, which is exactly why
+           a metered line can read its true cost and $0 proven at the same time. */
         verified = actual !== 0;
-        if (actual !== 0 && meteredUsd > 0) note = `ledger says ${meteredUsd.toFixed(2)}`;
+        const said = vendorMonthFor(ledgerKey, period);
+        if (said && !said.closed) {
+          note = `${item.vendor} so far this month, still running`;
+        } else if (said && actual === 0) {
+          note = `${item.vendor}'s own figure for the month`;
+        } else if (actual !== 0 && meteredUsd > 0 && Math.abs(actual - meteredUsd) >= 0.01) {
+          note = `ledger says ${meteredUsd.toFixed(2)}`;
+        }
       } else if (cancelled && actual === 0) {
         status = "cancelled";
       } else if (actual !== 0) {
