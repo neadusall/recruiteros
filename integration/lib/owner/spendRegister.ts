@@ -198,12 +198,6 @@ const SEED: SeedItem[] = [
     purpose: "The Lukas voice used by AI Vetting calls and the personalized video pipeline.",
     link: { ledgerSource: "elevenlabs", envKeys: ["VOICE_CLONE_API_KEY"], integrationId: "elevenlabs" },
   },
-  {
-    vendor: "Hume", label: "Empathic voice", category: "ai", billing: "monthly",
-    amountUsd: 0, needsAmount: true, at: "2026-06-01", status: "active",
-    purpose: "Voice interface option wired into the vetting desks.",
-    link: { envKeys: ["HUME_API_KEY"], integrationId: "hume" },
-  },
 
   /* ---- Data and enrichment ---- */
   {
@@ -220,20 +214,6 @@ const SEED: SeedItem[] = [
     impact: "Deliverability insurance. Port 25 is blocked on the app box, so this is the only way a guessed decision-maker email gets proven before it touches a warmed inbox. It protects domain reputation, which is the asset the whole cold-email motion rests on.",
     notes: "Lifetime licence bought outright years ago, before this register existed: no subscription, no monthly fee, and the credits it came with are still running. The purchase price is a sunk cost outside these books, which is why the row carries $0 rather than a guess. It becomes a real spend line the day volume forces a credit top-up: change the billing type to Credit top-up, enter what the pack cost, and the receipt for it will arrive by email on its own.",
     link: { ledgerSource: "reoon", envKeys: ["REOON_API_KEY"] },
-  },
-  {
-    vendor: "KoldInfo", label: "People and business email database", category: "people", billing: "monthly",
-    amountUsd: 0, needsAmount: true, at: "2026-06-01", status: "active",
-    purpose: "Free-rung enrichment: 129M people and 57M business emails by name plus city/state.",
-    impact: "Free enrichment rung carrying 14.7% of candidates with 100% email coverage. Its phones are weak (31% cell rate) but its emails are the cheapest in the stack.",
-    link: { envKeys: ["KOLDINFO_EMAIL"], outcomeSource: "koldinfo" },
-  },
-  {
-    vendor: "Laxis", label: "Contact enrichment", category: "people", billing: "monthly",
-    amountUsd: 0, needsAmount: true, at: "2026-06-01", status: "active",
-    purpose: "Enrichment rung between KoldInfo and the paid phone sources.",
-    impact: "The highest-accuracy phone source measured: 96.4% cell rate and 97.6% delivery. It runs before any paid phone rung, so every number it finds is a skip-trace charge avoided.",
-    link: { envKeys: ["LAXIS_EMAIL"], outcomeSource: "laxis" },
   },
   {
     vendor: "Adzuna", label: "Job feed API", category: "search", billing: "monthly",
@@ -261,13 +241,6 @@ const SEED: SeedItem[] = [
     purpose: "The one LinkedIn engine: connects each recruiter seat and runs every LinkedIn action.",
     impact: "The LinkedIn channel end to end. Every connection request, message and post publishes through it, so it is the difference between having a LinkedIn motion and not having one.",
     link: { envKeys: ["UNIPILE_API_KEY"], integrationId: "unipile" },
-  },
-  {
-    vendor: "Loxo", label: "ATS seats", category: "software", billing: "monthly",
-    amountUsd: 0, needsAmount: true, at: "2026-06-01", status: "active",
-    purpose: "System of record for the recruiting desk, two-way synced with every outbound channel.",
-    impact: "System of record. Two-way sync plus the no-double-contact guard means the desk can run several outbound channels at once without a candidate hearing from two recruiters.",
-    link: { envKeys: ["LOXO_API_KEY"], integrationId: "loxo" },
   },
 
   /* ---- Infrastructure ---- */
@@ -329,12 +302,6 @@ const SEED: SeedItem[] = [
     amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
     purpose: "The real human mailboxes on lumesp.com, including ryan@lumesp.com, and the DKIM records for the domain.",
     impact: "Reply handling and anything a candidate or client sends to a named person. Also the mailbox the receipt sweep is meant to read.",
-  },
-  {
-    vendor: "Instantly", label: "Outreach sending (alternate provider)", category: "email", billing: "monthly",
-    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
-    purpose: "Second cold-email sending provider, wired behind a feature flag.",
-    notes: "Confirm whether this is still subscribed: the engine sends through the Sending.ac pool by default, so this may be paying for a path nothing takes.",
   },
   {
     vendor: "Mailcow", label: "Self-hosted mail server (mail.lumesp.com)", category: "email", billing: "monthly",
@@ -436,8 +403,27 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 7;
+const SEED_VERSION = 8;
 const SNAP_KEY = "owner_spend_register_v1";
+
+/**
+ * Rows this register should never have carried, dropped once on a version bump.
+ *
+ * Taking a vendor out of SEED only stops it being re-added: a row already seeded into the
+ * live store stays there forever. These five were all owner calls (2026-07-31): Instantly
+ * and Hume are not used at all, and KoldInfo, Laxis and Loxo are used but are not billed
+ * to this book, so a $0 "no price on file" line for them is noise the owner has to look
+ * past every time. Guarded the same way a correction is: only a row that came from the
+ * seed and carries no owner-entered money is removed, so a figure someone typed can never
+ * be deleted by a redeploy.
+ */
+const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
+  { vendor: "Instantly", label: "Outreach sending (alternate provider)" },
+  { vendor: "Hume", label: "Empathic voice" },
+  { vendor: "KoldInfo", label: "People and business email database" },
+  { vendor: "Laxis", label: "Contact enrichment" },
+  { vendor: "Loxo", label: "ATS seats" },
+];
 
 /**
  * Facts learned about a row AFTER it was already seeded into the live store.
@@ -521,8 +507,8 @@ export function ensureSpendRegisterReady(): Promise<void> {
 void ensureSpendRegisterReady();
 
 /** Add any seed row not already present (matched on vendor + label), apply the corrections
- *  to rows the owner has never touched, then mark the version applied. Never overwrites an
- *  amount the owner has edited. */
+ *  to rows the owner has never touched, drop the retired ones, then mark the version
+ *  applied. Never overwrites or deletes an amount the owner has edited. */
 function applySeed(): void {
   const have = new Set(store.items.map((i) => key(i.vendor, i.label)));
   for (const s of SEED) {
@@ -536,8 +522,25 @@ function applySeed(): void {
     Object.assign(item, c.patch, { updatedAt: nowIso() });
   }
   store.items = mergeSeedRows(store.items);
+  store.items = retireSeedRows(store.items);
   store.seededVersion = SEED_VERSION;
   persist();
+}
+
+/** Drop the rows this register should not be carrying at all. A row is only removed while
+ *  it is still exactly as the seed left it: seeded, unverified, and with no money on it.
+ *  Anything the owner priced or confirmed stays, because a redeploy deleting a real figure
+ *  would be a silent hole in the burn number.
+ *  Pure and exported so the rule can be pinned by scripts/test-spend-merge.mts. */
+export function retireSeedRows(
+  items: SpendItem[],
+  retirements: typeof SEED_RETIREMENTS = SEED_RETIREMENTS,
+): SpendItem[] {
+  const gone = new Set(retirements.map((r) => key(r.vendor, r.label)));
+  return items.filter((i) => {
+    if (!gone.has(key(i.vendor, i.label))) return true;
+    return !i.seeded || i.verified === true || Number(i.amountUsd) > 0;
+  });
 }
 
 /** Fold the old per-item rows into the single row that replaced them, then drop them.

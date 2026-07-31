@@ -10,11 +10,14 @@
  *   - the merged row is only "verified" if every priced row folded in was;
  *   - the spend is dated from the FIRST box bought, not the last;
  *   - with no merged row present (seed never applied) nothing is deleted.
+ * Also pins the retirement rule (owner, 2026-07-31): five vendors come OFF the register
+ * entirely - two we do not use, three we use but are not billed for here - and a row is
+ * only dropped while it still carries no owner-entered money.
  * The suite calls mergeSeedRows with its real shipped merge list, so a change to which
  * rows are folded shows up here.
  */
 
-import { mergeSeedRows, type SpendItem } from "../lib/owner/spendRegister";
+import { mergeSeedRows, retireSeedRows, type SpendItem } from "../lib/owner/spendRegister";
 
 let failures = 0;
 function check(name: string, got: unknown, want: unknown): void {
@@ -124,6 +127,32 @@ function hetzner(items: SpendItem[]): SpendItem[] {
   const once = mergeSeedRows([row("Hetzner", APP, { amountUsd: 30, verified: true }), row("Hetzner", MERGED)]);
   const twice = mergeSeedRows(once);
   check("second pass changes nothing", twice.map((i) => [i.label, i.amountUsd]), [[MERGED, 30]]);
+}
+
+/* 8. Retirement: rows the register should not carry are dropped, but only while they are
+      still exactly as the seed left them. */
+{
+  const out = retireSeedRows([
+    row("Instantly", "Outreach sending (alternate provider)"),
+    row("Loxo", "ATS seats"),
+    row("Telnyx", "SMS and voice"),
+  ]);
+  check("retired seed rows are dropped", out.map((i) => i.vendor), ["Telnyx"]);
+}
+{
+  const out = retireSeedRows([
+    row("Loxo", "ATS seats", { amountUsd: 119, needsAmount: false }),
+    row("KoldInfo", "People and business email database", { verified: true }),
+    row("Laxis", "Contact enrichment", { seeded: false }),
+  ]);
+  check("a priced, proven or owner-added row is never deleted", out.length, 3);
+}
+{
+  const once = retireSeedRows([row("Hume", "Empathic voice"), row("Telnyx", "SMS and voice")]);
+  check("second pass changes nothing", retireSeedRows(once).map((i) => i.vendor), ["Telnyx"]);
+}
+{
+  check("a vendor not on the list is untouched", retireSeedRows([row("Loxo", "Something else")]).length, 1);
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILED`);
