@@ -82,6 +82,12 @@ export interface SpendItem {
   verified?: boolean;
   /** Seeded with no known price: the dashboard prompts for it instead of showing $0. */
   needsAmount?: boolean;
+  /** Bought outright, once: the licence does not renew, so no charge is ever due again.
+   *  A lifetime row costs $0/mo forever and has NOTHING to receipt, which is different
+   *  from a subscription whose receipt merely has not arrived. The reconciler reports it
+   *  as settled instead of chasing a missing invoice, and stops the moment the vendor is
+   *  put back on a paid plan (buying credits again makes it a normal credit row). */
+  lifetime?: boolean;
   notes?: string;
   /** Came from the shipped seed rather than being hand-entered. */
   seeded?: boolean;
@@ -201,10 +207,11 @@ const SEED: SeedItem[] = [
     link: { ledgerSource: "serper", envKeys: ["SERPER_API_KEY"] },
   },
   {
-    vendor: "Reoon", label: "Email verifier", category: "email", billing: "credit",
-    amountUsd: 0, needsAmount: true, at: "2026-06-24", status: "active",
+    vendor: "Reoon", label: "Email verifier", category: "email", billing: "one_time",
+    amountUsd: 0, lifetime: true, at: "2026-06-24", status: "active",
     purpose: "Mailbox-level verification of curated decision-maker emails. Port 25 is blocked on the app box, so this replaces the SMTP probe.",
     impact: "Deliverability insurance. Port 25 is blocked on the app box, so this is the only way a guessed decision-maker email gets proven before it touches a warmed inbox. It protects domain reputation, which is the asset the whole cold-email motion rests on.",
+    notes: "Lifetime licence bought outright years ago, before this register existed: no subscription, no monthly fee, and the credits it came with are still running. The purchase price is a sunk cost outside these books, which is why the row carries $0 rather than a guess. It becomes a real spend line the day volume forces a credit top-up: change the billing type to Credit top-up, enter what the pack cost, and the receipt for it will arrive by email on its own.",
     link: { ledgerSource: "reoon", envKeys: ["REOON_API_KEY"] },
   },
   {
@@ -300,8 +307,28 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 1;
+const SEED_VERSION = 2;
 const SNAP_KEY = "owner_spend_register_v1";
+
+/**
+ * Facts learned about a row AFTER it was already seeded into the live store.
+ *
+ * `applySeed` only ever ADDS missing rows, deliberately: a redeploy must never overwrite
+ * a figure the owner typed. But a seeded row can also be seeded WRONG. Reoon went in as
+ * an active credit line with a price still to find, when it is in fact a lifetime licence
+ * bought outright years ago with no recurring fee at all. That is a correction to a guess,
+ * not a change to anything the owner entered, so it is applied once, on the version bump,
+ * and ONLY while the row is still untouched (`seeded`, no owner-entered amount).
+ */
+const SEED_CORRECTIONS: Array<{ vendor: string; label: string; patch: Partial<SpendItem> }> = [
+  {
+    vendor: "Reoon", label: "Email verifier",
+    patch: {
+      billing: "one_time", lifetime: true, needsAmount: false, amountUsd: 0,
+      notes: SEED.find((s) => s.vendor === "Reoon")?.notes,
+    },
+  },
+];
 
 const store: RegisterStore = { items: [], seededVersion: 0 };
 const persist = debouncedSaver(SNAP_KEY, () => store);
@@ -324,13 +351,20 @@ export function ensureSpendRegisterReady(): Promise<void> {
 }
 void ensureSpendRegisterReady();
 
-/** Add any seed row not already present (matched on vendor + label), then mark the
- *  version applied. Never overwrites an amount the owner has edited. */
+/** Add any seed row not already present (matched on vendor + label), apply the corrections
+ *  to rows the owner has never touched, then mark the version applied. Never overwrites an
+ *  amount the owner has edited. */
 function applySeed(): void {
   const have = new Set(store.items.map((i) => key(i.vendor, i.label)));
   for (const s of SEED) {
     if (have.has(key(s.vendor, s.label))) continue;
     store.items.push({ ...s, id: rid("spend"), seeded: true, createdAt: nowIso(), updatedAt: nowIso() });
+  }
+  for (const c of SEED_CORRECTIONS) {
+    const item = store.items.find((i) => key(i.vendor, i.label) === key(c.vendor, c.label));
+    // Untouched means: it came from the seed and no owner-entered figure sits on it.
+    if (!item || !item.seeded || item.verified) continue;
+    Object.assign(item, c.patch, { updatedAt: nowIso() });
   }
   store.seededVersion = SEED_VERSION;
   persist();
@@ -360,6 +394,7 @@ export async function addSpendItem(input: Partial<SpendItem>): Promise<SpendItem
     purpose: input.purpose ? String(input.purpose) : undefined,
     link: input.link,
     verified: input.verified !== false,
+    lifetime: input.lifetime ? true : undefined,
     notes: input.notes ? String(input.notes) : undefined,
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -382,6 +417,14 @@ export async function updateSpendItem(id: string, patch: Partial<SpendItem>): Pr
     // An owner-entered figure is an invoice figure: it stops being a prompt.
     item.needsAmount = false;
     item.verified = true;
+  }
+  /* Marking a row paid-once retires the price prompt: there is no recurring figure to
+     find. Unmarking it (credits bought again) puts the prompt back unless a price is
+     already on file, so the row starts asking for its receipt from that day. */
+  if (patch.lifetime != null) {
+    item.lifetime = !!patch.lifetime;
+    if (item.lifetime) item.needsAmount = false;
+    else if (!item.amountUsd) item.needsAmount = true;
   }
   if (patch.at != null) item.at = String(patch.at);
   if (patch.status != null) item.status = patch.status === "cancelled" ? "cancelled" : "active";

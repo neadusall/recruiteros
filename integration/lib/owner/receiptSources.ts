@@ -137,6 +137,7 @@ export const VENDOR_SOURCES: VendorSource[] = [
     from: ["reoon.com", "emailverifier.reoon.com"],
     subject: ["reoon", "receipt", "invoice", "credits", "payment"],
     portal: "https://emailverifier.reoon.com/dashboard",
+    setup: "Lifetime licence, bought outright years ago: there is no subscription and no monthly charge, so no recurring receipt exists to chase. The matcher stays armed anyway, so the first credit top-up receipt is captured the moment volume makes one necessary.",
   },
   {
     vendor: "KoldInfo",

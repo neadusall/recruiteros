@@ -911,11 +911,19 @@
     rows.forEach(function (i) {
       html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' +
         '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div><div class="lr-sub note">' + esc(i.purpose || "") + '</div></td>' +
-        '<td>' + esc(labelFor(BURN_BILLING, i.billing)) + '</td>' +
+        '<td>' + esc(labelFor(BURN_BILLING, i.billing)) + (i.lifetime ? ' <span class="pill active">No ongoing fee</span>' : '') + '</td>' +
         '<td>' + esc(i.at || "") + '</td>' +
-        '<td class="num">' + (i.needsAmount ? '<span class="pill needs">Set amount</span>' : usd(i.amountUsd)) + '</td></tr>';
+        '<td class="num">' + oneTimeAmountCell(i) + '</td></tr>';
     });
     return html + '</tbody></table></div></div>';
+  }
+
+  /* A paid-once row with no price on file is not a $0 purchase and not a missing figure to
+     nag about: the money left the account before these books existed. Say that instead. */
+  function oneTimeAmountCell(i) {
+    if (i.lifetime && !i.amountUsd) return '<span class="note">paid before this register</span>';
+    if (i.needsAmount) return '<span class="pill needs">Set amount</span>';
+    return usd(i.amountUsd);
   }
 
   function burnForm() {
@@ -1175,9 +1183,10 @@
         : r.state === "auto" ? '<span class="pill active">Automatic</span>'
         : r.state === "manual" ? '<span class="pill needs">By hand</span>'
         : r.state === "unproven" ? '<span class="pill dead">Not arriving</span>'
+        : r.state === "lifetime" ? '<span class="pill active">Paid once</span>'
         : '<span class="pill unknown">Not billed</span>';
       html += '<tr><td><div class="lr-main">' + esc(r.vendor) + '</div>' + pill + '</td>' +
-        '<td><div class="lr-sub">' + esc(channelLabel(r.channel)) + '</div>' +
+        '<td><div class="lr-sub">' + esc(r.state === "lifetime" ? "Nothing recurring to receipt" : channelLabel(r.channel)) + '</div>' +
         (r.from && r.from.length ? '<div class="note" style="font-size:11px">from ' + esc(r.from.slice(0, 3).join(", ")) + '</div>' : "") +
         (r.api ? '<div class="note" style="font-size:11px">' + esc(r.api) + '</div>' : "") + '</td>' +
         '<td class="num">' + (r.emailCount + r.manualCount) + (r.manualCount ? ' <span class="note">(' + r.manualCount + ' by hand)</span>' : "") + '</td>' +
@@ -1411,7 +1420,7 @@
     html += '<div class="kv">' +
       kv("Status", stateCell(i)) +
       kv("Signal", '<span class="note">' + esc(L.reason || "") + '</span>') +
-      kv("Monthly equivalent", usd(monthlyOf(i))) +
+      kv("Monthly equivalent", usd(monthlyOf(i)) + (i.lifetime ? ' <span class="note">paid once, nothing recurring</span>' : '')) +
       (i.domain ? kv("Registrar", esc(i.registrar || "unknown")) : "") +
       (i.domain ? kv("Registered", esc((i.registeredAt || "").slice(0, 10) || "unknown")) : "") +
       (i.domain ? kv("Expires", esc((i.expiresAt || "").slice(0, 10) || "unknown")) : "") +
@@ -1440,6 +1449,7 @@
       fld("What it buys", '<input id="sePurpose" value="' + esc(i.purpose || "") + '" />') +
       fld("Notes", '<input id="seNotes" value="' + esc(i.notes || "") + '" />') +
       fld("Active", '<select id="seStatus"><option value="active"' + (i.status === "active" ? " selected" : "") + '>Active</option><option value="cancelled"' + (i.status === "cancelled" ? " selected" : "") + '>Cancelled</option></select>') +
+      fld("Paid once", '<select id="seLifetime"><option value="0"' + (i.lifetime ? "" : " selected") + '>No, it charges again</option><option value="1"' + (i.lifetime ? " selected" : "") + '>Yes, bought outright: no ongoing fee</option></select>') +
       (i.domain ? fld("Renewal price (USD)", '<input id="seRenewal" type="number" min="0" step="0.01" value="' + (i.renewalUsd || "") + '" />') : "") +
       (i.domain ? fld("Expires", '<input id="seExpires" type="date" value="' + esc((i.expiresAt || "").slice(0, 10)) + '" />') : "") +
       (i.domain ? fld("Auto-renew", '<select id="seAuto"><option value="">Not set</option><option value="1"' + (i.autoRenew ? " selected" : "") + '>On</option><option value="0"' + (i.autoRenew === false ? " selected" : "") + '>Off</option></select>') : "") +
@@ -1465,6 +1475,7 @@
         at: $("#seAt").value || i.at,
         purpose: $("#sePurpose").value.trim(),
         notes: $("#seNotes").value.trim(),
+        lifetime: $("#seLifetime").value === "1",
         status: $("#seStatus").value
       }).then(function (r) {
         if (!r.ok) { toast("Could not save"); return; }

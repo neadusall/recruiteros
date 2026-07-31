@@ -546,7 +546,12 @@ function collectItemAnomalies(
     }
   }
 
-  if (item.needsAmount && !mine.length && item.status === "active" && item.billing !== "metered") {
+  /* A paid-once licence has no recurring charge, so neither "no price on file" nor "never
+     receipted" is a fault: there is nothing further to collect. It is reported as settled
+     in the sourcing panel rather than raised as a gap here. */
+  if (item.lifetime) {
+    // nothing to chase
+  } else if (item.needsAmount && !mine.length && item.status === "active" && item.billing !== "metered") {
     out.push({
       severity: "high", kind: "no_price_on_file", vendor: item.vendor, itemId: item.id,
       message: `${item.vendor} · ${item.label} has no price on file and no receipt has ever arrived, so it is invisible in the monthly burn.`,
@@ -580,7 +585,7 @@ export interface SourcingRow {
   apiCount: number;
   lastAt?: string;
   /** What the owner still has to do, if anything. */
-  state: "api" | "auto" | "manual" | "unproven" | "not_billed";
+  state: "api" | "auto" | "manual" | "unproven" | "lifetime" | "not_billed";
   advice: string;
 }
 
@@ -600,10 +605,22 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
     const apiCount = mine.filter((r) => r.source === "api").length;
     const own = items.filter((i) => i.vendor === vendor);
     const billed = own.some((i) => i.status === "active" && (i.amountUsd > 0 || i.billing === "metered" || i.needsAmount));
+    /* Bought outright: every live row for this vendor is a paid-once licence, so there is
+       no recurring charge in existence to receipt. Checked FIRST, because "no receipt has
+       ever arrived" is only a problem when something is actually being charged. */
+    const live = own.filter((i) => i.status === "active");
+    const lifetime = live.length > 0 && live.every((i) => i.lifetime);
 
     let state: SourcingRow["state"];
     let advice: string;
-    if (apiCount > 0) {
+    if (lifetime) {
+      state = "lifetime";
+      advice = `Paid once, outright: no subscription, no monthly fee, and nothing recurring to receipt. ` +
+        (mine.length
+          ? `${mine.length} purchase receipt${mine.length > 1 ? "s are" : " is"} on file. `
+          : `The original purchase predates this register, so no receipt is expected. `) +
+        `If growth ever forces a credit top-up, the receipt for that purchase is captured here automatically.`;
+    } else if (apiCount > 0) {
       state = "api";
       advice = `Pulled straight from the vendor's billing API every night (${apiCount} month${apiCount > 1 ? "s" : ""} on file)${emailCount ? `, plus ${emailCount} emailed receipt${emailCount > 1 ? "s" : ""}` : ""}. This one cannot go unreported.`;
     } else if (emailCount > 0) {
@@ -635,6 +652,7 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
     };
   }).sort((a, b) => rank(a.state) - rank(b.state) || a.vendor.localeCompare(b.vendor));
 }
+/** Sort order = how much the owner still has to do about it. Settled rows sink. */
 function rank(s: SourcingRow["state"]): number {
-  return s === "unproven" ? 0 : s === "manual" ? 1 : s === "auto" ? 2 : s === "api" ? 3 : 4;
+  return s === "unproven" ? 0 : s === "manual" ? 1 : s === "auto" ? 2 : s === "api" ? 3 : s === "lifetime" ? 4 : 5;
 }
