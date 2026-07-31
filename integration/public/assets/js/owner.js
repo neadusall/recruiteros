@@ -1044,8 +1044,10 @@
   function sweepAlert(d) {
     var sweep = d && d.inbox && (d.inbox.sweeps || [])[0];
     if (!sweep || sweep.ok) return "";
+    /* The banner stays, because it is why the figures below are estimates. The raw error
+       string does not: it means nothing to an accountant and lives under Collection
+       status, where the owner goes to fix it. */
     return '<div class="burn-alert" style="margin-top:16px"><div class="ba-title">No receipt can be read: the mailbox turned the pull away</div>' +
-      '<p class="note">' + esc(sweep.error || "The last pull failed.") + '</p>' +
       '<p class="note">Until this is fixed the months below can only show the register\'s estimate, because nothing new is arriving to prove them.</p></div>';
   }
 
@@ -1187,7 +1189,11 @@
       var mb = (inbox.mailboxes || []).map(function (b) {
         return esc(b.user) + ' <span class="note">(' + esc(b.host) + (b.inherited ? ", shared with the resume inbox" : "") + ')</span>';
       }).join(", ");
+      /* The mailbox address, the pull clock and the raw error are plumbing: this page gets
+         handed to an accountant, who has no use for them and should not be reading a
+         private inbox address off it. Folded away, one click from the owner. */
       var sweep = (inbox.sweeps || [])[0];
+      html += '<details class="rc-rejects rc-ops"><summary>Collection status</summary><div>';
       html += '<p class="note" style="margin-top:2px">Reading ' + mb + '. ' +
         (inbox.lastSweepAt ? 'Last pull ' + esc(fmtDate(inbox.lastSweepAt)) + '. ' : 'No pull has run yet. ') +
         (sweep
@@ -1197,15 +1203,16 @@
           : "") +
         '</p>';
       if (sweep && sweep.rejects && sweep.rejects.length) {
-        html += '<details class="rc-rejects"><summary>' + sweep.rejects.length + ' billing-looking messages were not imported</summary><ul>';
+        html += '<div class="rc-rejects"><p class="note">' + sweep.rejects.length + ' billing-looking messages were not imported</p><ul>';
         sweep.rejects.forEach(function (r) {
           html += '<li><strong>' + esc(r.subject) + '</strong> <span class="note">' + esc(r.from) + ' · ' + esc(r.date) + ' · ' + esc(r.reason) + '</span></li>';
         });
-        html += '</ul></details>';
+        html += '</ul></div>';
       }
       if (inbox.harvest && inbox.harvest.running) {
         html += '<p class="note">A pull is running now (started ' + esc(fmtDate(inbox.harvest.startedAt)) + '). Rendering each receipt takes a few seconds, so this page refreshes itself when it finishes.</p>';
       }
+      html += '</div></details>';
     }
 
     var rows = d.sourcing || [];
