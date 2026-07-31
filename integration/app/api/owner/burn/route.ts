@@ -10,7 +10,7 @@
  *   GET    ?window=today|7d|30d|all  -> rollup + every line item with its live signal
  *   POST   { vendor, label, ... }    -> add a line item
  *   PATCH  { id, ...fields }         -> edit one (entering an amount marks it verified)
- *   DELETE ?id=…                     -> remove one
+ *   DELETE ?id=… | ?ids=a,b,c        -> remove one or many, and remember them as deleted
  */
 
 import { requireOwner, ok, fail, body } from "../../../../lib/api";
@@ -21,7 +21,7 @@ import {
   listSpendItems,
   addSpendItem,
   updateSpendItem,
-  deleteSpendItem,
+  deleteSpendItems,
   attachLive,
   rollupBurn,
   fetchPhoneOutcomes,
@@ -74,7 +74,9 @@ export async function POST(req: Request) {
   /* Domain maintenance runs through the same endpoint:
        action=import_domains  adopt every domain the sending fleet uses
        action=refresh_domains pull registration/expiry/registrar from the public registry */
-  if (b.action === "import_domains") return ok(await importSendingDomains());
+  /* readopt: pressing Import is an explicit "bring the fleet's domains in", the one thing
+     allowed to undo an earlier domain delete. The automatic adopter does not pass it. */
+  if (b.action === "import_domains") return ok(await importSendingDomains({ readopt: true }));
   if (b.action === "refresh_domains") return ok(await refreshDomainFacts());
   /* action=price_domains  price a whole registrar batch at once. Domains are bought 29
      at a time at one price, so pricing them one row at a time is how the panel stops
@@ -108,8 +110,12 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   const g = requireOwner(req);
   if ("response" in g) return g.response;
-  const id = new URL(req.url).searchParams.get("id");
-  if (!id) return fail("id_required", 400);
-  if (!(await deleteSpendItem(id))) return fail("not_found", 404);
-  return ok({ deleted: true });
+  const q = new URL(req.url).searchParams;
+  /* One row or forty go out as one request, so a bulk delete is one confirmation and one
+     round trip rather than forty of each. */
+  const ids = (q.get("ids") || q.get("id") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!ids.length) return fail("id_required", 400);
+  const deleted = await deleteSpendItems(ids);
+  if (!deleted) return fail("not_found", 404);
+  return ok({ deleted });
 }

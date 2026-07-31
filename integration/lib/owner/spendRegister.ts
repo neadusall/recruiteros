@@ -386,6 +386,20 @@ interface RegisterStore {
   items: SpendItem[];
   /** Seed version already applied, so a redeploy never re-adds rows the owner deleted. */
   seededVersion: number;
+  /**
+   * Rows the owner deleted, remembered so they cannot come back on their own.
+   *
+   * seededVersion alone was not enough. It stops the seed re-running until the NEXT bump,
+   * and this file is bumped often, so a deleted subscription reappeared at whatever deploy
+   * came next and the delete looked like it had never worked. Domains were worse: the
+   * adopter runs on any boot that finds a domain missing a registrar, so a deleted domain
+   * was back within minutes.
+   *
+   * Keys are `vendor|label` for an ordinary row and `domain:<name>` for a domain, because
+   * a domain row's vendor is rewritten to its registrar once the registry answers, and a
+   * key that moves is a key that stops matching.
+   */
+  dismissed?: string[];
 }
 
 /**
@@ -547,7 +561,52 @@ const SEED_MERGES: Array<{
   },
 ];
 
-const store: RegisterStore = { items: [], seededVersion: 0 };
+const store: RegisterStore = { items: [], seededVersion: 0, dismissed: [] };
+
+/* ---- staying deleted ----------------------------------------------------
+   Two different things put rows into this register on their own: the seed, on a version
+   bump, and the domain adopter, on any boot that finds a domain with no registrar yet.
+   Neither knew the difference between a row that had never been added and one the owner
+   had removed on purpose, so a delete quietly undid itself and the console looked broken.
+   The three rules below are pure and exported so scripts/test-spend-dismiss.mts can pin
+   them, the same way the merge and retirement rules are pinned. */
+
+/** The key a row is remembered by once it has been deleted. A domain is keyed by its own
+ *  name, not by vendor + label: the registry lookup rewrites a domain row's vendor to its
+ *  registrar, and a key that moves is a key that stops matching. */
+export function dismissKey(i: Pick<SpendItem, "vendor" | "label" | "domain">): string {
+  return i.domain ? "domain:" + String(i.domain).toLowerCase() : key(i.vendor, i.label);
+}
+
+/** Which seed rows this register is genuinely missing. A row the owner deleted is not a
+ *  row that is missing. */
+export function seedAdditions(
+  items: Array<Pick<SpendItem, "vendor" | "label">>,
+  seed: SeedItem[],
+  dismissed: string[],
+): SeedItem[] {
+  const have = new Set(items.map((i) => key(i.vendor, i.label)));
+  const gone = new Set(dismissed);
+  return seed.filter((s) => !have.has(key(s.vendor, s.label)) && !gone.has(key(s.vendor, s.label)));
+}
+
+/** Which of the fleet's domains the adopter is allowed to bring in. */
+export function domainsToAdopt(fleet: string[], dismissed: string[]): string[] {
+  const gone = new Set(dismissed);
+  return fleet.filter((d) => !gone.has("domain:" + d.toLowerCase()));
+}
+
+/** Pressing Import is the owner asking for the fleet's domains back, so it forgets the
+ *  domain deletions and ONLY those: a deleted subscription is not what that button is
+ *  about, and bringing one back would be a charge reappearing unasked. */
+export function forgetDomainDismissals(dismissed: string[]): string[] {
+  return dismissed.filter((k) => !k.startsWith("domain:"));
+}
+
+function dismiss(k: string): void {
+  if (!store.dismissed) store.dismissed = [];
+  if (store.dismissed.indexOf(k) < 0) store.dismissed.push(k);
+}
 const persist = debouncedSaver(SNAP_KEY, () => store);
 
 let hydrated: Promise<void> | null = null;
@@ -559,6 +618,7 @@ export function ensureSpendRegisterReady(): Promise<void> {
         if (s && Array.isArray(s.items)) {
           store.items = s.items;
           store.seededVersion = Number(s.seededVersion) || 0;
+          store.dismissed = Array.isArray(s.dismissed) ? s.dismissed : [];
         }
         if (store.seededVersion < SEED_VERSION) applySeed();
         else void adoptDomainsOnce();
@@ -569,13 +629,12 @@ export function ensureSpendRegisterReady(): Promise<void> {
 }
 void ensureSpendRegisterReady();
 
-/** Add any seed row not already present (matched on vendor + label), apply the corrections
- *  to rows the owner has never touched, drop the retired ones, then mark the version
- *  applied. Never overwrites or deletes an amount the owner has edited. */
+/** Add any seed row not already present (matched on vendor + label) and not deleted by the
+ *  owner, apply the corrections to rows the owner has never touched, drop the retired ones,
+ *  then mark the version applied. Never overwrites or deletes an amount the owner has
+ *  edited, and never resurrects a row the owner removed. */
 function applySeed(): void {
-  const have = new Set(store.items.map((i) => key(i.vendor, i.label)));
-  for (const s of SEED) {
-    if (have.has(key(s.vendor, s.label))) continue;
+  for (const s of seedAdditions(store.items, SEED, store.dismissed || [])) {
     store.items.push({ ...s, id: rid("spend"), seeded: true, createdAt: nowIso(), updatedAt: nowIso() });
   }
   for (const c of SEED_CORRECTIONS) {
@@ -1080,13 +1139,20 @@ function providerLabel(use: DomainUse): string {
  * apart from refreshing what each domain CARRIES, which changes as mailboxes are added,
  * so this is safe to run repeatedly. Returns the number of new rows.
  */
-export async function importSendingDomains(): Promise<{ added: number; total: number }> {
+export async function importSendingDomains(
+  opts: { readopt?: boolean } = {},
+): Promise<{ added: number; total: number }> {
   await ensureSpendRegisterReady();
   const use = await sendingDomainUse();
 
+  /* Pressing Import is the owner saying "bring the fleet's domains in", which is the one
+     thing that can overrule an earlier delete. The automatic adopter never passes this, so
+     a domain removed by hand stays removed through every boot in between. */
+  if (opts.readopt) store.dismissed = forgetDomainDismissals(store.dismissed || []);
+
   const byDomain = new Map(store.items.filter((i) => i.domain).map((i) => [i.domain as string, i]));
   let added = 0;
-  for (const domain of [...use.keys()].sort()) {
+  for (const domain of domainsToAdopt([...use.keys()].sort(), store.dismissed || [])) {
     const u = use.get(domain) as DomainUse;
     const carries = `${u.inboxes} ${providerLabel(u)} inbox${u.inboxes === 1 ? "" : "es"}.`;
     const existing = byDomain.get(domain);
@@ -1264,12 +1330,21 @@ export async function priceDomains(input: {
 }
 
 export async function deleteSpendItem(id: string): Promise<boolean> {
+  return (await deleteSpendItems([id])) > 0;
+}
+
+/** Remove line items and remember them as deleted. Returns how many rows actually went,
+ *  so the console can tell "removed" from "it was already gone". */
+export async function deleteSpendItems(ids: string[]): Promise<number> {
   await ensureSpendRegisterReady();
-  const n = store.items.length;
-  store.items = store.items.filter((i) => i.id !== id);
-  if (store.items.length === n) return false;
+  const want = new Set(ids.filter(Boolean));
+  if (!want.size) return 0;
+  const going = store.items.filter((i) => want.has(i.id));
+  if (!going.length) return 0;
+  for (const i of going) dismiss(dismissKey(i));
+  store.items = store.items.filter((i) => !want.has(i.id));
   persist();
-  return true;
+  return going.length;
 }
 
 function num(v: unknown): number {

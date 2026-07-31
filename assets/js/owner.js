@@ -658,6 +658,10 @@
    */
   var burnData = null;
   var burnFilter = "all";
+  /* Rows ticked for a bulk delete, keyed by id and shared by all three tables on this
+     page. The register is one list, so a selection made in Domains and one made in
+     One-time purchases go out in the same request. */
+  var burnPicked = {};
 
   var BURN_CATEGORIES = [
     ["search", "Search & job feeds"], ["people", "People & phone data"], ["ai", "AI & voice"],
@@ -683,6 +687,7 @@
       rcptData = res[1];
       var html = '<div class="v-head"><h2>Spend master</h2><p>Every dollar leaving the business: subscriptions, servers, domains, one-time buys and pay-per-use, checked against what the running system is actually calling. Metered cost is for the selected window (' + esc(win) + '); recurring cost is per month.</p></div>';
       html += burnKpis(b);
+      html += '<div class="vault-sel" id="burnSel" hidden></div>';
       html += receiptKpis(rcptData);
       html += sweepAlert(rcptData);
       html += closeWatch(rcptData);
@@ -761,13 +766,13 @@
     }).sort(function (x, y) { return monthlyOf(y) - monthlyOf(x); });
 
     if (!rows.length) return '<p class="note">Nothing matches this filter.</p>';
-    var html = '<div class="otable-wrap"><table class="otable"><thead><tr>' +
+    var html = '<div class="otable-wrap"><table class="otable"><thead><tr>' + pickHead() +
       '<th>Vendor / item</th><th>Billing</th><th class="num">Cost / mo</th><th>Usage against the plan</th><th>Status</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (i) {
-      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' +
+      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' + pickCell(i) +
         '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div>' +
-        '<div class="lr-sub note">' + esc(i.purpose || labelFor(BURN_CATEGORIES, i.category)) + '</div></td>' +
+        '<div class="lr-sub note">' + esc(i.purpose || labelFor(BURN_CATEGORIES, i.category)) + '</div>' + acts(i) + '</td>' +
         '<td>' + esc(labelFor(BURN_BILLING, i.billing)) + '</td>' +
         '<td class="num">' + amountCell(i) + '</td>' +
         '<td>' + usageCell(i) + '</td>' +
@@ -945,16 +950,16 @@
       '<button class="btn btn-sm dmApply">Apply to all ' + n + '</button>' +
       '<span class="note">sets every ' + esc(g.vendor) + ' domain at once</span></div>';
 
-    html += '<div class="otable-wrap"><table class="otable"><thead><tr>' +
+    html += '<div class="otable-wrap"><table class="otable"><thead><tr>' + pickHead() +
       '<th>Domain</th><th>Carries</th><th>Purchased</th><th>Expires</th><th class="num">Days left</th><th class="num">Paid</th><th class="num">Renewal</th><th>Auto</th>' +
       '</tr></thead><tbody>';
     g.rows.forEach(function (i) {
       var days = i.expiresAt ? Math.round((Date.parse(i.expiresAt) - Date.now()) / 86400000) : null;
       var dcls = days == null ? "" : days < 0 ? "margin-bad" : days <= 60 ? "margin-mid" : "margin-good";
-      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' +
+      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' + pickCell(i) +
         '<td><div class="lr-main">' + esc(i.domain) + '</div>' +
         (i.registryError ? '<div class="lr-sub bad-t">' + esc(i.registryError) + '</div>' : '') +
-        '</td>' +
+        acts(i) + '</td>' +
         '<td>' + (i.mailboxCount ? esc(i.mailboxCount + ' ' + (i.mailProvider || '') + ' inbox' + (i.mailboxCount === 1 ? '' : 'es')) : '<span class="note">no mailboxes</span>') + '</td>' +
         '<td>' + esc((i.registeredAt || i.at || "").slice(0, 10) || "-") + '</td>' +
         '<td>' + (i.expiresAt ? esc(i.expiresAt.slice(0, 10)) : '<span class="note">unknown</span>') + '</td>' +
@@ -975,10 +980,11 @@
       html += '<p class="note">Nothing recorded yet. Add domain buys, hardware, and prepaid credit here so the true cost of the business is complete.</p>';
       return html + '</div>';
     }
-    html += '<div class="otable-wrap"><table class="otable"><thead><tr><th>Vendor / item</th><th>Type</th><th>Date</th><th class="num">Amount</th></tr></thead><tbody>';
+    html += '<div class="otable-wrap"><table class="otable"><thead><tr>' + pickHead() +
+      '<th>Vendor / item</th><th>Type</th><th>Date</th><th class="num">Amount</th></tr></thead><tbody>';
     rows.forEach(function (i) {
-      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' +
-        '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div><div class="lr-sub note">' + esc(i.purpose || "") + '</div></td>' +
+      html += '<tr class="clickrow" data-spend="' + esc(i.id) + '">' + pickCell(i) +
+        '<td><div class="lr-main">' + esc(i.vendor) + ' · ' + esc(i.label) + '</div><div class="lr-sub note">' + esc(i.purpose || "") + '</div>' + acts(i) + '</td>' +
         '<td>' + esc(labelFor(BURN_BILLING, i.billing)) + (i.lifetime ? ' <span class="pill active">No ongoing fee</span>' : '') + '</td>' +
         '<td>' + esc(i.at || "") + '</td>' +
         '<td class="num">' + oneTimeAmountCell(i) + '</td></tr>';
@@ -1012,6 +1018,77 @@
     }).join("") + '</select>';
   }
 
+  /* Every table on this page hands the same two things to a row: Edit, which opens the
+     drawer that clicking the row already opened, and Delete, which the row had no way to
+     reach at all. Edit is spelled out because a row being clickable was something you had
+     to already know.
+     They sit UNDER the row's name rather than in a column of their own. Domains is eight
+     columns wide before anything is added to it, and a ninth put both links past the right
+     edge at 1024px, where they can only be reached by scrolling the table sideways: an
+     action you cannot see is not an action the row has. */
+  function pickHead() {
+    return '<th class="row-pick"><input type="checkbox" class="burn-box" data-pickall="1" title="Select every row in this table"></th>';
+  }
+  function pickCell(i) {
+    return '<td class="row-pick"><input type="checkbox" class="burn-box" data-pick="' + esc(i.id) + '"' +
+      (burnPicked[i.id] ? ' checked' : '') + '></td>';
+  }
+  function acts(i) {
+    return '<div class="row-acts"><a class="row-mini" data-bedit="' + esc(i.id) + '">Edit</a>' +
+      '<a class="row-mini danger" data-bdel="' + esc(i.id) + '">Delete</a></div>';
+  }
+
+  function burnItem(id) {
+    return ((burnData && burnData.items) || []).filter(function (x) { return x.id === id; })[0];
+  }
+  function burnName(id) {
+    var i = burnItem(id);
+    return i ? (i.domain || (i.vendor + " · " + i.label)) : "this line item";
+  }
+
+  /* One confirmation and one request, whether it is a row or forty. The two ways a row
+     can come back are named in the prompt, because a delete that quietly undoes itself at
+     the next deploy is worse than one that never happened. */
+  function deleteBurnRows(ids, what) {
+    if (!ids.length) return;
+    if (!confirm("Remove " + (what || "this line item") + " from the register?\n\n" +
+      "Its cost stops counting toward the burn figure. A line the register seeds itself stays gone; " +
+      "a deleted domain comes back only if you press Import from sending fleet.")) return;
+    send("/owner/burn?ids=" + encodeURIComponent(ids.join(",")), "DELETE").then(function (r) {
+      if (!r.ok) { toast(r.status === 404 ? "Already gone" : "Could not remove"); return; }
+      var n = (r.data && r.data.deleted) || ids.length;
+      ids.forEach(function (id) { delete burnPicked[id]; });
+      toast(n === 1 ? "Line item removed" : n + " line items removed");
+      closeDrawer();
+      viewBurn();
+    });
+  }
+
+  /* The bar only exists while something is ticked, and it prunes ids that are no longer
+     on screen so a delete cannot leave a phantom count behind. */
+  function syncBurnSel() {
+    var live = {};
+    ((burnData && burnData.items) || []).forEach(function (i) { if (burnPicked[i.id]) live[i.id] = true; });
+    burnPicked = live;
+    var ids = Object.keys(burnPicked);
+    var bar = $("#burnSel");
+    if (!bar) return;
+    if (!ids.length) { bar.hidden = true; bar.innerHTML = ""; return; }
+    bar.hidden = false;
+    bar.innerHTML = '<span class="vault-sel-n">' + ids.length + ' selected</span>' +
+      '<span style="flex:1"></span>' +
+      '<a class="row-mini" id="burnSelNone">Clear selection</a>' +
+      '<a class="btn btn-danger btn-sm" id="burnSelDel">Delete selected</a>';
+    $("#burnSelNone").addEventListener("click", function () {
+      burnPicked = {};
+      $$("#view input.burn-box").forEach(function (c) { c.checked = false; });
+      syncBurnSel();
+    });
+    $("#burnSelDel").addEventListener("click", function () {
+      deleteBurnRows(ids, ids.length === 1 ? burnName(ids[0]) : ids.length + " line items");
+    });
+  }
+
   function wireBurn() {
     $$("#burnFilters .burn-chip").forEach(function (c) {
       c.addEventListener("click", function () { burnFilter = c.dataset.filter; viewBurn(); });
@@ -1019,6 +1096,34 @@
     $$("#view .clickrow[data-spend]").forEach(function (tr) {
       tr.addEventListener("click", function () { openSpendItem(tr.dataset.spend); });
     });
+    /* The whole row opens the drawer, so the tick box and the two links have to stop the
+       click getting there, or ticking a box to delete it would open the editor instead. */
+    $$("#view td.row-pick, #view .row-acts").forEach(function (el) {
+      el.addEventListener("click", function (ev) { ev.stopPropagation(); });
+    });
+    $$("#view [data-bedit]").forEach(function (a) {
+      a.addEventListener("click", function () { openSpendItem(a.dataset.bedit); });
+    });
+    $$("#view [data-bdel]").forEach(function (a) {
+      a.addEventListener("click", function () { deleteBurnRows([a.dataset.bdel], burnName(a.dataset.bdel)); });
+    });
+    $$("#view [data-pick]").forEach(function (c) {
+      c.addEventListener("change", function () {
+        if (c.checked) burnPicked[c.dataset.pick] = true; else delete burnPicked[c.dataset.pick];
+        syncBurnSel();
+      });
+    });
+    // Select-all is per table, because that is the group you can actually see.
+    $$("#view [data-pickall]").forEach(function (c) {
+      c.addEventListener("change", function () {
+        $$("[data-pick]", c.closest("table")).forEach(function (b) {
+          b.checked = c.checked;
+          if (c.checked) burnPicked[b.dataset.pick] = true; else delete burnPicked[b.dataset.pick];
+        });
+        syncBurnSel();
+      });
+    });
+    syncBurnSel();
     // Price a whole registrar batch in one call. A blank field is left untouched
     // rather than sent as zero, so setting only the renewal price is a real option.
     $$("#view .dm-batch").forEach(function (box) {
@@ -2281,10 +2386,7 @@
       });
     });
     $("#seDelete").addEventListener("click", function () {
-      send("/owner/burn?id=" + encodeURIComponent(i.id), "DELETE").then(function (r) {
-        if (!r.ok) { toast("Could not remove"); return; }
-        toast("Removed"); closeDrawer(); viewBurn();
-      });
+      deleteBurnRows([i.id], burnName(i.id));
     });
   }
 

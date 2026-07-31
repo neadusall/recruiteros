@@ -457,6 +457,17 @@
 .vault-acts .vault-mini:first-child { margin-left: 0; }
 .vault-mini:hover { text-decoration: underline; }
 
+/* Per-row Edit / Delete on an ordinary .otable, which is how Spend master is drawn. Same
+   text-link treatment as the vault: a red button on every row would make destruction the
+   loudest thing on a page you came to read costs from. The pair sits under the row's name
+   rather than in a trailing column, so a wide table cannot push it off the right edge. */
+.row-acts { margin-top: 4px; white-space: nowrap; }
+.row-mini { display: inline-block; margin-left: 10px; font-size: 11.5px; font-weight: 600; color: var(--brand); cursor: pointer; white-space: nowrap; }
+.row-acts .row-mini:first-child { margin-left: 0; }
+.row-mini.danger { color: var(--danger); }
+.row-mini:hover { text-decoration: underline; }
+.otable th.row-pick, .otable td.row-pick { width: 26px; padding-left: 4px; padding-right: 0; text-align: center; vertical-align: middle; }
+
 .vault-warn { border-color: var(--danger); }
 .vault-warn h3 { color: var(--danger); }
 
@@ -479,6 +490,10 @@
      per-row Delete link is how you remove an account on a phone. */
   .vault-table th.vault-pick, .vault-table td.vault-pick { display: none !important; }
   .vault-sel { display: none; }
+  /* Spend master's tables scroll sideways rather than stacking, so a tick column here is
+     a column you have to scroll to reach. Multi-select goes away and the per-row Delete
+     link is how a line is removed on a phone. */
+  .otable th.row-pick, .otable td.row-pick { display: none !important; }
 }
 /* what kind of money a row is: recurring, one-off, usage, or off the register entirely */
 .rc-kind {
