@@ -138,6 +138,10 @@ export interface SweepReport {
    *  rather than dropped, so the second kind cannot hide among the first. */
   skippedNotOurs: number;
   otherSpend: Array<{ vendor: string; amountUsd: number; chargedAt: string; from: string }>;
+  /** Receipts filed, per folder. A receipt rescued from Spam is worth knowing about:
+   *  it means a vendor's mail is being filtered, which would otherwise read as a month
+   *  with no charge in it. */
+  byFolder: Record<string, number>;
   /** Messages that linked to a document which could not be fetched, with the reason. */
   documentFailures: Array<{ subject: string; from: string; reason: string }>;
   /** Messages that looked like billing but could not be turned into a row, with why. */
@@ -916,8 +920,37 @@ export function billingMailboxes(): MailboxCfg[] {
   return out;
 }
 
-/** Folders worth scanning. Gmail's All Mail catches anything already archived or filtered. */
-const FOLDERS = ["INBOX", "Archive", "[Gmail]/All Mail", "Receipts", "Billing"];
+/**
+ * Folders worth scanning. Anything not on this list is not read, and a folder a provider
+ * does not have is skipped without complaint.
+ *
+ * ── Why Spam and Trash are on it ────────────────────────────────────────────────
+ * Gmail's All Mail catches everything archived or filtered EXCEPT those two, which it
+ * excludes by design. That leaves the two ways a real invoice most often goes missing:
+ *
+ *   SPAM is the serious one. A vendor's receipt caught by a filter is invisible, and a
+ *   month with a filtered receipt looks exactly like a month with no charge. The books
+ *   would report a gap that does not exist, and no amount of staring at the console
+ *   would ever say why.
+ *
+ *   TRASH is the ordinary one. People delete a receipt email once the card has cleared;
+ *   the invoice behind it is still real and still has to be accounted for. Gmail keeps
+ *   deleted mail for 30 days, so this only ever recovers the recent past, which is
+ *   exactly the window the nightly sweep works in.
+ *
+ * Reading them is safe in a way that is worth stating: every folder is opened READ-ONLY,
+ * so nothing is un-deleted, nothing is marked as read, nothing is moved out of Spam and
+ * no filter is trained by this. And a charge found twice in two folders is not filed
+ * twice: `isSameCharge` settles it, the same test the duplicate sweep uses.
+ *
+ * Names differ per provider, so both dialects are listed: Gmail brackets its special
+ * folders, Microsoft 365 spells them out.
+ */
+const FOLDERS = [
+  "INBOX", "Archive", "[Gmail]/All Mail", "Receipts", "Billing",
+  /* the two All Mail leaves out */
+  "[Gmail]/Spam", "[Gmail]/Trash", "Junk", "Junk Email", "Deleted Items", "Trash", "Spam",
+];
 
 /**
  * What actually went wrong, in words the owner can act on.
@@ -959,7 +992,7 @@ export async function harvestMailbox(
     at: nowIso(), mailbox: cfg.user, ok: false, since: since.toISOString().slice(0, 10),
     scanned: 0, billingCandidates: 0, imported: 0, duplicates: 0, skippedNotCharge: 0,
     unparsedAmount: 0, shotsRendered: 0, shotFailures: 0,
-    documentsLinked: 0, documentFailures: [], skippedNotOurs: 0, otherSpend: [], rejects: [],
+    documentsLinked: 0, documentFailures: [], skippedNotOurs: 0, otherSpend: [], byFolder: {}, rejects: [],
   };
   await ensureReceiptsReady();
   const items = await listSpendItems();
@@ -1016,6 +1049,7 @@ export async function harvestMailbox(
           }
           if (res.status === "imported") {
             report.imported += 1;
+            report.byFolder[folder] = (report.byFolder[folder] || 0) + 1;
             if (res.linked) report.documentsLinked += 1;
             if (res.shot) report.shotsRendered += 1;
             if (res.shotError) report.shotFailures += 1;
@@ -1804,7 +1838,7 @@ export async function harvestAll(monthsBack = 3): Promise<{ ok: boolean; reason?
         at: nowIso(), mailbox: box.user, ok: false, error: e?.message?.slice(0, 300) || "sweep failed",
         since: since.toISOString().slice(0, 10), scanned: 0, billingCandidates: 0, imported: 0,
         duplicates: 0, skippedNotCharge: 0, unparsedAmount: 0, shotsRendered: 0, shotFailures: 0,
-        documentsLinked: 0, documentFailures: [], skippedNotOurs: 0, otherSpend: [], rejects: [],
+        documentsLinked: 0, documentFailures: [], skippedNotOurs: 0, otherSpend: [], byFolder: {}, rejects: [],
       })));
     }
   } finally {

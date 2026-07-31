@@ -1606,6 +1606,20 @@
             : '<span class="bad-t">Last pull failed: ' + esc(sweep.error || "unknown error") + '</span>')
           : "") +
         '</p>';
+      /* A receipt found in Spam means that vendor's mail is being filtered, which would
+         otherwise read as a month with no charge in it. Worth one line, and worth acting
+         on in the mail client rather than here. */
+      if (sweep && sweep.byFolder) {
+        var junk = 0;
+        Object.keys(sweep.byFolder).forEach(function (f) {
+          if (/spam|junk|trash|deleted/i.test(f)) junk += sweep.byFolder[f];
+        });
+        if (junk) {
+          html += '<p class="note"><b>' + junk + ' receipt' + (junk === 1 ? '' : 's') +
+            ' came out of Spam or Trash.</b> They are filed, but that vendor\'s mail is being ' +
+            'filtered or deleted, so mark it as not junk in your mail client or the next one may be missed.</p>';
+        }
+      }
       /* Charges that are real but are not this company's. A personal mailbox carries
          plenty of them and they are kept out of the books. They are still SHOWN, because
          a vendor genuinely being paid and never registered looks identical from here,
