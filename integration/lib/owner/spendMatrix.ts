@@ -115,7 +115,7 @@ export interface Anomaly {
     | "missing_receipt" | "amount_mismatch" | "price_change" | "duplicate_charge"
     | "unexpected_charge" | "unmatched_vendor" | "charged_after_cancel" | "no_price_on_file"
     | "refund" | "metered_spike" | "low_confidence" | "render_failed" | "never_receipted"
-    | "inbox_unconfigured" | "gap_in_series" | "non_usd";
+    | "inbox_unconfigured" | "gap_in_series" | "non_usd" | "pull_failed";
   period?: string;
   vendor: string;
   itemId?: string;
@@ -583,19 +583,59 @@ export interface SourcingRow {
   manualCount: number;
   /** Figures pulled straight from the vendor's own billing API. */
   apiCount: number;
+  /** Invoices downloaded from the vendor's billing page by the portal puller. */
+  portalCount: number;
   lastAt?: string;
   /** What the owner still has to do, if anything. */
-  state: "api" | "auto" | "manual" | "unproven" | "lifetime" | "not_billed";
+  state: "api" | "auto" | "portal" | "manual" | "pull_failed" | "unproven" | "lifetime" | "not_billed";
   advice: string;
+  /**
+   * Health of the automated portal pull, when one is configured. This is the half of the
+   * panel that answers "is it still working", so a puller that quietly died three weeks ago
+   * cannot pass for a healthy one.
+   */
+  pull?: {
+    configured: boolean;
+    ok: boolean;
+    at?: string;
+    /** Machine-readable failure class, for the console to phrase. */
+    failure?: string;
+    error?: string;
+    fix?: string;
+    filed?: number;
+    shot?: string;
+    /** True when the only thing standing between this and working is a sign-in. */
+    needsLogin?: boolean;
+  };
+}
+
+/** What the puller reported last time, keyed by vendor. Shape kept loose so spendMatrix
+ *  does not have to import the puller (and with it, Playwright's types). */
+export interface PullHealth {
+  vendor: string;
+  ok: boolean;
+  at: string;
+  failure?: string;
+  error?: string;
+  fix?: string;
+  filed: number;
+  shot?: string;
 }
 
 /**
  * The panel that keeps the report honest going forward: for every vendor in the register,
  * whether receipts are arriving on their own, and if not, exactly what to do about it.
  */
-export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): SourcingRow[] {
+export function sourcingStatus(
+  items: SpendItem[],
+  receipts: Receipt[],
+  opts: { pullers?: string[]; pulls?: PullHealth[] } = {},
+): SourcingRow[] {
   const vendors = [...new Set(items.map((i) => i.vendor))];
   for (const r of receipts) if (!vendors.includes(r.vendor)) vendors.push(r.vendor);
+
+  const pullerFor = (v: string) => (opts.pullers || []).some((p) => p.toLowerCase() === v.toLowerCase());
+  const pullFor = (v: string) => (opts.pulls || []).find((p) => p.vendor.toLowerCase() === v.toLowerCase());
 
   return vendors.map((vendor) => {
     const src = vendorSourceFor(vendor) || VENDOR_SOURCES.find((s) => vendor.toLowerCase().includes(s.vendor.toLowerCase()));
@@ -603,6 +643,9 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
     const emailCount = mine.filter((r) => r.source === "email").length;
     const manualCount = mine.filter((r) => r.source === "manual").length;
     const apiCount = mine.filter((r) => r.source === "api").length;
+    const portalCount = mine.filter((r) => r.source === "portal").length;
+    const hasPuller = pullerFor(vendor);
+    const pull = pullFor(vendor);
     const own = items.filter((i) => i.vendor === vendor);
     const billed = own.some((i) => i.status === "active" && (i.amountUsd > 0 || i.billing === "metered" || i.needsAmount));
     /* Bought outright: every live row for this vendor is a paid-once licence, so there is
@@ -620,6 +663,19 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
           ? `${mine.length} purchase receipt${mine.length > 1 ? "s are" : " is"} on file. `
           : `The original purchase predates this register, so no receipt is expected. `) +
         `If growth ever forces a credit top-up, the receipt for that purchase is captured here automatically.`;
+    } else if (hasPuller && (!pull || !pull.ok)) {
+      /* A configured puller that is not working is the loudest thing on this panel. It is
+         ranked above a vendor that never reported at all, because this one is a machine
+         that USED to work and stopped: nobody is watching the mailbox for it. */
+      state = "pull_failed";
+      advice = !pull
+        ? `The automatic download is set up but has not run yet. It runs with the nightly receipt sweep${portalCount ? `; ${portalCount} invoice${portalCount > 1 ? "s are" : " is"} already on file` : ""}.`
+        : `${pull.failure === "no_session" || pull.failure === "session_expired"
+            ? "The saved sign-in for this vendor has lapsed, so the download could not run."
+            : `The automatic download failed: ${pull.error || "reason unknown"}.`} ${pull.fix || ""}`.trim();
+    } else if (portalCount > 0) {
+      state = "portal";
+      advice = `The invoice is downloaded from the vendor's own billing page every night (${portalCount} on file)${emailCount ? `, plus ${emailCount} emailed receipt${emailCount > 1 ? "s" : ""}` : ""}. Email never worked for this one, so the document is fetched directly.`;
     } else if (apiCount > 0) {
       state = "api";
       advice = `Pulled straight from the vendor's billing API every night (${apiCount} month${apiCount > 1 ? "s" : ""} on file)${emailCount ? `, plus ${emailCount} emailed receipt${emailCount > 1 ? "s" : ""}` : ""}. This one cannot go unreported.`;
@@ -646,13 +702,48 @@ export function sourcingStatus(items: SpendItem[], receipts: Receipt[]): Sourcin
       portal: src?.portal,
       api: src?.api,
       setup: src?.setup,
-      emailCount, manualCount, apiCount,
+      emailCount, manualCount, apiCount, portalCount,
       lastAt: mine.map((r) => r.chargedAt).sort().slice(-1)[0],
       state, advice,
+      pull: hasPuller
+        ? {
+            configured: true,
+            ok: !!pull?.ok,
+            at: pull?.at,
+            failure: pull?.failure,
+            error: pull?.error,
+            fix: pull?.fix,
+            filed: pull?.filed,
+            shot: pull?.shot,
+            needsLogin: pull?.failure === "no_session" || pull?.failure === "session_expired",
+          }
+        : undefined,
     };
   }).sort((a, b) => rank(a.state) - rank(b.state) || a.vendor.localeCompare(b.vendor));
 }
+/**
+ * A broken puller belongs in the alert list, not only in the sourcing table. The whole point
+ * of automating the download is that nobody is watching the mailbox for that vendor any
+ * more, so the automation going quiet has to be as loud as a missing receipt.
+ */
+export function portalPullAnomalies(pulls: PullHealth[]): Anomaly[] {
+  return pulls
+    .filter((p) => !p.ok)
+    .map((p): Anomaly => ({
+      severity: p.failure === "no_rows" ? "low" : "high",
+      kind: "pull_failed",
+      vendor: p.vendor,
+      message: p.failure === "no_session"
+        ? `${p.vendor}: the automatic invoice download has never been signed in, so no month can be proved from the portal.`
+        : p.failure === "session_expired"
+          ? `${p.vendor}: the automatic invoice download stopped working on ${(p.at || "").slice(0, 10)} because the saved sign-in lapsed.`
+          : `${p.vendor}: the automatic invoice download failed on ${(p.at || "").slice(0, 10)} (${p.error || "reason unknown"}).`,
+      fix: p.fix,
+    }));
+}
+
 /** Sort order = how much the owner still has to do about it. Settled rows sink. */
 function rank(s: SourcingRow["state"]): number {
-  return s === "unproven" ? 0 : s === "manual" ? 1 : s === "auto" ? 2 : s === "api" ? 3 : s === "lifetime" ? 4 : 5;
+  return s === "pull_failed" ? 0 : s === "unproven" ? 1 : s === "manual" ? 2 : s === "auto" ? 3
+    : s === "portal" ? 4 : s === "api" ? 5 : s === "lifetime" ? 6 : 7;
 }

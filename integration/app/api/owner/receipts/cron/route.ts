@@ -20,6 +20,8 @@ import { harvestAll, listReceipts } from "../../../../../lib/owner/receipts";
 import { listSpendItems } from "../../../../../lib/owner/spendRegister";
 import { buildSpendMatrix } from "../../../../../lib/owner/spendMatrix";
 import { pullVendorApis } from "../../../../../lib/owner/vendorPullers";
+import { pullAllPortals } from "../../../../../lib/owner/portalPullers";
+import { portalPullAnomalies } from "../../../../../lib/owner/spendMatrix";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,9 +41,17 @@ async function run(req: Request) {
 
   const pulls = withVendors ? await pullVendorApis(monthsBack).catch(() => []) : [];
 
+  /* Vendors whose receipts never arrive by mail are fetched from their own billing page by
+     a logged-in browser. This is the slow half of the tick (a Chromium per vendor), and it
+     is deliberately not allowed to take the sweep down with it: a puller that throws still
+     returns a report, and a report that says "failed" is the point of running it. */
+  const portals = url.searchParams.get("portals") !== "0"
+    ? await pullAllPortals(monthsBack).catch(() => [])
+    : [];
+
   if (!wait) {
     const { startHarvest } = await import("../../../../../lib/owner/receipts");
-    return NextResponse.json({ ok: true, pulls, ...startHarvest(monthsBack) });
+    return NextResponse.json({ ok: true, pulls, portals, ...startHarvest(monthsBack) });
   }
 
   const result = await harvestAll(monthsBack);
@@ -52,6 +62,12 @@ async function run(req: Request) {
     ok: result.ok || pulls.some((p) => p.ok),
     reason: result.reason,
     pulls,
+    portals,
+    /* Named separately so a scheduler log line is enough to see a puller has gone dark,
+       without reading the whole report. */
+    portalFailures: portalPullAnomalies(
+      portals.map((p) => ({ vendor: p.vendor, ok: p.ok, at: p.at, failure: p.failure, error: p.error, fix: p.fix, filed: p.filed, shot: p.shot })),
+    ).map((a) => a.message),
     reports: result.reports,
     books: {
       months: matrix.months,

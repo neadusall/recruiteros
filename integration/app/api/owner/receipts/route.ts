@@ -22,8 +22,12 @@ import {
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
   type Receipt,
 } from "../../../../lib/owner/receipts";
-import { buildSpendMatrix, sourcingStatus } from "../../../../lib/owner/spendMatrix";
+import { buildSpendMatrix, sourcingStatus, portalPullAnomalies } from "../../../../lib/owner/spendMatrix";
 import { VENDOR_SOURCES } from "../../../../lib/owner/receiptSources";
+import {
+  PORTAL_PULLER_VENDORS, lastPortalPulls, ensurePortalPullsReady, portalSessionState,
+  portalRecipeFor, pullPortal, pullAllPortals,
+} from "../../../../lib/owner/portalPullers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,13 +37,28 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const months = Number(new URL(req.url).searchParams.get("months")) || 12;
 
-  const [items, receipts] = await Promise.all([listSpendItems(), listReceipts()]);
+  const [items, receipts] = await Promise.all([listSpendItems(), listReceipts(), ensurePortalPullsReady()]);
   const boxes = billingMailboxes();
   const matrix = buildSpendMatrix(items, receipts, { months, inboxConfigured: boxes.length > 0 });
 
+  /* Portal pulls report their own health. A puller that broke is an anomaly in its own
+     right, so it rides in the same alert list as a missing receipt rather than hiding in a
+     table nobody scrolls to. */
+  const pulls = lastPortalPulls();
+  matrix.anomalies = [...portalPullAnomalies(pulls), ...matrix.anomalies];
+
+  const sessions = await Promise.all(
+    PORTAL_PULLER_VENDORS.map(async (v) => ({ vendor: v, ...(await portalSessionState(v)), path: undefined })),
+  );
+
   return ok({
     matrix,
-    sourcing: sourcingStatus(items, receipts),
+    sourcing: sourcingStatus(items, receipts, { pullers: PORTAL_PULLER_VENDORS, pulls }),
+    portal: {
+      vendors: PORTAL_PULLER_VENDORS.map((v) => ({ ...portalRecipeFor(v), vendor: v })),
+      pulls,
+      sessions,
+    },
     /* The 25 most recent receipts power the drawer without shipping every artifact. */
     receipts: receipts.slice(0, 60).map(publicReceipt),
     inbox: {
@@ -98,11 +117,18 @@ export async function POST(req: Request) {
     return ok({ receipt: publicReceipt(receipt) });
   }
 
-  const b = await body<{ action?: string; monthsBack?: number }>(req);
+  const b = await body<{ action?: string; monthsBack?: number; vendor?: string }>(req);
   if (b?.action === "harvest") {
     const res = startHarvest(Number(b.monthsBack) || 3);
     if (!res.started) return ok({ started: false, reason: res.reason, mailboxes: res.mailboxes });
     return ok({ started: true, mailboxes: res.mailboxes });
+  }
+  /* "Try again" from the console. Awaited rather than detached: the owner pressed it to find
+     out whether it works now, so they get the answer, including the failure reason. */
+  if (b?.action === "pullPortal") {
+    const monthsBack = Number(b.monthsBack) || 3;
+    const reports = b.vendor ? [await pullPortal(b.vendor, { monthsBack })] : await pullAllPortals(monthsBack);
+    return ok({ pulls: reports });
   }
   return fail("unknown_action", 400);
 }
