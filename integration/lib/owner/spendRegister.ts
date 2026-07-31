@@ -154,10 +154,10 @@ const SEED: SeedItem[] = [
   },
   {
     vendor: "RapidAPI", label: "Real-Time Web Search", category: "search", billing: "monthly",
-    amountUsd: 75, at: "2026-06-01", status: "active", verified: false,
+    amountUsd: 150, at: "2026-06-01", status: "active", verified: true,
     purpose: "Paid Google SERP for decision-maker naming (the site:linkedin.com/in X-ray), bought to replace the throttled free scrapers.",
     impact: "The naming bottleneck. A company lead is worth nothing until it has a named decision maker attached, and that step currently runs on free scrapers measured at a 0% success rate. This is the piece that turns company signals into people you can actually contact.",
-    notes: "RAPID_WEBSEARCH_KEY is not set anywhere, so lib/inmarket/webSearch.ts no-ops. Confirm whether this subscription is still active: it appeared on the RapidAPI billing list at $150 but not on the later one.",
+    notes: "PRICE PROVED BY THE INVOICE: $150/mo, Mega plan, charged 2026-07-01 (rapidapi-2026-07-01-real-time-web-search, filed in the receipt vault). It was seeded at $75 off an ambiguous billing screenshot. Still active, and RAPID_WEBSEARCH_KEY is not set anywhere, so lib/inmarket/webSearch.ts no-ops: this is the most expensive line in the business that the engine cannot call at all, $1,800/yr for a feed that has never answered a request. Wire it or cancel it.",
     link: { rapidHost: "real-time-web-search.p.rapidapi.com", envKeys: ["RAPID_WEBSEARCH_KEY"] },
   },
   {
@@ -398,7 +398,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 11;
+const SEED_VERSION = 12;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -447,6 +447,16 @@ const SEED_CORRECTIONS: Array<{ vendor: string; label: string; patch: Partial<Sp
     // confirmed (2026-07-31) the Mailcow box is billed MONTHLY.
     vendor: "RackNerd", label: "Mailcow mail server (8GB)",
     patch: { billing: "monthly" },
+  },
+  {
+    // NOT a guess this time: the RapidAPI portal invoice of 2026-07-01 reads
+    // "Mega ($150.00 /mo)", so the $75 seeded off the ambiguous billing screenshot was
+    // wrong by half. The receipt is in the vault, which is why this one arrives verified.
+    vendor: "RapidAPI", label: "Real-Time Web Search",
+    patch: {
+      amountUsd: 150, verified: true, needsAmount: false,
+      notes: SEED.find((s) => s.label === "Real-Time Web Search")?.notes,
+    },
   },
   {
     // The three validation nodes are NOT on the mail server's cycle: the owner corrected
