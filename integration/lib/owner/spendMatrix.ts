@@ -81,6 +81,8 @@ export interface MatrixRow {
   billing: string;
   status: string;
   monthlyUsd: number;
+  /** What this line buys the business, shown on hover so a row explains itself. */
+  purpose?: string;
   /** Bought outright: nothing renews, so nothing is ever due again. */
   lifetime?: boolean;
   /** On the register with no price yet: the month figures are unknown, not zero. */
@@ -319,7 +321,7 @@ export function buildSpendMatrix(
     rows.push({
       itemId: item.id, vendor: item.vendor, label: item.label, category: item.category,
       billing: item.billing, status: item.status, monthlyUsd: monthlyEquivalent(item),
-      lifetime: item.lifetime, needsAmount: item.needsAmount, domain: item.domain,
+      purpose: item.purpose, lifetime: item.lifetime, needsAmount: item.needsAmount, domain: item.domain,
       channel: src?.channel, portal: src?.portal, emailProven, cells,
       totalCountedUsd: round2(cells.reduce((s, c) => s + c.countedUsd, 0)),
       totalVerifiedUsd: round2(cells.reduce((s, c) => s + (c.verified ? c.countedUsd : 0), 0)),

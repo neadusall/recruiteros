@@ -292,6 +292,125 @@ const SEED: SeedItem[] = [
     purpose: "Holds rendered personalized videos for the 4K/day video fleet.",
     link: { envKeys: ["ROS_S3_BUCKET"] },
   },
+
+  /* ---- Every remaining account the platform runs on -----------------------------------
+   *
+   * The register started as the things with a known price, which quietly made it a list of
+   * what had already been costed rather than a list of what the business pays for. These
+   * are the rest, taken one for one off the Passwords catalogue (lib/owner/vaultCatalog).
+   * They go in with NO amount on purpose: the row exists so it can be seen, priced, and
+   * pointed at a receipt route, one at a time. A tool that is genuinely free stays here
+   * too, priced at zero, because "we checked and it costs nothing" is an answer and a
+   * blank space is not. */
+  {
+    vendor: "Sending.ac", label: "Managed mailboxes (tal + lume domains)", category: "email", billing: "monthly",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "The 1,450 managed mailboxes the cold-email fleet actually sends from.",
+    impact: "Every BD email leaves through these. Losing them stops outbound entirely, and mailbox count is the hard ceiling on how many first emails a day the business can send.",
+    notes: "Billed per mailbox, so the figure moves with the fleet size. Sign-in goes through sso.ac.",
+  },
+  {
+    vendor: "Microsoft 365", label: "lumesp.com mailboxes", category: "email", billing: "monthly",
+    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
+    purpose: "The real human mailboxes on lumesp.com, including ryan@lumesp.com, and the DKIM records for the domain.",
+    impact: "Reply handling and anything a candidate or client sends to a named person. Also the mailbox the receipt sweep is meant to read.",
+  },
+  {
+    vendor: "Instantly", label: "Outreach sending (alternate provider)", category: "email", billing: "monthly",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "Second cold-email sending provider, wired behind a feature flag.",
+    notes: "Confirm whether this is still subscribed: the engine sends through the Sending.ac pool by default, so this may be paying for a path nothing takes.",
+  },
+  {
+    vendor: "Mailcow", label: "Self-hosted mail server (mail.lumesp.com)", category: "email", billing: "monthly",
+    amountUsd: 0, at: "2026-06-01", status: "active",
+    purpose: "The mail server behind the Lume sending mailboxes.",
+    notes: "Open source: there is no licence fee and no invoice will ever arrive. The real cost of it is the RackNerd 8GB box it runs on, which is its own line.",
+  },
+  {
+    vendor: "Vercel", label: "Marketing site hosting", category: "infra", billing: "monthly",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "Hosting for claimie.ai, the GTM OS site and glassnwa.com.",
+    notes: "Free tier covers a lot of this; confirm whether a Pro seat is being billed.",
+  },
+  {
+    vendor: "AWS", label: "S3 and anything else on the account", category: "infra", billing: "metered",
+    amountUsd: 0, at: "2026-07-01", status: "active", needsAmount: true,
+    purpose: "Object storage for the video fleet, if that bucket is billed by AWS rather than Hetzner.",
+    notes: "Settle which provider actually holds the bucket: this row and the Object storage row must not both be counted for the same bytes.",
+  },
+  {
+    vendor: "GitHub", label: "Repositories", category: "software", billing: "monthly",
+    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
+    purpose: "Every repo, and the source the deploy watcher pulls from.",
+    notes: "Private repos are free on the personal plan, so this may genuinely be $0. Confirm once and set it.",
+  },
+  {
+    vendor: "Cloudflare", label: "DNS", category: "domain", billing: "monthly",
+    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
+    purpose: "DNS for the tal fleet, talentrecru.com and the sending domains.",
+    notes: "DNS itself is free; anything billed here would be a paid add-on. Confirm and set it to zero if nothing is.",
+  },
+  {
+    vendor: "Dynadot", label: "Domain registrations", category: "domain", billing: "one_time",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "Registrar for the tal-brand fleet, talentrecru.com and the lume batch.",
+    notes: "Domains are bought and renewed one at a time, so this line is the account; individual names carry their own renewal dates in the Domains panel.",
+  },
+  {
+    vendor: "Porkbun", label: "Domain registrations", category: "domain", billing: "one_time",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "Registrar for the 15 Lume sending domains and the registrar of record for Claimie.",
+  },
+  {
+    vendor: "GoDaddy", label: "Domain registrations", category: "domain", billing: "one_time",
+    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
+    purpose: "Registrar for lumesp.com, claimie.ai and mytal.co, DNS included.",
+  },
+  {
+    vendor: "Namecheap", label: "Domain registrations", category: "domain", billing: "one_time",
+    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
+    purpose: "Registrar for glassnwa.com.",
+  },
+  {
+    vendor: "LinkedIn", label: "Sales Navigator seat", category: "software", billing: "monthly",
+    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
+    purpose: "The Sales Navigator searches JD Sourcing pulls from, and the account the LinkedIn OS acts as.",
+    impact: "The people side of sourcing. Without the seat, Sales Navigator URLs stop resolving and JD Sourcing falls back to the free search paths.",
+  },
+  {
+    vendor: "Apify", label: "Direct-dial phone actor", category: "people", billing: "monthly",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "The actor behind direct-dial phone discovery in the enrichment chain.",
+  },
+  {
+    vendor: "Icypeas", label: "Email finding and verification", category: "people", billing: "monthly",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "A rung in the email-finding chain alongside Reoon.",
+  },
+  {
+    vendor: "People Data Labs", label: "Person enrichment", category: "people", billing: "monthly",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "Person enrichment fallback when the cheaper rungs come back empty.",
+  },
+  {
+    vendor: "Cartesia", label: "Voice cloning fallback", category: "ai", billing: "monthly",
+    amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
+    purpose: "Backup voice engine for the vetting agent and the video stack.",
+    notes: "ElevenLabs carries this today, so confirm whether Cartesia is still subscribed.",
+  },
+  {
+    vendor: "TidyCal", label: "Booking links", category: "software", billing: "one_time",
+    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
+    purpose: "The booking link put in front of every interested reply.",
+    notes: "Usually sold as a lifetime deal rather than a subscription; if that is what was bought, mark it Paid once.",
+  },
+  {
+    vendor: "Telnyx", label: "Lume account (white-label numbers)", category: "messaging", billing: "metered",
+    amountUsd: 0, at: "2026-07-01", status: "active",
+    purpose: "Lume's own Telnyx account: its five per-recruiter 929 lines and everything its recruiters send.",
+    notes: "A SEPARATE Telnyx account from the house one, with its own invoices. Keep the two apart or the tenant's usage lands on the house bill.",
+  },
 ];
 
 /* ============================ store ============================ */
@@ -302,7 +421,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 5;
+const SEED_VERSION = 6;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**

@@ -1105,7 +1105,7 @@
        with a word saying which they are, not in a section of their own. Nothing is hidden
        for having no charge in the window: a line that is quiet says so. */
     (m.rows || []).forEach(function (r, ri) {
-      html += '<tr><th class="rc-svc"><div class="lr-main">' + esc(r.vendor) + ' <span class="rc-kind ' + kindClass(r) + '">' + esc(kindLabel(r)) + '</span></div>' +
+      html += '<tr><th class="rc-svc"' + (r.purpose ? ' title="' + esc(r.purpose) + '"' : "") + '><div class="lr-main">' + esc(r.vendor) + ' <span class="rc-kind ' + kindClass(r) + '">' + esc(kindLabel(r)) + '</span></div>' +
         '<div class="lr-sub note">' + esc(r.label) + '</div>' +
         (r.missingCount ? '<div class="lr-sub bad-t">' + r.missingCount + ' month' + (r.missingCount > 1 ? "s" : "") + ' unreceipted</div>' : "") +
         (r.needsAmount ? '<div class="lr-sub bad-t">no price on file</div>' : "") +
