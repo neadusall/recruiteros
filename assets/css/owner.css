@@ -199,10 +199,12 @@
 
 /* ---------------- receipts · month by month ----------------
    The grid is wide by nature (one column per month), so it scrolls horizontally with the
-   service column pinned. Cells carry a thumbnail of the actual invoice, which is the whole
-   point of the panel: a figure you can click through to the paper behind it. */
+   service column pinned. It never scrolls VERTICALLY: every service is on screen at once,
+   so the panel can be read (and screenshotted for an accountant) without hunting inside a
+   box. Cells carry a thumbnail of the actual invoice, which is the whole point of the
+   panel: a figure you can click through to the paper behind it. */
 .rc-months { height: 30px; font-size: 12.5px; }
-.rc-wrap { max-height: 620px; overflow: auto; }
+.rc-wrap { overflow-x: auto; }
 .rc-matrix { border-collapse: separate; border-spacing: 0; }
 .rc-matrix th, .rc-matrix td { border-bottom: 1px solid var(--border); }
 .rc-matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--bg); }
