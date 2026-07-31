@@ -89,6 +89,8 @@ export interface MatrixRow {
   needsAmount?: boolean;
   /** Registrable name when this line is a domain. */
   domain?: string;
+  /** How many register lines this row speaks for: >1 means one account, one bill. */
+  foldedCount?: number;
   /** A charge that arrived with no line item in the register expecting it. */
   unregistered?: boolean;
   /** Pay-per-use read off the usage ledger, with no register row behind it. */
@@ -206,6 +208,106 @@ function daysInto(period: string): number {
   return now.getUTCDate();
 }
 
+/* ============================ one account, one line ============================ */
+
+/**
+ * A vendor bills an ACCOUNT, not a thing.
+ *
+ * Zapmail is the case that forced this (owner, 2026-07-31: "there is only one. Sure, on
+ * the backend there are several accounts, but we are only being charged as one account").
+ * The register holds 33 Zapmail lines: the Google Workspace mailboxes plus one line per
+ * domain Zapmail registered. Every one of those domain lines is a fact worth keeping: the
+ * name, the registrar, the renewal date, and NOT ONE of them is a separate bill. Laid out
+ * as 33 rows in a month-by-month ledger they read as 33 charges to chase, when there is one
+ * monthly fee and the one-time charges that came with it. Same story at Dynadot (30 lines)
+ * and Porkbun (16).
+ *
+ * So the grid folds a vendor's domain lines into that vendor's account line: one row, one
+ * running total, receipts of every kind landing on it. Nothing is deleted and nothing moves
+ * in the register itself: the Domains panel still shows every name with its own expiry,
+ * which is where per-domain detail actually gets used.
+ *
+ * Folding is by DATA, not by a vendor list: two or more domain lines under one vendor fold,
+ * because that is what "one registrar account" looks like in the register. A vendor with a
+ * single domain has nothing to fold.
+ */
+export interface AccountGroup {
+  /** The row's identity: id, vendor, category, billing and the rest come from here. */
+  display: SpendItem;
+  /** Every register line this row speaks for, `display` included. */
+  members: SpendItem[];
+  label: string;
+  purpose?: string;
+  /** True when this row stands for more than one register line. */
+  folded: boolean;
+  domainCount: number;
+  needsAmount: boolean;
+}
+
+const vkey = (v: string): string => String(v || "").trim().toLowerCase();
+
+export function accountGroups(items: SpendItem[]): AccountGroup[] {
+  /* Which vendors have a domain estate worth folding. */
+  const domainsBy = new Map<string, SpendItem[]>();
+  for (const i of items) {
+    if (!i.domain) continue;
+    const k = vkey(i.vendor);
+    domainsBy.set(k, [...(domainsBy.get(k) || []), i]);
+  }
+  const folding = new Map<string, SpendItem[]>();
+  domainsBy.forEach((rows, k) => { if (rows.length >= 2) folding.set(k, rows); });
+
+  /* The line the estate folds INTO: the vendor's own account row when it has one (the
+     registrar's "Domain registrations" line, or Zapmail's mailbox line), otherwise the
+     first domain itself stands in for the account so the money still has a home. */
+  const hostFor = new Map<string, string>();
+  for (const [k, rows] of folding) {
+    const accounts = items.filter((i) => vkey(i.vendor) === k && !i.domain);
+    const host = accounts.find((a) => /domain/i.test(a.label)) || accounts[0] || rows[0];
+    hostFor.set(k, host.id);
+  }
+
+  const out: AccountGroup[] = [];
+  for (const item of items) {
+    const k = vkey(item.vendor);
+    const hostId = hostFor.get(k);
+    if (hostId === item.id) {
+      const domains = folding.get(k) || [];
+      const members = item.domain ? [...domains] : [item, ...domains];
+      out.push({
+        display: item,
+        members,
+        label: foldLabel(item, domains.length),
+        purpose: [item.purpose, foldNote(item.vendor, domains.length)].filter(Boolean).join(" "),
+        folded: members.length > 1,
+        domainCount: domains.length,
+        needsAmount: members.some((m) => m.needsAmount && m.status === "active"),
+      });
+      continue;
+    }
+    if (item.domain && hostId) continue; // spoken for by the row above
+    out.push({
+      display: item, members: [item], label: item.label, purpose: item.purpose,
+      folded: false, domainCount: item.domain ? 1 : 0, needsAmount: item.needsAmount,
+    });
+  }
+  return out;
+}
+
+function foldLabel(host: SpendItem, domains: number): string {
+  if (!domains) return host.label;
+  const n = `${domains} ${domains > 1 ? "names" : "name"}`;
+  return /domain/i.test(host.label) && !host.domain
+    ? `${host.label} · ${n} on one account`
+    : `${host.label} · plus ${n} on the same account`;
+}
+
+function foldNote(vendor: string, domains: number): string {
+  if (!domains) return "";
+  return `The ${domains} domain${domains > 1 ? "s" : ""} registered through ${vendor} sit on this line: ` +
+    `one account, one bill, so it reconciles as one row. Every name, its registrar and its renewal date stay on the Domains panel.`;
+}
+
 /* ============================ the report ============================ */
 
 export function buildSpendMatrix(
@@ -255,22 +357,43 @@ export function buildSpendMatrix(
     return ledgerKeys.has(byName) ? byName : undefined;
   };
 
-  for (const item of items) {
+  /* Receipts a folded row has taken for its own, so the unmatched list below does not
+     report them as money with nowhere to go and count them a second time. */
+  const claimedReceiptIds = new Set<string>();
+
+  for (const group of accountGroups(items)) {
+    const item = group.display;
+    const members = group.members;
     const src = vendorSourceFor(item.vendor);
     const ledgerKey = ledgerKeyFor(item);
-    const mine = byItem.get(item.id) || [];
-    const startMonth = (item.at || "").slice(0, 7);
+    const mine: Receipt[] = [];
+    for (const m of members) for (const r of byItem.get(m.id) || []) mine.push(r);
+    /* One account, one line: a charge from this vendor that never got tied to a specific
+       row has exactly one row it can belong to, so it belongs to this one. Only ever done
+       for a folded row, where that reasoning holds. */
+    if (group.folded) {
+      for (const r of byVendor.get(vkey(item.vendor)) || []) {
+        if (r.itemId || claimedReceiptIds.has(r.id)) continue;
+        claimedReceiptIds.add(r.id);
+        mine.push(r);
+      }
+    }
+    const cancelled = members.every((m) => m.status === "cancelled");
+    const startMonth = members.map((m) => (m.at || "").slice(0, 7)).filter(Boolean).sort()[0] || "";
     const emailProven = mine.some((r) => r.source === "email");
     let running = 0;
     let prevCounted: number | null = null;
     let prevReceiptAmount: number | null = null;
+    let prevReceiptCount = 0;
     const cells: MatrixCell[] = [];
 
     for (const period of months) {
       const inMonth = mine.filter((r) => r.period === period);
       const actual = round2(inMonth.reduce((s, r) => s + r.amountUsd, 0));
       const meteredUsd = ledgerKey ? round2(metered[period]?.[ledgerKey] || 0) : 0;
-      const expected = expectedFor(item, period);
+      /* What the whole account is due this month: the recurring fee plus any renewal or
+         one-time buy the folded lines put in this month. */
+      const expected = round2(members.reduce((s, m) => s + expectedFor(m, period), 0));
 
       let status: CellStatus;
       let note: string | undefined;
@@ -284,19 +407,35 @@ export function buildSpendMatrix(
         counted = actual !== 0 ? actual : meteredUsd;
         verified = actual !== 0;
         if (actual !== 0 && meteredUsd > 0) note = `ledger says ${meteredUsd.toFixed(2)}`;
-      } else if (item.status === "cancelled" && actual === 0) {
+      } else if (cancelled && actual === 0) {
         status = "cancelled";
       } else if (actual !== 0) {
         counted = actual; verified = true;
-        if (expected > 0 && Math.abs(actual - expected) > Math.max(1, expected * 0.02)) {
+        const off = expected > 0 && Math.abs(actual - expected) > Math.max(1, expected * 0.02);
+        /* An account that pays a monthly fee AND buys things is not "the wrong amount":
+           one of the charges IS the fee and the rest are one-time. Said in the note, so a
+           month with an extra purchase in it does not read as a billing error. */
+        const feePaid = off && group.folded && inMonth.some(
+          (r) => Math.abs(r.amountUsd - expected) <= Math.max(1, expected * 0.02),
+        );
+        if (off && feePaid) {
+          status = "paid";
+          note = `$${expected.toFixed(2)} recurring plus $${round2(actual - expected).toFixed(2)} one-time on the same account`;
+        } else if (off) {
           status = "mismatch";
           note = `register says ${expected.toFixed(2)}`;
         } else if (expected === 0) {
           status = "unexpected";
+          if (group.needsAmount) note = "no price on file for this account yet";
         } else {
           status = "paid";
         }
-        if (inMonth.length > 1 && item.billing === "monthly") {
+        if (inMonth.length > 1 && group.folded) {
+          note = note || `${inMonth.length} charges on this account in ${period}`;
+        }
+        /* Two charges in one month on a single-line monthly plan is worth a look. On a
+           folded account row it is just an account: a fee and a purchase, or two purchases. */
+        if (inMonth.length > 1 && item.billing === "monthly" && !group.folded) {
           anomalies.push({
             severity: "medium", kind: "duplicate_charge", period, vendor: item.vendor, itemId: item.id,
             amountUsd: actual,
@@ -325,18 +464,22 @@ export function buildSpendMatrix(
 
       /* Price movement between two months that BOTH have receipts is a real price change,
          not a reconciliation artefact — worth saying out loud. */
-      if (actual !== 0 && prevReceiptAmount != null && prevReceiptAmount !== 0) {
+      /* On a folded account row, only compare a single-charge month against another
+         single-charge month: a month that also carried a one-time buy is a different
+         question, and calling it a price rise would be false. */
+      const comparable = !group.folded || (inMonth.length === 1 && prevReceiptCount === 1);
+      if (actual !== 0 && prevReceiptAmount != null && prevReceiptAmount !== 0 && comparable) {
         const diff = actual - prevReceiptAmount;
         if (Math.abs(diff) > Math.max(1, Math.abs(prevReceiptAmount) * 0.05)) {
           anomalies.push({
             severity: diff > 0 ? "medium" : "info", kind: "price_change", period, vendor: item.vendor, itemId: item.id,
             amountUsd: round2(diff),
-            message: `${item.vendor} · ${item.label} ${diff > 0 ? "went up" : "went down"} $${Math.abs(diff).toFixed(2)} in ${period} ($${prevReceiptAmount.toFixed(2)} → $${actual.toFixed(2)}).`,
+            message: `${item.vendor} · ${group.label} ${diff > 0 ? "went up" : "went down"} $${Math.abs(diff).toFixed(2)} in ${period} ($${prevReceiptAmount.toFixed(2)} → $${actual.toFixed(2)}).`,
             fix: diff > 0 ? "Check the invoice for a plan change or added seats." : undefined,
           });
         }
       }
-      if (actual !== 0) prevReceiptAmount = actual;
+      if (actual !== 0) { prevReceiptAmount = actual; prevReceiptCount = inMonth.length; }
       prevCounted = counted;
 
       cells.push({
@@ -348,9 +491,12 @@ export function buildSpendMatrix(
 
     const missingCount = cells.filter((c) => c.status === "missing").length;
     rows.push({
-      itemId: item.id, vendor: item.vendor, label: item.label, category: item.category,
-      billing: item.billing, status: item.status, monthlyUsd: monthlyEquivalent(item),
-      purpose: item.purpose, lifetime: item.lifetime, needsAmount: item.needsAmount, domain: item.domain,
+      itemId: item.id, vendor: item.vendor, label: group.label, category: item.category,
+      billing: item.billing, status: item.status,
+      monthlyUsd: round2(members.reduce((s, m) => s + monthlyEquivalent(m), 0)),
+      purpose: group.purpose, lifetime: item.lifetime, needsAmount: group.needsAmount,
+      domain: group.folded ? undefined : item.domain,
+      foldedCount: group.folded ? members.length : undefined,
       channel: src?.channel, portal: src?.portal, emailProven, cells,
       totalCountedUsd: round2(cells.reduce((s, c) => s + c.countedUsd, 0)),
       totalVerifiedUsd: round2(cells.reduce((s, c) => s + (c.verified ? c.countedUsd : 0), 0)),
@@ -359,15 +505,21 @@ export function buildSpendMatrix(
       lastReceiptAt: mine.map((r) => r.chargedAt).sort().slice(-1)[0],
     });
 
-    /* ---- per-item anomalies ---- */
-    collectItemAnomalies(item, mine, cells, src, anomalies, nowMonth);
+    /* ---- per-item anomalies, named as the row is named ---- */
+    collectItemAnomalies(
+      group.folded ? { ...item, label: group.label, needsAmount: group.needsAmount } : item,
+      mine, cells, src, anomalies, nowMonth,
+    );
   }
 
   rows.sort((a, b) => b.totalCountedUsd - a.totalCountedUsd || a.vendor.localeCompare(b.vendor));
 
   /* ---- unmatched charges: money leaving with no register row behind it ---- */
   const unmatchedMap = new Map<string, Receipt[]>();
-  for (const r of receipts) if (!r.itemId) unmatchedMap.set(r.vendor, [...(unmatchedMap.get(r.vendor) || []), r]);
+  for (const r of receipts) {
+    if (r.itemId || claimedReceiptIds.has(r.id)) continue;
+    unmatchedMap.set(r.vendor, [...(unmatchedMap.get(r.vendor) || []), r]);
+  }
   const unmatched = [...unmatchedMap.entries()].map(([vendor, rs]) => ({
     vendor,
     totalUsd: round2(rs.reduce((s, r) => s + r.amountUsd, 0)),
@@ -641,7 +793,10 @@ function collectItemAnomalies(
     });
   }
 
-  const unexpected = cells.filter((c) => c.status === "unexpected");
+  /* A charge against a row that has no price on file is not a surprise charge: it is the
+     price arriving. The one thing to say about that row is already said, once, by
+     no_price_on_file below. */
+  const unexpected = item.needsAmount ? [] : cells.filter((c) => c.status === "unexpected");
   for (const c of unexpected) {
     out.push({
       severity: "low", kind: "unexpected_charge", period: c.period, vendor: item.vendor, itemId: item.id,
@@ -688,6 +843,16 @@ function collectItemAnomalies(
       severity: "high", kind: "no_price_on_file", vendor: item.vendor, itemId: item.id,
       message: `${item.vendor} · ${item.label} has no price on file and no receipt has ever arrived, so it is invisible in the monthly burn.`,
       fix: src?.portal ? `Pull one invoice from ${src.portal} to establish the figure.` : "Enter the invoice figure, or forward one receipt to the billing mailbox.",
+    });
+  } else if (item.needsAmount && mine.length && item.status === "active" && item.billing !== "metered") {
+    /* The receipts prove what was charged; the register still expects nothing, so every
+       month without a receipt reads $0 instead of reading as a gap. */
+    const last = mine.map((r) => r.amountUsd).slice(-1)[0] || 0;
+    out.push({
+      severity: "medium", kind: "no_price_on_file", vendor: item.vendor, itemId: item.id,
+      amountUsd: round2(last),
+      message: `${item.vendor} · ${item.label} has receipts on file but no price in the register, so any month without one reads as $0 rather than as a gap.`,
+      fix: `Set the recurring amount from the invoice (the last one was $${round2(last).toFixed(2)}).`,
     });
   } else if (!mine.length && item.status === "active" && item.billing !== "metered" && monthlyEquivalent(item) > 0) {
     out.push({
