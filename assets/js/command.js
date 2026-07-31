@@ -6290,7 +6290,7 @@
   /* ---- Domain warm-up: live per-domain warm-up fleet on the Senders tab.
           Data is /api/senders/warmup (server-cached, tenant-split by portal
           host), refreshed on a timer while the tab is open. ---- */
-  var wuData = null, wuTimer = null, wuOpen = {}, wuLoading = false;
+  var wuData = null, wuTimer = null, wuOpen = {}, wuLoading = false, wuRetry = null;
 
   function wuEnsureStyles() {
     if (document.getElementById("wuStyles")) return;
@@ -6324,6 +6324,18 @@
       '.wu-mbwrap{padding:0 8px 10px 22px}' +
       '.wu-mbwrap .wu-table{font-size:12.5px}' +
       '.wu-scroll{overflow-x:auto}' +
+      '.wu-hchip{display:inline-block;min-width:34px;text-align:center;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px}' +
+      '.wu-hchip.healthy{background:rgba(26,127,55,.12);color:#1a7f37}' +
+      '.wu-hchip.watch{background:rgba(178,106,0,.12);color:#b26a00}' +
+      '.wu-hchip.at_risk{background:rgba(179,38,30,.12);color:#b3261e}' +
+      '.wu-dns{display:inline-flex;gap:3px}' +
+      '.wu-dnsp{font-size:9.5px;font-weight:700;letter-spacing:.03em;border-radius:4px;padding:1.5px 5px}' +
+      '.wu-dnsp.ok{background:rgba(26,127,55,.12);color:#1a7f37}' +
+      '.wu-dnsp.miss{background:rgba(179,38,30,.12);color:#b3261e}' +
+      '.wu-dnsp.unk{background:var(--border);color:var(--muted,var(--text-dim))}' +
+      '.wu-acts{margin:8px 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}' +
+      '.wu-acts-t{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,var(--text-dim));margin-bottom:6px}' +
+      '.wu-acts li{font-size:12.5px;margin:3px 0 3px 16px}' +
       '.wu-days b{font-variant-numeric:tabular-nums}';
     document.head.appendChild(st);
   }
@@ -6339,6 +6351,42 @@
   function wuBadge(r) {
     var label = r === "ready" ? "Ready to send" : r === "attention" ? "Needs attention" : "Warming";
     return '<span class="wu-badge ' + r + '">' + label + '</span>';
+  }
+
+  // Plain-English reason for a domain's reputation given how long it has been
+  // warming, so a low number on a brand-new domain reads as "expected", not
+  // "problem". A low number on a MATURE domain is the real signal to act on.
+  function wuRepReason(days, rep) {
+    if (rep == null) return "";
+    var d = days == null ? 0 : days;
+    var msg, tone = "muted";
+    if (d < 3) {
+      msg = "Normal for a new domain. It climbs as warm-up sends land, get pulled from spam, opened and replied to. Expect 90%+ within 1 to 2 weeks.";
+    } else if (d < 7) {
+      msg = rep >= 80 ? "Ramping well, on track to reach 90%+ soon." : "Still early days, reputation is expected to keep rising this week.";
+    } else if (d < 14) {
+      msg = rep >= 85 ? "Almost there, nearly warmed." : (rep >= 70 ? "Climbing, give it the rest of the two weeks." : (tone = "warn", "Lower than expected at this age. Watch it. If it does not rise, ease the daily volume."));
+    } else {
+      if (rep >= 95) { tone = "ok"; msg = "Fully warmed and steady. Ready to send."; }
+      else if (rep >= 85) { tone = "ok"; msg = "Warmed and healthy."; }
+      else { tone = "danger"; msg = "Mature but under-warmed. This one needs attention: slow its ramp and let reputation recover before sending."; }
+    }
+    var color = tone === "ok" ? "#1a7f37" : tone === "warn" ? "#b26a00" : tone === "danger" ? "#b3261e" : "var(--muted,var(--text-dim))";
+    return '<div style="font-size:11px;color:' + color + ';margin-top:2px;max-width:230px;line-height:1.35">' + esc(msg) + '</div>';
+  }
+
+  function wuHealthChip(h) {
+    if (!h) return '<span class="muted">n/a</span>';
+    return '<span class="wu-hchip ' + esc(h.label) + '" title="Composite of reputation, spam outcomes, DNS posture and fleet state">' + h.score + '</span>';
+  }
+
+  function wuDnsPills(dns) {
+    function p(name, val) {
+      var cls = dns == null ? "unk" : (val ? "ok" : "miss");
+      var tip = dns == null ? name + ": checking" : name + (val ? " record found" : " record missing");
+      return '<span class="wu-dnsp ' + cls + '" title="' + esc(tip) + '">' + name + '</span>';
+    }
+    return '<span class="wu-dns">' + p("SPF", dns && dns.spf) + p("DKIM", dns && dns.dkim) + p("DMARC", dns && dns.dmarc) + p("MX", dns && dns.mx) + '</span>';
   }
 
   function wuAgo(iso) {
@@ -6367,31 +6415,44 @@
         '<span style="flex:1"></span>' +
         '<button class="btn btn-ghost btn-sm" id="wuRefresh"' + (wuLoading ? " disabled" : "") + '>' + (wuLoading ? "Refreshing…" : "↻ Refresh now") + '</button>' +
       '</div>' +
-      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. A domain is <b>Ready to send</b> after 14+ days warming at 95%+ average reputation. Click a domain for its mailboxes.</div>';
+      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam; a domain is <b>Ready to send</b> after 14+ days warming at 95%+ average reputation. Click a domain for its mailboxes.</div>';
     var stats =
       '<div class="wu-stats">' +
         c(t.domains || 0, "Domains warming") +
         c(t.mailboxes || 0, "Warm-up mailboxes") +
         c(t.avgReputation != null ? t.avgReputation + "%" : "n/a", "Avg reputation") +
+        c(t.avgHealth != null ? t.avgHealth : "n/a", "Fleet health") +
         c(t.ready || 0, "Domains ready") +
-        c(t.attention || 0, "Need attention") +
+        c(t.atRisk != null ? t.atRisk : (t.attention || 0), "At risk") +
       '</div>';
     var rows = domains.map(function (d) {
       var open = !!wuOpen[d.domain];
       var days = d.days != null ? ('<span class="wu-days"><b>' + d.days.toFixed(1) + '</b> days</span>' + (d.since ? '<div class="muted" style="font-size:11px">since ' + esc(String(d.since).slice(0, 10)) + '</div>' : '')) : '<span class="muted">n/a</span>';
       var main = '<tr class="wu-dom" data-wu-dom="' + esc(d.domain) + '">' +
-        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b></td>' +
+        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
         '<td>' + days + '</td>' +
-        '<td>' + wuRepCell(d.avgReputation) + '</td>' +
-        '<td>' + (d.minReputation != null ? d.minReputation + "%" : '<span class="muted">n/a</span>') + '</td>' +
-        '<td>' + (d.sentTotal || 0) + (d.spamCount ? ' <span class="muted">(' + d.spamCount + ' spam' + (d.spamRatePct != null ? ", " + d.spamRatePct + "%" : "") + ')</span>' : '') + '</td>' +
+        '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation) + '</td>' +
+        '<td>' + wuHealthChip(d.health) + '</td>' +
+        '<td>' + wuDnsPills(d.dns) + '</td>' +
+        '<td>' + (d.warmupPerDay != null ? '<b>' + d.warmupPerDay + '</b><span class="muted" style="font-size:11px">/day</span>' + (d.replyRatePct != null ? '<div class="muted" style="font-size:11px">' + d.replyRatePct + '% replies</div>' : '') : '<span class="muted">n/a</span>') + '</td>' +
         '<td>' + wuBadge(d.readiness) + '</td>' +
       '</tr>';
       if (!open) return main;
-      var mb = '<tr><td colspan="7"><div class="wu-mbwrap"><table class="wu-table"><thead><tr><th>Mailbox</th><th>Status</th><th>Reputation</th><th>Days</th><th>Sent</th><th>Spam</th><th>Daily limit</th></tr></thead><tbody>' +
+      var acts = (d.actions && d.actions.length)
+        ? '<div class="wu-acts"><div class="wu-acts-t">What to do next</div><ul>' + d.actions.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join("") + '</ul></div>'
+        : '<div class="wu-acts"><div class="wu-acts-t">What to do next</div><ul><li>Nothing needed, this domain is on track.</li></ul></div>';
+      var dnsNote = d.dns
+        ? '<div class="muted" style="font-size:11px;margin:0 0 8px">DNS checked ' + esc(wuAgo(d.dns.checkedAt)) + (d.dns.dmarcPolicy ? ' · DMARC policy: ' + esc(d.dns.dmarcPolicy) : '') + (d.dns.dkimSelector ? ' · DKIM selector: ' + esc(d.dns.dkimSelector) : '') + '</div>'
+        : '<div class="muted" style="font-size:11px;margin:0 0 8px">DNS check in progress, results on the next refresh.</div>';
+      var mb = '<tr><td colspan="8"><div class="wu-mbwrap">' + acts + dnsNote + '<table class="wu-table"><thead><tr><th>Mailbox</th><th>Warm-up</th><th>Reputation</th><th>Days</th><th>Sent</th><th>Spam</th><th>Daily limit</th><th>SMTP (this portal)</th></tr></thead><tbody>' +
         (d.accounts || []).map(function (a) {
           var st = a.status === "active" ? '<span class="cur-valid">warming</span>' : a.status === "paused" ? '<span class="im-email-unv">paused</span>' : '<span class="muted">unknown</span>';
+          var smtp = a.smtpStatus
+            ? (a.smtpStatus === "error"
+                ? '<span class="cur-invalid" title="' + esc(a.smtpError || "SMTP error") + '">error</span>'
+                : '<span class="cur-valid">' + esc(a.smtpStatus) + '</span>')
+            : '<span class="muted" title="Not imported as an Email ID on this portal">not imported</span>';
           return '<tr>' +
             '<td>' + esc(a.email) + '</td>' +
             '<td>' + st + '</td>' +
@@ -6400,12 +6461,13 @@
             '<td>' + (a.sentTotal || 0) + '</td>' +
             '<td>' + (a.spamCount || 0) + '</td>' +
             '<td>' + (a.messagePerDay != null ? (a.dailySent != null ? a.dailySent + "/" : "") + a.messagePerDay : "n/a") + '</td>' +
+            '<td>' + smtp + '</td>' +
           '</tr>';
         }).join("") + '</tbody></table></div></td></tr>';
       return main + mb;
     }).join("");
     var table = domains.length
-      ? '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Domain</th><th>Mailboxes</th><th>Time warming</th><th>Avg reputation</th><th>Lowest</th><th>Warm-up sends</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      ? '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Domain</th><th>Mailboxes</th><th>Time warming</th><th>Avg reputation</th><th>Health</th><th>DNS</th><th>Warm-up/day</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
       : '<div class="empty">No domains are warming on this portal yet.</div>';
     box.innerHTML = '<div class="wu-card">' + head + stats + table + '</div>';
     var rb = $("#wuRefresh"); if (rb) rb.addEventListener("click", function () { loadWarmup(true); });
@@ -6428,11 +6490,97 @@
       if (r.ok) wuData = r.data || null;
       else if (!wuData) wuData = { configured: false };
       renderWarmup();
+      // Self-heal a cold DNS cache: the server fills posture in the background,
+      // so if any domain came back without DNS yet, re-poll shortly rather than
+      // leaving grey pills until the 2-minute tick.
+      if (!wuRetry && wuData && wuData.configured && (wuData.domains || []).some(function (d) { return d.dns == null; })) {
+        wuRetry = setTimeout(function () { wuRetry = null; if (document.getElementById("wuWrap")) loadWarmup(false); }, 12000);
+      }
     });
     if (!wuTimer) {
       wuTimer = setInterval(function () {
         if (!document.getElementById("wuWrap")) { clearInterval(wuTimer); wuTimer = null; return; }
         loadWarmup(false);
+      }, 120000);
+    }
+  }
+
+  /* ---- SMTP infrastructure: live server + login health under the warm-up
+          panel. Data is /api/senders/infra (probes every distinct SMTP host in
+          the pool plus env watch-hosts, advances a rolling login re-verify
+          sweep on every poll). ---- */
+  var siData = null, siTimer = null, siLoading = false, siSweeping = false;
+
+  function renderInfra() {
+    var box = $("#siWrap"); if (!box) return;
+    wuEnsureStyles();
+    if (!siData) { box.innerHTML = '<div class="wu-card"><div class="empty">Checking sending servers…</div></div>'; return; }
+    var servers = siData.servers || [];
+    var sweep = siData.sweep || {};
+    var head =
+      '<div class="wu-head">' +
+        '<div class="wu-title">Sending servers</div>' +
+        '<span class="wu-live"><span class="wu-dot"></span> Live · updated ' + esc(wuAgo(siData.updatedAt)) + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-ghost btn-sm" id="siSweep"' + (siSweeping ? " disabled" : "") + '>' + (siSweeping ? "Testing logins…" : "Test logins now") + '</button>' +
+      '</div>' +
+      '<div class="wu-sub">The servers your Email IDs actually send through, probed live from this portal, with real login checks rotating through the pool so every credential is re-proven at least daily.</div>';
+    var sweepLine = '<div class="muted" style="font-size:12px;margin:0 0 10px">Login checks this pass: ' + (sweep.tested || 0) + ' tested, ' + (sweep.passed || 0) + ' passed, ' + (sweep.failed || 0) + ' failed' + (sweep.pendingStale ? ', ' + sweep.pendingStale + ' queued' : '') + '.</div>';
+    var mailcow = siData.mailcow
+      ? '<div class="muted" style="font-size:12px;margin:0 0 10px">Mail server inventory (' + esc(siData.mailcow.baseUrl.replace(/^https?:\/\//, "")) + '): ' + (siData.mailcow.mailboxes != null ? siData.mailcow.mailboxes + ' mailboxes' : 'mailboxes n/a') + (siData.mailcow.domains != null ? ' across ' + siData.mailcow.domains + ' domains' : '') + (siData.mailcow.ok ? '' : ' · <span style="color:#b3261e">inventory API unreachable, check the key</span>') + '</div>'
+      : '';
+    var table;
+    if (!servers.length) {
+      table = '<div class="empty">No sending servers yet. Import Email IDs and their servers appear here automatically.</div>';
+    } else {
+      table = '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Server</th><th>Status</th><th>Inboxes</th><th>Login health</th><th>Recent errors</th></tr></thead><tbody>' +
+        servers.map(function (s) {
+          var up = s.probe && s.probe.reachable;
+          var st = up
+            ? '<span class="wu-hchip healthy">Up</span>' + (s.probe.latencyMs != null ? ' <span class="muted" style="font-size:11px">' + s.probe.latencyMs + ' ms</span>' : '')
+            : '<span class="wu-hchip at_risk">Down</span>';
+          var inb = s.inboxes
+            ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + s.warming + ' warming' + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
+            : '<span class="muted">none imported yet</span>';
+          var auth = s.error
+            ? '<span style="color:#b3261e">' + s.error + ' failing</span>' + (s.staleAuth ? ' <span class="muted">· ' + s.staleAuth + ' due a re-check</span>' : '')
+            : (s.staleAuth ? '<span class="muted">' + s.staleAuth + ' due a re-check</span>' : (s.inboxes ? '<span style="color:#1a7f37">all recently verified</span>' : '<span class="muted">n/a</span>'));
+          var errs = s.lastErrors && s.lastErrors.length
+            ? s.lastErrors.map(function (e) { return '<div class="muted" style="font-size:11px" title="' + esc(e) + '">' + esc(e.length > 60 ? e.slice(0, 60) + "…" : e) + '</div>'; }).join("")
+            : '<span class="muted">none</span>';
+          return '<tr>' +
+            '<td><b>' + esc(s.host) + '</b><span class="muted">:' + s.port + '</span>' + (s.label ? '<div class="muted" style="font-size:11px">' + esc(s.label) + '</div>' : '') + '</td>' +
+            '<td>' + st + '</td>' +
+            '<td>' + inb + '</td>' +
+            '<td>' + auth + '</td>' +
+            '<td>' + errs + '</td>' +
+          '</tr>';
+        }).join("") + '</tbody></table></div>';
+    }
+    box.innerHTML = '<div class="wu-card">' + head + sweepLine + mailcow + table + '</div>';
+    var sb = $("#siSweep");
+    if (sb) sb.addEventListener("click", function () {
+      if (siSweeping) return;
+      siSweeping = true; renderInfra();
+      send("/senders/infra", "POST", { action: "sweep" }).then(function () {
+        siSweeping = false; loadInfra(true);
+      });
+    });
+  }
+
+  function loadInfra() {
+    if (siLoading) return;
+    siLoading = true;
+    send("/senders/infra", "GET").then(function (r) {
+      siLoading = false;
+      if (!document.getElementById("siWrap")) return;
+      if (r.ok) siData = r.data || null;
+      renderInfra();
+    });
+    if (!siTimer) {
+      siTimer = setInterval(function () {
+        if (!document.getElementById("siWrap")) { clearInterval(siTimer); siTimer = null; return; }
+        loadInfra();
       }, 120000);
     }
   }
@@ -6461,6 +6609,71 @@
       '</style>';
   }
 
+  /* ---- Domain DNS Health: every Zapmail sending domain, verified against live
+          public DNS (MX/SPF/DKIM/DMARC) on ~hourly cadence. Data is
+          /api/senders/dnshealth (persisted per tenant, self-refreshing when
+          stale). Read-only; no credentials touched. ---- */
+  var dnsHealthData = null;
+
+  function dnChip(label, ok) {
+    return '<span class="wu-dnsp ' + (ok ? "ok" : "miss") + '">' + label + '</span>';
+  }
+
+  function loadDnsHealth() {
+    wuEnsureStyles();
+    var wrap = $("#dnsHealthWrap"); if (!wrap) return;
+    if (!dnsHealthData) wrap.innerHTML = '<div class="wu-card"><div class="wu-title">Domain DNS Health</div><div class="wu-sub">Checking…</div></div>';
+    send("/senders/dnshealth", "GET").then(function (r) {
+      if (!r || !r.ok) return;
+      dnsHealthData = r.data || {};
+      renderDnsHealth();
+    });
+  }
+
+  function renderDnsHealth() {
+    var wrap = $("#dnsHealthWrap"); if (!wrap) return;
+    var d = dnsHealthData || {};
+    if (d.configured === false) {
+      wrap.innerHTML = '<div class="wu-card"><div class="wu-title">Domain DNS Health</div><div class="wu-sub">Connect Zapmail to track sending-domain DNS.</div></div>';
+      return;
+    }
+    if (d.pending || !d.totals) {
+      wrap.innerHTML = '<div class="wu-card"><div class="wu-title">Domain DNS Health</div><div class="wu-sub">Running the first DNS sweep, refresh in a moment.</div></div>';
+      return;
+    }
+    var t = d.totals, rows = d.domains || [];
+    var checked = d.ageMinutes != null ? (d.ageMinutes <= 1 ? "just now" : d.ageMinutes + " min ago") : "";
+    var allGood = t.incomplete === 0;
+    var head = '<div class="wu-head"><span class="wu-title">Domain DNS Health</span>' +
+      '<span class="wu-live"><span class="wu-dot"></span>checked ' + esc(checked) + '</span>' +
+      '<button class="btn btn-ghost btn-sm" id="dnRefresh" style="margin-left:auto">↻</button></div>';
+    var summary = '<div class="wu-sub"><b style="color:' + (allGood ? "#1a7f37" : "#b26a00") + '">' +
+      t.healthy + '/' + t.domains + '</b> domains fully configured (MX, SPF, DKIM, DMARC).' +
+      (allGood ? ' All sending-ready.' : ' <b style="color:#b3261e">' + t.incomplete + '</b> need attention. Do not send from these until green: ' + esc((d.incomplete || []).join(", "))) +
+      '</div>';
+    var body = '<div class="wu-scroll"><table class="wu-table"><thead><tr>' +
+      '<th>Domain</th><th>MX</th><th>SPF</th><th>DKIM</th><th>DMARC</th><th>Policy</th></tr></thead><tbody>' +
+      rows.map(function (x) {
+        return '<tr' + (x.ok ? "" : ' style="background:rgba(179,38,30,.05)"') + '>' +
+          '<td>' + esc(x.domain) + '</td>' +
+          '<td>' + dnChip("MX", x.mx) + '</td>' +
+          '<td>' + dnChip("SPF", x.spf) + '</td>' +
+          '<td>' + dnChip("DKIM", x.dkim) + '</td>' +
+          '<td>' + dnChip("DMARC", x.dmarc) + '</td>' +
+          '<td>' + (x.dmarcPolicy ? esc(x.dmarcPolicy) : '<span class="muted">n/a</span>') + '</td>' +
+          '</tr>';
+      }).join("") +
+      '</tbody></table></div>';
+    wrap.innerHTML = '<div class="wu-card">' + head + summary + body + '</div>';
+    var rb = $("#dnRefresh");
+    if (rb) rb.addEventListener("click", function () {
+      rb.disabled = true; rb.textContent = "…";
+      send("/senders/dnshealth?refresh=1", "GET").then(function (r) {
+        if (r && r.ok) { dnsHealthData = r.data || {}; renderDnsHealth(); }
+      });
+    });
+  }
+
   function renderSenders(el) {
     sndPicks = {};
     el.innerHTML = sndStyles() +
@@ -6472,7 +6685,9 @@
           '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
         '</div>' +
       '</div>' +
+      '<div id="dnsHealthWrap"></div>' +
       '<div id="wuWrap"></div>' +
+      '<div id="siWrap"></div>' +
       '<div id="sndStatsBox" class="snd-stats"></div>' +
       '<div id="sndPoolsBox"></div>' +
       '<div class="snd-toolbar">' +
@@ -6483,7 +6698,7 @@
       '<div id="sndBody"><div class="empty">Loading…</div></div>';
     $("#sndImport").addEventListener("click", openSenderImport);
     $("#sndAdd").addEventListener("click", openSenderAdd);
-    $("#sndRefresh").addEventListener("click", loadSenders);
+    $("#sndRefresh").addEventListener("click", function () { loadSenders(); loadDnsHealth(); });
     var f = $("#sndFilter"); if (f) f.addEventListener("input", renderSenderRows);
     $("#sndAssignSel").addEventListener("click", function () {
       var ids = Object.keys(sndPicks); if (!ids.length) return;
@@ -6491,6 +6706,9 @@
     });
     renderWarmup();
     loadWarmup(false);
+    renderInfra();
+    loadInfra();
+    loadDnsHealth();
     loadSenders();
   }
 
@@ -11324,9 +11542,22 @@
   var MAIL_BASE = (typeof window !== "undefined" && window.RECRUITEROS_MAIL_URL) || "https://mail.recruitersos.co";
 
   function renderSending(el) {
+    // WHITE-LABEL: on a tenant portal this page must stay entirely on the
+    // tenant's own brand and host. No house links, no external mail app, no
+    // vendor names. Render the live in-portal infrastructure panels instead
+    // (same data the Senders tab shows: warm-up fleet + sending servers).
+    if (isLumeWorkspace() || /(^|\.)lumesp\.com$/.test((location.hostname || "").toLowerCase())) {
+      el.innerHTML =
+        head("Email Sending", "Your sending infrastructure, live: domain warm-up, mailbox reputation, server health and login checks. Manage the inbox pool itself on the Senders tab.") +
+        '<div id="wuWrap"></div>' +
+        '<div id="siWrap"></div>';
+      renderWarmup(); loadWarmup(false);
+      renderInfra(); loadInfra();
+      return;
+    }
     var base = String(MAIL_BASE).replace(/\/+$/, "");
     el.innerHTML =
-      head("Email Sending", "Your owned email infrastructure, domains, sender mailboxes, warmup, deliverability health and open/click tracking, powered by RecruitersOS Mail (Azure Communication Services).") +
+      head("Email Sending", "Your owned email infrastructure, domains, sender mailboxes, warmup, deliverability health and open/click tracking, powered by RecruitersOS Mail.") +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px">' +
         '<a class="btn btn-primary btn-sm" href="' + esc(base + "/setup") + '" target="_blank" rel="noopener">Setup &amp; domains</a>' +
         '<a class="btn btn-ghost btn-sm" href="' + esc(base + "/health-stats") + '" target="_blank" rel="noopener">Health stats</a>' +
@@ -12012,6 +12243,19 @@
           // they ran): the chain kept moving on the other sources, and Enrich re-runs
           // exactly these batches once Laxis is reachable again.
           var lxSkipN = (r.laxisSkipped && r.laxisSkipped.offsets) ? r.laxisSkipped.offsets.length : 0;
+          // A lingering job ref can be DEAD: the worker crashed mid-run and the chain
+          // never cleared it, which used to leave this card stuck on "Enriching now" for
+          // hours with no way to tell it had died. Flip to a clear, actionable "stalled"
+          // state once a job has been in flight far longer than any real pass would take
+          // (the enrichment pool finishes ~2,300 rows in well under an hour). Age comes
+          // from the ref's own submittedAt, so no server change is needed. Plain words
+          // only, no internal terms ([[feedback-hide-search-internals]]).
+          var jJobRef = r.koldDbJob || r.laxisJob || r.koldJob;
+          var jJobMs = jJobRef && jJobRef.submittedAt ? Date.parse(String(jJobRef.submittedAt).replace(" ", "T")) : NaN;
+          var jJobMin = isFinite(jJobMs) ? Math.round(Math.max(0, Date.now() - jJobMs) / 60000) : 0;
+          var jStallMin = Math.max(90, Math.round(n / 20)); // scales with list size, floor 90 min
+          var enrichStalled = busyJobs && isFinite(jJobMs) && jJobMin >= jStallMin;
+          var jStuckAgo = jJobMin < 60 ? (jJobMin + " min") : (Math.round(jJobMin / 60) + " hr");
           // ---- The visible journey: the four stops every list travels (Searched,
           // Enriched, Candidates, OS Text), each derived from fields the server
           // already stamps (chunk ledger, mid-flight job refs, autoflow bookkeeping).
@@ -12051,8 +12295,15 @@
           var sSearch = jStop("jt-done", jIcons.check, "Searched", n + " found",
             "The search finished and saved " + n + " candidate" + (n === 1 ? "" : "s") +
             (outN ? (": " + (n - outN) + " in area and " + outN + " out of area") : "") + ".");
-          var sEnrich, jNote = "", jEta = jdEta(r, epDone, ep ? (ep.total || n) : n, busyJobs, jdPaceGuess);
-          if (busyJobs) {
+          var sEnrich, jNote = "", jEta = jdEta(r, epDone, ep ? (ep.total || n) : n, busyJobs && !enrichStalled, jdPaceGuess);
+          if (enrichStalled) {
+            // The card was lying ("Working now") over a dead job. Say it plainly and
+            // give the one-press fix: Enrich re-drives the chain from where it stopped,
+            // bypassing the automatic pipeline's wait, so a stuck list unsticks on click.
+            sEnrich = jStop("jt-act", jIcons.alert, "Enrichment stalled", { btn: "stuck ~" + jStuckAgo + " · press to restart", act: r.id },
+              "The contact lookup has been stuck for about " + jStuckAgo + " with no progress, so it most likely hit a snag and stopped. Press to restart it: finished work is kept and nothing is bought twice.");
+            jNote = "<b>Stalled:</b> the contact lookup has been stuck for about " + jStuckAgo + " with no progress. Press the amber pill (or the Enrich button) to restart it; it resumes where it stopped and re-sends the refreshed contacts to Candidates and OS Text when done. If it stalls again right after, tell your admin.";
+          } else if (busyJobs) {
             // Real progress under the live stop: the chunk ledger gives actual rows
             // done, so the mini bar is honest; without a ledger yet it just glides.
             var livePct = ep ? Math.max(4, Math.min(100, Math.round(epDone / (ep.total || n || 1) * 100))) : null;
@@ -12683,25 +12934,10 @@
        Discovery is one request (no server-side progress events), so the bar eases
        toward 95% over an ETA estimated from the cap, then snaps to 100% on completion.
        Honest about being an estimate; the phase labels track the real pipeline steps. */
-    var prog = { timer: null, start: 0, etaMs: 0, owner: "" };
+    var prog = { timer: null, start: 0, etaMs: 0 };
     function fmtSecs(ms) { var s = Math.max(0, Math.round(ms / 1000)); return s >= 60 ? (Math.floor(s / 60) + "m " + (s % 60) + "s") : (s + "s"); }
-    /* ONE ticker ever, app-wide. Leaving this tab and coming back rebuilds this
-       whole view (a fresh closure with its own prog), but the previous visit's
-       200ms interval was never stopped, and its progTick finds the rebuilt
-       #jdProgress by id. Two tickers with different start/ETA then overwrite
-       each other's % five times a second, so the bar visibly jumps between two
-       readings. The live interval id is therefore kept on window (shared across
-       closures) and every new bar kills it before starting its own; it is also
-       registered as a view timer so the router stops it on navigation. The
-       owner stamp keeps a stale background chain (an enrichment started on a
-       previous visit) from finishing or relabeling a bar a newer flow owns. */
-    function progOwns(host) { return !!(host && prog.owner && host.dataset.progOwner === prog.owner); }
-    function stopProgTimer() {
-      if (prog.timer) { clearInterval(prog.timer); prog.timer = null; }
-      if (window.__jdProgTimer) { clearInterval(window.__jdProgTimer); window.__jdProgTimer = null; }
-    }
     function progTick() {
-      var host = $("#jdProgress"); if (!host || !prog.timer || !progOwns(host)) return;
+      var host = $("#jdProgress"); if (!host || !prog.timer) return;
       var fill = host.querySelector(".jd-prog-fill"), pct = host.querySelector(".jd-prog-pct"),
         phase = host.querySelector("#jdProgPhase"), eta = host.querySelector("#jdProgEta");
       var elapsed = Date.now() - prog.start;
@@ -12720,37 +12956,24 @@
           '<span class="jd-prog-pct">0%</span></div>' +
         '<div class="jd-prog-track"><div class="jd-prog-fill" style="width:0%"></div></div>' +
         '<div class="jd-prog-meta muted"><span id="jdProgPhase">' + esc(phaseText || "Starting…") + '</span><span id="jdProgEta"></span></div>';
-      prog.owner = String(window.__jdProgSeq = (window.__jdProgSeq || 0) + 1);
-      host.dataset.progOwner = prog.owner;
       prog.start = Date.now(); prog.etaMs = Math.max(4, etaSec || 20) * 1000;
-      stopProgTimer();
-      prog.timer = window.__jdProgTimer = setInterval(progTick, 200);
-      viewTimers.push(prog.timer); // navigating away stops the ticker with the rest of the view
-      progTick();
+      if (prog.timer) clearInterval(prog.timer);
+      prog.timer = setInterval(progTick, 200); progTick();
     }
-    function setProgTitle(t) { if (!progOwns($("#jdProgress"))) return; var el = $("#jdProgTitle"); if (el) el.textContent = t; }
+    function setProgTitle(t) { var el = $("#jdProgTitle"); if (el) el.textContent = t; }
     /** Update the phase line without resetting the bar (for long polls). */
-    function setProgPhase(t) { if (!progOwns($("#jdProgress"))) return; var el = $("#jdProgPhase"); if (el) el.textContent = t; }
+    function setProgPhase(t) { var el = $("#jdProgPhase"); if (el) el.textContent = t; }
     function finishProgress(label) {
-      var host = $("#jdProgress");
-      // A newer flow owns the bar now: this finish is from a stale chain, and
-      // slamming the live bar to 100% is exactly the jumpiness being fixed.
-      if (host && host.dataset.progOwner && !progOwns(host)) { prog.timer = null; return; }
-      stopProgTimer();
-      if (!host) return;
+      if (prog.timer) { clearInterval(prog.timer); prog.timer = null; }
+      var host = $("#jdProgress"); if (!host) return;
       host.classList.add("done");
       var fill = host.querySelector(".jd-prog-fill"), pct = host.querySelector(".jd-prog-pct"),
         phase = host.querySelector("#jdProgPhase"), eta = host.querySelector("#jdProgEta");
       if (fill) fill.style.width = "100%"; if (pct) pct.textContent = "100%";
       if (phase) phase.textContent = label || "Done"; if (eta) eta.textContent = "";
-      setTimeout(function () { var h = $("#jdProgress"); if (h && !window.__jdProgTimer && progOwns(h)) h.style.display = "none"; }, 1600);
+      setTimeout(function () { var h = $("#jdProgress"); if (h && !prog.timer) h.style.display = "none"; }, 1600);
     }
-    function hideProgress() {
-      var h = $("#jdProgress");
-      if (h && h.dataset.progOwner && !progOwns(h)) { prog.timer = null; return; }
-      stopProgTimer();
-      if (h) { h.style.display = "none"; h.innerHTML = ""; }
-    }
+    function hideProgress() { if (prog.timer) { clearInterval(prog.timer); prog.timer = null; } var h = $("#jdProgress"); if (h) { h.style.display = "none"; h.innerHTML = ""; } }
     /** ETA seconds for a discovery run, estimated from the candidate cap. */
     // Wider breadth runs more searches, so the honest ETA scales with the dial.
     function findEta(cap) {

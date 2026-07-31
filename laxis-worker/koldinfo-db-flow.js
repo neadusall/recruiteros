@@ -51,7 +51,13 @@ const CONFIG = {
   // browser that dies mid-run used to silently zero the whole job).
   batchSize: Number(process.env.KOLDINFO_DB_BATCH || 15),
   batchTimeoutMs: Number(process.env.KOLDINFO_DB_BATCH_TIMEOUT_MS || 240_000),
-  batchesPerBrowser: Number(process.env.KOLDINFO_DB_BATCHES_PER_BROWSER || 8),
+  batchesPerBrowser: Number(process.env.KOLDINFO_DB_BATCHES_PER_BROWSER || 5),
+  // How many browser sessions sweep the DB grid IN PARALLEL within one job. The grid-read
+  // flow spends ZERO credits and never clicks Export, so N concurrent read sessions is a
+  // safe, ~Nx wall-clock win (a 2,300-row job drops from ~3h to ~45min at 4). Kept modest
+  // and env-tunable so we stay a light, predictable footprint on one KoldInfo account; the
+  // vendor lane still runs one DB JOB at a time, so total live sessions never exceed this.
+  dbConcurrency: Math.max(1, Number(process.env.KOLDINFO_DB_CONCURRENCY || 4)),
 };
 
 /* ----------------------------------------------------------------------------- */
@@ -557,18 +563,24 @@ function outRow(rosId, hit) {
 function launchArgs() { return { headless: !CONFIG.headed, args: ["--no-sandbox", "--disable-dev-shm-usage"] }; }
 
 /**
- * Run a KoldInfo DB-lookup job - BATCHED: candidates ride the filter rule as OR'd name
- * chips, ~batchSize per sweep, one Business Email DB sweep + one People DB sweep per
- * batch (2 queries per ~15 people instead of 2 per person; an 800-row job drops from
- * hours to tens of minutes). Grid reads only - zero credits.
+ * Run a KoldInfo DB-lookup job - BATCHED + PARALLEL: candidates ride the filter rule as
+ * OR'd name chips, ~batchSize per sweep, one Business Email DB sweep + one People DB
+ * sweep per batch (2 queries per ~15 people instead of 2 per person). The batches are
+ * then swept by a POOL of `dbConcurrency` browser sessions at once - the grid-read flow
+ * spends zero credits and never clicks Export, so N parallel read sessions is a safe
+ * ~Nx wall-clock win (a 2,300-row job drops from ~3h to ~45min at 4). Each session has
+ * its OWN browser context = its own client-side filter state (filter state is per-page,
+ * so parallel sessions can never trample each other's filters).
  *
  * Resilience (an early browser death used to fail 800 rows in a burst yet finish as
  * "done, 0 enriched"):
  *  - a dead browser/page ABORTS the run with a retryable error (the server requeues it)
  *    instead of burning the remaining batches;
- *  - progress checkpoints onto the job after every batch (persisted by the server's
- *    store), so a retry RESUMES at the first unprocessed batch;
- *  - the browser is relaunched every `batchesPerBrowser` batches to pre-empt SPA leaks.
+ *  - progress checkpoints the SET of finished batch indices onto the job after every
+ *    batch (persisted by the server's store), so a retry RESUMES the unprocessed ones
+ *    even though they complete out of order under the pool;
+ *  - each session relaunches its browser every `batchesPerBrowser` batches to pre-empt
+ *    the SPA's cross-navigation memory leak.
  */
 async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
   const inputCsv = job.csv;
@@ -586,70 +598,148 @@ async function runJob(job, { log = () => {}, setPhase = () => {} } = {}) {
   for (let i = 0; i < cands.length; i += size) batches.push(cands.slice(i, i + size));
 
   // Resume from the checkpoint a previous attempt left on the job (the server persists
-  // job.checkpoint through its store; a fresh job starts clean).
+  // job.checkpoint through its store; a fresh job starts clean). Checkpoint v2 records the
+  // SET of finished batch indices (batches complete out of order under the pool); a legacy
+  // v1 checkpoint stored a contiguous `doneBatches` count, read back here as {0..n-1}.
   const ck = job.checkpoint && job.checkpoint.batchSize === size ? job.checkpoint : null;
+  const doneIdx = new Set();
+  if (ck) {
+    if (Array.isArray(ck.done)) for (const i of ck.done) doneIdx.add(i);
+    else if (typeof ck.doneBatches === "number") for (let i = 0; i < ck.doneBatches; i++) doneIdx.add(i);
+  }
   const outLines = ck && Array.isArray(ck.outLines) ? ck.outLines.slice() : [OUT_HEADER.join(",")];
-  let firstBatch = ck ? Math.min(ck.doneBatches, batches.length) : 0;
   let emails = ck ? ck.emails || 0 : 0, phones = ck ? ck.phones || 0 : 0, hitRows = ck ? ck.hitRows || 0 : 0;
-  if (firstBatch) log("db-lookup: resuming at batch " + (firstBatch + 1) + "/" + batches.length + " (checkpoint)");
 
-  let browser = null, page = null, batchesOnBrowser = 0;
-  async function freshBrowser() {
-    if (browser) await browser.close().catch(() => {});
-    browser = await chromium.launch(launchArgs());
-    const haveState = fs.existsSync(CONFIG.statePath);
-    const context = await browser.newContext(haveState ? { storageState: CONFIG.statePath } : {});
-    page = await ensureSession(context, log);
-    batchesOnBrowser = 0;
+  // The batch indices still to process, shared across pool workers (each pops the next).
+  const pending = [];
+  for (let b = 0; b < batches.length; b++) if (!doneIdx.has(b)) pending.push(b);
+  if (doneIdx.size) log("db-lookup: resuming - " + doneIdx.size + "/" + batches.length + " batch(es) already done (checkpoint)");
+  if (!pending.length) { job.checkpoint = undefined; return outLines.join("\n") + "\n"; }
+
+  // Warm up ONE session first so the pool reuses a saved login: N sessions logging in
+  // simultaneously would race on writing the shared storageState file. After this, every
+  // pool worker just loads the saved state - no concurrent logins.
+  {
+    const warm = await chromium.launch(launchArgs());
+    try {
+      const haveState = fs.existsSync(CONFIG.statePath);
+      const ctx = await warm.newContext(haveState ? { storageState: CONFIG.statePath } : {});
+      await ensureSession(ctx, log);
+      await ctx.storageState({ path: CONFIG.statePath }).catch(() => {});
+    } finally { await warm.close().catch(() => {}); }
   }
 
-  try {
-    await freshBrowser();
-    await setPhase("processing");
+  const concurrency = Math.min(CONFIG.dbConcurrency, pending.length);
+  log("db-lookup: " + pending.length + " batch(es) to sweep across " + concurrency + " parallel session(s)");
+  await setPhase("processing");
 
-    for (let b = firstBatch; b < batches.length; b++) {
-      const batch = batches[b];
-      if (batchesOnBrowser >= CONFIG.batchesPerBrowser) { log("db-lookup: preventive browser relaunch"); await freshBrowser(); }
-      let batchErr = null;
-      try {
-        await Promise.race([
-          (async () => { await batchBizEmailDb(page, batch, log); await batchPeopleDb(page, batch, log); })(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("koldinfo_batch_timeout")), CONFIG.batchTimeoutMs)),
-        ]);
-      } catch (e) { batchErr = e; }
+  let cursor = 0;         // next index into `pending` any free worker claims
+  let aborted = null;     // set to a retryable Error only on SYSTEMIC failure → stops the pool
+  let deaths = 0;         // total browser deaths across the pool (circuit-breaker input)
+  const requeues = new Map(); // bIdx -> times handed back after a crash (bounds retry churn)
+  const total = cands.length;
+  // A single Chromium leaking to death is the historical failure mode; recycling per worker
+  // pre-empts most of it, but a crash still happens. One crash must NOT sink the whole job -
+  // the hit worker relaunches and the batch is retried. Only a STORM of crashes (real
+  // resource exhaustion, e.g. the box is out of memory) trips the breaker and aborts
+  // RETRYABLY so the server requeues and the checkpoint resumes with nothing lost.
+  const MAX_DEATHS = Math.max(10, batches.length);
+  const MAX_REQUEUE = 3; // per batch, before we accept it answered-empty and move on
 
-      if (batchErr && browserGone(batchErr)) {
-        // The browser under us is gone. Abort RETRYABLY - the server requeues and the
-        // checkpoint resumes here - rather than burning every remaining batch on a corpse.
-        throw new Error("koldinfo_db_browser_died at batch " + (b + 1) + "/" + batches.length + ": " + ((batchErr && batchErr.message) || batchErr).slice(0, 140));
+  // Fold one finished batch's hits into the shared output + checkpoint. Runs as a single
+  // synchronous block (no await), so concurrent workers can never interleave inside it.
+  function recordBatch(bIdx, batch) {
+    if (doneIdx.has(bIdx)) return; // a requeued+re-run batch could double-fire; guard it
+    for (const cand of batch) {
+      const hit = cand._hit;
+      if (hit && (hit.email || hit.phone)) {
+        outLines.push(outRow(cand.rosId, hit));
+        hitRows++; if (hit.email) emails++; if (hit.phone) phones++;
       }
-      if (batchErr) {
-        // A timeout leaves in-flight page operations running; recycle the browser so the
-        // next batch starts on a clean session instead of a wedged page.
-        log("batch " + (b + 1) + "/" + batches.length + " error: " + ((batchErr && batchErr.message) || batchErr).slice(0, 140));
-        await freshBrowser();
-      }
-
-      for (const cand of batch) {
-        const hit = cand._hit;
-        if (hit && (hit.email || hit.phone)) {
-          outLines.push(outRow(cand.rosId, hit));
-          hitRows++; if (hit.email) emails++; if (hit.phone) phones++;
-        }
-      }
-      batchesOnBrowser++;
-      const seen = Math.min((b + 1) * size, cands.length);
-      // Checkpoint AFTER the batch: the server's log hook persists the job (and with it
-      // this checkpoint) to the durable store on every log line.
-      job.checkpoint = { batchSize: size, doneBatches: b + 1, outLines, emails, phones, hitRows };
-      log("db-lookup: " + seen + "/" + cands.length + " done - " + hitRows + " hit, " + emails + " email, " + phones + " phone");
-      setPhase("processing:" + seen + "/" + cands.length);
     }
-    if (page) await page.context().storageState({ path: CONFIG.statePath }).catch(() => {});
-    await setPhase("exported");
-  } finally {
-    if (browser) await browser.close().catch(() => {});
+    doneIdx.add(bIdx);
+    // Checkpoint AFTER the batch: the server's log hook persists the job (and with it this
+    // checkpoint) to the durable store on every log line.
+    job.checkpoint = { version: 2, batchSize: size, done: [...doneIdx], outLines, emails, phones, hitRows };
+    const seen = Math.min(doneIdx.size * size, total);
+    log("db-lookup: " + seen + "/" + total + " done - " + hitRows + " hit, " + emails + " email, " + phones + " phone");
+    setPhase("processing:" + seen + "/" + total);
   }
+
+  async function worker(wid) {
+    let browser = null, page = null, onBrowser = 0;
+    async function fresh() {
+      if (browser) await browser.close().catch(() => {});
+      browser = await chromium.launch(launchArgs());
+      const haveState = fs.existsSync(CONFIG.statePath);
+      const context = await browser.newContext(haveState ? { storageState: CONFIG.statePath } : {});
+      page = await ensureSession(context, log); // reuses the warmed-up login; no re-login
+      onBrowser = 0;
+    }
+    // Relaunch, reporting whether we could - a relaunch that itself fails means this host
+    // can't run a browser right now, which is systemic and aborts the pool retryably.
+    async function freshSafe() {
+      try { await fresh(); return true; }
+      catch (e) { aborted = new Error("koldinfo_db_relaunch_failed: " + String((e && e.message) || e).slice(0, 120)); return false; }
+    }
+
+    /** Run one batch with in-worker recovery. Returns "done" | "requeued" | "abort". */
+    async function runBatch(bIdx, batch) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let err = null;
+        try {
+          await Promise.race([
+            (async () => { await batchBizEmailDb(page, batch, log); await batchPeopleDb(page, batch, log); })(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("koldinfo_batch_timeout")), CONFIG.batchTimeoutMs)),
+          ]);
+          return "done";
+        } catch (e) { err = e; }
+
+        if (browserGone(err)) {
+          deaths++;
+          log("[w" + wid + "] browser died on batch " + (bIdx + 1) + "/" + batches.length +
+            " (" + deaths + " total): " + String((err && err.message) || err).slice(0, 100));
+          if (deaths > MAX_DEATHS) {
+            aborted = new Error("koldinfo_db_browser_died x" + deaths + " (resource exhaustion) at batch " + (bIdx + 1) + "/" + batches.length);
+            return "abort";
+          }
+          if (!(await freshSafe())) return "abort"; // relaunch on a clean session
+          const rc = (requeues.get(bIdx) || 0) + 1; requeues.set(bIdx, rc);
+          if (rc <= MAX_REQUEUE) { pending.push(bIdx); return "requeued"; } // hand back, move on
+          return "done"; // exhausted retries for this batch → accept answered-empty (bounded)
+        }
+        // A timeout/wedge leaves in-flight page ops running; recycle onto a clean session
+        // and try once more before accepting the batch as answered-empty.
+        log("[w" + wid + "] batch " + (bIdx + 1) + "/" + batches.length + " error: " +
+          String((err && err.message) || err).slice(0, 120));
+        if (!(await freshSafe())) return "abort";
+      }
+      return "done"; // timed out twice → record empty (matches the pre-pool tolerance)
+    }
+
+    try {
+      await fresh();
+      while (!aborted) {
+        const bIdx = cursor < pending.length ? pending[cursor++] : -1;
+        if (bIdx < 0) break; // queue drained
+        if (doneIdx.has(bIdx)) continue; // already answered by a sibling before we claimed it
+        const batch = batches[bIdx];
+        if (onBrowser >= CONFIG.batchesPerBrowser) { if (!(await freshSafe())) break; }
+        const r = await runBatch(bIdx, batch);
+        if (r === "abort") break;
+        if (r === "requeued") continue; // batch pushed back; a worker will re-run it
+        recordBatch(bIdx, batch);
+        onBrowser++;
+      }
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, (_, i) => worker(i)));
+  if (aborted) throw aborted; // systemic; the server requeues and the checkpoint resumes
+
+  await setPhase("exported");
   job.checkpoint = undefined; // job is complete; drop the (large) resume payload
   log("db-lookup DONE: " + hitRows + "/" + cands.length + " rows enriched (" + emails + " emails, " + phones + " phones)" +
     (skippedNames ? " · " + skippedNames + " unmatchable name(s) skipped" : ""));

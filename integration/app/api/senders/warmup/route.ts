@@ -18,6 +18,8 @@ import { listSmartleadAccounts, smartleadConfigured, type SmartleadAccount } fro
 import { ensureConfig } from "../../../../lib/sending/config";
 import { requestHost, tenantWorkspaceForHost } from "../../../../lib/branding/portal";
 import { presetForHost, allBrandPresets } from "../../../../lib/branding/presets";
+import { probeDnsMany, cachedDns, type DnsPosture } from "../../../../lib/sending/dnsProbe";
+import { listInboxes } from "../../../../lib/senders";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +59,9 @@ export interface WarmupMailboxRow {
   dailySent: number | null;
   createdAt: string | null;
   days: number | null;
+  /** SMTP state of the matching Email ID on THIS portal (null = not imported). */
+  smtpStatus: string | null;
+  smtpError: string | null;
 }
 
 export interface WarmupDomainRow {
@@ -72,6 +77,21 @@ export interface WarmupDomainRow {
   spamCount: number;
   spamRatePct: number | null;
   readiness: "ready" | "warming" | "attention";
+  /** Live DNS posture; null while the first probe is still resolving. */
+  dns: {
+    spf: boolean; dkim: boolean; dmarc: boolean; mx: boolean;
+    dmarcPolicy: string | null; dkimSelector: string | null; checkedAt: string;
+  } | null;
+  /** Composite deliverability health, 0-100 + label. */
+  health: { score: number; label: "healthy" | "watch" | "at_risk" };
+  /** What an operator should do next for this domain (ordered, most urgent first). */
+  actions: string[];
+  /** Email IDs from this domain imported on THIS portal (the send side). */
+  emailIds: { total: number; active: number; error: number };
+  /** Warm-up throughput the upstream schedule is running at (emails/day, summed)
+   *  and the average reply rate. Meaningful even when cumulative sends read 0. */
+  warmupPerDay: number | null;
+  replyRatePct: number | null;
   accounts: WarmupMailboxRow[];
 }
 
@@ -89,8 +109,14 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
   const rows: WarmupDomainRow[] = [];
   for (const [domain, list] of byDomain) {
     const reps = list.map((a) => a.reputationPct).filter((r): r is number => typeof r === "number");
-    const createds = list.map((a) => a.createdAt).filter((c): c is string => !!c).sort();
+    // Prefer the true warm-up start (warmup_created_at) over the account's
+    // upstream created_at; fall back to created_at where warm-up hasn't stamped one.
+    const createds = list.map((a) => a.warmupStartedAt || a.createdAt).filter((c): c is string => !!c).sort();
     const since = createds[0] || null;
+    const perDays = list.map((a) => a.warmupPerDay).filter((n): n is number => typeof n === "number");
+    const warmupPerDay = perDays.length ? perDays.reduce((s, n) => s + n, 0) : null;
+    const replies = list.map((a) => a.replyRatePct).filter((n): n is number => typeof n === "number");
+    const replyRatePct = replies.length ? Math.round(replies.reduce((s, n) => s + n, 0) / replies.length) : null;
     const days = since ? round1((now - new Date(since).getTime()) / 86_400_000) : null;
     const sentTotal = list.reduce((s, a) => s + (a.sentTotal || 0), 0);
     const spamCount = list.reduce((s, a) => s + (a.spamCount || 0), 0);
@@ -118,6 +144,12 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
       spamCount,
       spamRatePct,
       readiness,
+      dns: null,
+      health: { score: 0, label: "watch" },
+      actions: [],
+      emailIds: { total: 0, active: 0, error: 0 },
+      warmupPerDay,
+      replyRatePct,
       accounts: list
         .map((a): WarmupMailboxRow => ({
           email: a.email,
@@ -125,10 +157,12 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
           reputationPct: a.reputationPct ?? null,
           sentTotal: a.sentTotal || 0,
           spamCount: a.spamCount || 0,
-          messagePerDay: a.messagePerDay ?? null,
+          messagePerDay: a.warmupPerDay ?? a.messagePerDay ?? null,
           dailySent: a.dailySent ?? null,
-          createdAt: a.createdAt || null,
-          days: a.createdAt ? round1((now - new Date(a.createdAt).getTime()) / 86_400_000) : null,
+          createdAt: a.warmupStartedAt || a.createdAt || null,
+          days: (a.warmupStartedAt || a.createdAt) ? round1((now - new Date((a.warmupStartedAt || a.createdAt) as string).getTime()) / 86_400_000) : null,
+          smtpStatus: null,
+          smtpError: null,
         }))
         .sort((x, y) => x.email.localeCompare(y.email)),
     });
@@ -136,6 +170,47 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
   // Oldest cohorts first, then alphabetical - the reading order an operator wants.
   rows.sort((x, y) => (x.since || "9999").localeCompare(y.since || "9999") || x.domain.localeCompare(y.domain));
   return rows;
+}
+
+/**
+ * Composite deliverability health for one domain: warm-up reputation carries
+ * most of the weight, then live DNS posture, spam outcomes and fleet state.
+ * DKIM is a soft signal (selector may just not be guessable), so it costs
+ * little and never triggers an at_risk on its own.
+ */
+function computeHealth(d: WarmupDomainRow): { score: number; label: "healthy" | "watch" | "at_risk" } {
+  let score = 0;
+  score += (d.avgReputation ?? 50) * 0.45;                                   // 0-45
+  if (d.spamRatePct == null || d.spamRatePct <= 0.5) score += 15;            // 0-15
+  else if (d.spamRatePct <= 2) score += 8;
+  if (d.dns) {
+    score += (d.dns.spf ? 9 : 0) + (d.dns.dmarc ? 9 : 0) + (d.dns.mx ? 4 : 0) + (d.dns.dkim ? 3 : 0); // 0-25
+  } else {
+    score += 18;                                                             // unknown DNS: neutral, not punitive
+  }
+  score += Math.max(0, 15 - d.paused * 3);                                   // 0-15
+  const s = Math.round(Math.min(100, score));
+  return { score: s, label: s >= 85 ? "healthy" : s >= 65 ? "watch" : "at_risk" };
+}
+
+function computeActions(d: WarmupDomainRow): string[] {
+  const a: string[] = [];
+  if (d.paused > 0) a.push(`Resume ${d.paused} paused mailbox${d.paused === 1 ? "" : "es"} in warm-up`);
+  if (d.spamRatePct != null && d.spamRatePct > 2) a.push(`Spam rate ${d.spamRatePct}% is high, slow this domain's ramp and let reputation recover`);
+  if (d.days != null && d.days >= 7 && d.avgReputation != null && d.avgReputation < 60) a.push("Reputation is low after a week of warming, reduce daily warm-up volume for this domain");
+  if (d.dns) {
+    if (!d.dns.spf) a.push("SPF record missing, add a v=spf1 TXT record at the domain root");
+    if (!d.dns.dmarc) a.push("DMARC record missing, add _dmarc TXT (start with p=none)");
+    if (!d.dns.mx) a.push("MX record missing, replies and warm-up threads cannot route back");
+    if (!d.dns.dkim) a.push("DKIM not visible on common selectors, confirm the mail host's DKIM record");
+    if (d.dns.dmarc && (d.dns.dmarcPolicy || "none") === "none" && d.days != null && d.days >= 21) a.push("Domain is stable, tighten DMARC from p=none to p=quarantine");
+  }
+  if (d.readiness === "ready" && d.emailIds.total === 0) a.push("Warmed and ready, import this domain's mailboxes as Email IDs to start sending");
+  if (d.emailIds.error > 0) a.push(`${d.emailIds.error} Email ID${d.emailIds.error === 1 ? "" : "s"} on this portal in SMTP error, open Senders list and Test them`);
+  if (!a.length && d.readiness === "warming" && d.days != null && d.days < 14) {
+    a.push(`On track, ${Math.max(1, Math.ceil(14 - d.days))} more day${14 - d.days > 1 ? "s" : ""} to the 14-day mark`);
+  }
+  return a;
 }
 
 export async function GET(req: Request) {
@@ -162,6 +237,40 @@ export async function GET(req: Request) {
     ? (tenantToken ? domains.filter((d) => d.domain.startsWith(tenantToken)) : [])
     : domains.filter((d) => !houseExcluded.some((t) => d.domain.startsWith(t)));
 
+  // Live DNS posture, timeboxed: whatever resolves in time ships now, the
+  // probe keeps filling its cache in the background for the next poll.
+  const domainNames = domains.map((d) => d.domain);
+  const probe = probeDnsMany(domainNames);
+  await Promise.race([probe, new Promise((r) => setTimeout(r, 8000))]);
+  const dnsFor = (name: string): DnsPosture | null => cachedDns(name);
+
+  // This portal's imported Email IDs (the send side), blended in per domain.
+  const inboxes = await listInboxes(g.ctx.workspace.id);
+  const inboxByEmail = new Map(inboxes.map((m) => [m.email.toLowerCase(), m]));
+
+  for (const d of domains) {
+    const p = dnsFor(d.domain);
+    d.dns = p ? {
+      spf: p.spf, dkim: p.dkim, dmarc: p.dmarc, mx: p.mx,
+      dmarcPolicy: p.dmarcPolicy || null, dkimSelector: p.dkimSelector || null, checkedAt: p.checkedAt,
+    } : null;
+    const local = inboxes.filter((m) => m.email.toLowerCase().endsWith("@" + d.domain));
+    d.emailIds = {
+      total: local.length,
+      active: local.filter((m) => m.status === "active").length,
+      error: local.filter((m) => m.status === "error").length,
+    };
+    for (const row of d.accounts) {
+      const m = inboxByEmail.get(row.email);
+      if (m) {
+        row.smtpStatus = m.status;
+        row.smtpError = m.lastError || null;
+      }
+    }
+    d.health = computeHealth(d);
+    d.actions = computeActions(d);
+  }
+
   const totals = {
     domains: domains.length,
     mailboxes: domains.reduce((s, d) => s + d.mailboxes, 0),
@@ -169,6 +278,9 @@ export async function GET(req: Request) {
     paused: domains.reduce((s, d) => s + d.paused, 0),
     ready: domains.filter((d) => d.readiness === "ready").length,
     attention: domains.filter((d) => d.readiness === "attention").length,
+    healthy: domains.filter((d) => d.health.label === "healthy").length,
+    atRisk: domains.filter((d) => d.health.label === "at_risk").length,
+    avgHealth: domains.length ? Math.round(domains.reduce((s, d) => s + d.health.score, 0) / domains.length) : null,
     avgReputation: (() => {
       const reps = domains.map((d) => d.avgReputation).filter((r): r is number => r != null);
       return reps.length ? Math.round(reps.reduce((s, r) => s + r, 0) / reps.length) : null;

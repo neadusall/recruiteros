@@ -9,7 +9,8 @@
  *   Registry + dispatcher:  var ROUTES = … ,  function route()
  *   #overview    viewOverview    business KPIs + spend rollup
  *   #pricing     viewPricing     published tiers (→ runCalc, tierCard, recoCard)
- *   #spend       viewSpend       unified spend
+ *   #spend       viewSpend       unified spend (→ renderReceiptsCard, renderBoostCard)
+ *   #burn        alias of #spend, the name this page is linked by
  *   #people      viewPeople      users & roles (→ renderRoster, roleChip)
  *   #accounts    viewAccounts    full account control (see/reset/delete)
  *   #costs       viewCosts       editable cost model
@@ -88,8 +89,11 @@
   // Projection calculator moved to the in-app command center (Measure → Spending).
   var ROUTES = { overview: viewOverview, pricing: viewPricing, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, security: viewSecurity };
   var TITLES = { overview: "Overview", pricing: "Pricing", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", security: "Security" };
+  // #burn is the name this page is linked and bookmarked by; it is the spend view.
+  var ALIASES = { burn: "spend" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
+    if (ALIASES[r]) r = ALIASES[r];
     if (!ROUTES[r]) r = "overview";
     $$("#ownerNav .nav-item").forEach(function (a) { a.classList.toggle("active", a.dataset.route === r); });
     $("#pageTitle").textContent = TITLES[r];
@@ -662,11 +666,119 @@
         html += '</tbody></table>';
       }
       html += '</div>';
+      html += '<div id="receiptsCard" style="margin-top:14px"></div>';
       html += '<div id="boostCard" style="margin-top:14px"></div>';
       $("#view").innerHTML = html;
       $$("#view .clickrow").forEach(function (tr) { tr.addEventListener("click", function () { openAccount(tr.dataset.id); }); });
+      renderReceiptsCard();
       renderBoostCard();
     }).catch(fail);
+  }
+
+  /* Receipt coverage. The spend numbers above say what left the account; this
+     says whether we hold the vendor's own document for it. Loaded after the
+     view paints, like the boost card, so it never delays the page.
+
+     Fetching happens off-platform in the spend-ledger tool: it tries each
+     provider's own API first and falls back to a browser session against their
+     billing page, on the charge date and again through a grace window until the
+     document lands. A provider whose session has never been signed in cannot
+     collect anything, and says so here rather than looking quietly fine. */
+  var RSTATE = {
+    "setup-needed": { pill: "susp", label: "Setup needed" },
+    "error":        { pill: "susp", label: "Last run failed" },
+    "missing":      { pill: "susp", label: "Missing receipt" },
+    "stale":        { pill: "susp", label: "Sweep stopped" },
+    "never-run":    { pill: "susp", label: "Never run" },
+    "waiting":      { pill: "atcost", label: "Waiting on vendor" },
+    "no-charges":   { pill: "atcost", label: "No charges" },
+    "ok":           { pill: "active", label: "Receipts on file" }
+  };
+
+  function renderReceiptsCard() {
+    var el = $("#receiptsCard");
+    if (!el) return;
+    el.innerHTML = '<div class="card"><h3>Receipts · every dollar documented</h3><p class="note">Reading receipt coverage…</p></div>';
+
+    api("/owner/receipts").then(function (r) {
+      var t = r.totals || {}, rows = r.providers || [];
+      var h = '<div class="card"><h3>Receipts · every dollar documented</h3>' +
+        '<p class="note">Whether we hold the provider\'s own receipt for every charge. Each provider is checked on the day it bills and again for a few days after, since vendors publish the document late. The provider API is always tried first; where none exists, a signed-in browser session fetches it.</p>';
+
+      h += '<div class="stat-grid" style="margin-top:12px">' +
+        stat(pct(t.coveragePct || 0), "Charges with a receipt", (t.coveragePct || 0) >= 100 ? "good" : (t.charges ? "bad" : "")) +
+        stat((t.ready || 0) + " of " + (t.tracked || 0), "Providers collecting", t.setupNeeded ? "bad" : "good") +
+        stat(t.setupNeeded || 0, "Need setting up", t.setupNeeded ? "bad" : "") +
+        stat(usd(t.undocumentedUsd || 0), "Spend with no document", t.undocumentedUsd ? "bad" : "") +
+        '</div>';
+
+      // The headline the page exists for: nothing is being collected yet.
+      if (r.neverSwept) {
+        h += '<p class="note" style="margin-top:14px"><b>No receipt sweep has ever reported in.</b> Every provider below is unset, so no receipts are being collected anywhere. ' +
+          'Set each one up with <span class="mono">node receipts.mjs login &lt;provider&gt;</span> in the spend-ledger tool, then schedule <span class="mono">node receipts.mjs sweep</span> to run daily.</p>';
+      } else if (r.sweepAgeDays != null && r.sweepAgeDays > 3) {
+        h += '<p class="note" style="margin-top:14px"><b>The sweep last reported ' + r.sweepAgeDays + ' days ago.</b> Charges since then have not been checked. Look at the scheduled task running <span class="mono">node receipts.mjs sweep</span>' + (r.host ? ' on ' + esc(r.host) : '') + '.</p>';
+      }
+
+      if (!rows.length) {
+        h += '<p class="note" style="margin-top:14px">No providers are on the book.</p>';
+      } else {
+        // Six columns will not fit a phone, so the table scrolls inside its own
+        // box rather than pushing the whole page sideways.
+        h += '<div style="margin-top:14px;overflow-x:auto"><table class="otable"><thead><tr>' +
+          '<th>Provider</th><th>Route to the receipt</th><th>Bills</th><th>Last checked</th>' +
+          '<th class="num">Receipts</th><th>Status</th></tr></thead><tbody>';
+        rows.forEach(function (p) {
+          var s = RSTATE[p.state] || RSTATE["never-run"];
+          var bills = p.billingDay ? "day " + p.billingDay + " of the month"
+            : (p.cadence === "usage" ? "as used" : "day not set");
+          var checked = p.lastRunAt
+            ? (p.daysSinceRun === 0 ? "today" : p.daysSinceRun === 1 ? "yesterday" : p.daysSinceRun + " days ago")
+            : "never";
+          var route = p.apiSupported === true ? "Provider API"
+            : p.apiSupported === "partial" ? "API for the amount, browser for the document"
+            : "Browser session";
+          h += '<tr><td><b>' + esc(p.name) + '</b><div class="note" style="margin:2px 0 0">' + esc(p.what || "") + '</div></td>' +
+            '<td>' + esc(route) + '</td>' +
+            '<td>' + esc(bills) + '</td>' +
+            '<td>' + esc(checked) + '</td>' +
+            '<td class="num">' + (p.charges ? (p.receipted || 0) + " of " + p.charges : "-") + '</td>' +
+            '<td style="white-space:nowrap"><span class="pill ' + s.pill + '">' + esc(s.label) + '</span></td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
+
+      // What to actually do, provider by provider, in the order it matters.
+      var todo = rows.filter(function (p) { return p.action; });
+      if (todo.length) {
+        h += '<div class="tier-lines" style="margin-top:16px"><div class="tl"><span>To do</span><span class="v">' + todo.length + ' provider' + (todo.length === 1 ? '' : 's') + '</span></div>';
+        todo.forEach(function (p) {
+          h += '<p class="note" style="margin-top:8px"><b>' + esc(p.name) + ':</b> ' + esc(p.action) + '</p>';
+        });
+        h += '</div>';
+      }
+
+      // Charges the vendor has been billed for but never documented.
+      var undocumented = [];
+      rows.forEach(function (p) {
+        (p.missing || []).forEach(function (m) { undocumented.push({ name: p.name, m: m }); });
+      });
+      if (undocumented.length) {
+        h += '<div class="tier-lines" style="margin-top:16px"><div class="tl"><span>Charges with no document yet</span><span class="v">' + undocumented.length + '</span></div>' +
+          '<div style="margin-top:8px;overflow-x:auto"><table class="otable"><thead><tr><th>Provider</th><th>Charged</th><th class="num">Amount</th><th>Why not</th></tr></thead><tbody>';
+        undocumented.forEach(function (u) {
+          h += '<tr><td>' + esc(u.name) + '</td><td>' + esc(u.m.date || "unknown") + '</td>' +
+            '<td class="num">' + (u.m.amount != null ? usd(u.m.amount) : "-") + '</td>' +
+            '<td class="note">' + esc(u.m.reason || "") + '</td></tr>';
+        });
+        h += '</tbody></table></div></div>';
+      }
+
+      h += '</div>';
+      el.innerHTML = h;
+    }).catch(function () {
+      el.innerHTML = '<div class="card"><h3>Receipts · every dollar documented</h3><p class="note">Could not load receipt coverage.</p></div>';
+    });
   }
 
   /* Paid phone lookups (JD Sourcing "Boost phones"). Loaded after the spend view
