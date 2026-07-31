@@ -89,6 +89,14 @@ echo "Saved $ADDR to slot $SLOT. Mailboxes now configured:"
 grep -E '^BILLING_INBOX(_[2-4])?_USER=' "$ENV" | sed 's/^/  /'
 
 echo ""
+# CONNECTING FOUR MAILBOXES MUST NOT COST FOUR REBUILDS. Each one takes minutes, and
+# three of the four would be thrown away by the next. A caller adding several in one
+# go sets SKIP_REBUILD=1 for all but the last, or rebuilds once itself afterwards;
+# a single run on its own still rebuilds, so the documented one-liner is unchanged.
+if [ "${SKIP_REBUILD:-}" = "1" ]; then
+  echo "Saved. Not rebuilding yet (SKIP_REBUILD=1): run 'docker compose up -d --build app' once you have added them all."
+  exit 0
+fi
 echo "Rebuilding (a few minutes)..."
 docker compose up -d --build app
 
