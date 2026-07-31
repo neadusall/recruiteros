@@ -252,8 +252,8 @@ export const VENDOR_SOURCES: VendorSource[] = [
     subject: ["zapmail", "mailbox", "receipt", "invoice", "subscription", "domain"],
     merchant: ["zapmail"],
     portal: "https://app.zapmail.ai/billing",
-    api: "POST /v2/payment/invoices (header x-auth-zapmail) returns a Stripe invoice URL, but only for a subscription id it does not itself hand out, and it carries no amount. So it can fetch the document once the subscription is known and can never state the figure.",
-    setup: "Two charges live here, not one: the Google Workspace mailboxes monthly, and the domains Zapmail registered on their reseller registrar. Both bill through Stripe, so the sender is Stripe and the merchant name is what identifies them.",
+    api: "COLLECTS ITSELF, no sign-in anywhere. GET /v2/subscriptions (header x-auth-zapmail) states the plan, the price and `invoiceDetails`: a Stripe HOSTED INVOICE link, which is its own credential. The sweep reads the whole invoice off it with plain fetch - number, amount, paid date, line items, PDF - so the monthly receipt arrives unattended forever. (The path once recorded here, POST /v2/payment/invoices, does not exist and answers 'Cannot POST'.)",
+    setup: "Two kinds of charge live here, not one, and they must not be added together: the Google Workspace mailboxes RECUR at $299/month, while the domains Zapmail registered on its reseller registrar were a ONE-OFF. The monthly one needs nobody. A one-off is not on a subscription, so the API has never heard of it: paste the hosted invoice link out of its receipt email into `node zapmail-invoice.mjs add <url>` once and it collects with the rest from then on.",
   },
   {
     vendor: "Microsoft 365",
