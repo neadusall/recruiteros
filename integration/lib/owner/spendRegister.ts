@@ -322,12 +322,6 @@ const SEED: SeedItem[] = [
     notes: "Settle which provider actually holds the bucket: this row and the Object storage row must not both be counted for the same bytes.",
   },
   {
-    vendor: "GitHub", label: "Repositories", category: "software", billing: "monthly",
-    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
-    purpose: "Every repo, and the source the deploy watcher pulls from.",
-    notes: "Private repos are free on the personal plan, so this may genuinely be $0. Confirm once and set it.",
-  },
-  {
     vendor: "Cloudflare", label: "DNS", category: "domain", billing: "monthly",
     amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
     purpose: "DNS for the tal fleet, talentrecru.com and the sending domains.",
@@ -343,11 +337,6 @@ const SEED: SeedItem[] = [
     vendor: "Porkbun", label: "Domain registrations", category: "domain", billing: "one_time",
     amountUsd: 0, at: "2026-06-01", status: "active", needsAmount: true,
     purpose: "Registrar for the 15 Lume sending domains and the registrar of record for Claimie.",
-  },
-  {
-    vendor: "GoDaddy", label: "Domain registrations", category: "domain", billing: "one_time",
-    amountUsd: 0, at: "2026-05-01", status: "active", needsAmount: true,
-    purpose: "Registrar for lumesp.com, claimie.ai and mytal.co, DNS included.",
   },
   {
     vendor: "Namecheap", label: "Domain registrations", category: "domain", billing: "one_time",
@@ -397,7 +386,7 @@ interface RegisterStore {
   seededVersion: number;
 }
 
-const SEED_VERSION = 9;
+const SEED_VERSION = 10;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -406,10 +395,11 @@ const SNAP_KEY = "owner_spend_register_v1";
  * Taking a vendor out of SEED only stops it being re-added: a row already seeded into the
  * live store stays there forever. These were all owner calls (2026-07-31): Instantly and
  * Hume are not used at all; KoldInfo, Laxis and Loxo are used but are not billed to this
- * book; and TidyCal costs nothing ongoing, so a $0 "no price on file" line for any of them
- * is noise the owner has to look past every time. Guarded the same way a correction is:
- * only a row that came from the seed and carries no owner-entered money is removed, so a
- * figure someone typed can never be deleted by a redeploy.
+ * book; TidyCal costs nothing ongoing; and GitHub and GoDaddy carry no charge to this book
+ * either, so a $0 "no price on file" line for any of them is noise the owner has to look
+ * past every time. Guarded the same way a correction is: only a row that came from the
+ * seed and carries no owner-entered money is removed, so a figure someone typed can never
+ * be deleted by a redeploy.
  */
 const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
   { vendor: "Instantly", label: "Outreach sending (alternate provider)" },
@@ -418,6 +408,8 @@ const SEED_RETIREMENTS: Array<{ vendor: string; label: string }> = [
   { vendor: "Laxis", label: "Contact enrichment" },
   { vendor: "Loxo", label: "ATS seats" },
   { vendor: "TidyCal", label: "Booking links" },
+  { vendor: "GitHub", label: "Repositories" },
+  { vendor: "GoDaddy", label: "Domain registrations" },
 ];
 
 /**
