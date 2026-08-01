@@ -1401,6 +1401,43 @@
   /* The grid itself: services x months, receipts behind the cells, running totals on both
      axes. Amounts a receipt proves are solid; amounts taken from the register are shown as
      estimates so a total is never quietly invented. */
+  // The client account that owner-pushed spend lands on (app.lumesp = Lume).
+  // Resolved once from the accounts list by domain/name and cached for the session.
+  var _clientWs = null;
+  function resolveClientWs(cb) {
+    if (_clientWs) { cb(_clientWs.id, _clientWs.name); return; }
+    api("/owner/accounts").then(function (r) {
+      var accts = (r && r.accounts) || [];
+      var pick = accts.filter(function (x) {
+        var dom = (x.domain || "").toLowerCase(), nm = (x.name || "").toLowerCase();
+        return dom.indexOf("lumesp") >= 0 || nm.indexOf("lume") >= 0;
+      })[0] || accts[0];
+      if (pick) { _clientWs = { id: pick.workspaceId, name: pick.name }; cb(pick.workspaceId, pick.name); }
+      else cb(null);
+    }).catch(function () { cb(null); });
+  }
+  // One click from the Month-by-month grid: create the charge on the client's
+  // Spending page AND approve it, so it lands live for their accountant at once.
+  function sendSpendToClient(el, label, amt) {
+    if (!(amt > 0)) { toast("Nothing to send on this row."); return; }
+    resolveClientWs(function (wsId, wsName) {
+      if (!wsId) { toast("No client account found to send to."); return; }
+      el.classList.add("is-busy"); var orig = el.textContent; el.textContent = "Sending…";
+      send("/owner/portal-spend", "POST", { workspaceId: wsId, source: "usage", label: label, amountUsd: amt }).then(function (r) {
+        var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
+        if (!cid) { toast((r.data && r.data.message) || "Couldn't send"); el.classList.remove("is-busy"); el.textContent = orig; return; }
+        send("/owner/portal-spend", "PATCH", { workspaceId: wsId, id: cid, action: "approve" }).then(function () {
+          toast("Sent to " + (wsName || "client") + " Spending"); el.classList.remove("is-busy"); el.classList.add("sent"); el.textContent = "Sent ✓";
+        }).catch(function () { el.classList.remove("is-busy"); el.classList.add("sent"); el.textContent = "Sent ✓"; });
+      }).catch(function () { toast("Couldn't reach the server"); el.classList.remove("is-busy"); el.textContent = orig; });
+    });
+  }
+  /** "Send to Spending" on a whole row (its total in the window). */
+  function sendRowAct(r, ri) {
+    if (!(r.totalCountedUsd > 0)) return "";
+    return '<div class="row-acts"><a class="row-mini" data-sendrow="' + ri + '">Send to Spending →</a></div>';
+  }
+
   function receiptMatrix(d) {
     if (!d) return "";
     var m = d.matrix, months = m.months || [];
@@ -1465,6 +1502,7 @@
            what it does is what the row needs. The column is sticky, so the actions stay
            put while the months scroll past. */
         (r.itemId ? acts(r.itemId) : registerAct(r, ri)) +
+        sendRowAct(r, ri) +
         /* Clearing a row's paperwork is a different act from deleting the register line,
            so it is its own control and only appears when there is something to clear.
            It counts the receipts the GRID is showing on this row, which includes the ones
@@ -1981,6 +2019,17 @@
           toast(r.vendor + " added to the register");
           viewBurn();
         });
+      });
+    });
+    /* Send a whole row's spend to the client's Spending page (one click = create +
+       approve). stopPropagation so it never doubles as opening a receipt. */
+    $$("#view [data-sendrow]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (a.classList.contains("is-busy") || a.classList.contains("sent")) return;
+        var r = ((rcptData && rcptData.matrix && rcptData.matrix.rows) || [])[Number(a.dataset.sendrow)];
+        if (!r || !(r.totalCountedUsd > 0)) { toast("This row has no cost to send."); return; }
+        sendSpendToClient(a, (r.vendor || "Spend") + (r.label ? " — " + r.label : ""), r.totalCountedUsd);
       });
     });
     /* Clear a whole row's paperwork. stopPropagation because the row header sits next to
