@@ -241,8 +241,10 @@ export const SEED: SeedItem[] = [
   },
   {
     vendor: "Resend", label: "Transactional SMTP", category: "email", billing: "monthly",
-    amountUsd: 0, needsAmount: true, at: "2026-07-01", status: "active",
+    amountUsd: 20, at: "2026-07-01", status: "active", verified: true,
     purpose: "Platform mail for the Lume tenant on port 587 (465 is blocked on the app box).",
+    impact: "Every password reset, magic link, verification and view-notification the platform sends leaves through Resend. Without it those transactional emails stop and sign-in breaks for anyone who needs a reset.",
+    notes: "PRICE PROVED BY THE INVOICE: $20.00/mo, Transactional Pro, invoice BZSBPCJF-0001 charged 2026-07-22 (filed in the receipt vault). Seeded at $0/needsAmount, which is why Month by month reported the Resend charge as unexpected and the row as no-price-on-file. It is a monthly plan, so it recurs and is expected every month from July onward.",
     link: { envKeys: ["RESEND_API_KEY"] },
   },
   {
@@ -412,8 +414,14 @@ interface RegisterStore {
  * boots, and every correction shipped under the second 16 is then skipped FOREVER: the row
  * quietly keeps its old value and nothing anywhere reports a problem. That is what happened
  * here, and 17 is the repair.
+ *
+ * 18: price the Resend row. It was seeded at $0/needsAmount, so it counted for nothing in
+ * the burn and the real $20/mo Transactional Pro invoice (BZSBPCJF-0001, charged
+ * 2026-07-22) landed as an unexpected charge with no row expecting it. The SEED_CORRECTION
+ * sets it to $20 verified on every live store still carrying the $0 version. Checked
+ * origin/main == 17 before bumping.
  */
-const SEED_VERSION = 17;
+const SEED_VERSION = 18;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -533,6 +541,21 @@ const SEED_CORRECTIONS: Array<{
     patch: {
       billing: "annual",
       notes: SEED.find((s) => s.vendor === "RackNerd" && s.label.startsWith("Validation"))?.notes,
+    },
+  },
+  {
+    /* Seeded at $0 with needsAmount, so the Resend row contributed nothing to the burn and
+       Month by month flagged the real $20 charge as unexpected against a no-price-on-file
+       row. The invoice proves the recurring price: $20.00/mo Transactional Pro, invoice
+       BZSBPCJF-0001 charged 2026-07-22, filed in the receipt vault. The row is already
+       billing: "monthly" active from 2026-07, so pricing it makes every month from July
+       onward expect $20 and the July receipt reconcile as paid. Applied to the untouched
+       seeded row so every live store still carrying the $0 version is corrected on this bump. */
+    vendor: "Resend", label: "Transactional SMTP",
+    patch: {
+      amountUsd: 20, verified: true, needsAmount: false,
+      impact: SEED.find((s) => s.vendor === "Resend")?.impact,
+      notes: SEED.find((s) => s.vendor === "Resend")?.notes,
     },
   },
 ];
