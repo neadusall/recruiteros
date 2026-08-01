@@ -219,19 +219,14 @@
 
 .rc-cell { cursor: pointer; transition: background 0.12s ease; position: relative; }
 .rc-cell:hover { background: var(--brand-soft); }
-/* The per-cell clear (×) / restore (↺). Sits in the top-left corner of EVERY cell that
-   shows something, faint but always visible so it can actually be found, and brightening
-   on hover. The left corner keeps it clear of the receipt thumbnail, which sits top-right. */
-.rc-clear {
-  position: absolute; top: 1px; left: 3px; z-index: 2;
-  border: 0; background: transparent; cursor: pointer; padding: 0 3px;
-  font-size: 13px; line-height: 1.2; color: var(--text-muted);
-  opacity: 0.4; transition: opacity 0.12s ease, color 0.12s ease;
-}
-.rc-cell:hover .rc-clear, .rc-clear:focus-visible { opacity: 0.85; }
-.rc-clear:hover { opacity: 1; color: var(--danger); }
-.rc-clear.restore { opacity: 0.75; }
-.rc-clear.restore:hover { color: var(--brand); }
+/* The per-cell Clear / Restore button. A real, visible button on EVERY cell that shows
+   something — same ghost style as "Attach one" / "View receipt", so it reads as a cell
+   action rather than hiding in a corner. Clear carries a faint danger tint so it reads as
+   a remove; Restore reads neutral/brand. */
+.rc-clearbtn { display: inline-block; margin-top: 3px; }
+button.rc-clearbtn[data-clear] { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+button.rc-clearbtn[data-clear]:hover { background: var(--danger-bg); }
+button.rc-clearbtn[data-restore] { color: var(--brand); }
 .rc-amt { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; }
 .rc-amt.est { font-weight: 500; color: var(--text-muted); }
 .rc-delta { font-size: 11px; font-variant-numeric: tabular-nums; }
