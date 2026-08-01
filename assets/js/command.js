@@ -1234,6 +1234,7 @@
     // engine as a cap-gated Statistics tab (the two built the same funnel and
     // leaderboards twice; recruiters without team:manage see plain Analytics).
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalyticsHub },
+    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: function () { location.hash = "#analytics/stats"; }, cap: "team:manage" },
     // Outbound Performance: the admin utilization + accountability command
     // center (capacity engine, scores, heatmap, triggers, goals, reports).
@@ -18647,48 +18648,74 @@
   // The model + UI live in the self-contained spending-calc.js module so the
   // underlying tools stay generic (no vendor names exposed here).
   function renderSpending(el) {
-    if (!window.SpendingCalc) { el.innerHTML = '<div class="empty">Spending module did not load, refresh and try again.</div>'; return; }
-    // Owner-approved monthly statement sits above the planner. It renders only
-    // when the owner has approved at least one charge for this workspace (served
-    // by /api/portal-spend, scoped to the caller's own workspace); otherwise the
-    // tab is exactly the scenario planner as before.
-    el.innerHTML = "";
+    // Primary content is the owner-approved monthly statement (billed charges).
+    // The optional scenario planner mounts below it only when spending-calc.js is
+    // loaded; the statement stands on its own so the view is never blank.
+    el.innerHTML = head("Spending", "Your monthly subscription and any charges on your account, billed month to month.");
     var stmt = document.createElement("div");
-    var planner = document.createElement("div");
-    el.appendChild(stmt); el.appendChild(planner);
-    // Recruiting motion models the AI Vetting tool (cloned voice + telephony per
-    // hour); BD keeps the full outreach scenario planner. Same look either way.
-    if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(planner);
-    else window.SpendingCalc.mount(planner);
+    el.appendChild(stmt);
     renderSpendStatement(stmt);
+    if (window.SpendingCalc) {
+      var planner = document.createElement("div");
+      el.appendChild(planner);
+      // Recruiting motion models the AI Vetting tool (cloned voice + telephony
+      // per hour); BD keeps the full outreach scenario planner.
+      if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(planner);
+      else window.SpendingCalc.mount(planner);
+    }
   }
 
   // The customer-facing monthly statement: only the charges the owner approved
   // in the owner console, billed month to month. Empty (nothing shown) until the
   // owner approves something, so a workspace with no approved charges is unchanged.
   function renderSpendStatement(el) {
+    el.innerHTML = loading();
     api("/portal-spend").then(function (d) {
       var charges = (d && d.charges) || [];
-      if (!charges.length) { el.innerHTML = ""; return; }
+      if (!charges.length) {
+        el.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">No charges on your account yet. Your monthly subscription will appear here once it is set up.</div></div>';
+        return;
+      }
       function m(n) { n = Number(n) || 0; return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
       var line = "display:flex;justify-content:space-between;align-items:center;";
-      var rows = charges.map(function (c) {
-        return '<div style="' + line + 'padding:10px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))">' +
+      var bord = 'padding:10px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))';
+      // Split the recurring subscription lines from any one-time usage rows the
+      // owner pushed over: recurring get a "/mo" suffix and roll up to the monthly
+      // total; one-time rows are billed once and totalled on their own.
+      var monthly = charges.filter(function (c) { return (c.cadence || "monthly") !== "one_time"; });
+      var oneTime = charges.filter(function (c) { return c.cadence === "one_time"; });
+      function row(c, suffix) {
+        return '<div style="' + line + bord + '">' +
           '<span>' + esc(c.label) + '</span>' +
           '<span style="font-weight:600;font-variant-numeric:tabular-nums">' + m(c.amountUsd) +
-          '<span class="muted" style="font-weight:400;font-size:12px"> /mo</span></span></div>';
-      }).join("");
-      el.innerHTML =
-        '<div class="card" style="margin-bottom:16px">' +
+          (suffix ? '<span class="muted" style="font-weight:400;font-size:12px"> ' + suffix + '</span>' : '') +
+          '</span></div>';
+      }
+      var html = '<div class="card" style="margin-bottom:16px">';
+      if (monthly.length) {
+        html +=
           '<div style="' + line + 'margin-bottom:6px">' +
             '<h3 style="margin:0">Your monthly statement</h3>' +
             '<span class="pill" style="font-size:11px">Billed monthly</span></div>' +
           '<div class="muted" style="font-size:12.5px;margin-bottom:8px">Your recurring subscription, billed month to month.</div>' +
-          rows +
-          '<div style="' + line + 'padding-top:12px;font-weight:700;font-size:15px">' +
+          monthly.map(function (c) { return row(c, "/mo"); }).join("") +
+          '<div style="' + line + 'padding-top:12px;font-weight:700;font-size:15px' + (oneTime.length ? ';padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line,rgba(255,255,255,.08))' : '') + '">' +
             '<span>Total per month</span>' +
-            '<span style="font-variant-numeric:tabular-nums">' + m(d.monthlyTotalUsd) + '</span></div>' +
-        '</div>';
+            '<span style="font-variant-numeric:tabular-nums">' + m(d.monthlyTotalUsd) + '</span></div>';
+      }
+      if (oneTime.length) {
+        html +=
+          '<div style="' + line + 'margin-bottom:6px">' +
+            '<h3 style="margin:0">One-time charges</h3>' +
+            '<span class="pill" style="font-size:11px">Billed once</span></div>' +
+          '<div class="muted" style="font-size:12.5px;margin-bottom:8px">Usage-based charges on your account, billed one time.</div>' +
+          oneTime.map(function (c) { return row(c, ""); }).join("") +
+          '<div style="' + line + 'padding-top:12px;font-weight:700;font-size:15px">' +
+            '<span>One-time total</span>' +
+            '<span style="font-variant-numeric:tabular-nums">' + m(d.oneTimeTotalUsd) + '</span></div>';
+      }
+      html += '</div>';
+      el.innerHTML = html;
     }).catch(function () { el.innerHTML = ""; });
   }
 
