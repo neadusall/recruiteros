@@ -99,6 +99,18 @@ export interface SpendItem {
    *  it falls in expects the fee once more; the months between `pausedFrom` and it expect
    *  nothing. Leave unset when the vendor has not said, and the pause runs open-ended. */
   resumesAt?: string;
+  /**
+   * Individual months the owner has marked as NO CHARGE for this line, "YYYY-MM" each.
+   *
+   * Different from a pause, which is a contiguous run the vendor suspended: this is the
+   * owner reaching into one cell and saying "nothing was billed here", for a month that
+   * did not fit the pause model — a skipped month, a comped one, a line that only bills
+   * some months. The grid then draws that one cell blank instead of projecting the
+   * recurring estimate into it, and every other month, and the row itself, are untouched.
+   * A real receipt landing in a waived month still shows: the waiver only silences the
+   * ESTIMATE, it never hides a charge that actually happened.
+   */
+  noChargePeriods?: string[];
   notes?: string;
   /** The product name the VENDOR's own account page prints for this row, e.g. their
    *  "KVM VPS - 8GB" against our "Mailcow mail server (8GB)". Recorded the first time a
@@ -812,6 +824,27 @@ export async function updateSpendItem(id: string, patch: Partial<SpendItem>): Pr
      has just seen the charge land will want to do. */
   if (patch.pausedFrom != null) item.pausedFrom = String(patch.pausedFrom).trim() || undefined;
   if (patch.resumesAt != null) item.resumesAt = String(patch.resumesAt).trim() || undefined;
+  /* Blank or restore a single month's cell. `hidePeriod`/`showPeriod` toggle one month at
+     a time, so the console only has to send the cell it was clicking rather than reconcile
+     the whole set; `noChargePeriods` accepts the full list, for a caller that already holds
+     it. All three take "YYYY-MM" and ignore anything that is not, so a stray value can never
+     silence a month nobody meant. */
+  {
+    const p = patch as unknown as { hidePeriod?: string; showPeriod?: string };
+    const ym = (v: unknown): string => (/^\d{4}-\d{2}$/.test(String(v)) ? String(v) : "");
+    const set = new Set(item.noChargePeriods || []);
+    const hide = ym(p.hidePeriod);
+    const show = String(p.showPeriod || "").trim();
+    if (hide) set.add(hide);
+    if (show) set.delete(show);
+    if (Array.isArray(patch.noChargePeriods)) {
+      set.clear();
+      for (const v of patch.noChargePeriods) { const m = ym(v); if (m) set.add(m); }
+    }
+    if (p.hidePeriod != null || p.showPeriod != null || patch.noChargePeriods != null) {
+      item.noChargePeriods = set.size ? [...set].sort() : undefined;
+    }
+  }
   if (patch.status != null) item.status = patch.status === "cancelled" ? "cancelled" : "active";
   if (patch.purpose != null) item.purpose = String(patch.purpose);
   if (patch.notes != null) item.notes = String(patch.notes);

@@ -236,6 +236,10 @@
 /* Paused is not a gap: quiet grey, and the word never borrows the red of a missing receipt. */
 .rc-cell.rc-paused { background: var(--bg-soft); }
 .rc-cell.rc-paused .rc-gap { color: var(--text-muted); font-weight: 600; }
+/* Waived by the owner: no colour at all, just the dash. It is neither a charge nor a gap,
+   so it must not read as either — the quietest cell on the grid. */
+.rc-cell.rc-waived { background: transparent; }
+.rc-cell.rc-waived .rc-dash { opacity: 0.65; }
 .rc-total { background: var(--bg-soft); }
 
 .rcpt-anoms li { list-style: none; margin-left: -14px; padding-left: 12px; border-left: 3px solid transparent; }

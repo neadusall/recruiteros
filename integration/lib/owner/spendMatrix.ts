@@ -38,6 +38,7 @@ export type CellStatus =
   | "none"           // nothing expected and nothing charged (credit top-ups, free tiers)
   | "before"         // predates the service
   | "paused"         // subscription suspended by the vendor: nothing due, and it comes back
+  | "waived"         // owner marked this one month as no charge: the estimate is silenced here
   | "cancelled";     // service is off
 
 export interface ReceiptRef {
@@ -500,6 +501,15 @@ export function buildSpendMatrix(
             fix: "Confirm this is a top-up or a second seat rather than a double charge.",
           });
         }
+      } else if (members.some((m) => waivedIn(m, period))) {
+        /* The owner reached into this one cell and said nothing was billed here. The
+           estimate is silenced and the cell counts nothing, but it is kept distinct from a
+           plain "none" so it can say it was cleared on purpose and offer to put the estimate
+           back. Checked before `expected > 0` precisely so the waiver wins over the estimate;
+           checked after `actual !== 0` so a real receipt in a waived month still shows. */
+        status = "waived";
+        counted = 0; verified = true;
+        note = "marked as no charge";
       } else if (expected > 0) {
         const due = src?.billingDay ?? 1;
         if (period === nowMonth && daysInto(period) <= due + 3) {
@@ -548,7 +558,13 @@ export function buildSpendMatrix(
       prevCounted = counted;
 
       cells.push({
-        period, status, actualUsd: actual, meteredUsd, expectedUsd: round2(expected),
+        /* A waived month expects nothing by the owner's own hand, so it reports $0 expected
+           — otherwise it would quietly sit in the coverage denominator (see monthClose) as
+           money the register predicted, dragging the proven-of-expected figure down while
+           showing as no gap at all. The underlying estimate is not lost: the row still
+           carries its monthly figure, which is what the popup offers to restore. */
+        period, status, actualUsd: actual, meteredUsd,
+        expectedUsd: status === "waived" ? 0 : round2(expected),
         countedUsd: round2(counted), verified, runningUsd: running, deltaUsd: delta,
         receipts: inMonth.map(toRef), note,
       });
@@ -823,6 +839,11 @@ export function pausedIn(item: SpendItem, period: string): boolean {
   if (!from || period < from) return false;
   const until = String(item.resumesAt || "").slice(0, 7);
   return !until || period < until;
+}
+
+/** Whether the owner has marked this exact month as no charge for this line. */
+export function waivedIn(item: SpendItem, period: string): boolean {
+  return Array.isArray(item.noChargePeriods) && item.noChargePeriods.indexOf(period) >= 0;
 }
 
 /** What the register says a given month should cost for one line item. */
