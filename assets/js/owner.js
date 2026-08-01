@@ -2912,8 +2912,9 @@
         return { label: titleCase(k), amount: a.costByCategory[k] };
       }).sort(function (x, y) { return y.amount - x.amount; });
       html += '<h3 style="font-size:13px;margin:16px 0 6px">Cost by category · ' + esc(win) + '</h3>' +
-        '<div class="note" style="margin-bottom:6px">Push any line to their Spending tab as a one-time charge, one row at a time. It stays pending until you approve it below.</div>' +
-        pushCostTable(catRows);
+        '<div class="note" style="margin-bottom:6px">Push any line to their Spending tab as a one-time charge, one row at a time, or push them all at once. Everything stays pending until you approve it below.</div>' +
+        '<div class="btn-row" style="margin-bottom:8px"><a class="btn btn-sm" id="dwPushAllCat">Push all ' + catRows.length + ' rows to receipt</a></div>' +
+        '<div id="dwCatTable">' + pushCostTable(catRows) + '</div>';
     }
 
     // billing edit
@@ -3025,22 +3026,61 @@
   // Owner-approved client-portal charges for one account. Owner view shows all
   // statuses with Approve / Pull-back / Remove; the client only ever sees the
   // approved rows (served by /api/portal-spend, scoped to their own workspace).
+  // Run a list of portal-spend calls one at a time (gentle on the server), then
+  // refresh. Used by "Approve all & send" and "Remove pending".
+  function runChargeBatch(items, label, wsId, done) {
+    var n = items.length, ok = 0;
+    (function next(i) {
+      if (i >= n) { toast(label.replace("{n}", ok)); if (done) done(); loadCharges(wsId); return; }
+      items[i]().then(function (r) { if (r && r.ok) ok++; next(i + 1); }).catch(function () { next(i + 1); });
+    })(0);
+  }
+
   function loadCharges(wsId) {
     api("/owner/portal-spend?workspaceId=" + encodeURIComponent(wsId)).then(function (d) {
       var charges = (d && d.charges) || [];
       var box = $("#dwCharges"); if (!box) return;
       if (!charges.length) { box.innerHTML = '<div class="note">No charges staged. Nothing shows on their Spending tab.</div>'; return; }
-      box.innerHTML = '<table class="otable"><tbody>' + charges.map(function (c) {
-        var live = c.status === "approved";
+      var pending = charges.filter(function (c) { return c.status !== "approved"; });
+      var live = charges.length - pending.length;
+      var pendingTotal = pending.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
+      // Receipt-level actions: approve (send) the whole pending set at once, or
+      // clear it. Nothing reaches the accountant until you approve.
+      var bar = '';
+      if (pending.length) {
+        bar = '<div class="btn-row" style="margin-bottom:8px;align-items:center;gap:8px">' +
+          '<a class="btn btn-primary btn-sm" id="cApproveAll">Approve all &amp; send (' + pending.length + ' · ' + usd(pendingTotal) + ')</a>' +
+          '<a class="btn btn-sm" id="cRemovePending">Remove pending</a>' +
+          (live ? '<span class="note">' + live + ' already live on their receipt</span>' : '') +
+          '</div>';
+      } else {
+        bar = '<div class="note" style="margin-bottom:8px">All ' + live + ' charges are live on their receipt.</div>';
+      }
+      box.innerHTML = bar + '<table class="otable"><tbody>' + charges.map(function (c) {
+        var isLive = c.status === "approved";
         var oneTime = c.cadence === "one_time";
-        var pill = live ? '<span class="pill active">Live on portal</span>' : '<span class="pill susp">Pending</span>';
-        return '<tr data-cid="' + esc(c.id) + '" data-live="' + (live ? "1" : "") + '">' +
+        var pill = isLive ? '<span class="pill active">Live on portal</span>' : '<span class="pill susp">Pending</span>';
+        return '<tr data-cid="' + esc(c.id) + '" data-live="' + (isLive ? "1" : "") + '">' +
           '<td>' + esc(c.label) + ' <span class="note">' + (oneTime ? "one-time" : "/mo") + '</span></td>' +
           '<td class="num">' + usd(c.amountUsd) + '</td>' +
           '<td>' + pill + '</td>' +
-          '<td class="num"><a class="btn btn-sm c-toggle">' + (live ? "Pull back" : "Approve & send") + '</a> ' +
+          '<td class="num"><a class="btn btn-sm c-toggle">' + (isLive ? "Pull back" : "Approve & send") + '</a> ' +
           '<a class="btn btn-sm c-del">Remove</a></td></tr>';
       }).join("") + '</tbody></table>';
+      var appAll = $("#cApproveAll");
+      if (appAll) appAll.addEventListener("click", function () {
+        appAll.classList.add("is-busy"); appAll.textContent = "Sending…";
+        runChargeBatch(pending.map(function (c) {
+          return function () { return send("/owner/portal-spend", "PATCH", { workspaceId: wsId, id: c.id, action: "approve" }); };
+        }), "Sent {n} to their receipt", wsId);
+      });
+      var rmPending = $("#cRemovePending");
+      if (rmPending) rmPending.addEventListener("click", function () {
+        if (!confirm("Remove all " + pending.length + " pending charges? Approved ones stay live.")) return;
+        runChargeBatch(pending.map(function (c) {
+          return function () { return send("/owner/portal-spend?workspaceId=" + encodeURIComponent(wsId) + "&id=" + encodeURIComponent(c.id), "DELETE"); };
+        }), "Removed {n} pending", wsId);
+      });
       $$("#dwCharges tr[data-cid]").forEach(function (row) {
         var cid = row.dataset.cid, isLive = !!row.dataset.live;
         row.querySelector(".c-toggle").addEventListener("click", function () {
@@ -3094,6 +3134,22 @@
         });
       });
     }
+    // Bulk: stage every Cost-by-category row as a one-time charge in one click,
+    // so the whole itemized picture is ready to review + approve.
+    var pushAllBtn = $("#dwPushAllCat");
+    if (pushAllBtn) pushAllBtn.addEventListener("click", function () {
+      var rows = $$("#dwCatTable .push-spend").map(function (b) {
+        return { label: b.getAttribute("data-label") || "", amt: Number(b.getAttribute("data-amt")) || 0 };
+      }).filter(function (r) { return r.amt > 0; });
+      if (!rows.length) { toast("No cost rows to send."); return; }
+      if (!confirm("Stage all " + rows.length + " cost rows as pending charges? You approve them before anything is sent.")) return;
+      pushAllBtn.classList.add("is-busy"); pushAllBtn.textContent = "Staging…";
+      runChargeBatch(rows.map(function (r) {
+        return function () { return send("/owner/portal-spend", "POST", { workspaceId: id, source: "usage", label: r.label, amountUsd: r.amt }); };
+      }), "Staged {n} rows, approve below to send", id, function () {
+        pushAllBtn.classList.remove("is-busy"); pushAllBtn.textContent = "Push all rows to receipt";
+      });
+    });
     var stageBtn = $("#dwStageCharge");
     if (stageBtn) stageBtn.addEventListener("click", function () {
       send("/owner/portal-spend", "POST", { workspaceId: id, source: "monthly_price" }).then(function (r) {
