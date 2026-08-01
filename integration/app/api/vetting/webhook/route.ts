@@ -14,44 +14,10 @@
 
 import { NextResponse } from "next/server";
 import { verifyTelnyxVoice } from "../../../../lib/providers";
-import { recordUsage } from "../../../../lib/billing/ledger";
-import { rateCost } from "../../../../lib/billing/rates";
 import {
-  findCallByEngineId, getDeskById, updateCall, scoreCall, getCandidateById,
-  buildPostCallEmail,
-  type TranscriptTurn,
+  findCallByEngineId, getDeskById,
+  parseTranscript, finalizeVettingCall,
 } from "../../../../lib/vetting";
-import { sendWorkspaceEmail } from "../../../../lib/auth";
-
-/** Map an engine speaker label onto our two-role transcript model. */
-function toRole(label: unknown): "agent" | "candidate" {
-  const s = String(label ?? "").toLowerCase();
-  if (s.includes("assistant") || s.includes("agent") || s.includes("bot") || s.includes("ai")) return "agent";
-  return "candidate";
-}
-
-/** Parse the engine's transcript into ordered turns (tolerant of shapes). */
-function parseTranscript(ev: any): TranscriptTurn[] {
-  const raw = ev?.transcript ?? ev?.transcription ?? ev?.messages ?? ev?.conversation;
-  if (Array.isArray(raw)) {
-    return raw
-      .map((t: any): TranscriptTurn | null => {
-        const text = t?.content ?? t?.text ?? t?.message ?? "";
-        if (!text) return null;
-        return {
-          role: toRole(t?.role ?? t?.speaker ?? t?.participant),
-          text: String(text),
-          atSec: typeof t?.start === "number" ? Math.round(t.start) : undefined,
-        };
-      })
-      .filter((t): t is TranscriptTurn => Boolean(t));
-  }
-  // A single transcript string: keep it as one candidate-side blob to score.
-  if (typeof raw === "string" && raw.trim()) {
-    return [{ role: "candidate", text: raw.trim() }];
-  }
-  return [];
-}
 
 function durationSec(ev: any): number | undefined {
   if (typeof ev?.duration_sec === "number") return ev.duration_sec;
@@ -92,71 +58,8 @@ export async function POST(req: Request) {
     ev?.recording_url || (Array.isArray(ev?.recording_urls) ? ev.recording_urls[0] : undefined) || ev?.recording?.url;
   const dur = durationSec(ev);
 
-  updateCall(call.id, {
-    status: "completed", transcript, recordingUrl, durationSec: dur,
-    endedAt: new Date().toISOString(),
-  });
-
-  // Meter the conversational minutes (best-effort).
-  if (dur && dur > 0) {
-    recordUsage({
-      workspaceId: call.workspaceId, motion: desk.motion,
-      category: "messaging", type: "ai_vetting_minute", source: "telnyx",
-      quantity: Math.ceil(dur / 60), unitCostUsd: rateCost("ai_vetting_minute"),
-      meta: { callId: call.id, deskId: desk.id, engineCallId },
-    });
-  }
-
-  // Nothing to score (e.g. caller hung up immediately).
-  if (!transcript.length) {
-    updateCall(call.id, {
-      status: "scored", summary: "Call ended with no usable transcript.",
-      qualified: false, scoringConfidence: "low", needsReview: true,
-    });
-    return NextResponse.json({ ok: true, scored: false, reason: "empty_transcript" });
-  }
-
-  try {
-    // Pair the JD must-haves against the call AND the caller's LinkedIn background.
-    const candidate = call.candidateId ? getCandidateById(call.candidateId) : undefined;
-    const s = await scoreCall(desk, transcript, candidate?.enrichment);
-    updateCall(call.id, {
-      status: "scored",
-      scores: s.scores,
-      evidence: s.evidence,
-      totalScore: s.totalScore,
-      marketabilityScore: s.marketabilityScore,
-      agentRealism: s.agentRealism,
-      verdicts: s.verdicts,
-      qualified: s.qualified,
-      scoringConfidence: s.scoringConfidence,
-      needsReview: s.needsReview,
-      summary: s.summary,
-      qualifyRationale: s.qualifyRationale,
-      nextStepGiven: s.qualified ? desk.nextStepQualified : desk.nextStepUnqualified,
-      scoredAt: new Date().toISOString(),
-    });
-
-    // Best-effort: email the candidate the role's must-haves so they can update
-    // their resume to clearly reflect what they genuinely have. Never blocks or
-    // fails the webhook; skipped for thin calls and clear, unfixable mismatches.
-    if (candidate?.email && !s.needsReview) {
-      try {
-        const mail = await buildPostCallEmail(desk, { ...call, verdicts: s.verdicts }, candidate);
-        if (mail.worthInviting) {
-          await sendWorkspaceEmail(candidate.email, mail.subject, mail.body, call.workspaceId);
-        }
-      } catch (mailErr: any) {
-        console.error("[vetting] post-call coaching email failed:", mailErr?.message || mailErr);
-      }
-    }
-
-    return NextResponse.json({
-      ok: true, scored: true, total: s.totalScore,
-      qualified: s.qualified, confidence: s.scoringConfidence,
-    });
-  } catch (e: any) {
-    updateCall(call.id, { status: "failed", summary: `Scoring failed: ${e?.message || "error"}` });
-    return NextResponse.json({ ok: true, scored: false, error: e?.message || "scoring_failed" });
-  }
+  // Single shared scoring path — identical to the reconciler's. Idempotent, so if
+  // the reconciler already scored this call, finalize no-ops.
+  const r = await finalizeVettingCall({ call, desk, transcript, recordingUrl, durationSec: dur });
+  return NextResponse.json({ ok: true, ...r });
 }

@@ -13,7 +13,9 @@
     "eval": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/eval-sourcing.mts",
     "shots": "tsx scripts/gen-shots.ts",
     "prebuild": "node sync-public.cjs",
-    "sync": "node sync-public.cjs"
+    "sync": "node sync-public.cjs",
+    "test:vetting": "tsx lib/vetting/vetting.test.ts",
+    "test": "tsx lib/vetting/vetting.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

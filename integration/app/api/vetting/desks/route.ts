@@ -109,7 +109,13 @@ export async function POST(req: Request) {
         return fail("provision_failed", 502, { detail: res.error });
       }
       const updated = markDeskSynced(ws, desk.id, { assistantId: res.assistantId, status: "live" });
-      return ok({ desk: updated, dryRun: res.dryRun, numberBound: res.numberBound });
+      return ok({
+        desk: updated,
+        dryRun: res.dryRun,
+        numberBound: res.numberBound,
+        voiceMode: res.voiceMode,
+        model: res.model,
+      });
     }
     case "detach": {
       // Unbind the number from this desk (swap it onto another JD). Tears down

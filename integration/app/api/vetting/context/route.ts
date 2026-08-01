@@ -40,8 +40,12 @@ export async function POST(req: Request) {
   // Telnyx wraps as { data: { payload: {...} } }; also accept a flat body.
   const ev = payload?.data?.payload ?? payload?.payload ?? payload ?? {};
 
-  const dialed = firstPhone(ev, ["to", "telnyx_end_user_target", "called_number", "destination", "did"]);
-  const caller = firstPhone(ev, ["from", "telnyx_agent_target", "caller_number", "origin", "ani"]);
+  // Telnyx's canonical fields (verified against the OpenAPI spec):
+  //   telnyx_agent_target    = the DIALED number (which desk)   -> "to"
+  //   telnyx_end_user_target = the CALLER's number (who's calling) -> "from"
+  // Keep flat to/from as fallbacks for manual/web test tools.
+  const dialed = firstPhone(ev, ["telnyx_agent_target", "to", "called_number", "destination", "did"]);
+  const caller = firstPhone(ev, ["telnyx_end_user_target", "from", "caller_number", "origin", "ani"]);
   const engineCallId =
     ev?.call_control_id || ev?.conversation_id || ev?.call_id || ev?.telnyx_call_control_id || undefined;
 

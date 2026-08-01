@@ -292,6 +292,18 @@ export function findCallByEngineId(engineCallId: string): VettingCall | undefine
   return store.calls.find((c) => c.engineCallId === engineCallId);
 }
 
+/**
+ * Every call across all workspaces that still needs finalizing — has an engine
+ * call id but isn't yet `scored`/`failed`. The reconciler's work-list: it pulls
+ * these from the Telnyx Conversations API and scores them, so a call is never
+ * lost to a missed webhook.
+ */
+export function listCallsNeedingScore(): VettingCall[] {
+  return store.calls.filter(
+    (c) => c.engineCallId && c.status !== "scored" && c.status !== "failed",
+  );
+}
+
 /** Create the call record when an inbound leg starts (or arrives post-hoc). */
 export function createCall(input: {
   workspaceId: string; deskId: string; candidateId?: string;

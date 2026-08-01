@@ -176,44 +176,108 @@ export class TelnyxClient extends ProviderClient {
     return this.request({ method: "POST", path: "/ai/assistants", body });
   }
 
-  /** Update an existing assistant's config (instructions/voice/greeting/webhooks). */
+  /** Update an existing assistant's config (POST, not PUT/PATCH — per Telnyx spec). */
   updateAssistant(assistantId: string, body: Partial<AssistantConfig>) {
     return this.request({ method: "POST", path: `/ai/assistants/${encodeURIComponent(assistantId)}`, body });
+  }
+
+  /** Fetch an assistant — used to read its auto-provisioned Default TeXML app id. */
+  getAssistant(assistantId: string) {
+    return this.request({ path: `/ai/assistants/${encodeURIComponent(assistantId)}` });
+  }
+
+  /** List the LLM models available to this Telnyx account (`GET /ai/models`). */
+  listModels() {
+    return this.request({ path: "/ai/models" });
   }
 
   deleteAssistant(assistantId: string) {
     return this.request({ method: "DELETE", path: `/ai/assistants/${encodeURIComponent(assistantId)}` });
   }
 
+  /** Resolve an E.164 number to its Telnyx phone_number resource id (null if not found). */
+  async phoneNumberId(e164: string): Promise<string | null> {
+    const res: any = await this.request({ path: "/phone_numbers", query: { "filter[phone_number]": e164 } });
+    if (res?.dryRun) return null;
+    const data: any[] = Array.isArray(res?.data) ? res.data : [];
+    return data[0]?.id ?? null;
+  }
+
+  /** Read the assistant's Default TeXML application id (its inbound voice connection). */
+  private async texmlAppId(assistantId: string): Promise<string | null | { dryRun: true }> {
+    const a: any = await this.getAssistant(assistantId);
+    if (a?.dryRun) return { dryRun: true };
+    return (
+      a?.telephony_settings?.default_texml_app_id ??
+      a?.data?.telephony_settings?.default_texml_app_id ??
+      null
+    );
+  }
+
   /**
-   * Bind an inbound phone number to an assistant so calls to it are answered by
-   * the agent. Telnyx exposes this as the assistant's phone-numbers collection.
+   * Route inbound calls for `phoneNumber` to the assistant. Telnyx auto-provisions
+   * a Default TeXML Application per assistant (`telephony_settings.default_texml_app_id`);
+   * binding a number = pointing its voice connection at that app. There is NO
+   * `/ai/assistants/{id}/phone_numbers` endpoint — you PATCH the phone number's
+   * `connection_id` (exactly what the portal's "Assign a phone number" step does).
    */
-  assignNumberToAssistant(assistantId: string, phoneNumber: string) {
+  async assignNumberToAssistant(assistantId: string, phoneNumber: string): Promise<any> {
+    const app = await this.texmlAppId(assistantId);
+    if (app && typeof app === "object" && (app as any).dryRun) return { dryRun: true };
+    const connectionId = app as string | null;
+    if (!connectionId) return { error: "no_texml_app" };
+    const pid = await this.phoneNumberId(phoneNumber);
+    if (!pid) return { error: "number_not_found" };
     return this.request({
-      method: "POST",
-      path: `/ai/assistants/${encodeURIComponent(assistantId)}/phone_numbers`,
-      body: { phone_number: phoneNumber },
+      method: "PATCH",
+      path: `/phone_numbers/${encodeURIComponent(pid)}`,
+      body: { connection_id: connectionId },
     });
+  }
+
+  /** Free a number's inbound route (clears its voice connection). Best-effort. */
+  async clearNumberConnection(phoneNumber: string): Promise<any> {
+    const pid = await this.phoneNumberId(phoneNumber);
+    if (!pid) return { error: "number_not_found" };
+    return this.request({
+      method: "PATCH",
+      path: `/phone_numbers/${encodeURIComponent(pid)}`,
+      body: { connection_id: "" },
+    });
+  }
+
+  /**
+   * List AI conversations (optionally filtered) — the source of finished-call
+   * transcripts. `insight_settings.webhook_url` does NOT exist on Telnyx; the
+   * transcript lives on the conversation and is read via the Conversations API.
+   */
+  listConversations(query?: Record<string, string | number>) {
+    return this.request({ path: "/ai/conversations", query });
+  }
+
+  /** The ordered message/transcript array for one finished conversation. */
+  getConversationMessages(conversationId: string) {
+    return this.request({ path: `/ai/conversations/${encodeURIComponent(conversationId)}/messages` });
   }
 }
 
 /** Shape of the Telnyx AI Assistant config we push (the fields we use). */
 export interface AssistantConfig {
   name: string;
-  /** Underlying LLM the assistant reasons with (Telnyx-hosted model id). */
+  /** Underlying LLM the assistant reasons with (a current Telnyx `GET /ai/models` id). */
   model?: string;
   /** The full system prompt (human-likeness spec + JD + caller context slots). */
   instructions: string;
   /** First line spoken on answer; may contain {{dynamic_variables}}. */
   greeting?: string;
-  /** Voice selector, e.g. "ElevenLabs.<voiceId>" for the recruiter's cloned voice. */
-  voice?: string;
+  /**
+   * Voice config. The voice SELECTOR lives here (`voice_settings.voice`), not at the
+   * top level. For the cloned ElevenLabs voice, `api_key_ref` must point at a Telnyx
+   * integration secret holding the ElevenLabs API key.
+   */
   voice_settings?: Record<string, unknown>;
   /** Called per-call to resolve {{dynamic_variables}} (caller identity/context). */
   dynamic_variables_webhook_url?: string;
-  /** Where Telnyx posts the finished transcript + recording for scoring. */
-  insight_settings?: Record<string, unknown>;
   transcription?: Record<string, unknown>;
   telephony_settings?: Record<string, unknown>;
 }
