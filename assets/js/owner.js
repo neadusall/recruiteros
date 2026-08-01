@@ -133,6 +133,28 @@
     }).join("") + '</div>';
   }
 
+  // Human label for a raw cost key (e.g. "boost_phones" -> "Boost phones").
+  function titleCase(s) {
+    s = String(s || "").replace(/[_-]+/g, " ").trim();
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+  }
+  // A "→ Spending" button that pushes one usage row to the client's Spending tab.
+  // Carries the label + amount; wired up in wireDrawer via delegation.
+  function spendPushBtn(label, amt) {
+    amt = Number(amt) || 0;
+    if (amt <= 0) return '<span class="note">—</span>';
+    return '<a class="btn btn-sm push-spend" data-label="' + esc(label) + '" data-amt="' + amt + '" title="Stage this as a one-time charge on the client\'s Spending tab">→ Spending</a>';
+  }
+  // A pushable cost table: [{label, amount}] -> rows with a push button each.
+  function pushCostTable(rows) {
+    rows = (rows || []).filter(function (r) { return r && (Number(r.amount) || 0) > 0; });
+    if (!rows.length) return '<p class="note">No cost recorded in this window.</p>';
+    return '<table class="otable"><tbody>' + rows.map(function (r) {
+      return '<tr><td>' + esc(r.label) + '</td><td class="num">' + usd(r.amount) + '</td>' +
+        '<td class="num">' + spendPushBtn(r.label, r.amount) + '</td></tr>';
+    }).join("") + '</tbody></table>';
+  }
+
   /* ================= PEOPLE (users & roles) ================= */
   /* Who is on the platform and what they can do: account / admin / recruiter
    * counts, the LLM-vs-enrichment spend split, a per-account headcount + activity
@@ -2903,9 +2925,14 @@
       kv("LinkedIn accts", c.linkedinAccounts || 0) + kv("Sending domains", c.domains || 0) +
       kv("API keys", c.apiKeys || 0) + kv("Content assets", c.contentAssets || 0) + '</div>';
 
-    // cost by category
+    // cost by category — each row can be pushed to the client's Spending tab.
     if (a.costByCategory && Object.keys(a.costByCategory).length) {
-      html += '<h3 style="font-size:13px;margin:16px 0 6px">Cost by category · ' + esc(win) + '</h3>' + barsFromObj(a.costByCategory);
+      var catRows = Object.keys(a.costByCategory).map(function (k) {
+        return { label: titleCase(k), amount: a.costByCategory[k] };
+      }).sort(function (x, y) { return y.amount - x.amount; });
+      html += '<h3 style="font-size:13px;margin:16px 0 6px">Cost by category · ' + esc(win) + '</h3>' +
+        '<div class="note" style="margin-bottom:6px">Push any line to their Spending tab as a one-time charge, one row at a time. It stays pending until you approve it below.</div>' +
+        pushCostTable(catRows);
     }
 
     // billing edit
@@ -2954,11 +2981,18 @@
       '<div class="note" style="margin-bottom:8px">Lend your house API keys to this customer. When on, they use YOUR key for that tool; set the markup % and/or monthly fee your billing applies.</div>' +
       '<div id="dwGrants">Loading…</div>';
 
-    // recent usage
+    // recent usage — each event can be pushed to the client's Spending tab.
     if (d.recentUsage && d.recentUsage.length) {
-      html += '<h3 style="font-size:13px;margin:16px 0 6px">Recent cost events</h3><table class="otable"><tbody>';
+      html += '<h3 style="font-size:13px;margin:16px 0 6px">Recent cost events</h3>' +
+        '<div class="note" style="margin-bottom:6px">Push any event to their Spending tab as a one-time charge. It stays pending until you approve it below.</div>' +
+        '<table class="otable"><tbody>';
       d.recentUsage.slice(0, 12).forEach(function (e) {
-        html += '<tr><td>' + esc(e.type) + ' <span class="note">' + esc(e.source || e.category) + '</span></td><td class="num">' + (e.quantity || 0).toLocaleString() + '</td><td class="num">' + usd(e.costUsd) + '</td></tr>';
+        var sub = e.source || e.category || "";
+        var label = titleCase(e.type) + (sub ? " · " + titleCase(sub) : "");
+        html += '<tr><td>' + esc(e.type) + ' <span class="note">' + esc(sub) + '</span></td>' +
+          '<td class="num">' + (e.quantity || 0).toLocaleString() + '</td>' +
+          '<td class="num">' + usd(e.costUsd) + '</td>' +
+          '<td class="num">' + spendPushBtn(label, e.costUsd) + '</td></tr>';
       });
       html += '</tbody></table>';
     }
@@ -3017,9 +3051,10 @@
       if (!charges.length) { box.innerHTML = '<div class="note">No charges staged. Nothing shows on their Spending tab.</div>'; return; }
       box.innerHTML = '<table class="otable"><tbody>' + charges.map(function (c) {
         var live = c.status === "approved";
+        var oneTime = c.cadence === "one_time";
         var pill = live ? '<span class="pill active">Live on portal</span>' : '<span class="pill susp">Pending</span>';
         return '<tr data-cid="' + esc(c.id) + '" data-live="' + (live ? "1" : "") + '">' +
-          '<td>' + esc(c.label) + ' <span class="note">/mo</span></td>' +
+          '<td>' + esc(c.label) + ' <span class="note">' + (oneTime ? "one-time" : "/mo") + '</span></td>' +
           '<td class="num">' + usd(c.amountUsd) + '</td>' +
           '<td>' + pill + '</td>' +
           '<td class="num"><a class="btn btn-sm c-toggle">' + (live ? "Pull back" : "Approve & send") + '</a> ' +
@@ -3044,6 +3079,40 @@
     loadGrants(id);
     loadCharges(id);
     $("#dwClose").addEventListener("click", closeDrawer);
+
+    // Push a single usage row (Cost by category / Recent cost events) onto the
+    // client's Spending tab as a one-time charge. #drawerBody persists across
+    // opens, so bind the delegated handler ONCE and read the current workspace
+    // from a data attribute at click time (avoids stacked listeners + stale ids).
+    var db = $("#drawerBody");
+    db.dataset.wsid = id;
+    if (!db.dataset.pushWired) {
+      db.dataset.pushWired = "1";
+      db.addEventListener("click", function (ev) {
+        var btn = ev.target.closest && ev.target.closest(".push-spend");
+        if (!btn) return;
+        ev.preventDefault();
+        var wsid = db.dataset.wsid;
+        var label = btn.getAttribute("data-label") || "";
+        var amt = Number(btn.getAttribute("data-amt")) || 0;
+        if (amt <= 0) { toast("This row has no cost to send."); return; }
+        if (btn.classList.contains("is-busy")) return;
+        btn.classList.add("is-busy"); btn.textContent = "Staging…";
+        send("/owner/portal-spend", "POST", { workspaceId: wsid, source: "usage", label: label, amountUsd: amt }).then(function (r) {
+          if (r.ok) {
+            toast("Staged “" + label + "” — approve below to send it");
+            btn.textContent = "Staged ✓";
+            loadCharges(wsid);
+          } else {
+            toast((r.data && r.data.message) || "Couldn't stage that row");
+            btn.classList.remove("is-busy"); btn.textContent = "→ Spending";
+          }
+        }).catch(function () {
+          toast("Couldn't reach the server");
+          btn.classList.remove("is-busy"); btn.textContent = "→ Spending";
+        });
+      });
+    }
     var stageBtn = $("#dwStageCharge");
     if (stageBtn) stageBtn.addEventListener("click", function () {
       send("/owner/portal-spend", "POST", { workspaceId: id, source: "monthly_price" }).then(function (r) {

@@ -11,7 +11,11 @@
  */
 
 import { requireSession, ok } from "../../../lib/api";
-import { listApprovedCharges, approvedMonthlyTotal } from "../../../lib/owner/portalSpend";
+import {
+  listApprovedCharges,
+  approvedMonthlyTotal,
+  approvedOneTimeTotal,
+} from "../../../lib/owner/portalSpend";
 
 export async function GET(req: Request) {
   const g = requireSession(req);
@@ -21,8 +25,13 @@ export async function GET(req: Request) {
     id: c.id,
     label: c.label,
     amountUsd: c.amountUsd,
-    cadence: c.cadence,
+    cadence: c.cadence || "monthly",
     since: c.approvedAt || c.createdAt,
   }));
-  return ok({ charges, monthlyTotalUsd: approvedMonthlyTotal(workspaceId), currency: "USD" });
+  return ok({
+    charges,
+    monthlyTotalUsd: approvedMonthlyTotal(workspaceId),
+    oneTimeTotalUsd: approvedOneTimeTotal(workspaceId),
+    currency: "USD",
+  });
 }

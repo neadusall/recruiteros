@@ -7,10 +7,15 @@
  *
  *   GET    ?workspaceId=   -> { charges }  every row for the account, any status
  *   POST   { workspaceId, label?, source:"monthly_price" }
- *                          -> stage a charge FROM the account's month-to-month
- *                             price field. The amount is not taken from the body;
- *                             it is read server-side from account meta so an
- *                             arbitrary figure can never be pushed to a customer.
+ *                          -> stage the recurring charge FROM the account's
+ *                             month-to-month price field. The amount is not taken
+ *                             from the body; it is read server-side from account
+ *                             meta so an arbitrary recurring figure can never be
+ *                             pushed to a customer.
+ *   POST   { workspaceId, source:"usage", label, amountUsd }
+ *                          -> push one real usage row (a Cost-by-category or
+ *                             Recent-cost-events line from the console) to the
+ *                             account's Spending tab as a one-time line item.
  *   PATCH  { workspaceId, id, action:"approve"|"unapprove" }
  *                          -> approve (goes live on the client portal) / pull back
  *   DELETE ?workspaceId=&id=  -> remove a staged row
@@ -20,6 +25,7 @@ import { requireOwner, ok, fail, body } from "../../../../lib/api";
 import {
   listCharges,
   stageMonthlyCharge,
+  stageUsageCharge,
   approveCharge,
   unapproveCharge,
   deleteCharge,
@@ -37,11 +43,22 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const g = requireOwner(req);
   if ("response" in g) return g.response;
-  const b = await body<{ workspaceId?: string; label?: string; source?: string }>(req);
+  const b = await body<{ workspaceId?: string; label?: string; source?: string; amountUsd?: number }>(req);
   if (!b || !b.workspaceId) return fail("missing_workspace", 400);
 
-  // Hard rule: the only sendable amount is the account's month-to-month price.
-  // We ignore any amount in the body and read it from account meta ourselves.
+  // Usage push: one real cost row from the console -> a one-time line item. The
+  // amount is the row's actual cost, carried in the body; the owner reviews and
+  // approves it before it ever reaches the client.
+  if (b.source === "usage") {
+    const u = stageUsageCharge(b.workspaceId, { label: b.label || "", amountUsd: Number(b.amountUsd) || 0 });
+    if (u.error === "missing_label") return fail("missing_label", 422, { message: "This row has no label to send." });
+    if (u.error === "no_amount") return fail("no_amount", 422, { message: "This row has no cost to send." });
+    if (!u.charge) return fail(u.error || "could_not_stage", 400);
+    return ok({ staged: true, charge: u.charge });
+  }
+
+  // Recurring charge: the only sendable amount is the account's month-to-month
+  // price. We ignore any amount in the body and read it from account meta.
   if (b.source && b.source !== "monthly_price") return fail("only_monthly_price_allowed", 422);
   const meta = getAccountMeta(b.workspaceId);
   const res = stageMonthlyCharge(b.workspaceId, { amountUsd: meta.monthlyPriceUsd, label: b.label });

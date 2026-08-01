@@ -8,11 +8,16 @@
  * nothing appears in front of a customer until the owner has explicitly signed
  * off on it.
  *
- * Two hard rules enforced here (not just in the UI):
- *   1. A charge can only be created with source "monthly_price" and an amount
- *      equal to the account's month-to-month price. You cannot send an arbitrary
- *      figure to a client portal.
- *   2. A charge is invisible to the client until status === "approved".
+ * Two kinds of charge can be staged:
+ *   - "monthly_price": the recurring subscription line. Its amount is locked to
+ *     the account's month-to-month price (read server-side, never from the body),
+ *     so an arbitrary recurring figure can never be pushed to a client portal.
+ *   - "usage": a one-time line item the owner pushes from a real cost row in the
+ *     owner console (Cost by category / Recent cost events), one row at a time.
+ *     The amount comes from that actual usage row, not a free-typed number.
+ *
+ * One hard rule holds for both: a charge is invisible to the client until the
+ * owner approves it (status === "approved").
  *
  * In-memory reference store + debounced Postgres snapshot, same pattern as the
  * billing ledger and account-meta store, so it survives restarts when
@@ -23,6 +28,8 @@ import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
 export type ChargeStatus = "pending" | "approved";
+export type ChargeCadence = "monthly" | "one_time";
+export type ChargeSource = "monthly_price" | "usage";
 
 export interface PortalCharge {
   id: string;
@@ -30,10 +37,10 @@ export interface PortalCharge {
   /** What the customer sees on the line item, e.g. "Monthly subscription". */
   label: string;
   amountUsd: number;
-  /** Only month-to-month recurring charges are sendable to a client portal. */
-  cadence: "monthly";
-  /** Where the amount came from. Locked to the account's month-to-month field. */
-  source: "monthly_price";
+  /** "monthly" = recurring subscription; "one_time" = a pushed usage line item. */
+  cadence: ChargeCadence;
+  /** Where the amount came from: the monthly-price field, or a real usage row. */
+  source: ChargeSource;
   /** Client portal shows the row only when this is "approved". */
   status: ChargeStatus;
   createdAt: string;
@@ -75,9 +82,22 @@ export function listApprovedCharges(workspaceId: string): PortalCharge[] {
   return listCharges(workspaceId).filter((c) => c.status === "approved");
 }
 
-/** Sum of approved monthly charges = what this account is billed per month. */
+/** Sum of approved recurring charges = what this account is billed per month. */
 export function approvedMonthlyTotal(workspaceId: string): number {
-  return round(listApprovedCharges(workspaceId).reduce((s, c) => s + c.amountUsd, 0));
+  return round(
+    listApprovedCharges(workspaceId)
+      .filter((c) => (c.cadence || "monthly") === "monthly")
+      .reduce((s, c) => s + c.amountUsd, 0),
+  );
+}
+
+/** Sum of approved one-time (usage) charges: pushed rows, billed once. */
+export function approvedOneTimeTotal(workspaceId: string): number {
+  return round(
+    listApprovedCharges(workspaceId)
+      .filter((c) => c.cadence === "one_time")
+      .reduce((s, c) => s + c.amountUsd, 0),
+  );
 }
 
 /* ---------------- write (owner only, guarded by the route) ---------------- */
@@ -102,6 +122,37 @@ export function stageMonthlyCharge(
     amountUsd: amount,
     cadence: "monthly",
     source: "monthly_price",
+    status: "pending",
+    createdAt: nowIso(),
+  };
+  store.charges.push(charge);
+  persist();
+  return { charge };
+}
+
+/**
+ * Push a single real usage row (from the owner console's Cost-by-category or
+ * Recent-cost-events tables) to the account's Spending tab as a one-time line
+ * item. The amount is the actual cost of that row, not a free-typed figure. A
+ * label is required and the amount must be positive. Lands as "pending" — it is
+ * invisible to the client until the owner approves it.
+ */
+export function stageUsageCharge(
+  workspaceId: string,
+  input: { label: string; amountUsd: number },
+): { charge?: PortalCharge; error?: string } {
+  const amount = round(Number(input.amountUsd) || 0);
+  const label = String(input.label || "").trim().slice(0, 80);
+  if (!workspaceId) return { error: "missing_workspace" };
+  if (!label) return { error: "missing_label" };
+  if (amount <= 0) return { error: "no_amount" };
+  const charge: PortalCharge = {
+    id: rid("chg"),
+    workspaceId,
+    label,
+    amountUsd: amount,
+    cadence: "one_time",
+    source: "usage",
     status: "pending",
     createdAt: nowIso(),
   };
