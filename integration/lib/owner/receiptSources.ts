@@ -125,11 +125,14 @@ export const VENDOR_SOURCES: VendorSource[] = [
   {
     vendor: "Serper.dev",
     channel: "email_processor",
-    from: ["serper.dev", "stripe.com"],
-    subject: ["serper", "receipt", "credits"],
+    /* Serper bills through PADDLE, not Stripe: the receipt arrives from paddle.com with the
+       display name "Serper (via Paddle.com)" and the card statement reads "PADDLE.NET* SERPER".
+       The old list said stripe.com, which is the wrong processor for this vendor. */
+    from: ["serper.dev", "paddle.com", "paddle.net"],
+    subject: ["serper", "receipt", "credits", "subscription", "paddle"],
     merchant: ["serper"],
     portal: "https://serper.dev/dashboard",
-    setup: "Credit top-ups, not a subscription: a month with no receipt means no top-up was needed, which the console reports as such rather than as a missing receipt.",
+    setup: "Billed through Paddle, so the sender is Paddle and the merchant name (\"Serper\") identifies it. Sometimes a recurring $50 subscription for 50,000 credits rather than an ad-hoc top-up: either way the receipt is captured and filed; the credit row simply has no standing monthly rate to fill.",
   },
   {
     vendor: "Reoon",
