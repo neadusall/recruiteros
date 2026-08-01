@@ -18674,49 +18674,104 @@
     api("/portal-spend").then(function (d) {
       var charges = (d && d.charges) || [];
       if (!charges.length) {
-        el.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">No charges on your account yet. Your monthly subscription will appear here once it is set up.</div></div>';
+        el.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">No charges on your account yet. Your monthly subscription and any charges will appear here once they are set up.</div></div>';
         return;
       }
       function m(n) { n = Number(n) || 0; return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-      var line = "display:flex;justify-content:space-between;align-items:center;";
-      var bord = 'padding:10px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))';
-      // Split the recurring subscription lines from any one-time usage rows the
-      // owner pushed over: recurring get a "/mo" suffix and roll up to the monthly
-      // total; one-time rows are billed once and totalled on their own.
+      // Recurring subscription vs one-time usage rows the owner pushed over. This
+      // view is READ-ONLY for the account: no edit controls, only the monthly /
+      // annual toggle, an enlarge popup, and a PDF download.
       var monthly = charges.filter(function (c) { return (c.cadence || "monthly") !== "one_time"; });
       var oneTime = charges.filter(function (c) { return c.cadence === "one_time"; });
-      function row(c, suffix) {
-        return '<div style="' + line + bord + '">' +
-          '<span>' + esc(c.label) + '</span>' +
-          '<span style="font-weight:600;font-variant-numeric:tabular-nums">' + m(c.amountUsd) +
-          (suffix ? '<span class="muted" style="font-weight:400;font-size:12px"> ' + suffix + '</span>' : '') +
-          '</span></div>';
+      var monthlyTotal = Number(d.monthlyTotalUsd) || monthly.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
+      var oneTimeTotal = Number(d.oneTimeTotalUsd) || oneTime.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
+      var wsName = (typeof wsDisplayName === "function" && wsDisplayName()) || "Spending";
+      var period; try { period = localStorage.getItem("ros_spend_period") || "monthly"; } catch (e) { period = "monthly"; }
+
+      // The receipt itself, for one period. `opts.print` swaps CSS-var colors for
+      // concrete ones so it renders in a bare print window; `opts.big` bumps sizing
+      // for the enlarge modal and the PDF.
+      function receiptHtml(per, opts) {
+        opts = opts || {};
+        var annual = per === "annual", mult = annual ? 12 : 1, suf = annual ? "/yr" : "/mo";
+        var recurTotal = monthlyTotal * mult, grand = recurTotal + oneTimeTotal;
+        var lineCol = opts.print ? "#e4e4ea" : "var(--line,rgba(120,120,140,.18))";
+        var strong = opts.print ? "#c7c7d0" : "var(--line,rgba(120,120,140,.4))";
+        var muted = opts.print ? "#6b7280" : "var(--muted,#8b93a1)";
+        var big = !!opts.big, fs = big ? "15px" : "14px", flx = "display:flex;justify-content:space-between;align-items:center;";
+        function seg(t) { return '<div style="font-size:12px;font-weight:700;color:' + muted + ';margin:14px 0 4px">' + esc(t) + '</div>'; }
+        function row(label, amt, s) {
+          return '<div style="' + flx + 'padding:' + (big ? "12px" : "10px") + ' 0;border-bottom:1px solid ' + lineCol + ';font-size:' + fs + '">' +
+            '<span>' + esc(label) + '</span><span style="font-weight:600;font-variant-numeric:tabular-nums">' + m(amt) +
+            (s ? '<span style="font-weight:400;font-size:12px;color:' + muted + '"> ' + s + '</span>' : '') + '</span></div>';
+        }
+        function tot(label, amt, grandRow) {
+          return '<div style="' + flx + 'padding-top:12px;' + (grandRow ? "margin-top:12px;border-top:2px solid " + strong + ";" : "") +
+            'font-weight:' + (grandRow ? "800" : "700") + ';font-size:' + (grandRow ? (big ? "18px" : "15px") : fs) + '">' +
+            '<span>' + esc(label) + '</span><span style="font-variant-numeric:tabular-nums">' + m(amt) + '</span></div>';
+        }
+        var h = '<div style="' + flx + 'margin-bottom:8px"><div>' +
+          '<div style="font-weight:700;font-size:' + (big ? "20px" : "16px") + '">' + esc(wsName) + '</div>' +
+          '<div style="font-size:12px;color:' + muted + '">Spending statement, ' + (annual ? "annual view" : "monthly view") + '</div></div></div>';
+        if (monthly.length) {
+          h += seg("Subscription");
+          h += monthly.map(function (c) { return row(c.label, (Number(c.amountUsd) || 0) * mult, suf); }).join("");
+          h += tot(annual ? "Subscription per year" : "Subscription per month", recurTotal);
+        }
+        if (oneTime.length) {
+          h += seg("One-time charges");
+          h += oneTime.map(function (c) { return row(c.label, Number(c.amountUsd) || 0, ""); }).join("");
+          h += tot("One-time total", oneTimeTotal);
+        }
+        h += tot("Total " + (annual ? "per year" : "this month"), grand, true);
+        return h;
       }
-      var html = '<div class="card" style="margin-bottom:16px">';
-      if (monthly.length) {
-        html +=
-          '<div style="' + line + 'margin-bottom:6px">' +
-            '<h3 style="margin:0">Your monthly statement</h3>' +
-            '<span class="pill" style="font-size:11px">Billed monthly</span></div>' +
-          '<div class="muted" style="font-size:12.5px;margin-bottom:8px">Your recurring subscription, billed month to month.</div>' +
-          monthly.map(function (c) { return row(c, "/mo"); }).join("") +
-          '<div style="' + line + 'padding-top:12px;font-weight:700;font-size:15px' + (oneTime.length ? ';padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line,rgba(255,255,255,.08))' : '') + '">' +
-            '<span>Total per month</span>' +
-            '<span style="font-variant-numeric:tabular-nums">' + m(d.monthlyTotalUsd) + '</span></div>';
+
+      function segBtn(val, label) {
+        return '<button class="btn btn-sm ' + (period === val ? "btn-primary" : "btn-ghost") + '" data-period="' + val + '" style="min-width:76px">' + label + '</button>';
       }
-      if (oneTime.length) {
-        html +=
-          '<div style="' + line + 'margin-bottom:6px">' +
-            '<h3 style="margin:0">One-time charges</h3>' +
-            '<span class="pill" style="font-size:11px">Billed once</span></div>' +
-          '<div class="muted" style="font-size:12.5px;margin-bottom:8px">Usage-based charges on your account, billed one time.</div>' +
-          oneTime.map(function (c) { return row(c, ""); }).join("") +
-          '<div style="' + line + 'padding-top:12px;font-weight:700;font-size:15px">' +
-            '<span>One-time total</span>' +
-            '<span style="font-variant-numeric:tabular-nums">' + m(d.oneTimeTotalUsd) + '</span></div>';
+
+      // Download to PDF via a print-friendly window (user picks "Save as PDF").
+      function downloadPdf() {
+        var w = window.open("", "_blank", "width=720,height=900");
+        if (!w) { toast("Allow pop-ups to download the PDF"); return; }
+        var title = wsName + " spending statement (" + (period === "annual" ? "annual" : "monthly") + ")";
+        w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
+          '<style>body{font-family:Inter,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;background:#fff;max-width:620px;margin:0 auto;padding:36px 32px}@media print{@page{margin:16mm}}</style></head><body>' +
+          '<div style="border:1px solid #e4e4ea;border-radius:12px;padding:24px 22px">' + receiptHtml(period, { print: true, big: true }) + '</div>' +
+          '<div style="color:#9aa0aa;font-size:11px;margin-top:14px">Generated ' + esc(new Date().toLocaleString()) + '</div>' +
+          '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},200);};</scr' + 'ipt></body></html>');
+        w.document.close();
       }
-      html += '</div>';
-      el.innerHTML = html;
+
+      function paint() {
+        el.innerHTML =
+          '<div class="card" style="margin-bottom:16px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
+              '<div style="display:inline-flex;gap:6px">' + segBtn("monthly", "Monthly") + segBtn("annual", "Annual") + '</div>' +
+              '<div style="display:inline-flex;gap:8px">' +
+                '<button class="btn btn-ghost btn-sm" id="spEnlarge" title="Enlarge the receipt">Enlarge</button>' +
+                '<button class="btn btn-ghost btn-sm" id="spPdf" title="Download as PDF">Download PDF</button>' +
+              '</div>' +
+            '</div>' +
+            '<div id="spReceipt">' + receiptHtml(period, {}) + '</div>' +
+          '</div>';
+        Array.prototype.forEach.call(el.querySelectorAll("[data-period]"), function (b) {
+          b.addEventListener("click", function () {
+            period = b.getAttribute("data-period");
+            try { localStorage.setItem("ros_spend_period", period); } catch (e) {}
+            paint();
+          });
+        });
+        var en = $("#spEnlarge", el);
+        if (en) en.addEventListener("click", function () {
+          openModal(wsName + " spending", (period === "annual" ? "Annual view" : "Monthly view") + ", read-only",
+            '<div style="max-width:560px;margin:0 auto">' + receiptHtml(period, { big: true }) + '</div>');
+        });
+        var pf = $("#spPdf", el);
+        if (pf) pf.addEventListener("click", downloadPdf);
+      }
+      paint();
     }).catch(function () { el.innerHTML = ""; });
   }
 
