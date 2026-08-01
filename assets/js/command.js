@@ -1234,6 +1234,7 @@
     // engine as a cap-gated Statistics tab (the two built the same funnel and
     // leaderboards twice; recruiters without team:manage see plain Analytics).
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalyticsHub },
+    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: function () { location.hash = "#analytics/stats"; }, cap: "team:manage" },
     // Outbound Performance: the admin utilization + accountability command
     // center (capacity engine, scores, heatmap, triggers, goals, reports).
@@ -18647,29 +18648,34 @@
   // The model + UI live in the self-contained spending-calc.js module so the
   // underlying tools stay generic (no vendor names exposed here).
   function renderSpending(el) {
-    if (!window.SpendingCalc) { el.innerHTML = '<div class="empty">Spending module did not load, refresh and try again.</div>'; return; }
-    // Owner-approved monthly statement sits above the planner. It renders only
-    // when the owner has approved at least one charge for this workspace (served
-    // by /api/portal-spend, scoped to the caller's own workspace); otherwise the
-    // tab is exactly the scenario planner as before.
-    el.innerHTML = "";
+    // The client Spending tab. Primary content is the owner-approved monthly
+    // statement (billed charges). The optional scenario planner mounts below it
+    // only when spending-calc.js is loaded; the statement stands on its own.
+    el.innerHTML = head("Spending", "Your monthly subscription and any charges on your account, billed month to month.");
     var stmt = document.createElement("div");
-    var planner = document.createElement("div");
-    el.appendChild(stmt); el.appendChild(planner);
-    // Recruiting motion models the AI Vetting tool (cloned voice + telephony per
-    // hour); BD keeps the full outreach scenario planner. Same look either way.
-    if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(planner);
-    else window.SpendingCalc.mount(planner);
+    el.appendChild(stmt);
     renderSpendStatement(stmt);
+    if (window.SpendingCalc) {
+      var planner = document.createElement("div");
+      el.appendChild(planner);
+      // Recruiting motion models the AI Vetting tool (cloned voice + telephony
+      // per hour); BD keeps the full outreach scenario planner.
+      if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(planner);
+      else window.SpendingCalc.mount(planner);
+    }
   }
 
   // The customer-facing monthly statement: only the charges the owner approved
-  // in the owner console, billed month to month. Empty (nothing shown) until the
-  // owner approves something, so a workspace with no approved charges is unchanged.
+  // in the owner console, billed month to month. Shows a light empty state until
+  // the owner approves the account's first charge.
   function renderSpendStatement(el) {
+    el.innerHTML = loading();
     api("/portal-spend").then(function (d) {
       var charges = (d && d.charges) || [];
-      if (!charges.length) { el.innerHTML = ""; return; }
+      if (!charges.length) {
+        el.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">No charges on your account yet. Your monthly subscription will appear here once it is set up.</div></div>';
+        return;
+      }
       function m(n) { n = Number(n) || 0; return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
       var line = "display:flex;justify-content:space-between;align-items:center;";
       var rows = charges.map(function (c) {
