@@ -4,6 +4,13 @@
 # of a real workspace. Without that gate, on-demand TLS would be a cert-issuance
 # DoS vector, so the catch-all block below depends on it.
 {
+	# Serve only HTTP/1.1 and HTTP/2 (both over TCP). HTTP/3 (QUIC) runs over
+	# UDP 443, which this box does not forward (docker maps only tcp/443), so
+	# advertising h3 via Alt-Svc made Chrome try a dead UDP path and stall on
+	# the login page. Disabling it keeps every browser on the TCP path that works.
+	servers {
+		protocols h1 h2
+	}
 	on_demand_tls {
 		ask http://app:3000/api/caddyask
 	}
