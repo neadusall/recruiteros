@@ -14,5 +14,11 @@ import { requireOwner } from "../../../../lib/api";
 export async function GET(req: Request) {
   const g = requireOwner(req);
   if ("response" in g) return g.response; // 404 for non-owners / unauthenticated
-  return NextResponse.redirect(new URL("/owner-console", req.url), 302);
+  // Relative Location on purpose: the browser resolves it against the URL IT
+  // requested (https://recruitersos.co/...), so owners land on the public site.
+  // new URL("/owner-console", req.url) would use req.url, which behind the Caddy
+  // reverse proxy is the app's INTERNAL address (http://localhost:3000) — that
+  // bounced owners to localhost:3000/owner-console after login. A relative
+  // redirect never depends on the internal address or forwarded headers.
+  return new NextResponse(null, { status: 302, headers: { Location: "/owner-console" } });
 }
