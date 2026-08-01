@@ -18744,6 +18744,26 @@
         w.document.close();
       }
 
+      // Download the full spending as a CSV (respects the Monthly/Annual toggle).
+      function downloadCsv() {
+        var annual = period === "annual", mult = annual ? 12 : 1;
+        function q(s) { s = String(s == null ? "" : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+        var rows = [["Item", "Type", "Amount (USD)"]];
+        monthly.forEach(function (c) { rows.push([c.label, annual ? "Subscription (per year)" : "Subscription (per month)", ((Number(c.amountUsd) || 0) * mult).toFixed(2)]); });
+        oneTime.forEach(function (c) { rows.push([c.label, "One-time", (Number(c.amountUsd) || 0).toFixed(2)]); });
+        rows.push([]);
+        if (monthly.length) rows.push([annual ? "Subscription total (per year)" : "Subscription total (per month)", "", (monthlyTotal * mult).toFixed(2)]);
+        if (oneTime.length) rows.push(["One-time total", "", oneTimeTotal.toFixed(2)]);
+        rows.push([annual ? "Total per year" : "Total this month", "", (monthlyTotal * mult + oneTimeTotal).toFixed(2)]);
+        var csv = rows.map(function (r) { return r.map(q).join(","); }).join("\r\n");
+        var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = (wsName + "-spending-" + (annual ? "annual" : "monthly") + ".csv").replace(/\s+/g, "_");
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      }
+
       function paint() {
         el.innerHTML =
           '<div class="card" style="margin-bottom:16px">' +
@@ -18751,6 +18771,7 @@
               '<div style="display:inline-flex;gap:6px">' + segBtn("monthly", "Monthly") + segBtn("annual", "Annual") + '</div>' +
               '<div style="display:inline-flex;gap:8px">' +
                 '<button class="btn btn-ghost btn-sm" id="spEnlarge" title="Enlarge the receipt">Enlarge</button>' +
+                '<button class="btn btn-ghost btn-sm" id="spCsv" title="Download as CSV">Download CSV</button>' +
                 '<button class="btn btn-ghost btn-sm" id="spPdf" title="Download as PDF">Download PDF</button>' +
               '</div>' +
             '</div>' +
@@ -18768,6 +18789,8 @@
           openModal(wsName + " spending", (period === "annual" ? "Annual view" : "Monthly view") + ", read-only",
             '<div style="max-width:560px;margin:0 auto">' + receiptHtml(period, { big: true }) + '</div>');
         });
+        var cv = $("#spCsv", el);
+        if (cv) cv.addEventListener("click", downloadCsv);
         var pf = $("#spPdf", el);
         if (pf) pf.addEventListener("click", downloadPdf);
       }

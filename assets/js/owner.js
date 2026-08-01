@@ -2758,11 +2758,13 @@
         '<div class="card"><h3>By category</h3>' + barsFromObj(s.byCategory) + '</div>' +
         '<div class="card"><h3>By provider</h3>' + barsFromObj(s.bySource) + '</div></div>';
       html += '<div class="card" style="margin-top:14px"><h3>By account</h3>';
+      html += '<div class="note" style="margin-bottom:8px">Open an account to select its spend rows and push them to that customer\'s Spending page. Nothing is sent until you approve it, and each row shows whether it is already sent.</div>';
       if (!s.byWorkspace.length) html += '<p class="note">No account has incurred cost in this window.</p>';
       else {
-        html += '<table class="otable"><thead><tr><th>Account</th><th class="num">Cost</th><th class="num">Events</th></tr></thead><tbody>';
+        html += '<table class="otable"><thead><tr><th>Account</th><th class="num">Cost</th><th class="num">Events</th><th></th></tr></thead><tbody>';
         s.byWorkspace.forEach(function (w) {
-          html += '<tr class="clickrow" data-id="' + esc(w.workspaceId) + '"><td>' + esc(w.name) + '</td><td class="num">' + usd(w.costUsd) + '</td><td class="num">' + w.events + '</td></tr>';
+          html += '<tr class="clickrow" data-id="' + esc(w.workspaceId) + '"><td>' + esc(w.name) + '</td><td class="num">' + usd(w.costUsd) + '</td><td class="num">' + w.events + '</td>' +
+            '<td class="num"><a class="btn btn-sm">Push spend →</a></td></tr>';
         });
         html += '</tbody></table>';
       }
