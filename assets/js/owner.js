@@ -1575,20 +1575,20 @@
     } else {
       inner = '<div class="rc-dash">·</div>';
     }
-    /* Per-cell control, on every cell that shows something: a small × clears the month to
-       nothing (deletes any receipt in it and marks it no charge), and a cleared cell shows
-       ↺ to put its estimate back. Only on real register lines — a ledger-only or
-       unregistered row has no line to write the waiver to. A genuinely empty cell gets
-       nothing, because there is nothing to clear. */
-    var corner = "";
+    /* Per-cell control, VISIBLE on every cell that shows something and styled like the
+       other cell buttons ("Attach one", "View receipt") so it is actually found: a labelled
+       Clear empties the month to nothing (deleting any receipt in it and marking it no
+       charge), and a cleared cell shows Restore to put its estimate back. Only on real
+       register lines — a ledger-only or unregistered row has no line to write the waiver to.
+       A genuinely empty cell gets nothing, because there is nothing to clear. */
     if (row.itemId && /^\d{4}-\d{2}$/.test(c.period)) {
       if (c.status === "waived") {
-        corner = '<button class="rc-clear restore" data-restore="' + esc(key) + '" title="' + esc("Restore the estimate for " + monthLabel(c.period)) + '">↺</button>';
+        inner += '<button class="rc-view ghost rc-clearbtn" data-restore="' + esc(key) + '" title="' + esc("Restore the estimate for " + monthLabel(c.period)) + '">Restore</button>';
       } else if ((c.receipts && c.receipts.length) || c.expectedUsd > 0 || c.actualUsd > 0 || c.countedUsd > 0 || c.status === "paused") {
-        corner = '<button class="rc-clear" data-clear="' + esc(key) + '" title="' + esc("Clear " + monthLabel(c.period) + " — show nothing in this cell") + '">×</button>';
+        inner += '<button class="rc-view ghost rc-clearbtn" data-clear="' + esc(key) + '" title="' + esc("Clear " + monthLabel(c.period) + " — show nothing in this cell") + '">Clear</button>';
       }
     }
-    return '<td class="' + cls + '"' + attr + ' title="' + esc(monthLabel(c.period) + " · " + (CELL_LABEL[c.status] || c.status)) + '">' + corner + inner + '</td>';
+    return '<td class="' + cls + '"' + attr + ' title="' + esc(monthLabel(c.period) + " · " + (CELL_LABEL[c.status] || c.status)) + '">' + inner + '</td>';
   }
 
   /* Receipts whose document is on file but whose picture is not. An API figure never had a
@@ -1920,12 +1920,12 @@
     $$("#view .rc-view[data-attach]").forEach(function (b) {
       b.addEventListener("click", function (e) { e.stopPropagation(); openCell(b.dataset.attach); });
     });
-    /* The per-cell clear (×) and restore (↺). They sit ON the cell, so the click must not
+    /* The per-cell Clear / Restore buttons. They sit ON the cell, so the click must not
        also open the cell popup underneath. */
-    $$("#view .rc-clear[data-clear]").forEach(function (b) {
+    $$("#view [data-clear]").forEach(function (b) {
       b.addEventListener("click", function (e) { e.stopPropagation(); clearCell(b.dataset.clear); });
     });
-    $$("#view .rc-clear[data-restore]").forEach(function (b) {
+    $$("#view [data-restore]").forEach(function (b) {
       b.addEventListener("click", function (e) { e.stopPropagation(); restoreCell(b.dataset.restore); });
     });
     $$("#view .rc-mhead[data-month]").forEach(function (b) {
