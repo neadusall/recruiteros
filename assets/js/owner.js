@@ -143,7 +143,7 @@
   function spendPushBtn(label, amt) {
     amt = Number(amt) || 0;
     if (amt <= 0) return '<span class="note">—</span>';
-    return '<a class="btn btn-sm push-spend" data-label="' + esc(label) + '" data-amt="' + amt + '" title="Stage this as a one-time charge on the client\'s Spending tab">→ Spending</a>';
+    return '<a class="btn btn-sm push-spend" data-label="' + esc(label) + '" data-amt="' + amt + '" title="Send this row to the client\'s Spending page (one click approves + sends it)">Send to Spending</a>';
   }
   // A pushable cost table: [{label, amount}] -> rows with a push button each.
   function pushCostTable(rows) {
@@ -2914,7 +2914,7 @@
         return { label: titleCase(k), amount: a.costByCategory[k] };
       }).sort(function (x, y) { return y.amount - x.amount; });
       html += '<h3 style="font-size:13px;margin:16px 0 6px">Cost by category · ' + esc(win) + '</h3>' +
-        '<div class="note" style="margin-bottom:6px">Push any line to their Spending tab as a one-time charge, one row at a time. It stays pending until you approve it below.</div>' +
+        '<div class="note" style="margin-bottom:6px">Click <strong>Send to Spending</strong> on any line to approve + send it to the client\'s Spending page in one click. Sent rows lock so you can\'t double-send; remove one below to clear it (only you can clear, the accountant can only view and download).</div>' +
         pushCostTable(catRows);
     }
 
@@ -2947,10 +2947,10 @@
     // this account's Spending tab on the client portal (app.lumesp.com). The
     // amount is always the month-to-month price above; nothing reaches the
     // customer until you approve it here.
-    html += '<h3 style="font-size:13px;margin:16px 0 6px">Client portal statement</h3>' +
-      '<div class="note" style="margin-bottom:8px">Send this account\'s month-to-month charge to their <strong>Spending</strong> tab on the client portal. The amount is always the monthly price above, and it only appears to them once you approve it.</div>' +
+    html += '<h3 style="font-size:13px;margin:16px 0 6px">On their Spending page</h3>' +
+      '<div class="note" style="margin-bottom:8px">Everything you have sent to this client\'s <strong>Spending</strong> page, live for their accountant to view and download (CSV/PDF). They cannot change or delete anything, only you can. Remove a row here to clear it off their receipt.</div>' +
       '<div class="btn-row" style="margin-bottom:8px">' +
-      '<a class="btn btn-sm" id="dwStageCharge">+ Stage monthly charge (' + usd(a.monthlyPriceUsd) + '/mo)</a></div>' +
+      '<a class="btn btn-sm" id="dwStageCharge">Send monthly charge (' + usd(a.monthlyPriceUsd) + '/mo)</a></div>' +
       '<div id="dwCharges">Loading…</div>';
 
     // API access (reselling): lend house keys to this customer, with terms.
@@ -2967,7 +2967,7 @@
     // recent usage — each event can be pushed to the client's Spending tab.
     if (d.recentUsage && d.recentUsage.length) {
       html += '<h3 style="font-size:13px;margin:16px 0 6px">Recent cost events</h3>' +
-        '<div class="note" style="margin-bottom:6px">Push any event to their Spending tab as a one-time charge. It stays pending until you approve it below.</div>' +
+        '<div class="note" style="margin-bottom:6px">Click <strong>Send to Spending</strong> to approve + send any event to the client\'s Spending page in one click. Remove it below to clear it off their receipt.</div>' +
         '<table class="otable"><tbody>';
       d.recentUsage.slice(0, 12).forEach(function (e) {
         var sub = e.source || e.category || "";
@@ -3042,7 +3042,7 @@
       } else if (st === "pending") {
         b.setAttribute("data-sent", "pending"); b.textContent = "Sent · pending"; b.style.opacity = "0.72";
       } else {
-        b.removeAttribute("data-sent"); b.textContent = "→ Spending"; b.style.opacity = "";
+        b.removeAttribute("data-sent"); b.textContent = "Send to Spending"; b.style.opacity = "";
       }
     });
   }
@@ -3102,33 +3102,39 @@
         var wsid = db.dataset.wsid;
         var label = btn.getAttribute("data-label") || "";
         var amt = Number(btn.getAttribute("data-amt")) || 0;
-        // Already pushed? Block the double-send and point them to the list below,
-        // where they can approve or remove it (removing frees it to send again).
+        // Already on their receipt? Block the double-send (remove it below to re-send).
         var sent = btn.getAttribute("data-sent");
-        if (sent) { toast(sent === "live" ? "Already on their receipt." : "Already sent, pending your approval below."); return; }
+        if (sent) { toast("Already on their Spending. Remove it below to re-send."); return; }
         if (amt <= 0) { toast("This row has no cost to send."); return; }
         if (btn.classList.contains("is-busy")) return;
-        btn.classList.add("is-busy"); btn.textContent = "Staging…";
+        btn.classList.add("is-busy"); btn.textContent = "Sending…";
+        // One click = create the charge AND approve it, so it lands on the client's
+        // Spending page immediately. No separate approve step.
         send("/owner/portal-spend", "POST", { workspaceId: wsid, source: "usage", label: label, amountUsd: amt }).then(function (r) {
-          if (r.ok) {
-            toast("Staged “" + label + "” — approve below to send it");
-            btn.textContent = "Staged ✓";
-            loadCharges(wsid);
-          } else {
-            toast((r.data && r.data.message) || "Couldn't stage that row");
-            btn.classList.remove("is-busy"); btn.textContent = "→ Spending";
+          var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
+          if (!cid) {
+            toast((r.data && r.data.message) || "Couldn't send that row");
+            btn.classList.remove("is-busy"); btn.textContent = "Send to Spending";
+            return;
           }
+          send("/owner/portal-spend", "PATCH", { workspaceId: wsid, id: cid, action: "approve" }).then(function () {
+            toast("Sent “" + label + "” to their Spending");
+            loadCharges(wsid);
+          }).catch(function () { toast("Sent — check the list below to confirm"); loadCharges(wsid); });
         }).catch(function () {
           toast("Couldn't reach the server");
-          btn.classList.remove("is-busy"); btn.textContent = "→ Spending";
+          btn.classList.remove("is-busy"); btn.textContent = "Send to Spending";
         });
       });
     }
     var stageBtn = $("#dwStageCharge");
     if (stageBtn) stageBtn.addEventListener("click", function () {
       send("/owner/portal-spend", "POST", { workspaceId: id, source: "monthly_price" }).then(function (r) {
-        if (r.ok) { toast("Staged, approve to send it to their portal"); loadCharges(id); }
-        else toast((r.data && r.data.message) || "Set a month-to-month price first");
+        var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
+        if (!cid) { toast((r.data && r.data.message) || "Set a month-to-month price first"); return; }
+        send("/owner/portal-spend", "PATCH", { workspaceId: id, id: cid, action: "approve" }).then(function () {
+          toast("Monthly charge sent to their Spending"); loadCharges(id);
+        }).catch(function () { loadCharges(id); });
       });
     });
     $("#dwSave").addEventListener("click", function () {
