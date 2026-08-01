@@ -1575,7 +1575,20 @@
     } else {
       inner = '<div class="rc-dash">·</div>';
     }
-    return '<td class="' + cls + '"' + attr + ' title="' + esc(monthLabel(c.period) + " · " + (CELL_LABEL[c.status] || c.status)) + '">' + inner + '</td>';
+    /* Per-cell control, on every cell that shows something: a small × clears the month to
+       nothing (deletes any receipt in it and marks it no charge), and a cleared cell shows
+       ↺ to put its estimate back. Only on real register lines — a ledger-only or
+       unregistered row has no line to write the waiver to. A genuinely empty cell gets
+       nothing, because there is nothing to clear. */
+    var corner = "";
+    if (row.itemId && /^\d{4}-\d{2}$/.test(c.period)) {
+      if (c.status === "waived") {
+        corner = '<button class="rc-clear restore" data-restore="' + esc(key) + '" title="' + esc("Restore the estimate for " + monthLabel(c.period)) + '">↺</button>';
+      } else if ((c.receipts && c.receipts.length) || c.expectedUsd > 0 || c.actualUsd > 0 || c.countedUsd > 0 || c.status === "paused") {
+        corner = '<button class="rc-clear" data-clear="' + esc(key) + '" title="' + esc("Clear " + monthLabel(c.period) + " — show nothing in this cell") + '">×</button>';
+      }
+    }
+    return '<td class="' + cls + '"' + attr + ' title="' + esc(monthLabel(c.period) + " · " + (CELL_LABEL[c.status] || c.status)) + '">' + corner + inner + '</td>';
   }
 
   /* Receipts whose document is on file but whose picture is not. An API figure never had a
@@ -1906,6 +1919,14 @@
     });
     $$("#view .rc-view[data-attach]").forEach(function (b) {
       b.addEventListener("click", function (e) { e.stopPropagation(); openCell(b.dataset.attach); });
+    });
+    /* The per-cell clear (×) and restore (↺). They sit ON the cell, so the click must not
+       also open the cell popup underneath. */
+    $$("#view .rc-clear[data-clear]").forEach(function (b) {
+      b.addEventListener("click", function (e) { e.stopPropagation(); clearCell(b.dataset.clear); });
+    });
+    $$("#view .rc-clear[data-restore]").forEach(function (b) {
+      b.addEventListener("click", function (e) { e.stopPropagation(); restoreCell(b.dataset.restore); });
     });
     $$("#view .rc-mhead[data-month]").forEach(function (b) {
       b.addEventListener("click", function (e) { e.stopPropagation(); openMonthReceipts(b.dataset.month); });
@@ -2451,6 +2472,55 @@
       closeViewer();
       viewBurn();
     });
+  }
+
+  /* Resolve a "ri|period" cell key to its row + cell, the same way openCell does. */
+  function cellFromKey(key) {
+    var parts = String(key || "").split("|");
+    var row = ((rcptData && rcptData.matrix && rcptData.matrix.rows) || [])[Number(parts[0])];
+    var cell = row && (row.cells || []).filter(function (c) { return c.period === parts[1]; })[0];
+    return { row: row, cell: cell, period: parts[1] };
+  }
+
+  /* Clear a cell to nothing, whatever is in it. This is the per-cell × on the grid.
+     An estimate or a "due" cell just gets waived; a cell with a receipt has the receipt
+     deleted first, because a real charge always shows OVER a waiver, so silencing the
+     estimate alone would leave the money on screen. Either way the cell ends up blank.
+     Reversible for the estimate (the ↺ on the cleared cell restores it); a deleted receipt
+     is gone, which the confirmation says out loud. */
+  function clearCell(key) {
+    var t = cellFromKey(key), row = t.row, cell = t.cell, period = t.period;
+    if (!row || !row.itemId || !/^\d{4}-\d{2}$/.test(period)) { toast("This cell can't be cleared"); return; }
+    var receipts = (cell && cell.receipts) || [];
+    var msg = receipts.length
+      ? "Clear " + monthLabel(period) + " for " + row.vendor + "?\n\nThis deletes " + receipts.length + " receipt" + (receipts.length > 1 ? "s" : "") +
+        " on this cell and marks the month as no charge, so the cell shows nothing. The estimate can be restored later; the receipt" + (receipts.length > 1 ? "s" : "") + " cannot."
+      : "Show nothing for " + row.vendor + " in " + monthLabel(period) + "?\n\nThe month is marked as no charge. Restore it any time with the ↺ on the cell.";
+    if (!confirm(msg)) return;
+
+    var waive = function () {
+      send("/owner/burn", "PATCH", { id: row.itemId, hidePeriod: period }).then(function (r) {
+        if (!r.ok) { toast("Could not clear the cell"); return; }
+        toast(monthLabel(period) + " cleared");
+        closeViewer();
+        viewBurn();
+      });
+    };
+    if (receipts.length) {
+      var ids = receipts.map(function (x) { return x.id; }).filter(Boolean);
+      send("/owner/receipts?ids=" + encodeURIComponent(ids.join(",")), "DELETE").then(function (res) {
+        if (!res.ok && res.status !== 404) { toast("Could not remove the receipt"); return; }
+        waive();
+      });
+    } else {
+      waive();
+    }
+  }
+
+  /* Put a cleared cell's estimate back — the ↺ on a waived cell. */
+  function restoreCell(key) {
+    var t = cellFromKey(key);
+    if (t.row) toggleCellCharge(t.row, t.period, false);
   }
 
   /* The editor behind the viewer: correcting what the parser read. */
