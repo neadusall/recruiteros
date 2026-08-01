@@ -1819,8 +1819,11 @@
     var art = r.hasShot
       ? '<img class="rc-tile-shot" src="' + shotUrl(r, "thumb") + '" alt="receipt" loading="lazy" />'
       : '<div class="rc-tile-shot rc-tile-none">' + (r.source === "api" ? "figure from the vendor API" : "no image") + '</div>';
+    var delWhat = r.vendor + " " + usd(Math.abs(r.amountUsd)) + " of " + ((r.chargedAt || "").slice(0, 10) || "unknown date");
     return '<button class="rc-tile" data-receipt="' + esc(r.id) + '" data-month="' + esc(r.period || (r.chargedAt || "").slice(0, 7)) + '"' +
       ' title="' + esc((r.subject || r.description || r.vendor) + "") + '">' +
+      '<span class="rc-tile-del" role="button" tabindex="0" aria-label="Delete this receipt" title="Delete this receipt"' +
+      ' data-del="' + esc(r.id) + '" data-delwhat="' + esc(delWhat) + '">✕</span>' +
       art +
       '<div class="rc-tile-meta"><div class="rc-tile-top"><span class="rc-tile-vendor">' + esc(r.vendor) + '</span>' + badge + '</div>' +
       '<div class="rc-tile-amt">' + usd(Math.abs(r.amountUsd)) + (r.kind && r.kind !== "charge" ? ' <span class="note">' + esc(r.kind.replace("_", " ")) + '</span>' : '') + '</div>' +
@@ -1951,6 +1954,7 @@
         else openReceipt(b.dataset.receipt);
       });
     });
+    wireTileDeletes($("#view"));
 
     if (rcptData && rcptData.inbox && rcptData.inbox.harvest && rcptData.inbox.harvest.running) pollHarvest();
 
@@ -1994,6 +1998,7 @@
         else openReceipt(b.dataset.receipt);
       });
         });
+        wireTileDeletes(body);
       }
       if (loud) toast(d.matrix.totals.receiptCount + " receipts on file · " + pct(d.matrix.totals.coveragePct) + " of spend proven");
     }).catch(function () { if (loud) toast("Could not refresh"); });
@@ -2337,6 +2342,24 @@
    * as never having happened. Said out loud in the prompt, because it is the thing people
    * get wrong about a books tool.
    */
+  /* The ✕ on a gallery tile. It sits on top of the tile button, so the click has to be
+     stopped from also opening the viewer underneath it. Each span carries its own id and a
+     human label, so the same confirm-and-DELETE path the viewer uses runs unchanged. */
+  function wireTileDeletes(root) {
+    if (!root) return;
+    $$("[data-del]", root).forEach(function (x) {
+      var go = function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        deleteReceipts([x.dataset.del], x.dataset.delwhat || "this receipt");
+      };
+      x.addEventListener("click", go);
+      x.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") go(e);
+      });
+    });
+  }
+
   function deleteReceipts(ids, what, totalUsd) {
     if (!ids || !ids.length) return;
     var many = ids.length > 1;

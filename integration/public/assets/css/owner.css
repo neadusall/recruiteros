@@ -273,11 +273,26 @@
 .rc-month-sum { font-size: 12.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .rc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
 .rc-tile {
+  position: relative;
   display: block; text-align: left; padding: 0; cursor: pointer; overflow: hidden;
   background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
   transition: border-color 0.12s ease, transform 0.12s ease;
 }
 .rc-tile:hover { border-color: var(--brand); transform: translateY(-1px); }
+/* Delete straight from the gallery, without opening the invoice first. Hidden until the
+   tile is hovered so the grid stays a clean wall of receipts, and stopPropagation on the
+   click keeps it from also opening the viewer it sits on top of. */
+.rc-tile-del {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; border-radius: 6px; line-height: 1;
+  font-size: 13px; cursor: pointer; opacity: 0;
+  color: #fff; background: rgba(17, 17, 17, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+.rc-tile:hover .rc-tile-del, .rc-tile-del:focus-visible { opacity: 1; }
+.rc-tile-del:hover { background: var(--danger, #c0392b); }
 .rc-tile-shot {
   display: block; width: 100%; height: 116px; object-fit: cover; object-position: top center;
   background: #fff; border-bottom: 1px solid var(--border);
@@ -390,7 +405,15 @@
   box-shadow: 0 -10px 14px -10px rgba(16, 24, 40, 0.22);
 }
 
+/* Deleting sits in the same row as Close, so it says what it does in red rather than
+   looking like one more neutral button next to the one people press to get out. */
+.rcv-foot .rcv-del { color: var(--danger); margin-left: auto; }
+.rcv-foot .rcv-del:hover { background: var(--danger-bg); }
+
 @media (max-width: 720px) {
+  /* Stacked, the auto margin would push Delete away from the group and put it directly
+     under the thumb where Close used to be. */
+  .rcv-foot .rcv-del { margin-left: 0; }
   .rcv-sheet { margin: 0; width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; border: 0; }
   .rcv-head { flex-direction: column; align-items: stretch; gap: 10px; }
   .rcv-tools { justify-content: flex-end; flex-wrap: wrap; }
@@ -478,13 +501,16 @@
 /* Narrow screens: the table collapses to one stacked card per account. The column
    headers go with it, so each value carries its own label, otherwise two consecutive
    "not set" lines are unreadable. */
+/* The routing table on Spend master stacks the same way: its "what is needed" column is a
+   sentence, and a sentence in a four-column table on a phone is a column two words wide. */
 @media (max-width: 900px) {
-  .vault-table, .vault-table tbody, .vault-table tr, .vault-table td { display: block; width: 100% !important; }
-  .vault-table thead { display: none; }
-  .vault-table tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
-  .vault-table td { border: 0; padding: 3px 0; }
-  .vault-table td[data-l] { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; margin-top: 6px; }
-  .vault-table td[data-l]::before { content: attr(data-l); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--text-dim); }
+  .vault-table, .vault-table tbody, .vault-table tr, .vault-table td,
+  .route-table, .route-table tbody, .route-table tr, .route-table td { display: block; width: 100% !important; }
+  .vault-table thead, .route-table thead { display: none; }
+  .vault-table tr, .route-table tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
+  .vault-table td, .route-table td { border: 0; padding: 3px 0; }
+  .vault-table td[data-l], .route-table td[data-l] { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; margin-top: 6px; }
+  .vault-table td[data-l]::before, .route-table td[data-l]::before { content: attr(data-l); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--text-dim); }
   .vault-table td.num { text-align: left; }
   /* Stacked cards have no columns to tick down, so multi-select goes away here and the
      per-row Delete link is how you remove an account on a phone. */
