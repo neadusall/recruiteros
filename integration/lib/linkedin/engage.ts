@@ -188,7 +188,7 @@ async function draft(system: string, user: string): Promise<string | null> {
 async function recentPost(account: LiAccountState, workspaceId: string, p: Prospect): Promise<{ postUrl: string; excerpt: string } | null> {
   try {
     const identity = await resolveIdentity(workspaceId, {
-      linkedinUrl: p.linkedinUrl, email: p.email, fullName: `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || undefined,
+      linkedinUrl: p.linkedinUrl, email: p.email, fullName: (p.fullName || p.firstName || "").trim() || undefined,
       company: p.company, title: p.title, prospectId: p.id,
     });
     const pid = identity.providerIds.classic ?? identity.providerIds.salesNavigator ?? identity.providerIds.recruiter;
@@ -243,7 +243,7 @@ export async function buildEngageQueue(workspaceId: string): Promise<{ built: nu
     try { emailed = (await core.listActivity(p.id)).some((a) => a.type === "email_sent"); } catch { /* skip on error */ }
     if (!emailed) continue;
 
-    const who = { email: p.email, linkedinUrl: p.linkedinUrl, fullName: `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim(), company: p.company };
+    const who = { email: p.email, linkedinUrl: p.linkedinUrl, fullName: (p.fullName || p.firstName || "").trim(), company: p.company };
     const fullName = who.fullName || p.email || "this prospect";
     const persona = `${fullName}${p.title ? `, ${p.title}` : ""}${p.company ? ` at ${p.company}` : ""}`;
 
