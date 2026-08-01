@@ -425,7 +425,7 @@ interface RegisterStore {
  * quietly keeps its old value and nothing anywhere reports a problem. That is what happened
  * here, and 17 is the repair.
  */
-const SEED_VERSION = 17;
+const SEED_VERSION = 18;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -646,6 +646,16 @@ void ensureSpendRegisterReady();
  *  then mark the version applied. Never overwrites or deletes an amount the owner has
  *  edited, and never resurrects a row the owner removed. */
 function applySeed(): void {
+  /* One-time repair (2026-08-01): a per-cell clear removed / over-hid the ElevenLabs
+     "Voice Cloning" row. Un-dismiss it so seedAdditions can re-add it if it was deleted,
+     and clear its noChargePeriods so every month shows again. Targeted to this one row, so
+     no other line's legitimate waivers are disturbed. Runs once, on this version bump. */
+  {
+    const elk = key("ElevenLabs", "Voice cloning");
+    if (store.dismissed) store.dismissed = store.dismissed.filter((k) => k !== elk);
+    const el = store.items.find((i) => key(i.vendor, i.label) === elk);
+    if (el) el.noChargePeriods = undefined;
+  }
   for (const s of seedAdditions(store.items, SEED, store.dismissed || [])) {
     store.items.push({ ...s, id: rid("spend"), seeded: true, createdAt: nowIso(), updatedAt: nowIso() });
   }
