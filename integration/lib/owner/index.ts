@@ -31,6 +31,9 @@ import {
 import { workspaceAccountCounts, purgeWorkspaceAccounts } from "../accounts";
 import { listAssets, deleteAsset } from "../content";
 import { getAccountMeta, setAccountMeta, deleteAccountMeta, type AccountMeta } from "./store";
+import { purgeWorkspaceCharges } from "./portalSpend";
+
+export * from "./portalSpend";
 
 /* ---------------- owner identity ---------------- */
 
@@ -357,6 +360,7 @@ function purgeWorkspaceData(workspaceId: string): NonNullable<HardResetResult["p
 
   const infra = purgeWorkspaceAccounts(workspaceId);
   const usageEvents = purgeWorkspaceUsage(workspaceId);
+  purgeWorkspaceCharges(workspaceId);
 
   return { prospects, campaigns, activity, contentAssets, ...infra, usageEvents };
 }

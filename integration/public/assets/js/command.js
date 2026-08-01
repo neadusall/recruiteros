@@ -11285,10 +11285,48 @@
   // underlying tools stay generic (no vendor names exposed here).
   function renderSpending(el) {
     if (!window.SpendingCalc) { el.innerHTML = '<div class="empty">Spending module did not load, refresh and try again.</div>'; return; }
+    // Owner-approved monthly statement sits above the planner. It renders only
+    // when the owner has approved at least one charge for this workspace (served
+    // by /api/portal-spend, scoped to the caller's own workspace); otherwise the
+    // tab is exactly the scenario planner as before.
+    el.innerHTML = "";
+    var stmt = document.createElement("div");
+    var planner = document.createElement("div");
+    el.appendChild(stmt); el.appendChild(planner);
     // Recruiting motion models the AI Vetting tool (cloned voice + telephony per
     // hour); BD keeps the full outreach scenario planner. Same look either way.
-    if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(el);
-    else window.SpendingCalc.mount(el);
+    if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(planner);
+    else window.SpendingCalc.mount(planner);
+    renderSpendStatement(stmt);
+  }
+
+  // The customer-facing monthly statement: only the charges the owner approved
+  // in the owner console, billed month to month. Empty (nothing shown) until the
+  // owner approves something, so a workspace with no approved charges is unchanged.
+  function renderSpendStatement(el) {
+    api("/portal-spend").then(function (d) {
+      var charges = (d && d.charges) || [];
+      if (!charges.length) { el.innerHTML = ""; return; }
+      function m(n) { n = Number(n) || 0; return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+      var line = "display:flex;justify-content:space-between;align-items:center;";
+      var rows = charges.map(function (c) {
+        return '<div style="' + line + 'padding:10px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))">' +
+          '<span>' + esc(c.label) + '</span>' +
+          '<span style="font-weight:600;font-variant-numeric:tabular-nums">' + m(c.amountUsd) +
+          '<span class="muted" style="font-weight:400;font-size:12px"> /mo</span></span></div>';
+      }).join("");
+      el.innerHTML =
+        '<div class="card" style="margin-bottom:16px">' +
+          '<div style="' + line + 'margin-bottom:6px">' +
+            '<h3 style="margin:0">Your monthly statement</h3>' +
+            '<span class="pill" style="font-size:11px">Billed monthly</span></div>' +
+          '<div class="muted" style="font-size:12.5px;margin-bottom:8px">Your recurring subscription, billed month to month.</div>' +
+          rows +
+          '<div style="' + line + 'padding-top:12px;font-weight:700;font-size:15px">' +
+            '<span>Total per month</span>' +
+            '<span style="font-variant-numeric:tabular-nums">' + m(d.monthlyTotalUsd) + '</span></div>' +
+        '</div>';
+    }).catch(function () { el.innerHTML = ""; });
   }
 
   function renderAnalytics(el) {
