@@ -2821,6 +2821,16 @@
       '<a class="btn btn-sm" id="dwSuspend">' + (a.suspended ? "Unsuspend" : "Suspend") + '</a>' +
       '<a class="btn btn-sm" id="dwRevoke">Revoke sessions</a></div>';
 
+    // Client portal statement: owner-approved, month-to-month charges pushed to
+    // this account's Spending tab on the client portal (app.lumesp.com). The
+    // amount is always the month-to-month price above; nothing reaches the
+    // customer until you approve it here.
+    html += '<h3 style="font-size:13px;margin:16px 0 6px">Client portal statement</h3>' +
+      '<div class="note" style="margin-bottom:8px">Send this account\'s month-to-month charge to their <strong>Spending</strong> tab on the client portal. The amount is always the monthly price above, and it only appears to them once you approve it.</div>' +
+      '<div class="btn-row" style="margin-bottom:8px">' +
+      '<a class="btn btn-sm" id="dwStageCharge">+ Stage monthly charge (' + usd(a.monthlyPriceUsd) + '/mo)</a></div>' +
+      '<div id="dwCharges">Loading…</div>';
+
     // API access (reselling): lend house keys to this customer, with terms.
     html += '<style>' +
       '.grant-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line,var(--surface-2))}' +
@@ -2885,10 +2895,50 @@
     }).catch(function () { var box = $("#dwGrants"); if (box) box.innerHTML = '<div class="note">Could not load grants.</div>'; });
   }
 
+  // Owner-approved client-portal charges for one account. Owner view shows all
+  // statuses with Approve / Pull-back / Remove; the client only ever sees the
+  // approved rows (served by /api/portal-spend, scoped to their own workspace).
+  function loadCharges(wsId) {
+    api("/owner/portal-spend?workspaceId=" + encodeURIComponent(wsId)).then(function (d) {
+      var charges = (d && d.charges) || [];
+      var box = $("#dwCharges"); if (!box) return;
+      if (!charges.length) { box.innerHTML = '<div class="note">No charges staged. Nothing shows on their Spending tab.</div>'; return; }
+      box.innerHTML = '<table class="otable"><tbody>' + charges.map(function (c) {
+        var live = c.status === "approved";
+        var pill = live ? '<span class="pill active">Live on portal</span>' : '<span class="pill susp">Pending</span>';
+        return '<tr data-cid="' + esc(c.id) + '" data-live="' + (live ? "1" : "") + '">' +
+          '<td>' + esc(c.label) + ' <span class="note">/mo</span></td>' +
+          '<td class="num">' + usd(c.amountUsd) + '</td>' +
+          '<td>' + pill + '</td>' +
+          '<td class="num"><a class="btn btn-sm c-toggle">' + (live ? "Pull back" : "Approve & send") + '</a> ' +
+          '<a class="btn btn-sm c-del">Remove</a></td></tr>';
+      }).join("") + '</tbody></table>';
+      $$("#dwCharges tr[data-cid]").forEach(function (row) {
+        var cid = row.dataset.cid, isLive = !!row.dataset.live;
+        row.querySelector(".c-toggle").addEventListener("click", function () {
+          send("/owner/portal-spend", "PATCH", { workspaceId: wsId, id: cid, action: isLive ? "unapprove" : "approve" })
+            .then(function (r) { if (r.ok) { toast(isLive ? "Pulled back off portal" : "Approved, live on portal"); loadCharges(wsId); } else toast("Couldn't update"); });
+        });
+        row.querySelector(".c-del").addEventListener("click", function () {
+          send("/owner/portal-spend?workspaceId=" + encodeURIComponent(wsId) + "&id=" + encodeURIComponent(cid), "DELETE")
+            .then(function (r) { if (r.ok) { toast("Removed"); loadCharges(wsId); } else toast("Couldn't remove"); });
+        });
+      });
+    }).catch(function () { var box = $("#dwCharges"); if (box) box.innerHTML = '<div class="note">Could not load charges.</div>'; });
+  }
+
   function wireDrawer(a) {
     var id = a.workspaceId;
     loadGrants(id);
+    loadCharges(id);
     $("#dwClose").addEventListener("click", closeDrawer);
+    var stageBtn = $("#dwStageCharge");
+    if (stageBtn) stageBtn.addEventListener("click", function () {
+      send("/owner/portal-spend", "POST", { workspaceId: id, source: "monthly_price" }).then(function (r) {
+        if (r.ok) { toast("Staged, approve to send it to their portal"); loadCharges(id); }
+        else toast((r.data && r.data.message) || "Set a month-to-month price first");
+      });
+    });
     $("#dwSave").addEventListener("click", function () {
       var planSel = $("#dwPlan");
       send("/owner/accounts/" + id, "PATCH", {
