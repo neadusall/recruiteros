@@ -3022,12 +3022,36 @@
     }).catch(function () { var box = $("#dwGrants"); if (box) box.innerHTML = '<div class="note">Could not load grants.</div>'; });
   }
 
+  // Reflect what has already been pushed to the client onto every "→ Spending"
+  // button, matched by label, so each cost row plainly shows whether it is already
+  // sent (pending or live on the receipt) and a second click can't double-send it.
+  function annotateSent(charges) {
+    var byLabel = {};
+    (charges || []).forEach(function (c) {
+      var k = (c.label || "").trim().toLowerCase();
+      if (byLabel[k] !== "approved") byLabel[k] = c.status; // 'approved' wins over 'pending'
+    });
+    $$("#drawerBody .push-spend").forEach(function (b) {
+      var k = (b.getAttribute("data-label") || "").trim().toLowerCase();
+      var st = byLabel[k];
+      b.classList.remove("is-busy");
+      if (st === "approved") {
+        b.setAttribute("data-sent", "live"); b.textContent = "On receipt ✓"; b.style.opacity = "0.6";
+      } else if (st === "pending") {
+        b.setAttribute("data-sent", "pending"); b.textContent = "Sent · pending"; b.style.opacity = "0.72";
+      } else {
+        b.removeAttribute("data-sent"); b.textContent = "→ Spending"; b.style.opacity = "";
+      }
+    });
+  }
+
   // Owner-approved client-portal charges for one account. Owner view shows all
   // statuses with Approve / Pull-back / Remove; the client only ever sees the
   // approved rows (served by /api/portal-spend, scoped to their own workspace).
   function loadCharges(wsId) {
     api("/owner/portal-spend?workspaceId=" + encodeURIComponent(wsId)).then(function (d) {
       var charges = (d && d.charges) || [];
+      annotateSent(charges); // keep every "→ Spending" button's sent-state in sync
       var box = $("#dwCharges"); if (!box) return;
       if (!charges.length) { box.innerHTML = '<div class="note">No charges staged. Nothing shows on their Spending tab.</div>'; return; }
       box.innerHTML = '<table class="otable"><tbody>' + charges.map(function (c) {
@@ -3076,6 +3100,10 @@
         var wsid = db.dataset.wsid;
         var label = btn.getAttribute("data-label") || "";
         var amt = Number(btn.getAttribute("data-amt")) || 0;
+        // Already pushed? Block the double-send and point them to the list below,
+        // where they can approve or remove it (removing frees it to send again).
+        var sent = btn.getAttribute("data-sent");
+        if (sent) { toast(sent === "live" ? "Already on their receipt." : "Already sent, pending your approval below."); return; }
         if (amt <= 0) { toast("This row has no cost to send."); return; }
         if (btn.classList.contains("is-busy")) return;
         btn.classList.add("is-busy"); btn.textContent = "Staging…";
