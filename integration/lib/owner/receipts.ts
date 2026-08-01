@@ -38,6 +38,7 @@ import {
 import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge } from "./receiptMatch";
 import { pullEmailDocument, type FetchedDocument, type PullResult } from "./receiptLinks";
 import { relevanceOf, filingUnknownVendors } from "./receiptRelevance";
+import { getMsImapToken, msBillingMailboxes } from "./msOauth";
 
 /* ============================ types ============================ */
 
@@ -922,7 +923,12 @@ function titleCase(s: string): string {
 
 /* ============================ the mailbox ============================ */
 
-export interface MailboxCfg { user: string; pass: string; host: string; port: number; label: string; inherited?: boolean }
+export interface MailboxCfg {
+  user: string; pass: string; host: string; port: number; label: string; inherited?: boolean;
+  /** Authenticate with an OAuth2 access token (XOAUTH2) instead of a password. Set for
+   *  Microsoft 365 work mailboxes, where basic-auth IMAP is disabled and only OAuth works. */
+  oauth?: boolean;
+}
 
 function guessHost(user: string): string {
   const d = (user.split("@")[1] || "").toLowerCase();
@@ -951,6 +957,13 @@ export function billingMailboxes(): MailboxCfg[] {
   add(E.BILLING_INBOX_USER || "", E.BILLING_INBOX_PASS || "", E.BILLING_INBOX_HOST || "", E.BILLING_INBOX_PORT || "");
   for (const n of [2, 3, 4]) {
     add(E[`BILLING_INBOX_${n}_USER`] || "", E[`BILLING_INBOX_${n}_PASS`] || "", E[`BILLING_INBOX_${n}_HOST`] || "", E[`BILLING_INBOX_${n}_PORT`] || "");
+  }
+  /* Microsoft 365 work mailboxes (e.g. ryan@lumesp.com): no password can reach them because
+     Microsoft disabled basic-auth IMAP, so they connect over OAuth2 with a token minted at
+     sweep time. Configured by MS_BILLING_MAILBOXES + the Entra app creds (see msOauth.ts). */
+  for (const user of msBillingMailboxes()) {
+    if (out.some((x) => x.user.toLowerCase() === user.toLowerCase())) continue;
+    out.push({ user, pass: "", host: E.MS_IMAP_HOST || "outlook.office365.com", port: 993, label: user, oauth: true });
   }
   if (!out.length) add(E.RESUME_INBOX_USER || "", E.RESUME_INBOX_PASS || "", E.RESUME_INBOX_HOST || "", E.RESUME_INBOX_PORT || "", true);
   return out;
@@ -1037,7 +1050,12 @@ export async function harvestMailbox(
   try {
     const { ImapFlow } = await import("imapflow");
     const { simpleParser } = await import("mailparser");
-    client = new ImapFlow({ host: cfg.host, port: cfg.port, secure: true, auth: { user: cfg.user, pass: cfg.pass }, logger: false });
+    /* OAuth mailboxes (Microsoft 365) authenticate with a bearer token; the rest with a
+       password. The token is minted per sweep and cached, so this is one HTTP call at most. */
+    const auth = cfg.oauth
+      ? { user: cfg.user, accessToken: await getMsImapToken() }
+      : { user: cfg.user, pass: cfg.pass };
+    client = new ImapFlow({ host: cfg.host, port: cfg.port, secure: true, auth, logger: false });
     await client.connect();
 
     for (const folder of FOLDERS) {

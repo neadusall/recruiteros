@@ -42,6 +42,17 @@ function guessHost(user) {
   return d ? "outlook.office365.com" : "";
 }
 
+/* Mint an Office 365 IMAP token for the OAuth mailboxes (Microsoft 365 work accounts, which
+   have no password login). Same client-credentials flow as lib/owner/msOauth.ts. */
+async function msToken() {
+  const url = `https://login.microsoftonline.com/${encodeURIComponent(E.MS_TENANT_ID)}/oauth2/v2.0/token`;
+  const body = new URLSearchParams({ client_id: E.MS_CLIENT_ID, client_secret: E.MS_CLIENT_SECRET, grant_type: "client_credentials", scope: "https://outlook.office365.com/.default" });
+  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.access_token) throw new Error("token request rejected: " + (j.error_description || j.error || ("HTTP " + res.status)));
+  return j.access_token;
+}
+
 /* Same resolution order as lib/owner/receipts.ts: the dedicated billing mailboxes
    first, and only when none is set does it fall back to the resume inbox. */
 const E = process.env;
@@ -57,6 +68,17 @@ add(E.BILLING_INBOX_USER, E.BILLING_INBOX_PASS, E.BILLING_INBOX_HOST, E.BILLING_
 for (const n of [2, 3, 4]) {
   add(E[`BILLING_INBOX_${n}_USER`], E[`BILLING_INBOX_${n}_PASS`], E[`BILLING_INBOX_${n}_HOST`], E[`BILLING_INBOX_${n}_PORT`], `BILLING_INBOX_${n}_*`);
 }
+// Microsoft 365 work mailboxes (OAuth, no password) — same resolution as lib/owner/msOauth.ts.
+const msList = (E.MS_BILLING_MAILBOXES || "").split(",").map((s) => s.trim()).filter(Boolean);
+if (msList.length && E.MS_TENANT_ID && E.MS_CLIENT_ID && E.MS_CLIENT_SECRET) {
+  for (const user of msList) {
+    if (!boxes.some((x) => x.user.toLowerCase() === user.toLowerCase())) {
+      boxes.push({ user, host: E.MS_IMAP_HOST || "outlook.office365.com", port: 993, from: "MS_BILLING_MAILBOXES (OAuth)", oauth: true });
+    }
+  }
+} else if (msList.length) {
+  console.log("NOTE: MS_BILLING_MAILBOXES is set but MS_TENANT_ID/MS_CLIENT_ID/MS_CLIENT_SECRET are missing, so those OAuth mailboxes are skipped.\n");
+}
 if (!boxes.length) add(E.RESUME_INBOX_USER, E.RESUME_INBOX_PASS, E.RESUME_INBOX_HOST, E.RESUME_INBOX_PORT, "RESUME_INBOX_* (fallback)");
 
 if (!boxes.length) {
@@ -69,9 +91,11 @@ if (!boxes.length) {
 (async () => {
   for (const b of boxes) {
     const label = `${b.user} (${b.host}:${b.port}, from ${b.from})`;
-    const client = new ImapFlow({ host: b.host, port: b.port, secure: true, auth: { user: b.user, pass: b.pass }, logger: false, greetingTimeout: 15000, socketTimeout: 30000 });
-    client.on("error", () => {});
+    let client;
     try {
+      const auth = b.oauth ? { user: b.user, accessToken: await msToken() } : { user: b.user, pass: b.pass };
+      client = new ImapFlow({ host: b.host, port: b.port, secure: true, auth, logger: false, greetingTimeout: 15000, socketTimeout: 30000 });
+      client.on("error", () => {});
       await client.connect();
       const list = await client.list();
       const names = list.map((f) => f.path);
