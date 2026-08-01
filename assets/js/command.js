@@ -1235,6 +1235,7 @@
     // leaderboards twice; recruiters without team:manage see plain Analytics).
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalyticsHub },
     spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
+    recruiterspend: { title: "Recruiters Spending", crumb: "Measure", action: null, render: renderRecruiterSpending, cap: "team:manage" },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: function () { location.hash = "#analytics/stats"; }, cap: "team:manage" },
     // Outbound Performance: the admin utilization + accountability command
     // center (capacity engine, scores, heatmap, triggers, goals, reports).
@@ -18719,6 +18720,65 @@
     }).catch(function () { el.innerHTML = ""; });
   }
 
+  // Admin-only "Recruiters Spending": what each individual recruiter has run up in
+  // attributed usage cost, one row per member. Separate from the tool Spending tab
+  // (subscription + owner-pushed charges). Served by /api/recruiter-spend
+  // (team:manage), scoped to this workspace. Window selector matches the ledger.
+  var recruiterSpendWindow = "30d";
+  function renderRecruiterSpending(el) {
+    function money(n) { n = Number(n) || 0; return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    var WINS = [["today", "Today"], ["7d", "7 days"], ["30d", "30 days"], ["all", "All time"]];
+    el.innerHTML =
+      head("Recruiters Spending", "What each recruiter has spent in usage on your account. This is per-person spend, separate from your tool subscription on the Spending tab.") +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">' +
+        '<span class="muted" style="font-size:12.5px;font-weight:600">Window</span>' +
+        '<div id="rsWin" class="seg" style="display:inline-flex;gap:4px">' +
+          WINS.map(function (w) {
+            return '<button type="button" class="btn btn-ghost btn-sm" data-win="' + w[0] + '"' +
+              (w[0] === recruiterSpendWindow ? ' style="font-weight:700;color:var(--brand-2)"' : '') + '>' + w[1] + '</button>';
+          }).join("") +
+        '</div></div>' +
+      '<div id="rsBody">' + loading() + '</div>';
+
+    el.querySelector("#rsWin").addEventListener("click", function (ev) {
+      var b = ev.target.closest("[data-win]"); if (!b) return;
+      recruiterSpendWindow = b.getAttribute("data-win");
+      renderRecruiterSpending(el);
+    });
+
+    var body = el.querySelector("#rsBody");
+    api("/recruiter-spend?window=" + encodeURIComponent(recruiterSpendWindow)).then(function (d) {
+      var rows = (d && d.rows) || [];
+      if (!rows.length) {
+        body.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">No recruiters on this account yet.</div></div>';
+        return;
+      }
+      var line = "display:flex;justify-content:space-between;align-items:center;";
+      var bord = "padding:12px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))";
+      var list = rows.map(function (r) {
+        var nm = esc(r.name || r.email || "Recruiter") + (r.isYou ? ' <span class="muted" style="font-weight:400">(you)</span>' : "");
+        var sub = esc(r.email || "") + (r.events ? ' · ' + Number(r.events).toLocaleString() + ' events' : "");
+        return '<div style="' + line + bord + '">' +
+            '<div><div style="font-weight:600">' + nm + '</div>' +
+              '<div class="muted" style="font-size:12px">' + sub + '</div></div>' +
+            '<div style="font-weight:700;font-variant-numeric:tabular-nums">' + money(r.costUsd) + '</div>' +
+          '</div>';
+      }).join("");
+      body.innerHTML =
+        '<div class="card">' +
+          '<div style="' + line + 'margin-bottom:6px">' +
+            '<h3 style="margin:0">Spend by recruiter</h3>' +
+            '<span class="pill" style="font-size:11px">Usage cost</span></div>' +
+          list +
+          '<div style="' + line + 'padding-top:14px;font-weight:700;font-size:15px">' +
+            '<span>Total</span>' +
+            '<span style="font-variant-numeric:tabular-nums">' + money(d.totalUsd) + '</span></div>' +
+        '</div>';
+    }).catch(function () {
+      body.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">Could not load recruiter spending.</div></div>';
+    });
+  }
+
   function renderAnalytics(el) {
     var detail = currentDetail();
     if (detail) return renderAnalyticsDetail(el, detail);
@@ -23821,6 +23881,10 @@
     Array.prototype.forEach.call(menu.querySelectorAll("[data-route]"), function (a) {
       a.addEventListener("click", function () { setOpen(false); location.hash = a.getAttribute("data-route"); });
     });
+    // "Recruiters Spending" (per-person usage roster) is admin-only; the tool
+    // "Spending" item above stays visible to everyone.
+    var recruiterSpendLink = $("#recruiterSpendLink");
+    if (recruiterSpendLink && (typeof can === "function") && can("team:manage")) recruiterSpendLink.hidden = false;
     var billing = $("#billingLink");
     if (billing) billing.addEventListener("click", function () { setOpen(false); location.hash = "accounts"; });
 
