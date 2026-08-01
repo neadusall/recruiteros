@@ -217,8 +217,21 @@
 .rc-matrix tfoot tr.rc-foot td, .rc-matrix tfoot tr.rc-foot th { border-top: 1px solid var(--border); }
 .rc-matrix td { text-align: right; vertical-align: top; padding: 8px 10px; min-width: 92px; }
 
-.rc-cell { cursor: pointer; transition: background 0.12s ease; }
+.rc-cell { cursor: pointer; transition: background 0.12s ease; position: relative; }
 .rc-cell:hover { background: var(--brand-soft); }
+/* The per-cell clear (×) / restore (↺). Sits in the top-left corner of EVERY cell that
+   shows something, faint but always visible so it can actually be found, and brightening
+   on hover. The left corner keeps it clear of the receipt thumbnail, which sits top-right. */
+.rc-clear {
+  position: absolute; top: 1px; left: 3px; z-index: 2;
+  border: 0; background: transparent; cursor: pointer; padding: 0 3px;
+  font-size: 13px; line-height: 1.2; color: var(--text-muted);
+  opacity: 0.4; transition: opacity 0.12s ease, color 0.12s ease;
+}
+.rc-cell:hover .rc-clear, .rc-clear:focus-visible { opacity: 0.85; }
+.rc-clear:hover { opacity: 1; color: var(--danger); }
+.rc-clear.restore { opacity: 0.75; }
+.rc-clear.restore:hover { color: var(--brand); }
 .rc-amt { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; }
 .rc-amt.est { font-weight: 500; color: var(--text-muted); }
 .rc-delta { font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -394,7 +407,15 @@
   box-shadow: 0 -10px 14px -10px rgba(16, 24, 40, 0.22);
 }
 
+/* Deleting sits in the same row as Close, so it says what it does in red rather than
+   looking like one more neutral button next to the one people press to get out. */
+.rcv-foot .rcv-del { color: var(--danger); margin-left: auto; }
+.rcv-foot .rcv-del:hover { background: var(--danger-bg); }
+
 @media (max-width: 720px) {
+  /* Stacked, the auto margin would push Delete away from the group and put it directly
+     under the thumb where Close used to be. */
+  .rcv-foot .rcv-del { margin-left: 0; }
   .rcv-sheet { margin: 0; width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; border: 0; }
   .rcv-head { flex-direction: column; align-items: stretch; gap: 10px; }
   .rcv-tools { justify-content: flex-end; flex-wrap: wrap; }
@@ -482,13 +503,16 @@
 /* Narrow screens: the table collapses to one stacked card per account. The column
    headers go with it, so each value carries its own label, otherwise two consecutive
    "not set" lines are unreadable. */
+/* The routing table on Spend master stacks the same way: its "what is needed" column is a
+   sentence, and a sentence in a four-column table on a phone is a column two words wide. */
 @media (max-width: 900px) {
-  .vault-table, .vault-table tbody, .vault-table tr, .vault-table td { display: block; width: 100% !important; }
-  .vault-table thead { display: none; }
-  .vault-table tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
-  .vault-table td { border: 0; padding: 3px 0; }
-  .vault-table td[data-l] { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; margin-top: 6px; }
-  .vault-table td[data-l]::before { content: attr(data-l); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--text-dim); }
+  .vault-table, .vault-table tbody, .vault-table tr, .vault-table td,
+  .route-table, .route-table tbody, .route-table tr, .route-table td { display: block; width: 100% !important; }
+  .vault-table thead, .route-table thead { display: none; }
+  .vault-table tr, .route-table tr { border-bottom: 1px solid var(--border); padding: 10px 0; }
+  .vault-table td, .route-table td { border: 0; padding: 3px 0; }
+  .vault-table td[data-l], .route-table td[data-l] { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; margin-top: 6px; }
+  .vault-table td[data-l]::before, .route-table td[data-l]::before { content: attr(data-l); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--text-dim); }
   .vault-table td.num { text-align: left; }
   /* Stacked cards have no columns to tick down, so multi-select goes away here and the
      per-row Delete link is how you remove an account on a phone. */
