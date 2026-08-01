@@ -66,18 +66,92 @@
      * (requireOwner), a non-owner who signs in here just hits the locked gate. */
     (function () {
       "use strict";
-      var API = (window.RECRUITEROS_API_BASE || "") + "/api/auth";
+      var BASE = window.RECRUITEROS_API_BASE || "";
+      var API = BASE + "/api/auth";
       // Gated doorway: checks owner access server-side, then forwards to the
       // console's secret slug. Never hardcode the slug in a public page.
       var OWNER_CONSOLE = "/api/owner/enter";
       var form = document.getElementById("ownerForm");
       var msg = document.getElementById("msg");
       var submitBtn = document.getElementById("submitBtn");
+      // Set when the password is accepted but a 2FA code is still owed; the next
+      // submit redeems this challenge instead of re-sending email + password.
+      var pendingChallenge = null;
       function say(t, k) { msg.textContent = t; msg.className = "auth-msg" + (k ? " " + k : ""); }
       function valid(e) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e); }
+      function json(r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || ("http_" + r.status)); return d; }); }
+
+      // Session issued: persist the context, then CONFIRM owner access before
+      // entering. /api/owner/enter is a bare redirect that 404s for non-owners,
+      // so a plain redirect would dump a logged-in-but-not-owner user (or one
+      // whose session cookie didn't stick) onto a blank 404. Checking the
+      // owner-only overview first lets us show a real message instead.
+      function land(auth) {
+        try {
+          localStorage.setItem("ros_session", (auth && (auth.token || (auth.session && auth.session.token))) || "");
+          localStorage.setItem("ros_ctx", JSON.stringify(auth || {}));
+        } catch (x) {}
+        say("Checking owner access…", "busy");
+        fetch(BASE + "/api/owner/overview", { credentials: "include" }).then(function (r) {
+          if (r.ok) { say("Opening the Owner Console…", "okk"); setTimeout(function () { location.href = OWNER_CONSOLE; }, 300); return; }
+          if (r.status === 404 || r.status === 403) { say("You're signed in, but this account isn't an owner. Use the workspace sign-in instead.", "err"); submitBtn.disabled = false; return; }
+          say("Signed in, but the console didn't open. Please try again.", "err"); submitBtn.disabled = false;
+        }).catch(function () {
+          // Can't reach the check; fall back to the gated door itself.
+          say("Opening the Owner Console…", "okk"); setTimeout(function () { location.href = OWNER_CONSOLE; }, 300);
+        });
+      }
+
+      // 2FA users: the password was accepted but NO session is issued yet, so a
+      // straight redirect would 404 at the owner gate. Swap the form to a code
+      // entry and redeem the challenge (mirrors the workspace login flow).
+      function showTwoFactor(challenge) {
+        pendingChallenge = challenge;
+        form.querySelectorAll("label.fld").forEach(function (l) { l.style.display = "none"; });
+        var forgot = document.getElementById("forgot"); if (forgot) forgot.style.display = "none";
+        var title = document.getElementById("title"); if (title) title.textContent = "Two-factor verification";
+        var sub = document.querySelector(".auth-sub"); if (sub) sub.textContent = "Open your authenticator app and enter the 6-digit code.";
+        var wrap = document.createElement("label");
+        wrap.className = "fld";
+        wrap.innerHTML = '<span>Authentication code</span><input id="twoFactorCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" required />';
+        form.insertBefore(wrap, submitBtn);
+        submitBtn.textContent = "Verify →";
+        submitBtn.disabled = false;
+        say("Lost your device? Enter one of your backup recovery codes instead.", "");
+        var codeEl = document.getElementById("twoFactorCode"); if (codeEl) codeEl.focus();
+      }
+
+      function onAuthResult(d) {
+        if (d && d.twoFactorRequired) return showTwoFactor(d.challenge);
+        land(d);
+      }
 
       form.addEventListener("submit", function (e) {
         e.preventDefault();
+
+        // Step two of a 2FA sign-in: redeem the challenge with the code.
+        if (pendingChallenge) {
+          var codeEl = document.getElementById("twoFactorCode");
+          var code = codeEl ? codeEl.value.trim() : "";
+          if (!code) return say("Enter your authentication code.", "err");
+          submitBtn.disabled = true;
+          say("Verifying…", "busy");
+          fetch(API + "/2fa/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ challenge: pendingChallenge, code: code }),
+          }).then(json).then(land).catch(function (err) {
+            var m = String(err.message || "");
+            if (/Failed to fetch|NetworkError/.test(m)) say("Can't reach the server. Check your connection.", "err");
+            else if (/invalid_code/.test(m)) say("That code isn't right. Check your authenticator app and try again.", "err");
+            else if (/challenge_expired/.test(m)) { pendingChallenge = null; say("This sign-in timed out. Please enter your password again.", "err"); setTimeout(function () { location.reload(); }, 1400); }
+            else say("Verification failed. Please try again.", "err");
+            submitBtn.disabled = false;
+          });
+          return;
+        }
+
         var email = document.getElementById("email").value.trim();
         var password = document.getElementById("password").value;
         if (!valid(email)) return say("Enter a valid email.", "err");
@@ -88,19 +162,11 @@
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({ email: email, password: password }),
-        }).then(function (r) {
-          return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || ("http_" + r.status)); return d; });
-        }).then(function (auth) {
-          try {
-            localStorage.setItem("ros_session", auth.token || (auth.session && auth.session.token) || "");
-            localStorage.setItem("ros_ctx", JSON.stringify(auth));
-          } catch (x) {}
-          say("Opening the Owner Console…", "okk");
-          setTimeout(function () { location.href = OWNER_CONSOLE; }, 400);
-        }).catch(function (err) {
+        }).then(json).then(onAuthResult).catch(function (err) {
           var m = String(err.message || "");
           if (/Failed to fetch|NetworkError/.test(m)) say("Can't reach the server. Check your connection.", "err");
           else if (/invalid_credentials/.test(m)) say("Email or password is incorrect.", "err");
+          else if (/account_suspended/.test(m)) say("This account is suspended.", "err");
           else say("Sign-in failed. Please try again.", "err");
           submitBtn.disabled = false;
         });
