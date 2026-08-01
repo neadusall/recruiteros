@@ -1454,7 +1454,7 @@
       html += '<tr><th class="rc-svc"' + (r.purpose ? ' title="' + esc(r.purpose) + '"' : "") + '><div class="lr-main">' + esc(r.vendor) + ' <span class="rc-kind ' + kindClass(r) + '">' + esc(kindLabel(r)) + '</span></div>' +
         '<div class="lr-sub note">' + esc(r.label) + '</div>' +
         (r.missingCount ? '<div class="lr-sub bad-t">' + r.missingCount + ' month' + (r.missingCount > 1 ? "s" : "") + ' unreceipted</div>' : "") +
-        (r.needsAmount ? '<div class="lr-sub bad-t">no price on file</div>' : "") +
+        (r.needsAmount ? '<div class="lr-sub ' + (r.blankUrgent ? 'bad-t' : 'note') + '">' + esc(r.blankReason || 'no price on file') + '</div>' : "") +
         /* EVERY row is actionable, including the two kinds that have no line item behind
            them: a charge that arrived with nothing expecting it, and pay-per-use the usage
            ledger totted up. Those used to show nothing at all, which reads as a dead row

@@ -109,6 +109,17 @@ export interface MatrixRow {
   receiptCount: number;
   missingCount: number;
   lastReceiptAt?: string;
+  /**
+   * Why this row still shows no price, in one line the owner can act on. "No price on file"
+   * is the symptom; the cause differs by billing type (a one-time buy has no monthly rate to
+   * find, a metered line is priced from usage, an annual charge falls outside a 3-month pull,
+   * a monthly line with no receipt is an inbox that was never connected). Set only while the
+   * row is still asking for a figure.
+   */
+  blankReason?: string;
+  /** True when the blank is a real gap to close, false when it is simply the honest state
+   *  of a one-time/credit/metered line. Lets the console colour the two differently. */
+  blankUrgent?: boolean;
 }
 
 export interface MonthTotal {
@@ -323,6 +334,57 @@ function foldNote(vendor: string, domains: number): string {
 }
 
 /* ============================ the report ============================ */
+
+/**
+ * Turn a bare "no price on file" into the one line that says what to do about it.
+ *
+ * The register asks every recurring line for a figure, but "blank" means five different
+ * things and each needs a different move. A one-time domain buy has no monthly rate to find;
+ * a metered line is priced from usage, not a receipt; an annual charge renews once a year, so
+ * it falls outside a 3-month sweep; a monthly line with no receipt is either an inbox nobody
+ * connected or a vendor that emails nothing and must be pulled from its portal. Reporting all
+ * five as the same red "no price on file" is what makes the page read as broken when four of
+ * them are working exactly as intended. So each row says which it is, and whether it is a gap
+ * to close (`urgent`) or just the honest state of a line that has no standing monthly figure.
+ *
+ * Pure and side-effect free: it reads the row's shape and the receipt counts already computed
+ * for it, and never touches the books.
+ */
+export function blankReasonFor(
+  r: { billing: string; channel?: string; receiptCount: number; lifetime?: boolean },
+  inboxConfigured: boolean,
+): { reason: string; urgent: boolean } | undefined {
+  if (r.lifetime) return undefined; // bought outright: handled as "paid before this register"
+  const portalOnly = r.channel === "portal_only";
+  const has = r.receiptCount > 0;
+
+  switch (r.billing) {
+    case "metered":
+      return portalOnly
+        ? { reason: "Metered + prepaid: payment receipts come from the vendor portal, not email, so this needs the portal puller (Telnyx has two separate accounts).", urgent: true }
+        : { reason: "Metered: priced from live usage, not a receipt. It fills as usage is recorded.", urgent: false };
+    case "credit":
+      return has
+        ? { reason: "Credit top-ups: proven by receipt, but there is no standing monthly rate to show.", urgent: false }
+        : { reason: "Credit top-ups: no top-up in this window reads as $0, not a missing receipt.", urgent: false };
+    case "one_time":
+      return has
+        ? { reason: "One-time purchase: receipts are on file; there is no recurring rate to fill.", urgent: false }
+        : { reason: "One-time purchase: the receipt likely predates the pull window. Widen the look-back, or set the figure by hand.", urgent: true };
+    case "annual":
+      if (has) return { reason: "Annual: a receipt is on file and prices this row on the next sweep.", urgent: false };
+      return portalOnly
+        ? { reason: "Annual + portal-only: needs the portal puller for this vendor.", urgent: true }
+        : { reason: "Annual: renews once a year, so the charge is likely outside a 3-month pull. Widen the look-back to a year.", urgent: true };
+    case "monthly":
+    default:
+      if (portalOnly) return { reason: "Emails no receipt: needs the portal puller for this vendor.", urgent: true };
+      if (!inboxConfigured) return { reason: "No billing inbox connected yet: connect the mailbox this vendor emails, then pull.", urgent: true };
+      if (!has) return { reason: "No receipt found in the connected inboxes: it lands in an inbox that is not connected, or (Stripe-billed vendors) the receipt did not name the vendor. Add the inbox or widen the pull.", urgent: true };
+      if (r.receiptCount === 1) return { reason: "One receipt on file: one more month at the same figure confirms the recurring rate, then it fills on its own.", urgent: false };
+      return { reason: "Receipts on file but not yet two matching months: the rate fills once two months agree on the figure.", urgent: false };
+  }
+}
 
 export function buildSpendMatrix(
   items: SpendItem[],
@@ -571,6 +633,9 @@ export function buildSpendMatrix(
     }
 
     const missingCount = cells.filter((c) => c.status === "missing").length;
+    const blank = group.needsAmount
+      ? blankReasonFor({ billing: item.billing, channel: src?.channel, receiptCount: mine.length, lifetime: item.lifetime }, opts.inboxConfigured !== false)
+      : undefined;
     rows.push({
       itemId: item.id, vendor: item.vendor, label: group.label, category: item.category,
       billing: item.billing, status: item.status,
@@ -584,6 +649,8 @@ export function buildSpendMatrix(
       receiptCount: mine.length,
       missingCount,
       lastReceiptAt: mine.map((r) => r.chargedAt).sort().slice(-1)[0],
+      blankReason: blank?.reason,
+      blankUrgent: blank?.urgent,
     });
 
     /* ---- per-item anomalies, named as the row is named ---- */

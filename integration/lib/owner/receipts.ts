@@ -1744,35 +1744,65 @@ function provenPrice(itemId: string): { amountUsd: number; periods: string[] } |
 }
 
 /**
+ * The annual price a row's own receipts prove, or null.
+ *
+ * An annual charge posts once a year, so the two-period test `provenPrice` applies to monthly
+ * lines can NEVER be met for it: RackNerd's yearly boxes sat at "no price on file" forever
+ * with a real invoice filed against them, because a rate was demanded that an annual term
+ * cannot produce. A single annual invoice IS the yearly figure, so one receipt is enough here
+ * where it is not for a monthly line. The guard that keeps it honest is the same one money
+ * matching uses: require ONE distinct amount across the row's receipts. If a top-up or a
+ * partial-term charge is mixed in there are two amounts, and then this refuses rather than
+ * guess which is the annual one. The figure it writes stays correctable (never `verified`).
+ */
+function annualPrice(itemId: string): { amountUsd: number; periods: string[] } | null {
+  const byAmount = new Map<number, Set<string>>();
+  for (const r of store.receipts) {
+    if (r.itemId !== itemId || r.kind === "refund" || !(r.amountUsd > 0)) continue;
+    const key = round2(r.amountUsd);
+    byAmount.set(key, (byAmount.get(key) || new Set<string>()).add(r.period));
+  }
+  if (byAmount.size !== 1) return null; // nothing, or two figures with no way to tell them apart
+  const [amountUsd, ps] = [...byAmount.entries()][0];
+  return { amountUsd, periods: [...ps].sort() };
+}
+
+/**
  * Let the receipts answer the price question the register is asking.
  *
  * Only rows still asking are touched, and `setLearnedPrice` is the one that enforces that,
- * so a figure the owner typed cannot be moved from here however many receipts arrive.
+ * so a figure the owner typed cannot be moved from here however many receipts arrive. A
+ * monthly line needs two matching months (a rate, not a proration); an annual line takes the
+ * one figure its yearly invoice states, because that is already the rate.
  */
 async function learnPriceFor(
-  itemId: string | undefined,
+  target: SpendItem | string | undefined,
   { dryRun = false, label }: { dryRun?: boolean; label?: string } = {},
 ): Promise<VaultRepair["priced"][number] | null> {
-  if (!itemId) return null;
-  const proven = provenPrice(itemId);
+  const item = typeof target === "string"
+    ? (await listSpendItems().catch(() => [] as SpendItem[])).find((i) => i.id === target)
+    : target;
+  if (!item) return null;
+  const proven = provenPrice(item.id) || (item.billing === "annual" ? annualPrice(item.id) : null);
   if (!proven) return null;
-  const entry = { itemId, label: label || itemId, ...proven };
+  const entry = { itemId: item.id, label: label || item.id, ...proven };
   if (dryRun) return entry;
-  const item = await setLearnedPrice(
-    itemId,
-    proven.amountUsd,
-    `Priced at $${proven.amountUsd.toFixed(2)} from the vendor's own receipts, which charged`
+  const one = item.billing === "annual" && proven.periods.length < 2;
+  const why = one
+    ? `Priced at $${proven.amountUsd.toFixed(2)} from the annual invoice on file (${proven.periods.join(", ")}).`
+      + ` Correct it here if that was not the yearly figure.`
+    : `Priced at $${proven.amountUsd.toFixed(2)} from the vendor's own receipts, which charged`
       + ` exactly that in ${proven.periods.join(" and ")}. Correct it here if the plan is not what`
-      + ` those months were billed at.`,
-  ).catch(() => null);
-  return item ? { ...entry, label: label || `${item.vendor} · ${item.label}` } : null;
+      + ` those months were billed at.`;
+  const updated = await setLearnedPrice(item.id, proven.amountUsd, why).catch(() => null);
+  return updated ? { ...entry, label: label || `${updated.vendor} · ${updated.label}` } : null;
 }
 
 async function learnPrices(items: SpendItem[], dryRun = false): Promise<VaultRepair["priced"]> {
   const priced: VaultRepair["priced"] = [];
   for (const item of items) {
     if (!item.needsAmount) continue;
-    const got = await learnPriceFor(item.id, { dryRun, label: `${item.vendor} · ${item.label}` });
+    const got = await learnPriceFor(item, { dryRun, label: `${item.vendor} · ${item.label}` });
     if (got) priced.push(got);
   }
   return priced;

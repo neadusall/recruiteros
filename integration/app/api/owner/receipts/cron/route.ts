@@ -31,7 +31,17 @@ async function run(req: Request) {
   if (!auth.ok) return auth.response;
 
   const url = new URL(req.url);
-  const monthsBack = Math.max(1, Math.min(24, Number(url.searchParams.get("monthsBack")) || 3));
+  let monthsBack = Math.max(1, Math.min(24, Number(url.searchParams.get("monthsBack")) || 3));
+  /* Once a month, sweep a full year instead of the trailing three. An annual renewal posts
+     once and a one-time domain buy never repeats, so both fall outside a 3-month nightly
+     window and would never be caught by the scheduled sweep at all — only by someone
+     remembering to widen the look-back by hand. Doing it automatically in the first days of
+     the month closes that: the sweep is read-only and de-duplicates on the message, so the
+     wide pass only renders receipts it has never seen and is free to repeat. Skipped when the
+     caller named an explicit window (a manual backfill is already saying how far to look). */
+  if (!url.searchParams.get("monthsBack") && new Date().getUTCDate() <= 3) {
+    monthsBack = Math.max(monthsBack, 13);
+  }
   const wait = url.searchParams.get("wait") !== "0";
   /* Vendors with a real billing API are pulled on every tick: an API cannot be filtered
      into spam or deleted, so those months report themselves even if no mail arrives. */
