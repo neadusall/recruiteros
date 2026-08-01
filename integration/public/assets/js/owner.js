@@ -1212,7 +1212,7 @@
     paid: "receipt on file", mismatch: "amount differs from the register", missing: "no receipt",
     pending: "not charged yet", unexpected: "charged with nothing expected", metered: "pay per use",
     prepaid: "covered by the annual payment", none: "nothing charged", before: "before this service started",
-    paused: "paused by the vendor, nothing due", cancelled: "cancelled"
+    paused: "paused by the vendor, nothing due", waived: "marked as no charge — click to restore", cancelled: "cancelled"
   };
 
   function receiptKpis(d) {
@@ -1567,6 +1567,11 @@
          the vendor stopped charging, and the note says when it starts again. */
       inner = '<div class="rc-gap">paused</div>' +
         (c.note ? '<div class="note" style="font-size:10.5px">' + esc(c.note) + '</div>' : "");
+    } else if (c.status === "waived") {
+      /* The owner cleared this month by hand. Shown as a quiet dash, not the estimate and
+         not a "no receipt" gap: nothing is owed here and nothing is missing. Still a cell,
+         so a click reopens it and offers to restore the estimate. */
+      inner = '<div class="rc-dash" title="marked as no charge">—</div>';
     } else {
       inner = '<div class="rc-dash">·</div>';
     }
@@ -2378,37 +2383,74 @@
      the two ways to close the gap, instead of a click that does nothing. */
   function openMissing(row, cell) {
     var period = (cell && cell.period) || "";
+    /* A cell the owner has already cleared by hand. Its estimate is still known (the grid
+       kept it) so the popup can show what it WOULD be and offer to put it back. */
+    var waived = !!(cell && cell.status === "waived");
+    /* Whether "no charge this month" can even be offered: it writes to a real register
+       line, so a ledger-only or unregistered row (no itemId) has nowhere to record it. */
+    var canWaive = !!(row && row.itemId && /^\d{4}-\d{2}$/.test(period));
     ensureViewer();
     rcvList = []; rcvIndex = 0; rcvContext = "";
     document.body.classList.add("rcv-open");
     $("#rcv").classList.add("show");
     $("#rcvTitle").textContent = row.vendor;
-    $("#rcvSub").textContent = (period ? monthLabel(period) + " · " : "") + "no receipt on file";
+    $("#rcvSub").textContent = (period ? monthLabel(period) + " · " : "") + (waived ? "marked as no charge" : "no receipt on file");
     $("#rcvStep").style.display = "none";
     $("#rcvCount").textContent = "";
 
-    var expected = cell ? (cell.expectedUsd || 0) : (row.monthlyUsd || 0);
+    /* A waived cell reports $0 expected on purpose, so the figure it WOULD show comes from
+       the row's own monthly estimate instead. A live missing cell already carries it. */
+    var expected = waived ? (row.monthlyUsd || 0) : (cell ? (cell.expectedUsd || 0) : (row.monthlyUsd || 0));
     var html = '<div class="rcv-facts">' +
-      fact("Expected", usd(expected)) +
+      fact(waived ? "Estimate (silenced)" : "Expected", usd(expected)) +
       fact("Month", esc(period ? monthLabel(period) : "not stated")) +
       fact("How it should arrive", esc(channelLabel(row.channel))) +
-      '</div>' +
-      '<div class="rcv-none"><div class="rcv-none-t">Nothing on file for this month</div>' +
-      '<p class="note">This figure is the register\'s estimate, not a proven charge. Pull the mailbox again, or download the invoice from the vendor and attach it to ' +
-      esc(period ? monthLabel(period) : "the month") + '.</p></div>';
+      '</div>';
+    html += waived
+      ? '<div class="rcv-none"><div class="rcv-none-t">This month is marked as no charge</div>' +
+        '<p class="note">You cleared this cell, so the grid expects nothing here and it does not count as a gap. Restore it to put the ' +
+        usd(expected) + ' estimate back, or attach a receipt if a charge did land after all.</p></div>'
+      : '<div class="rcv-none"><div class="rcv-none-t">Nothing on file for this month</div>' +
+        '<p class="note">This figure is the register\'s estimate, not a proven charge. Pull the mailbox again, download the invoice from the vendor and attach it to ' +
+        esc(period ? monthLabel(period) : "the month") + (canWaive ? ', or mark the month as no charge so the estimate stops showing here.' : '.') + '</p></div>';
 
     html += '<div class="rcv-foot">';
     if (row.portal) html += '<a class="btn btn-ghost btn-sm" href="' + esc(row.portal) + '" target="_blank" rel="noopener">Open the ' + esc(row.vendor) + ' billing page</a>';
-    html += '<button class="btn btn-primary btn-sm" id="rcvAttach">Attach the invoice</button>' +
-      '<button class="btn btn-ghost btn-sm" id="rcvDone">Close</button></div>';
+    html += '<button class="btn btn-primary btn-sm" id="rcvAttach">Attach the invoice</button>';
+    /* The one-cell toggle. Only shown where it can be written and only when there is an
+       estimate worth silencing (or a silenced one to restore). */
+    if (canWaive && (waived || expected > 0)) {
+      html += waived
+        ? '<button class="btn btn-ghost btn-sm" id="rcvWaive">Restore the estimate</button>'
+        : '<button class="btn btn-ghost btn-sm" id="rcvWaive">No charge this month</button>';
+    }
+    html += '<button class="btn btn-ghost btn-sm" id="rcvDone">Close</button></div>';
 
     $("#rcvBody").innerHTML = html;
     $("#rcvBody").scrollTop = 0;
     $("#rcvDone").addEventListener("click", closeViewer);
     $("#rcvAttach").addEventListener("click", function () { closeViewer(); openAttach(row, cell); });
+    var wv = $("#rcvWaive");
+    if (wv) wv.addEventListener("click", function () { toggleCellCharge(row, period, !waived); });
     /* No picture here, so the zoom control goes away with it. */
     rcvZoom = 0;
     rcvWireShot();
+  }
+
+  /* Blank a single month's cell, or put its estimate back. One register line, one month:
+     `hide` waives it, and clearing it restores the projected figure. The whole point is
+     control over a single cell without touching the row or any other month, so this sends
+     exactly the month that was clicked and nothing else. */
+  function toggleCellCharge(row, period, hide) {
+    if (!row || !row.itemId || !/^\d{4}-\d{2}$/.test(period)) return;
+    var payload = { id: row.itemId };
+    payload[hide ? "hidePeriod" : "showPeriod"] = period;
+    send("/owner/burn", "PATCH", payload).then(function (r) {
+      if (!r.ok) { toast(r.status === 404 ? "That line is no longer on file" : "Could not update the cell"); return; }
+      toast(hide ? monthLabel(period) + " marked as no charge" : monthLabel(period) + " estimate restored");
+      closeViewer();
+      viewBurn();
+    });
   }
 
   /* The editor behind the viewer: correcting what the parser read. */
