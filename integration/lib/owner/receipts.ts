@@ -166,6 +166,14 @@ interface ReceiptStore {
   pullers?: Record<string, PullerState>;
   /** When a puller sweep last reported in at all. */
   pullerReportAt?: string;
+  /**
+   * When the one-time "collapse every cell to a single receipt" cleanup last ran. Set the
+   * first time the Spend master grid is loaded after the feature shipped, so a vault that a
+   * wide sweep left with stacked cells self-cleans exactly ONCE — never again, so it can
+   * never eat a second charge the owner re-adds by hand afterwards. The manual button
+   * ignores this and can be pressed any number of times.
+   */
+  onePerCellRunAt?: string;
 }
 
 const SNAP_KEY = "owner_spend_receipts_v1";
@@ -183,6 +191,7 @@ export function ensureReceiptsReady(): Promise<void> {
         if (s?.lastSweepAt) store.lastSweepAt = s.lastSweepAt;
         if (s?.pullers) store.pullers = s.pullers;
         if (s?.pullerReportAt) store.pullerReportAt = s.pullerReportAt;
+        if (s?.onePerCellRunAt) store.onePerCellRunAt = s.onePerCellRunAt;
       })
       .catch(() => {});
   }
@@ -1977,6 +1986,22 @@ export async function collapseToOnePerCell(): Promise<{ removed: number; cells: 
   }
   if (changed) persist();
   return { removed, cells };
+}
+
+/**
+ * Run the one-per-cell collapse ONCE, ever, then remember it did. The Spend master grid
+ * calls this on load so a vault a wide sweep left stacked cleans itself the first time the
+ * owner opens the page after this shipped — no button press, no SSH. The flag makes it a
+ * one-shot: every later load is a no-op, so a second charge the owner re-adds by hand is
+ * never touched. Returns what it removed (zero on every run after the first).
+ */
+export async function collapseToOnePerCellOnce(): Promise<{ removed: number; cells: number; ran: boolean }> {
+  await ensureReceiptsReady();
+  if (store.onePerCellRunAt) return { removed: 0, cells: 0, ran: false };
+  const res = await collapseToOnePerCell();
+  store.onePerCellRunAt = nowIso();
+  persist();
+  return { ...res, ran: true };
 }
 
 /** What the console needs to know about whether the vault is tidy, without changing it. */

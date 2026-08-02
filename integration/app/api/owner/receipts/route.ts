@@ -29,7 +29,7 @@ import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
   pullerStates, lastPullerReportAt, renderMissingShots, repairVault, vaultHealth,
-  collapseToOnePerCell,
+  collapseToOnePerCell, collapseToOnePerCellOnce,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
@@ -50,6 +50,13 @@ export async function GET(req: Request) {
   const g = requireOwner(req);
   if ("response" in g) return g.response;
   const months = Number(new URL(req.url).searchParams.get("months")) || 12;
+
+  /* One-shot: the first time this grid is opened after the one-per-cell cleanup shipped,
+     collapse any cell a wide sweep left stacked down to its single best receipt, then never
+     again (a persisted flag guards it). This is what turns "clean it up" into something that
+     happens on the owner's next page load without a button press — and being one-shot, it
+     can never touch a second charge the owner re-adds by hand later. */
+  await collapseToOnePerCellOnce().catch(() => {});
 
   /* The vendor-billed figures are read synchronously while the grid is built, so the store
      has to be hydrated before that: on a cold container the first page view would otherwise
