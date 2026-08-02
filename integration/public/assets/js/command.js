@@ -18689,6 +18689,10 @@
       var oneTimeTotal = Number(d.oneTimeTotalUsd) || oneTime.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
       var wsName = (typeof wsDisplayName === "function" && wsDisplayName()) || "Spending";
       var period; try { period = localStorage.getItem("ros_spend_period") || "monthly"; } catch (e) { period = "monthly"; }
+      // Only the account OWNER may remove a charge (server gates the DELETE on
+      // billing:manage and echoes canManage). An accountant or recruiter sees the
+      // statement, the receipts and the downloads, but never the delete control.
+      var canManage = !!(d && d.canManage);
 
       // The receipt itself, for one period. `opts.print` swaps CSS-var colors for
       // concrete ones so it renders in a bare print window; `opts.big` bumps sizing
@@ -18708,10 +18712,18 @@
         var muted = opts.print ? "#6b7280" : "var(--muted,#8b93a1)";
         var big = !!opts.big, fs = big ? "15px" : "14px", flx = "display:flex;justify-content:space-between;align-items:center;";
         function seg(t) { return '<div style="font-size:12px;font-weight:700;color:' + muted + ';margin:14px 0 4px">' + esc(t) + '</div>'; }
-        function row(label, amt, s) {
+        function row(label, amt, s, cid) {
+          var amtHtml = '<span style="font-weight:600;font-variant-numeric:tabular-nums">' + m(amt) +
+            (s ? '<span style="font-weight:400;font-size:12px;color:' + muted + '"> ' + s + '</span>' : '') + '</span>';
+          // Delete only on the live on-screen statement (opts.manage), never in the
+          // printed/enlarged/PDF copies which pass no manage flag.
+          var del = (opts.manage && cid)
+            ? '<button class="sp-del" data-cid="' + esc(cid) + '" title="Remove this charge" aria-label="Remove this charge" ' +
+              'style="border:none;background:transparent;cursor:pointer;color:var(--danger,#e5484d);font-size:14px;line-height:1;padding:2px 6px;border-radius:5px;opacity:.72">✕</button>'
+            : '';
           return '<div style="' + flx + 'padding:' + (big ? "12px" : "10px") + ' 0;border-bottom:1px solid ' + lineCol + ';font-size:' + fs + '">' +
-            '<span>' + esc(label) + '</span><span style="font-weight:600;font-variant-numeric:tabular-nums">' + m(amt) +
-            (s ? '<span style="font-weight:400;font-size:12px;color:' + muted + '"> ' + s + '</span>' : '') + '</span></div>';
+            '<span>' + esc(label) + '</span>' +
+            '<span style="display:inline-flex;align-items:center;gap:12px">' + amtHtml + del + '</span></div>';
         }
         function tot(label, amt, grandRow) {
           return '<div style="' + flx + 'padding-top:12px;' + (grandRow ? "margin-top:12px;border-top:2px solid " + strong + ";" : "") +
@@ -18723,7 +18735,7 @@
           '<div style="font-size:12px;color:' + muted + '">Spending statement, ' + (annual ? "annual view" : "monthly view") + '</div></div></div>';
         if (monthly.length) {
           h += seg("Monthly subscription");
-          h += monthly.map(function (c) { return row(c.label, (Number(c.amountUsd) || 0) * mult, suf); }).join("");
+          h += monthly.map(function (c) { return row(c.label, (Number(c.amountUsd) || 0) * mult, suf, c.id); }).join("");
           h += tot(annual ? "Monthly subscription per year" : "Subscription per month", monthlyInView);
         }
         if (annualCharges.length) {
@@ -18732,14 +18744,14 @@
             var a = Number(c.amountUsd) || 0;
             // Annual view: the true yearly figure. Monthly view: its per-month
             // share, with the real yearly amount named so nothing is hidden.
-            return annual ? row(c.label, a, "/yr")
-              : row(c.label + " — billed " + m(a) + "/yr", a / 12, "/mo");
+            return annual ? row(c.label, a, "/yr", c.id)
+              : row(c.label + " — billed " + m(a) + "/yr", a / 12, "/mo", c.id);
           }).join("");
           h += tot(annual ? "Annual subscriptions per year" : "Annual subscriptions per month", annualInView);
         }
         if (oneTime.length) {
           h += seg("One-time charges");
-          h += oneTime.map(function (c) { return row(c.label, Number(c.amountUsd) || 0, ""); }).join("");
+          h += oneTime.map(function (c) { return row(c.label, Number(c.amountUsd) || 0, "", c.id); }).join("");
           h += tot("One-time total", oneTimeTotal);
         }
         h += tot("Total " + (annual ? "per year" : "this month"), grand, true);
@@ -18786,10 +18798,11 @@
           var thumb = r.hasImage
             ? '<img class="sp-rthumb" src="' + receiptImgUrl(c.id, "thumb") + '" alt="receipt" loading="lazy" />'
             : '<div class="sp-rthumb sp-rnoimg">no image</div>';
-          var acts = r.hasImage
+          var acts = (r.hasImage
             ? '<button class="btn btn-ghost btn-sm sp-rview" data-cid="' + esc(c.id) + '">View receipt</button>' +
               (r.hasFile ? '<a class="btn btn-ghost btn-sm" href="' + receiptImgUrl(c.id, "file") + '" target="_blank" rel="noopener">Download</a>' : "")
-            : '<span class="muted" style="font-size:12px">no document</span>';
+            : '<span class="muted" style="font-size:12px">no document</span>') +
+            (canManage ? ' <button class="btn btn-ghost btn-sm sp-del" data-cid="' + esc(c.id) + '" style="color:var(--danger,#e5484d)">Remove</button>' : '');
           return '<div class="sp-rrow">' + thumb +
             '<div class="sp-rmeta"><div class="sp-rlabel">' + esc(c.label) + ' ' + tag + '</div>' +
             (sub ? '<div class="sp-rsub muted">' + esc(sub) + '</div>' : "") + '</div>' +
@@ -18820,27 +18833,27 @@
         var annual = period === "annual", mult = annual ? 12 : 1;
         function q(s) { s = String(s == null ? "" : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
         var annualInView = annual ? annualTotal : annualTotal / 12;
-        var rows = [["Item", "Type", "Amount (USD)"]];
-        monthly.forEach(function (c) {
+        // Explicit columns so the sheet stands on its own for an accountant: what
+        // it is, how it recurs, who billed it, the invoice date + number behind
+        // it, and the amount in the current view. Blank cells where a line has no
+        // receipt, never a guess.
+        var COLS = 6; // Item, Cadence, Vendor, Invoice date, Invoice #, Amount
+        var rows = [["Item", "Cadence", "Vendor", "Invoice date", "Invoice #", "Amount (USD)"]];
+        function line(c, cadence, amt) {
           var r = c.receipt || {};
-          var det = [annual ? "Monthly subscription (per year)" : "Monthly subscription (per month)", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
-          rows.push([c.label, det, ((Number(c.amountUsd) || 0) * mult).toFixed(2)]);
-        });
-        annualCharges.forEach(function (c) {
-          var a = Number(c.amountUsd) || 0, r = c.receipt || {};
-          var det = ["Annual subscription (billed yearly)", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
-          rows.push([c.label, det, (annual ? a : a / 12).toFixed(2)]);
-        });
-        oneTime.forEach(function (c) {
-          var r = c.receipt || {};
-          var det = ["One-time", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
-          rows.push([c.label, det, (Number(c.amountUsd) || 0).toFixed(2)]);
-        });
+          rows.push([c.label, cadence, r.vendor || "", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : "", amt.toFixed(2)]);
+        }
+        function totalRow(label, amt) {
+          var t = [label]; while (t.length < COLS - 1) t.push(""); t.push(amt.toFixed(2)); return t;
+        }
+        monthly.forEach(function (c) { line(c, annual ? "Monthly (shown per year)" : "Monthly", (Number(c.amountUsd) || 0) * mult); });
+        annualCharges.forEach(function (c) { var a = Number(c.amountUsd) || 0; line(c, annual ? "Annual" : "Annual (shown per month)", annual ? a : a / 12); });
+        oneTime.forEach(function (c) { line(c, "One-time", Number(c.amountUsd) || 0); });
         rows.push([]);
-        if (monthly.length) rows.push([annual ? "Monthly subscription total (per year)" : "Subscription total (per month)", "", (monthlyTotal * mult).toFixed(2)]);
-        if (annualCharges.length) rows.push([annual ? "Annual subscriptions total (per year)" : "Annual subscriptions total (per month)", "", annualInView.toFixed(2)]);
-        if (oneTime.length) rows.push(["One-time total", "", oneTimeTotal.toFixed(2)]);
-        rows.push([annual ? "Total per year" : "Total this month", "", (monthlyTotal * mult + annualInView + oneTimeTotal).toFixed(2)]);
+        if (monthly.length) rows.push(totalRow(annual ? "Monthly subscription total (per year)" : "Subscription total (per month)", monthlyTotal * mult));
+        if (annualCharges.length) rows.push(totalRow(annual ? "Annual subscriptions total (per year)" : "Annual subscriptions total (per month)", annualInView));
+        if (oneTime.length) rows.push(totalRow("One-time total", oneTimeTotal));
+        rows.push(totalRow(annual ? "Total per year" : "Total this month", monthlyTotal * mult + annualInView + oneTimeTotal));
         var csv = rows.map(function (r) { return r.map(q).join(","); }).join("\r\n");
         var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
         var url = URL.createObjectURL(blob);
@@ -18861,7 +18874,7 @@
                 '<button class="btn btn-ghost btn-sm" id="spPdf" title="Download as PDF">Download PDF</button>' +
               '</div>' +
             '</div>' +
-            '<div id="spReceipt">' + receiptHtml(period, {}) + '</div>' +
+            '<div id="spReceipt">' + receiptHtml(period, { manage: canManage }) + '</div>' +
           '</div>' +
           receiptsGalleryHtml();
         // Open the full invoice image for one receipt.
@@ -18880,6 +18893,20 @@
             period = b.getAttribute("data-period");
             try { localStorage.setItem("ros_spend_period", period); } catch (e) {}
             paint();
+          });
+        });
+        // Owner-only: remove a charge (the ✕ on a statement line and the Remove
+        // in the receipts list share this class). Deletes for good, then reloads
+        // the whole statement so totals and the receipts list stay in step.
+        Array.prototype.forEach.call(el.querySelectorAll(".sp-del"), function (b) {
+          b.addEventListener("click", function () {
+            var cid = b.getAttribute("data-cid");
+            if (!window.confirm("Remove this charge from the spending statement? This deletes it for good.")) return;
+            b.disabled = true; b.style.opacity = ".4";
+            send("/portal-spend?id=" + encodeURIComponent(cid), "DELETE").then(function (r) {
+              if (r.ok) { toast("Charge removed"); renderSpendStatement(el); }
+              else { b.disabled = false; b.style.opacity = ""; toast(r.status === 403 ? "Only the account owner can remove charges" : "Couldn't remove that charge"); }
+            }).catch(function () { b.disabled = false; b.style.opacity = ""; });
           });
         });
         var en = $("#spEnlarge", el);

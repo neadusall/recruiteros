@@ -8,14 +8,23 @@
  *
  * Scope is the session's workspace — a member can only ever see their own
  * statement, never another account's.
+ *
+ *   DELETE ?id=<chargeId>   remove one charge from THIS account's statement.
+ *     Gated on `billing:manage`, which is an OWNER-role capability: the account
+ *     owner can clear a line off their own bill, but an accountant or recruiter
+ *     (who can view and download it) cannot. Scoped to the session's workspace,
+ *     so it can only ever touch a charge on the caller's own account. This is
+ *     the client-side mirror of the owner-console Remove; both call the same
+ *     store, so a delete here also clears it from the owner console.
  */
 
-import { requireSession, ok } from "../../../lib/api";
+import { requireSession, requireCapability, ok, fail } from "../../../lib/api";
 import {
   listApprovedCharges,
   approvedMonthlyTotal,
   approvedAnnualTotal,
   approvedOneTimeTotal,
+  deleteCharge,
 } from "../../../lib/owner/portalSpend";
 
 export async function GET(req: Request) {
@@ -47,5 +56,19 @@ export async function GET(req: Request) {
     annualTotalUsd: approvedAnnualTotal(workspaceId),
     oneTimeTotalUsd: approvedOneTimeTotal(workspaceId),
     currency: "USD",
+    // Tell the client whether THIS session may remove charges, so the UI shows
+    // the delete control only to the account owner and never to a viewer.
+    canManage: g.ctx.capabilities.includes("billing:manage"),
   });
+}
+
+export async function DELETE(req: Request) {
+  const g = requireCapability(req, "billing:manage");
+  if ("response" in g) return g.response;
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return fail("bad_request", 400);
+  // deleteCharge is scoped to (workspaceId, id): passing the session's own
+  // workspace means a caller can never reach into another account's statement.
+  if (!deleteCharge(g.ctx.workspace.id, id)) return fail("not_found", 404);
+  return ok({ deleted: true });
 }
