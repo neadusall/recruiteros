@@ -2540,3 +2540,36 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
 .lie-chip.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
 .lie-chip.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .lie-chip.mut { color: var(--text-dim); background: var(--surface-2); }
+
+/* Spending -> Receipts on your account: the actual invoice behind each pushed
+   charge, one row per receipt, with a thumbnail that opens to the full image. */
+.sp-rhead { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+.sp-rlist { display: flex; flex-direction: column; gap: 2px; }
+.sp-rrow {
+  display: flex; align-items: center; gap: 12px; padding: 10px 0;
+  border-bottom: 1px solid var(--line, rgba(120, 120, 140, 0.16));
+}
+.sp-rrow:last-child { border-bottom: 0; }
+.sp-rthumb {
+  width: 54px; height: 40px; flex: 0 0 auto; object-fit: cover; object-position: top center;
+  border: 1px solid var(--line, rgba(120, 120, 140, 0.25)); border-radius: 4px; background: #fff;
+}
+.sp-rnoimg {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  font-size: 9.5px; color: var(--muted, #8b93a1); background: var(--surface-2, rgba(120, 120, 140, 0.08));
+}
+.sp-rmeta { flex: 1 1 auto; min-width: 0; }
+.sp-rlabel { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-rsub { font-size: 12px; margin-top: 2px; }
+.sp-ramt { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 14px; white-space: nowrap; }
+.sp-rper { font-weight: 400; font-size: 12px; margin-left: 2px; }
+/* Monthly vs one-time, said on every receipt so the two are never confused. */
+.sp-rtag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; vertical-align: middle; }
+.sp-rtag-mo { color: var(--brand, #4f46e5); background: color-mix(in srgb, var(--brand, #4f46e5) 14%, transparent); }
+.sp-rtag-yr { color: var(--ok, #0e9f6e); background: color-mix(in srgb, var(--ok, #0e9f6e) 14%, transparent); }
+.sp-rtag-one { color: var(--muted, #8b93a1); background: var(--surface-2, rgba(120, 120, 140, 0.1)); }
+.sp-racts { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+@media (max-width: 560px) {
+  .sp-rrow { flex-wrap: wrap; }
+  .sp-racts { width: 100%; }
+}

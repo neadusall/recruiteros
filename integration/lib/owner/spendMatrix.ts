@@ -54,6 +54,9 @@ export interface ReceiptRef {
   kind: Receipt["kind"];
   subject?: string;
   shotError?: string;
+  /** Recurring or one-off, read off the invoice. Drives whether a pushed receipt
+   *  bills as a monthly subscription line or a one-time charge on the client. */
+  cadence?: Receipt["cadence"];
 }
 
 export interface MatrixCell {
@@ -874,6 +877,7 @@ function toRef(r: Receipt): ReceiptRef {
     id: r.id, amountUsd: r.amountUsd, chargedAt: r.chargedAt, invoiceNumber: r.invoiceNumber,
     hasShot: r.hasShot, hasFile: !!r.fileMime, source: r.source, confidence: r.confidence,
     reviewed: r.reviewed, kind: r.kind, subject: r.subject, shotError: r.shotError,
+    cadence: r.cadence,
   };
 }
 

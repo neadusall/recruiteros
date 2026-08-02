@@ -264,9 +264,20 @@
           if (!_retried) return delay(1200).then(function () { return api(path, true); });
           signOut(); throw 0;
         }
-        if (!r.ok || d === null) throw 0;
+        if (!r.ok || d === null) {
+          // A read that fails used to throw a bare 0, so callers rendered an empty
+          // screen and the person was left guessing whether the data was missing
+          // or the app was. Say so, once, with a code.
+          var code = breakCodeFor(r.status);
+          if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
+          throw 0;
+        }
         return d;
       });
+    }, function (e) {
+      // The request never landed at all (offline, server restarting mid-deploy).
+      reportBreak("ROS-NET", screenLabel(), { path: path, status: 0, detail: (e && e.message) || "fetch failed" });
+      throw 0;
     });
   }
   // Mutating call (POST/PUT/DELETE) -> { ok, status, data }. Same 401-retry guard.
@@ -281,9 +292,155 @@
           if (!_retried) return delay(1200).then(function () { return send(path, method, payload, true); });
           signOut(); throw 0;
         }
+        // Call sites handle their own 4xx (those are answers: "no candidates",
+        // "name taken"). A 5xx or a denial is the platform failing, and gets a
+        // coded notice whether or not the call site says anything.
+        if (!r.ok) {
+          var code = breakCodeFor(r.status);
+          if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
+        }
         return { ok: r.ok, status: r.status, data: d };
       });
+    }, function (e) {
+      // Connection died mid-request. Flows with their own recovery (a running
+      // search hands over to its checkpoint) catch this and carry on; the notice
+      // is what stops everything else from failing in silence.
+      reportBreak("ROS-NET", screenLabel(), { path: path, status: 0, detail: (e && e.message) || "fetch failed" });
+      throw e;
     });
+  }
+
+  /* ---------------- breaks: nothing fails silently ---------------------------
+     A screen that stops with no explanation is worse than an error: the person
+     using it cannot tell whether it worked, cannot report it usefully, and has
+     no idea whether to redo the work. So every break — a request that never
+     lands, a server that answers with an error, a crash in this file — puts a
+     plain-English notice on screen with a short code to quote, and files the
+     technical side (screen, request, status, browser) with the server where it
+     can be looked up later.
+
+     Deliberate split: the SCREEN says what happened and what to do about it, in
+     recruiter language with no internals; the CODE and the technical detail are
+     what travel to whoever fixes it (Copy details puts them on the clipboard).
+     One outage is one notice, not fifty: identical breaks fold for a minute. */
+  var BREAK_CODES = {
+    "ROS-NET": "The app could not reach the server. Nothing you typed is lost. Wait a moment and try that again.",
+    "ROS-SRV": "The server ran into a problem doing that, so it did not finish. Nothing was changed.",
+    "ROS-DENY": "Your account is not allowed to do that. An admin can grant access.",
+    "ROS-APP": "This screen hit a problem and may not have finished what it started. Reload the page before relying on what is on it.",
+  };
+  var breakSeen = {};
+  var breakLog = [];
+  /** The running progress bar's "stop honestly" hook, if a screen has one up.
+   *  Screens with a bar point this at their own failProgress while they render. */
+  var activeProgressFail = null;
+
+  /** The notice strip, created on first use so a healthy session never carries it. */
+  function breakHost() {
+    var el = document.getElementById("breakBar");
+    if (el) return el;
+    var view = document.getElementById("view");
+    if (!view || !view.parentNode) return null;
+    var css = document.createElement("style");
+    css.textContent =
+      '.break-bar{margin:0 0 14px;display:flex;flex-direction:column;gap:10px}' +
+      '.break-note{font-size:13.5px;line-height:1.5;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid var(--danger,#d4544e);border-radius:10px;padding:12px 14px}' +
+      '.break-note b{color:var(--text)}' +
+      '.break-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;padding-top:7px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)}' +
+      '.break-foot code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--text)}' +
+      '.break-act{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
+      '.break-act:hover{color:var(--text)}';
+    document.head.appendChild(css);
+    el = document.createElement("div");
+    el.id = "breakBar";
+    el.className = "break-bar";
+    view.parentNode.insertBefore(el, view);
+    return el;
+  }
+
+  /**
+   * Surface a break. `code` is one of BREAK_CODES (quotable, stable); `where` is
+   * what the person was doing, in their words ("the candidate search"); `tech` is
+   * everything an engineer needs and nobody else should have to read.
+   */
+  function reportBreak(code, where, tech) {
+    code = BREAK_CODES[code] ? code : "ROS-APP";
+    var key = code + "|" + (tech && tech.path ? tech.path : "") + "|" + (where || "");
+    var now = Date.now();
+    if (breakSeen[key] && now - breakSeen[key] < 60000) return;
+    breakSeen[key] = now;
+
+    var entry = {
+      code: code, where: where || "", at: new Date().toISOString(),
+      screen: (location.hash || "#overview").replace(/^#/, ""),
+      path: (tech && tech.path) || "", status: (tech && tech.status) || 0,
+      detail: (tech && tech.detail) || "", agent: navigator.userAgent,
+    };
+    breakLog.push(entry);
+    if (breakLog.length > 20) breakLog.shift();
+
+    // Any progress bar still running is now lying about work that stopped.
+    if (activeProgressFail) { try { activeProgressFail("Stopped"); } catch (e) { /* the notice below still shows */ } }
+    try { window.dispatchEvent(new CustomEvent("ros:break", { detail: entry })); } catch (e) { /* older browser: the notice below still shows */ }
+
+    var host = breakHost();
+    if (host) {
+      var note = document.createElement("div");
+      note.className = "break-note";
+      note.innerHTML =
+        '<b>' + esc(where ? ("Something went wrong with " + where + ".") : "Something went wrong.") + '</b><br>' +
+        esc(BREAK_CODES[code]) +
+        '<div class="break-foot">' +
+          '<span>Reference <code>' + esc(code) + '</code> · quote this when you report it</span>' +
+          '<button class="break-act" data-break-copy="1">Copy details</button>' +
+          '<button class="break-act" data-break-close="1">Dismiss</button>' +
+        '</div>';
+      note.querySelector("[data-break-copy]").onclick = function () {
+        var text = "RecruitersOS break report\n" + JSON.stringify(entry, null, 2);
+        var done = function () { this.textContent = "Copied"; }.bind(note.querySelector("[data-break-copy]"));
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, done);
+        else done();
+      };
+      note.querySelector("[data-break-close]").onclick = function () { note.remove(); };
+      host.appendChild(note);
+    }
+
+    // File it. Best effort by definition: this runs BECAUSE something is broken,
+    // so it must never throw, retry, or block anything on screen.
+    try {
+      fetch(API + "/breaks", {
+        method: "POST", credentials: "include",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(entry),
+        keepalive: true,
+      }).catch(function () { });
+    } catch (e) { /* nothing further to do: the person already sees the notice */ }
+  }
+
+  // A crash in this file used to leave a half-drawn screen and no explanation.
+  window.addEventListener("error", function (e) {
+    reportBreak("ROS-APP", "", { detail: (e && e.message) || "script error", path: (e && e.filename) || "" });
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e && e.reason;
+    if (r === 0 || r === undefined) return; // an already-reported request failure
+    reportBreak("ROS-APP", "", { detail: (r && (r.message || String(r))) || "unhandled rejection" });
+  });
+
+  /** What the person was doing, named the way the app names it on screen. */
+  function screenLabel() {
+    var hash = (location.hash || "").replace(/^#/, "").split("?")[0];
+    var route = (typeof ROUTES !== "undefined" && ROUTES) ? ROUTES[hash] : null;
+    return (route && route.title) || "";
+  }
+
+  /** Which code a failed request deserves. 401 is deliberately absent: a dead
+   *  session signs the user out, which is its own (clear) answer. */
+  function breakCodeFor(status) {
+    if (!status) return "ROS-NET";
+    if (status === 403) return "ROS-DENY";
+    if (status >= 500 || status === 0) return "ROS-SRV";
+    return "";
   }
 
   /* ---------------- reference content (product knowledge, not customer data) -- */
@@ -857,7 +1014,7 @@
           "</div>";
 
         // Today's send capacity, spelled out from Email IDs x domains.
-        body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> total capacity across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
+        body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> available today" + (cap.matureCapacity && cap.matureCapacity > cap.coldCapacity ? ' <span style="color:var(--text-dim)">(' + n(cap.matureCapacity) + "/day at full ramp, as warming mailboxes mature)</span>" : "") + " across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
           (cap.warmingPerDay ? ', plus about ' + n(cap.warmingPerDay) + " external warm-up sends/day that build reputation (not outreach)." : ".") + "</div>";
         var provRows = (cap.byProvider || []).map(function (p) {
           var nm = provName[p.provider] || p.provider;
@@ -1077,6 +1234,8 @@
     // engine as a cap-gated Statistics tab (the two built the same funnel and
     // leaderboards twice; recruiters without team:manage see plain Analytics).
     analytics: { title: "Analytics", crumb: "Measure", action: null, render: renderAnalyticsHub },
+    spending: { title: "Spending", crumb: "Measure", action: null, render: renderSpending },
+    recruiterspend: { title: "Recruiters Spending", crumb: "Measure", action: null, render: renderRecruiterSpending, cap: "team:manage" },
     "outreach-stats": { title: "Outreach Statistics", crumb: "Measure", action: null, render: function () { location.hash = "#analytics/stats"; }, cap: "team:manage" },
     // Outbound Performance: the admin utilization + accountability command
     // center (capacity engine, scores, heatmap, triggers, goals, reports).
@@ -6727,6 +6886,16 @@
     return '<span class="wu-badge ' + r + '">' + label + '</span>';
   }
 
+  // Google Workspace domains carry a "Gmail Accounts" chip beside the domain name,
+  // the same slot the Internal SMTP and Sending.ac chips use, so one glance down
+  // that column says who runs each domain's mailboxes. It only appears where the
+  // Google mailboxes actually live: the server resolves the kind from the warm-up
+  // connection (smtp.gmail.com) and falls back to the domain's Google MX.
+  function wuKindChip(kind) {
+    if (kind !== "google") return "";
+    return ' <span class="snd-prov" style="border-color:#15803d;color:#15803d;font-size:10px;vertical-align:1px" title="Google Workspace mailboxes: these send and warm up through Gmail">Gmail Accounts</span>';
+  }
+
   // Plain-English reason for a domain's reputation given how long it has been
   // warming, so a low number on a brand-new domain reads as "expected", not
   // "problem". A low number on a MATURE domain is the real signal to act on.
@@ -6825,7 +6994,7 @@
       var open = !!wuOpen[d.domain];
       var days = d.days != null ? ('<span class="wu-days"><b>' + d.days.toFixed(1) + '</b> days</span>' + (d.since ? '<div class="muted" style="font-size:11px">since ' + esc(String(d.since).slice(0, 10)) + '</div>' : '')) : '<span class="muted">n/a</span>';
       var main = '<tr class="wu-dom" data-wu-dom="' + esc(d.domain) + '">' +
-        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + wuInfraChip(d.infra) + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
+        '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + wuInfraChip(d.infra) + wuKindChip(d.mailboxKind) + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
         '<td>' + days + '</td>' +
         '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation) + '</td>' +
@@ -6939,12 +7108,15 @@
     if (!servers.length) {
       table = '<div class="empty">No sending servers yet. Import Email IDs and their servers appear here automatically.</div>';
     } else {
-      table = '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Server</th><th>Status</th><th>Inboxes</th><th>Login health</th><th>Recent errors</th></tr></thead><tbody>' +
+      table = '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Server</th><th>Status</th><th>Capacity</th><th>Inboxes</th><th>Login health</th><th>Recent errors</th></tr></thead><tbody>' +
         servers.map(function (s) {
           var up = s.probe && s.probe.reachable;
           var st = up
             ? '<span class="wu-hchip healthy">Up</span>' + (s.probe.latencyMs != null ? ' <span class="muted" style="font-size:11px">' + s.probe.latencyMs + ' ms</span>' : '')
             : '<span class="wu-hchip at_risk">Down</span>';
+          var cap = s.capacityPerDay
+            ? '<b>≈' + Number(s.capacityPerDay).toLocaleString() + '</b><span class="muted" style="font-size:11px">/day</span>' + (s.capacityBasis ? '<div class="muted" style="font-size:11px" title="' + esc(s.capacityBasis) + '">' + esc(s.capacityBasis) + '</div>' : '')
+            : '<span class="muted">n/a</span>';
           var inb = s.inboxes
             ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + s.warming + ' warming' + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
             : '<span class="muted">none imported yet</span>';
@@ -6957,6 +7129,7 @@
           return '<tr>' +
             '<td><b>' + esc(s.host) + '</b><span class="muted">:' + s.port + '</span>' + (s.label ? '<div class="muted" style="font-size:11px">' + esc(s.label) + '</div>' : '') + '</td>' +
             '<td>' + st + '</td>' +
+            '<td>' + cap + '</td>' +
             '<td>' + inb + '</td>' +
             '<td>' + auth + '</td>' +
             '<td>' + errs + '</td>' +
@@ -7107,12 +7280,16 @@
     if (!list.length) { box.innerHTML = ""; return; }
     var notes = {
       "sending-ac": "Sending.ac model: every mailbox sends a flat 2 cold emails/day, warmed externally. More volume means more mailboxes, not higher caps.",
-      "own-smtp": "Your internal SMTP server: mailboxes ramp 5, 10, 15, then " + (cap.coldPerInbox || 20) + "/day across their first four weeks of sending.",
+      "own-smtp": "Your internal SMTP server: each mailbox ramps 5, 10, 15, then " + (cap.coldPerInbox || 20) + "/day over its first four weeks once activated. Mailboxes still warming send the day-one floor until you activate them.",
     };
+    function fmt(n) { return Number(n || 0).toLocaleString(); }
     box.innerHTML = '<div class="snd-split"><div class="snd-split-t">Sending infrastructure split</div>' +
       list.map(function (p) {
+        // Show today's warm-up-throttled figure, plus the full-ramp ceiling when the
+        // provider ramps and isn't there yet, so the capacity never reads misleadingly low.
+        var ramps = p.matureCapacity > p.coldCapacity;
         return '<div class="snd-split-row">' + sndProviderBadge(p.provider) +
-          '<span class="snd-split-meta">' + p.inboxes + ' Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + p.coldCapacity + '</b> cold sends/day · ' + p.coldRemaining + ' left today</span>' +
+          '<span class="snd-split-meta">' + p.inboxes + ' Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + fmt(p.coldCapacity) + '</b> cold sends/day' + (ramps ? ' <span class="muted">(ramps to <b>' + fmt(p.matureCapacity) + '</b>/day at full ramp)</span>' : '') + ' · ' + fmt(p.coldRemaining) + ' left today</span>' +
           (notes[p.provider] ? '<span class="snd-split-note">' + esc(notes[p.provider]) + '</span>' : '') +
         '</div>';
       }).join("") + '</div>';
@@ -12008,6 +12185,15 @@
       '.jd-prog-meta{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:12px}' +
       '.jd-prog.done .jd-prog-dot{animation:none;background:var(--ok)}' +
       '.jd-prog.done .jd-prog-fill{animation:none;background:var(--ok)}' +
+      // A run that DIED must never look like a run that finished: no 100%, no green,
+      // no auto-hide. It stops where it stopped, in warning color, and stays on screen.
+      '.jd-prog.fail .jd-prog-dot{animation:none;background:var(--warn,#e0a33e)}' +
+      '.jd-prog.fail .jd-prog-fill{animation:none;background:var(--warn,#e0a33e)}' +
+      '.jd-prog.fail .jd-prog-pct{color:var(--warn,#e0a33e)}' +
+      '.jd-err{font-size:13.5px;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid var(--warn,#e0a33e);border-radius:10px;padding:12px 14px;margin:10px 0 0;line-height:1.5}' +
+      '.jd-err b{color:var(--text)}' +
+      '.jd-code{margin-top:8px;padding-top:7px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)}' +
+      '.jd-code b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.02em;color:var(--text)}' +
       '.jd-cardhead{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}' +
       '.jd-ratelink{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
       '.jd-ratelink:hover{color:var(--brand-2)}' +
@@ -12322,7 +12508,34 @@
         '<div id="jdCombineBar" class="jd-combine-bar" style="display:none"></div>' +
         '<div id="jdRuns">' + loading() + '</div></div>';
 
-    function msg(t) { var m = $("#jdMsg"); if (m) m.textContent = t || ""; }
+    function msg(t) { var m = $("#jdMsg"); if (m) { m.className = "muted"; m.textContent = t || ""; } }
+    /** A failure the recruiter MUST see. Persistent, boxed, and it survives the
+        progress bar hiding itself — a lost run used to leave nothing but one line of
+        grey text that read like a normal status update. */
+    function msgErr(t) { msgStop("SRC-UNKNOWN", t); }
+    /** Codes that mean "the search worked, there was simply nobody to save" rather than
+        "something is broken". Only the headline differs: both stay on screen. */
+    var JD_NOMATCH = { "SRC-FILTERED": 1, "SRC-FRESHONLY": 1, "SRC-NONE": 1, "SRC-FREEENGINE": 1 };
+    /**
+     * The ONE place a stopped run explains itself.
+     *
+     * A run that ends with an empty screen and no reason is the worst outcome this tool
+     * has: the recruiter cannot tell "nobody matches" from "the platform is broken", and
+     * the report that reaches the engineer is "it went blank". So this is persistent (it
+     * outlives the progress bar and stays until the next run), it always says something,
+     * and it always carries a quotable code the recruiter can read out so the engineer
+     * knows exactly which failure to go fix. The code is the ONLY internal thing shown:
+     * no engine names, no keys, no queries.
+     */
+    function msgStop(code, text, headline) {
+      var m = $("#jdMsg"); if (!m) return;
+      code = code || "SRC-UNKNOWN";
+      m.className = "jd-err";
+      m.innerHTML =
+        '<b>' + esc(headline || (JD_NOMATCH[code] ? "No candidates to save." : "The search stopped early, and nothing was saved.")) + '</b><br>' +
+        esc(text || "No reason was reported, which is itself a fault worth reporting.") +
+        '<div class="jd-code">Reference <b>' + esc(code) + '</b> · quote this code when you report it, it says exactly what needs fixing</div>';
+    }
     function chips(arr) { return (arr || []).map(function (x) { return '<span class="jd-chip">' + esc(x) + '</span>'; }).join("") || '<span class="muted">-</span>'; }
 
     function renderPlan() {
@@ -12640,6 +12853,19 @@
           // they ran): the chain kept moving on the other sources, and Enrich re-runs
           // exactly these batches once Laxis is reachable again.
           var lxSkipN = (r.laxisSkipped && r.laxisSkipped.offsets) ? r.laxisSkipped.offsets.length : 0;
+          // A lingering job ref can be DEAD: the worker crashed mid-run and the chain
+          // never cleared it, which used to leave this card stuck on "Enriching now" for
+          // hours with no way to tell it had died. Flip to a clear, actionable "stalled"
+          // state once a job has been in flight far longer than any real pass would take
+          // (the enrichment pool finishes ~2,300 rows in well under an hour). Age comes
+          // from the ref's own submittedAt, so no server change is needed. Plain words
+          // only, no internal terms ([[feedback-hide-search-internals]]).
+          var jJobRef = r.koldDbJob || r.laxisJob || r.koldJob;
+          var jJobMs = jJobRef && jJobRef.submittedAt ? Date.parse(String(jJobRef.submittedAt).replace(" ", "T")) : NaN;
+          var jJobMin = isFinite(jJobMs) ? Math.round(Math.max(0, Date.now() - jJobMs) / 60000) : 0;
+          var jStallMin = Math.max(90, Math.round(n / 20)); // scales with list size, floor 90 min
+          var enrichStalled = busyJobs && isFinite(jJobMs) && jJobMin >= jStallMin;
+          var jStuckAgo = jJobMin < 60 ? (jJobMin + " min") : (Math.round(jJobMin / 60) + " hr");
           // ---- The visible journey: the four stops every list travels (Searched,
           // Enriched, Candidates, OS Text), each derived from fields the server
           // already stamps (chunk ledger, mid-flight job refs, autoflow bookkeeping).
@@ -12679,8 +12905,15 @@
           var sSearch = jStop("jt-done", jIcons.check, "Searched", n + " found",
             "The search finished and saved " + n + " candidate" + (n === 1 ? "" : "s") +
             (outN ? (": " + (n - outN) + " in area and " + outN + " out of area") : "") + ".");
-          var sEnrich, jNote = "", jEta = jdEta(r, epDone, ep ? (ep.total || n) : n, busyJobs, jdPaceGuess);
-          if (busyJobs) {
+          var sEnrich, jNote = "", jEta = jdEta(r, epDone, ep ? (ep.total || n) : n, busyJobs && !enrichStalled, jdPaceGuess);
+          if (enrichStalled) {
+            // The card was lying ("Working now") over a dead job. Say it plainly and
+            // give the one-press fix: Enrich re-drives the chain from where it stopped,
+            // bypassing the automatic pipeline's wait, so a stuck list unsticks on click.
+            sEnrich = jStop("jt-act", jIcons.alert, "Enrichment stalled", { btn: "stuck ~" + jStuckAgo + " · press to restart", act: r.id },
+              "The contact lookup has been stuck for about " + jStuckAgo + " with no progress, so it most likely hit a snag and stopped. Press to restart it: finished work is kept and nothing is bought twice.");
+            jNote = "<b>Stalled:</b> the contact lookup has been stuck for about " + jStuckAgo + " with no progress. Press the amber pill (or the Enrich button) to restart it; it resumes where it stopped and re-sends the refreshed contacts to Candidates and OS Text when done. If it stalls again right after, tell your admin.";
+          } else if (busyJobs) {
             // Real progress under the live stop: the chunk ledger gives actual rows
             // done, so the mini bar is honest; without a ledger yet it just glides.
             var livePct = ep ? Math.max(4, Math.min(100, Math.round(epDone / (ep.total || n || 1) * 100))) : null;
@@ -12882,7 +13115,7 @@
       function laxisBail() { if (onDone) onDone(false, ""); }
       function pollLaxis() {
         sendPatient("/sourcing", "POST", { action: "laxisStatus", id: lid }).then(function (s) {
-          if (!s.ok) { laxisReset(); finishProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || gatewayMsg(s.status))); laxisBail(); return; }
+          if (!s.ok) { laxisReset(); failProgress("Enrichment stopped"); alert("Enrichment status check failed: " + ((s.data && s.data.error) || gatewayMsg(s.status))); laxisBail(); return; }
           if (!s.data.done) { setTimeout(pollLaxis, 10000); return; }
           if (s.data.status === "error") {
             var why = (s.data.warnings || []).join("\n");
@@ -12896,7 +13129,7 @@
               setTimeout(function () { startChunk(null); }, 5000);
               return;
             }
-            laxisReset(); finishProgress("Enrichment stopped");
+            laxisReset(); failProgress("Enrichment stopped");
             alert("Enrichment failed:\n" + (why || "unknown error") +
               "\n\nAlready-enriched batches are saved; the list is sent on to Candidates and OS Text with what it has. Press Enrich on the list to finish the rest; if it keeps failing, ask your admin."); loadRuns(); laxisBail(); return;
           }
@@ -12912,7 +13145,7 @@
         if (startOffset != null) body.start = startOffset;
         sendPatient("/sourcing", "POST", body).then(function (r) {
           if (!r.ok) {
-            laxisReset(); finishProgress("Enrichment stopped");
+            laxisReset(); failProgress("Enrichment stopped");
             var err = (r.data && r.data.error) || r.status;
             if (err === "laxis_worker_not_configured") {
               alert("Deep enrichment isn't connected yet. Ask your account team to enable it, then run Enrich again."); laxisBail(); return;
@@ -13002,7 +13235,7 @@
           var err = (r.data && r.data.error) || r.status;
           if (err === "koldinfo_worker_not_configured") { stageKoldDb(); return; }
           aBtn.disabled = false; aBtn.textContent = "Enrich";
-          finishProgress("Enrich could not start");
+          failProgress("Enrich could not start");
           alert("Enrich failed to start: " + gatewayMsg(err) + ((r.data && r.data.detail) ? ("\n" + r.data.detail) : ""));
           if (onDone) onDone(false, ""); return;
         }
@@ -13010,7 +13243,7 @@
         setTimeout(pollKold, 8000);
       }).catch(function () {
         aBtn.disabled = false; aBtn.textContent = "Enrich";
-        finishProgress("Enrich stopped");
+        failProgress("Enrich stopped");
         alert("Could not reach the server.");
         if (onDone) onDone(false, "");
       });
@@ -13029,13 +13262,18 @@
     function autoSendList(id, name, added) {
       showProgress('Sending "' + name + '" on', 30, "Sending to Candidates…");
       var bits = added ? [added] : [];
+      // Which legs actually FAILED, in recruiter words. A leg that legitimately had
+      // nothing to do (nobody has a phone yet) is not a failure and never lands here.
+      var failed = [];
       sendPatient("/sourcing", "POST", { action: "promote", id: id, listName: name, tag: "" }).then(function (p) {
         if (p.ok) {
           // Remember the new list so the Candidates tab opens straight onto it.
           try { if (p.data.listId) sessionStorage.setItem("ros_open_list", p.data.listId); } catch (err) {}
           bits.push("sent " + (p.data.added || 0) + " to Candidates" + (p.data.deduped ? (" (" + p.data.deduped + " already in pipeline)") : ""));
         } else {
-          bits.push("Candidates push failed: " + ((p.data && (p.data.detail || p.data.error)) || p.status));
+          var pr = (p.data && (p.data.detail || p.data.error)) || p.status || "no reason given";
+          failed.push("Candidates (" + pr + ")");
+          bits.push("Candidates push failed: " + pr);
         }
         setProgPhase("Building the OS Text campaign…");
         return sendPatient("/sourcing", "POST", { action: "ostext", id: id, name: name });
@@ -13047,16 +13285,35 @@
             ((d.protectedDnc || d.protectedRecent) ? (", " + ((d.protectedDnc || 0) + (d.protectedRecent || 0)) + " protected (already in an ATS conversation)") : ""));
           if (d.validation === "blocked_no_qstash") bits.push("WARNING: the cell-line check is not running (validation queue unconfigured), so these numbers are held and will NOT be texted until it is fixed");
         } else if (d.error === "no_contacts_with_phone") {
+          // A real, benign outcome: the list simply has no phones yet. Not a failure.
           bits.push("OS Text skipped: nobody on this list has a phone number yet");
         } else {
-          bits.push("OS Text push failed: " + ((d.detail || d.error) || (o && o.status)));
+          var or = (d.detail || d.error) || (o && o.status) || "no reason given";
+          failed.push("OS Text (" + or + ")");
+          bits.push("OS Text push failed: " + or);
         }
-        finishProgress('Done · "' + name + '" sent to Candidates and OS Text');
+        // TELL THE TRUTH ABOUT DELIVERY. This used to finish "sent to Candidates and OS
+        // Text" unconditionally, even when BOTH pushes had just failed, and the only
+        // trace of the failure was a toast that faded. That is precisely how a run gets
+        // reported as delivered while nothing ever appears in either tab.
+        if (failed.length) {
+          failProgress("Sending stopped");
+          msgStop("SRC-DELIVERY",
+            'The list "' + name + '" is saved and safe, but it could not be sent on to ' +
+            failed.join(" or ") + ". Nothing was lost: press Send on the list below to try again.",
+            "The list is saved, but sending it on did not work.");
+        } else {
+          finishProgress('Done · "' + name + '" sent to Candidates and OS Text');
+          // A lasting record of what happened, not just a toast that fades.
+          msg(bits.join(" · ") + ". Review and launch the texts in the OS Text tab.");
+        }
         toast(bits.join(" · ") + ". Review and launch the texts in the OS Text tab.");
         loadRuns();
       }).catch(function () {
-        finishProgress("Sending stopped");
-        toast('"' + name + '" is saved below, but sending it on failed (could not reach the server).');
+        failProgress("Sending stopped");
+        msgStop("SRC-DELIVERY-NET",
+          'The list "' + name + '" is saved and safe, but the server could not be reached to send it on to Candidates and OS Text. Press Send on the list below to try again.',
+          "The list is saved, but sending it on did not work.");
         loadRuns();
       });
     }
@@ -13100,13 +13357,37 @@
       btn.disabled = true; btn.textContent = "Searching…";
       smsg("");
       showProgress("Running the LinkedIn search", 120, "Pulling the search's people from LinkedIn, then widening with the search waterfall…");
-      var payload = { action: "salesNav", url: url, breadth: jdBreadth() };
+      // Crash net, same one the JD search runs behind: the token rides along so the
+      // server can arm a durable checkpoint BEFORE it starts pulling. This request
+      // runs for minutes and writes nothing until it finishes, so a deploy recreating
+      // the container mid-pull used to leave the bar stalled and no list anywhere.
+      // Deliberately NOT sendPatient here: blindly re-POSTing would re-run the whole
+      // paid search (and could race the server-side recovery into a second list).
+      // A dead connection hands over to watchRecovery instead, which finds the
+      // checkpoint by this token and narrates the server finishing the job.
+      var snavToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      var payload = { action: "salesNav", url: url, breadth: jdBreadth(), recoveryToken: snavToken };
       if (targetId) payload.targetRunId = targetId;
       if (name) payload.name = name;
-      sendPatient("/sourcing", "POST", payload).then(function (r) {
-        btn.disabled = false; btn.textContent = "Search & Enrich";
+      function snavReset() { btn.disabled = false; btn.textContent = "Search & Enrich"; }
+      function snavRecover() {
+        return watchRecovery({ token: snavToken, name: name || "LinkedIn search", cap: 300 }, snavReset);
+      }
+      send("/sourcing", "POST", payload).catch(function () {
+        // fetch itself rejected: the connection died mid-request (a deploy
+        // recreating the server is the everyday cause). Not a server "no".
+        return { ok: false, status: 0, data: null };
+      }).then(function (r) {
+        snavReset();
+        if (!r.ok && (r.status === 0 || r.status === 502 || r.status === 503 || r.status === 504)) {
+          // The server (or the connection to it) died mid-search. The checkpoint
+          // armed above survives in the durable store, so the search finishes
+          // server-side and lands on the same list; watch it instead of failing.
+          smsg("");
+          return snavRecover();
+        }
         if (!r.ok) {
-          finishProgress("Search stopped");
+          failProgress("Search stopped");
           smsg("Sales Navigator search failed: " + ((r.data && (r.data.detail || r.data.error)) || gatewayMsg(r.status)));
           return;
         }
@@ -13134,9 +13415,13 @@
           if (run.id) runAutoPipeline(run.id, run.name || d.name || "Candidate list");
         });
       }).catch(function () {
-        btn.disabled = false; btn.textContent = "Search & Enrich";
-        finishProgress("Search stopped");
-        smsg("Could not reach the server. Nothing was lost: paste the URL and try again in a moment.");
+        // Only the success path itself can land here (the dead-connection case is
+        // converted to a status-0 answer above and recovered), so the search may
+        // well have saved. Never claim a loss that did not happen.
+        snavReset();
+        failProgress("Search stopped");
+        smsg("Something went wrong while finishing up. Check Your saved candidate lists below before running it again.");
+        loadRuns();
       });
     }
 
@@ -13261,15 +13546,19 @@
             // server-side; hand this tab over to the recovery watch.
             throw { recover: { token: recoveryToken, name: provisionalName, cap: cap } };
           }
-          if (!r.ok) { finishProgress("Search failed"); throw { stage: "Search", r: r }; }
+          if (!r.ok) { failProgress("Search failed"); throw { stage: "Search", r: r }; }
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
           state.usage = r.data.usage || null; // the run's search-API spend, saved onto the list
           renderPlan(); renderResults();
           if (!state.candidates.length) {
-            finishProgress("No candidates found");
-            var why = (state.warnings || []).filter(function (w) { return w.indexOf("empty_run:") === 0; })[0];
-            throw { plain: (why ? why.replace("empty_run: ", "The search came back empty: ") : "The search came back empty.") };
+            failProgress("No candidates found");
+            // The engine says WHY, in recruiter language, with a quotable code. The old
+            // path spliced the raw engineer warning onto the screen instead, which named
+            // vendors and read like a stack trace; and when there was no warning at all
+            // it said "came back empty" and left the recruiter with nothing to report.
+            var sr = (r.data && r.data.stopReason) || null;
+            throw { stop: sr || { code: "SRC-NONE", message: "The search came back with nobody, and no reason was reported." } };
           }
         });
       }).then(function () {
@@ -13302,10 +13591,18 @@
         // the search finishes on the server; keep the bar alive and watch for it.
         if (e && e.recover) return watchRecovery(e.recover, reset);
         reset();
-        if (prog.timer) finishProgress(((e && e.stage) || "Run") + " stopped");
+        if (prog.timer) failProgress(((e && e.stage) || "Run") + " stopped");
+        // An empty search is a real answer, not a breakage. It still gets a reason and a
+        // code, and it still stays on screen: "nobody matched" and "the platform broke"
+        // must never look the same to a recruiter.
+        if (e && e.stop) { msgStop(e.stop.code, e.stop.message); return; }
         if (e && e.plain) { msg(e.plain); return; }
-        var detail = (e && e.r && e.r.data && (e.r.data.detail || e.r.data.error)) || (e && e.r && e.r.status) || (e && e.message) || "error";
-        msg(((e && e.stage) || "Run") + " failed: " + detail);
+        // A server-side failure. The recruiter gets the stage and a code, never the raw
+        // server text, which can carry internals.
+        var detail = (e && e.r && e.r.data && (e.r.data.detail || e.r.data.error)) || (e && e.r && e.r.status) || (e && e.message) || "";
+        var stage = (e && e.stage) || "Run";
+        msgStop("SRC-SERVER", "The " + stage.toLowerCase() + " step was refused by the server" +
+          (detail ? " (" + detail + ")" : "") + ". Nothing was saved, so running it again is safe.");
       });
     }
 
@@ -13322,6 +13619,9 @@
         "The connection to the server dropped mid-search. Finishing it on the server instead; nothing is lost…");
       var deadline = Date.now() + 30 * 60 * 1000;
       function done(label, message) { finishProgress(label); msg(message); reset(); loadRuns(); }
+      /** The recovery could not deliver a list. Loud, persistent, and never dressed up
+          as a finished run. */
+      function lost(label, code, message) { failProgress(label); msgStop(code, message); reset(); loadRuns(); }
       function poll() {
         return api("/sourcing").then(function (d) {
           var items = (d && d.nightQueue) || [];
@@ -13333,8 +13633,8 @@
             return;
           }
           if (it && it.stage === "error") {
-            done("Recovery stopped",
-              "The interrupted search could not be recovered (" + (it.error || "unknown") + "). Press Initiate Search to run it again.");
+            lost("Recovery stopped", "SRC-RECOVERY",
+              "The server picked this search back up after an update, but could not finish it (" + (it.error || "no reason given") + "). Nothing was saved. Press Initiate Search to run it again.");
             return;
           }
           if (it) {
@@ -13346,13 +13646,16 @@
           }
           // No checkpoint and no saved run: the request died before the checkpoint
           // could be written (or an older server ignored it). Nothing recoverable.
-          done("Connection lost",
-            "The connection dropped mid-search and the server had nothing to recover. Press Initiate Search to run it again.");
+          // The server now arms the checkpoint before its first slow step, so this
+          // should be rare; when it does happen the recruiter gets told plainly
+          // instead of watching the bar fill to 100% and vanish.
+          lost("Connection lost", "SRC-DEPLOY",
+            "The platform was updating and the search was lost before the server had registered it, so there was nothing to pick back up and no list was saved. Press Initiate Search to run it again.");
         }).catch(function () {
           // The app may still be restarting; keep knocking until the deadline.
           if (Date.now() < deadline) return delay(15000).then(poll);
-          finishProgress("Connection lost");
-          msg("The server did not come back in time. Reload the page and check Your saved candidate lists; the search may still have finished on its own.");
+          failProgress("Connection lost");
+          msgStop("SRC-TIMEOUT", "The platform did not come back within 30 minutes. Reload the page and check Your saved candidate lists: the search may still have finished on its own. If it is not there, run it again.");
           reset();
         });
       }
@@ -13414,7 +13717,8 @@
     }
     function showProgress(title, etaSec, phaseText) {
       var host = $("#jdProgress"); if (!host) return;
-      host.classList.remove("done"); host.style.display = "";
+      // Clear BOTH end-states: a new run must not inherit the last one's failure paint.
+      host.classList.remove("done"); host.classList.remove("fail"); host.style.display = "";
       if (phaseText) host.dataset.staticPhase = "1"; else delete host.dataset.staticPhase;
       host.innerHTML =
         '<div class="jd-prog-head"><span class="jd-prog-dot"></span><b id="jdProgTitle">' + esc(title) + '</b>' +
@@ -13445,6 +13749,26 @@
       if (fill) fill.style.width = "100%"; if (pct) pct.textContent = "100%";
       if (phase) phase.textContent = label || "Done"; if (eta) eta.textContent = "";
       setTimeout(function () { var h = $("#jdProgress"); if (h && !window.__jdProgTimer && progOwns(h)) h.style.display = "none"; }, 1600);
+    }
+    /** End the bar as a FAILURE. Deliberately not finishProgress: that one slams the
+        bar to 100%, paints it green and hides it 1.6s later, which is indistinguishable
+        from success and is exactly how a lost run got reported as a finished one
+        (2026-07-31). This leaves the bar parked at the % it actually reached, in warning
+        color, on screen, until the recruiter starts another run. */
+    // A break anywhere must stop this bar too: a bar still filling after the work
+    // behind it died is the exact lie this whole layer exists to prevent. One
+    // slot, re-pointed on every render, so old screens can never reach back.
+    activeProgressFail = function (label) { if (prog && prog.timer) failProgress(label || "Stopped"); };
+    function failProgress(label) {
+      var host = $("#jdProgress");
+      if (host && host.dataset.progOwner && !progOwns(host)) { prog.timer = null; return; }
+      stopProgTimer();
+      if (!host) return;
+      host.classList.remove("done");
+      host.classList.add("fail");
+      var phase = host.querySelector("#jdProgPhase"), eta = host.querySelector("#jdProgEta");
+      if (phase) phase.textContent = label || "Stopped";
+      if (eta) eta.textContent = "";
     }
     function hideProgress() {
       var h = $("#jdProgress");
@@ -18325,11 +18649,310 @@
   // The model + UI live in the self-contained spending-calc.js module so the
   // underlying tools stay generic (no vendor names exposed here).
   function renderSpending(el) {
-    if (!window.SpendingCalc) { el.innerHTML = '<div class="empty">Spending module did not load, refresh and try again.</div>'; return; }
-    // Recruiting motion models the AI Vetting tool (cloned voice + telephony per
-    // hour); BD keeps the full outreach scenario planner. Same look either way.
-    if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(el);
-    else window.SpendingCalc.mount(el);
+    // Primary content is the owner-approved monthly statement (billed charges).
+    // The optional scenario planner mounts below it only when spending-calc.js is
+    // loaded; the statement stands on its own so the view is never blank.
+    el.innerHTML = head("Spending", "Your monthly subscription and any charges on your account, billed month to month.");
+    var stmt = document.createElement("div");
+    el.appendChild(stmt);
+    renderSpendStatement(stmt);
+    if (window.SpendingCalc) {
+      var planner = document.createElement("div");
+      el.appendChild(planner);
+      // Recruiting motion models the AI Vetting tool (cloned voice + telephony
+      // per hour); BD keeps the full outreach scenario planner.
+      if (motion === "recruiting" && window.SpendingCalc.mountVetting) window.SpendingCalc.mountVetting(planner);
+      else window.SpendingCalc.mount(planner);
+    }
+  }
+
+  // The customer-facing monthly statement: only the charges the owner approved
+  // in the owner console, billed month to month. Empty (nothing shown) until the
+  // owner approves something, so a workspace with no approved charges is unchanged.
+  function renderSpendStatement(el) {
+    el.innerHTML = loading();
+    api("/portal-spend").then(function (d) {
+      var charges = (d && d.charges) || [];
+      if (!charges.length) {
+        el.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">No charges on your account yet. Your monthly subscription and any charges will appear here once they are set up.</div></div>';
+        return;
+      }
+      function m(n) { n = Number(n) || 0; return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+      // Recurring subscription vs one-time usage rows the owner pushed over. This
+      // view is READ-ONLY for the account: no edit controls, only the monthly /
+      // annual toggle, an enlarge popup, and a PDF download.
+      var monthly = charges.filter(function (c) { return (c.cadence || "monthly") === "monthly"; });
+      var annualCharges = charges.filter(function (c) { return c.cadence === "annual"; });
+      var oneTime = charges.filter(function (c) { return c.cadence === "one_time"; });
+      var monthlyTotal = Number(d.monthlyTotalUsd) || monthly.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
+      var annualTotal = Number(d.annualTotalUsd) || annualCharges.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
+      var oneTimeTotal = Number(d.oneTimeTotalUsd) || oneTime.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
+      var wsName = (typeof wsDisplayName === "function" && wsDisplayName()) || "Spending";
+      var period; try { period = localStorage.getItem("ros_spend_period") || "monthly"; } catch (e) { period = "monthly"; }
+
+      // The receipt itself, for one period. `opts.print` swaps CSS-var colors for
+      // concrete ones so it renders in a bare print window; `opts.big` bumps sizing
+      // for the enlarge modal and the PDF.
+      function receiptHtml(per, opts) {
+        opts = opts || {};
+        var annual = per === "annual", mult = annual ? 12 : 1, suf = annual ? "/yr" : "/mo";
+        // Monthly-cadence lines scale with the view (×12 in annual view). Annual-
+        // cadence lines are naturally per-year: shown as-is in the annual view,
+        // and as their per-month equivalent in the monthly view so the running
+        // total stays coherent whichever period you are looking at.
+        var monthlyInView = monthlyTotal * mult;
+        var annualInView = annual ? annualTotal : annualTotal / 12;
+        var recurTotal = monthlyInView + annualInView, grand = recurTotal + oneTimeTotal;
+        var lineCol = opts.print ? "#e4e4ea" : "var(--line,rgba(120,120,140,.18))";
+        var strong = opts.print ? "#c7c7d0" : "var(--line,rgba(120,120,140,.4))";
+        var muted = opts.print ? "#6b7280" : "var(--muted,#8b93a1)";
+        var big = !!opts.big, fs = big ? "15px" : "14px", flx = "display:flex;justify-content:space-between;align-items:center;";
+        function seg(t) { return '<div style="font-size:12px;font-weight:700;color:' + muted + ';margin:14px 0 4px">' + esc(t) + '</div>'; }
+        function row(label, amt, s) {
+          return '<div style="' + flx + 'padding:' + (big ? "12px" : "10px") + ' 0;border-bottom:1px solid ' + lineCol + ';font-size:' + fs + '">' +
+            '<span>' + esc(label) + '</span><span style="font-weight:600;font-variant-numeric:tabular-nums">' + m(amt) +
+            (s ? '<span style="font-weight:400;font-size:12px;color:' + muted + '"> ' + s + '</span>' : '') + '</span></div>';
+        }
+        function tot(label, amt, grandRow) {
+          return '<div style="' + flx + 'padding-top:12px;' + (grandRow ? "margin-top:12px;border-top:2px solid " + strong + ";" : "") +
+            'font-weight:' + (grandRow ? "800" : "700") + ';font-size:' + (grandRow ? (big ? "18px" : "15px") : fs) + '">' +
+            '<span>' + esc(label) + '</span><span style="font-variant-numeric:tabular-nums">' + m(amt) + '</span></div>';
+        }
+        var h = '<div style="' + flx + 'margin-bottom:8px"><div>' +
+          '<div style="font-weight:700;font-size:' + (big ? "20px" : "16px") + '">' + esc(wsName) + '</div>' +
+          '<div style="font-size:12px;color:' + muted + '">Spending statement, ' + (annual ? "annual view" : "monthly view") + '</div></div></div>';
+        if (monthly.length) {
+          h += seg("Monthly subscription");
+          h += monthly.map(function (c) { return row(c.label, (Number(c.amountUsd) || 0) * mult, suf); }).join("");
+          h += tot(annual ? "Monthly subscription per year" : "Subscription per month", monthlyInView);
+        }
+        if (annualCharges.length) {
+          h += seg(annual ? "Annual subscriptions" : "Annual subscriptions (billed yearly)");
+          h += annualCharges.map(function (c) {
+            var a = Number(c.amountUsd) || 0;
+            // Annual view: the true yearly figure. Monthly view: its per-month
+            // share, with the real yearly amount named so nothing is hidden.
+            return annual ? row(c.label, a, "/yr")
+              : row(c.label + " — billed " + m(a) + "/yr", a / 12, "/mo");
+          }).join("");
+          h += tot(annual ? "Annual subscriptions per year" : "Annual subscriptions per month", annualInView);
+        }
+        if (oneTime.length) {
+          h += seg("One-time charges");
+          h += oneTime.map(function (c) { return row(c.label, Number(c.amountUsd) || 0, ""); }).join("");
+          h += tot("One-time total", oneTimeTotal);
+        }
+        h += tot("Total " + (annual ? "per year" : "this month"), grand, true);
+        return h;
+      }
+
+      function segBtn(val, label) {
+        return '<button class="btn btn-sm ' + (period === val ? "btn-primary" : "btn-ghost") + '" data-period="' + val + '" style="min-width:76px">' + label + '</button>';
+      }
+
+      // The actual receipts, one per pushed line: the vendor, the date, the
+      // invoice number and — for anything that arrived with a document — the
+      // invoice image itself, viewable in full and downloadable as the vendor
+      // sent it. Fetched by CHARGE id from the session-scoped endpoint, so a
+      // customer only ever sees invoices on their own live statement.
+      function fmtDate(s) {
+        if (!s) return "";
+        var t = Date.parse(s); if (isNaN(t)) return "";
+        try { return new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }); }
+        catch (e) { return ""; }
+      }
+      function receiptImgUrl(cid, which) {
+        return API + "/portal-spend/receipt/" + encodeURIComponent(cid) + "?v=" + (which || "png");
+      }
+      function receiptsGalleryHtml() {
+        // Every pushed line that has an invoice behind it — monthly AND one-time —
+        // so a vendor that billed a subscription and a one-off in the same month
+        // (ZapMail) shows both, each tagged and each with its own document.
+        // Monthly first, then one-time, so the two are visually grouped.
+        var withR = charges.filter(function (c) { return c.receipt; });
+        if (!withR.length) return "";
+        // Rank monthly, then annual, then one-time, so like sits with like.
+        function cadRank(c) { var cd = c.cadence || "monthly"; return cd === "monthly" ? 0 : cd === "annual" ? 1 : 2; }
+        withR.sort(function (a, b) { return cadRank(a) - cadRank(b); });
+        var rows = withR.map(function (c) {
+          var r = c.receipt || {};
+          var cd = c.cadence || "monthly";
+          var cadLabel = cd === "annual" ? "Annual" : cd === "one_time" ? "One-time" : "Monthly";
+          var cadClass = cd === "annual" ? "sp-rtag-yr" : cd === "one_time" ? "sp-rtag-one" : "sp-rtag-mo";
+          var per = cd === "annual" ? "/yr" : cd === "one_time" ? "" : "/mo";
+          var tag = '<span class="sp-rtag ' + cadClass + '">' + cadLabel + '</span>';
+          var sub = [r.vendor, fmtDate(r.date), r.invoiceNumber ? "Invoice #" + r.invoiceNumber : ""]
+            .filter(Boolean).join(" · ");
+          var thumb = r.hasImage
+            ? '<img class="sp-rthumb" src="' + receiptImgUrl(c.id, "thumb") + '" alt="receipt" loading="lazy" />'
+            : '<div class="sp-rthumb sp-rnoimg">no image</div>';
+          var acts = r.hasImage
+            ? '<button class="btn btn-ghost btn-sm sp-rview" data-cid="' + esc(c.id) + '">View receipt</button>' +
+              (r.hasFile ? '<a class="btn btn-ghost btn-sm" href="' + receiptImgUrl(c.id, "file") + '" target="_blank" rel="noopener">Download</a>' : "")
+            : '<span class="muted" style="font-size:12px">no document</span>';
+          return '<div class="sp-rrow">' + thumb +
+            '<div class="sp-rmeta"><div class="sp-rlabel">' + esc(c.label) + ' ' + tag + '</div>' +
+            (sub ? '<div class="sp-rsub muted">' + esc(sub) + '</div>' : "") + '</div>' +
+            '<div class="sp-ramt">' + m(Number(c.amountUsd) || 0) + (per ? '<span class="sp-rper muted">' + per + '</span>' : "") + '</div>' +
+            '<div class="sp-racts">' + acts + '</div></div>';
+        }).join("");
+        return '<div class="card" style="margin-bottom:16px">' +
+          '<div class="sp-rhead">Receipts on your account</div>' +
+          '<div class="muted" style="font-size:12px;margin-bottom:10px">Each charge above, with the invoice it was billed from. <strong>Monthly</strong> lines recur each month, <strong>Annual</strong> once a year, <strong>One-time</strong> once. Open one to see the full receipt, or download the original.</div>' +
+          '<div class="sp-rlist">' + rows + '</div></div>';
+      }
+
+      // Download to PDF via a print-friendly window (user picks "Save as PDF").
+      function downloadPdf() {
+        var w = window.open("", "_blank", "width=720,height=900");
+        if (!w) { toast("Allow pop-ups to download the PDF"); return; }
+        var title = wsName + " spending statement (" + (period === "annual" ? "annual" : "monthly") + ")";
+        w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
+          '<style>body{font-family:Inter,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;background:#fff;max-width:620px;margin:0 auto;padding:36px 32px}@media print{@page{margin:16mm}}</style></head><body>' +
+          '<div style="border:1px solid #e4e4ea;border-radius:12px;padding:24px 22px">' + receiptHtml(period, { print: true, big: true }) + '</div>' +
+          '<div style="color:#9aa0aa;font-size:11px;margin-top:14px">Generated ' + esc(new Date().toLocaleString()) + '</div>' +
+          '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},200);};</scr' + 'ipt></body></html>');
+        w.document.close();
+      }
+
+      // Download the full spending as a CSV (respects the Monthly/Annual toggle).
+      function downloadCsv() {
+        var annual = period === "annual", mult = annual ? 12 : 1;
+        function q(s) { s = String(s == null ? "" : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+        var annualInView = annual ? annualTotal : annualTotal / 12;
+        var rows = [["Item", "Type", "Amount (USD)"]];
+        monthly.forEach(function (c) {
+          var r = c.receipt || {};
+          var det = [annual ? "Monthly subscription (per year)" : "Monthly subscription (per month)", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
+          rows.push([c.label, det, ((Number(c.amountUsd) || 0) * mult).toFixed(2)]);
+        });
+        annualCharges.forEach(function (c) {
+          var a = Number(c.amountUsd) || 0, r = c.receipt || {};
+          var det = ["Annual subscription (billed yearly)", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
+          rows.push([c.label, det, (annual ? a : a / 12).toFixed(2)]);
+        });
+        oneTime.forEach(function (c) {
+          var r = c.receipt || {};
+          var det = ["One-time", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
+          rows.push([c.label, det, (Number(c.amountUsd) || 0).toFixed(2)]);
+        });
+        rows.push([]);
+        if (monthly.length) rows.push([annual ? "Monthly subscription total (per year)" : "Subscription total (per month)", "", (monthlyTotal * mult).toFixed(2)]);
+        if (annualCharges.length) rows.push([annual ? "Annual subscriptions total (per year)" : "Annual subscriptions total (per month)", "", annualInView.toFixed(2)]);
+        if (oneTime.length) rows.push(["One-time total", "", oneTimeTotal.toFixed(2)]);
+        rows.push([annual ? "Total per year" : "Total this month", "", (monthlyTotal * mult + annualInView + oneTimeTotal).toFixed(2)]);
+        var csv = rows.map(function (r) { return r.map(q).join(","); }).join("\r\n");
+        var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = (wsName + "-spending-" + (annual ? "annual" : "monthly") + ".csv").replace(/\s+/g, "_");
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      }
+
+      function paint() {
+        el.innerHTML =
+          '<div class="card" style="margin-bottom:16px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
+              '<div style="display:inline-flex;gap:6px">' + segBtn("monthly", "Monthly") + segBtn("annual", "Annual") + '</div>' +
+              '<div style="display:inline-flex;gap:8px">' +
+                '<button class="btn btn-ghost btn-sm" id="spEnlarge" title="Enlarge the receipt">Enlarge</button>' +
+                '<button class="btn btn-ghost btn-sm" id="spCsv" title="Download as CSV">Download CSV</button>' +
+                '<button class="btn btn-ghost btn-sm" id="spPdf" title="Download as PDF">Download PDF</button>' +
+              '</div>' +
+            '</div>' +
+            '<div id="spReceipt">' + receiptHtml(period, {}) + '</div>' +
+          '</div>' +
+          receiptsGalleryHtml();
+        // Open the full invoice image for one receipt.
+        Array.prototype.forEach.call(el.querySelectorAll(".sp-rview"), function (b) {
+          b.addEventListener("click", function () {
+            var cid = b.getAttribute("data-cid");
+            openModal("Receipt", "As the vendor billed it",
+              '<div style="text-align:center;max-height:70vh;overflow:auto">' +
+              '<img src="' + receiptImgUrl(cid, "png") + '" alt="receipt" ' +
+              'style="max-width:100%;height:auto;border-radius:8px;border:1px solid var(--line,rgba(120,120,140,.2))" />' +
+              '</div>');
+          });
+        });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-period]"), function (b) {
+          b.addEventListener("click", function () {
+            period = b.getAttribute("data-period");
+            try { localStorage.setItem("ros_spend_period", period); } catch (e) {}
+            paint();
+          });
+        });
+        var en = $("#spEnlarge", el);
+        if (en) en.addEventListener("click", function () {
+          openModal(wsName + " spending", (period === "annual" ? "Annual view" : "Monthly view") + ", read-only",
+            '<div style="max-width:560px;margin:0 auto">' + receiptHtml(period, { big: true }) + '</div>');
+        });
+        var cv = $("#spCsv", el);
+        if (cv) cv.addEventListener("click", downloadCsv);
+        var pf = $("#spPdf", el);
+        if (pf) pf.addEventListener("click", downloadPdf);
+      }
+      paint();
+    }).catch(function () { el.innerHTML = ""; });
+  }
+
+  // Admin-only "Recruiters Spending": what each individual recruiter has run up in
+  // attributed usage cost, one row per member. Separate from the tool Spending tab
+  // (subscription + owner-pushed charges). Served by /api/recruiter-spend
+  // (team:manage), scoped to this workspace. Window selector matches the ledger.
+  var recruiterSpendWindow = "30d";
+  function renderRecruiterSpending(el) {
+    function money(n) { n = Number(n) || 0; return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    var WINS = [["today", "Today"], ["7d", "7 days"], ["30d", "30 days"], ["all", "All time"]];
+    el.innerHTML =
+      head("Recruiters Spending", "What each recruiter has spent in usage on your account. This is per-person spend, separate from your tool subscription on the Spending tab.") +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">' +
+        '<span class="muted" style="font-size:12.5px;font-weight:600">Window</span>' +
+        '<div id="rsWin" class="seg" style="display:inline-flex;gap:4px">' +
+          WINS.map(function (w) {
+            return '<button type="button" class="btn btn-ghost btn-sm" data-win="' + w[0] + '"' +
+              (w[0] === recruiterSpendWindow ? ' style="font-weight:700;color:var(--brand-2)"' : '') + '>' + w[1] + '</button>';
+          }).join("") +
+        '</div></div>' +
+      '<div id="rsBody">' + loading() + '</div>';
+
+    el.querySelector("#rsWin").addEventListener("click", function (ev) {
+      var b = ev.target.closest("[data-win]"); if (!b) return;
+      recruiterSpendWindow = b.getAttribute("data-win");
+      renderRecruiterSpending(el);
+    });
+
+    var body = el.querySelector("#rsBody");
+    api("/recruiter-spend?window=" + encodeURIComponent(recruiterSpendWindow)).then(function (d) {
+      var rows = (d && d.rows) || [];
+      if (!rows.length) {
+        body.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">No recruiters on this account yet.</div></div>';
+        return;
+      }
+      var line = "display:flex;justify-content:space-between;align-items:center;";
+      var bord = "padding:12px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08))";
+      var list = rows.map(function (r) {
+        var nm = esc(r.name || r.email || "Recruiter") + (r.isYou ? ' <span class="muted" style="font-weight:400">(you)</span>' : "");
+        var sub = esc(r.email || "") + (r.events ? ' · ' + Number(r.events).toLocaleString() + ' events' : "");
+        return '<div style="' + line + bord + '">' +
+            '<div><div style="font-weight:600">' + nm + '</div>' +
+              '<div class="muted" style="font-size:12px">' + sub + '</div></div>' +
+            '<div style="font-weight:700;font-variant-numeric:tabular-nums">' + money(r.costUsd) + '</div>' +
+          '</div>';
+      }).join("");
+      body.innerHTML =
+        '<div class="card">' +
+          '<div style="' + line + 'margin-bottom:6px">' +
+            '<h3 style="margin:0">Spend by recruiter</h3>' +
+            '<span class="pill" style="font-size:11px">Usage cost</span></div>' +
+          list +
+          '<div style="' + line + 'padding-top:14px;font-weight:700;font-size:15px">' +
+            '<span>Total</span>' +
+            '<span style="font-variant-numeric:tabular-nums">' + money(d.totalUsd) + '</span></div>' +
+        '</div>';
+    }).catch(function () {
+      body.innerHTML = '<div class="card"><div class="muted" style="font-size:13px">Could not load recruiter spending.</div></div>';
+    });
   }
 
   function renderAnalytics(el) {
@@ -23434,6 +24057,10 @@
     Array.prototype.forEach.call(menu.querySelectorAll("[data-route]"), function (a) {
       a.addEventListener("click", function () { setOpen(false); location.hash = a.getAttribute("data-route"); });
     });
+    // "Recruiters Spending" (per-person usage roster) is admin-only; the tool
+    // "Spending" item above stays visible to everyone.
+    var recruiterSpendLink = $("#recruiterSpendLink");
+    if (recruiterSpendLink && (typeof can === "function") && can("team:manage")) recruiterSpendLink.hidden = false;
     var billing = $("#billingLink");
     if (billing) billing.addEventListener("click", function () { setOpen(false); location.hash = "accounts"; });
 

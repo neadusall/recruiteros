@@ -43,14 +43,41 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const g = requireOwner(req);
   if ("response" in g) return g.response;
-  const b = await body<{ workspaceId?: string; label?: string; source?: string; amountUsd?: number }>(req);
+  const b = await body<{
+    workspaceId?: string;
+    label?: string;
+    source?: string;
+    amountUsd?: number;
+    cadence?: string;
+    receipt?: {
+      receiptId?: string;
+      vendor?: string;
+      chargedAt?: string;
+      invoiceNumber?: string;
+      hasShot?: boolean;
+      hasFile?: boolean;
+    };
+  }>(req);
   if (!b || !b.workspaceId) return fail("missing_workspace", 400);
 
   // Usage push: one real cost row from the console -> a one-time line item. The
-  // amount is the row's actual cost, carried in the body; the owner reviews and
-  // approves it before it ever reaches the client.
+  // amount is the row's actual cost, carried in the body; when the row is pushed
+  // from a real receipt on the grid, that receipt travels with it (id + details)
+  // so the client sees the actual invoice, not just a figure. The owner reviews
+  // and approves it before it ever reaches the client.
   if (b.source === "usage") {
-    const u = stageUsageCharge(b.workspaceId, { label: b.label || "", amountUsd: Number(b.amountUsd) || 0 });
+    const rc = b.receipt && b.receipt.receiptId
+      ? {
+          receiptId: String(b.receipt.receiptId),
+          vendor: b.receipt.vendor,
+          chargedAt: b.receipt.chargedAt,
+          invoiceNumber: b.receipt.invoiceNumber,
+          hasShot: !!b.receipt.hasShot,
+          hasFile: !!b.receipt.hasFile,
+        }
+      : undefined;
+    const cadence = b.cadence === "monthly" ? "monthly" : b.cadence === "annual" ? "annual" : "one_time";
+    const u = stageUsageCharge(b.workspaceId, { label: b.label || "", amountUsd: Number(b.amountUsd) || 0, receipt: rc, cadence });
     if (u.error === "missing_label") return fail("missing_label", 422, { message: "This row has no label to send." });
     if (u.error === "no_amount") return fail("no_amount", 422, { message: "This row has no cost to send." });
     if (!u.charge) return fail(u.error || "could_not_stage", 400);

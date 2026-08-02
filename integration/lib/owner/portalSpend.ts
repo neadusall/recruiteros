@@ -28,8 +28,30 @@ import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
 export type ChargeStatus = "pending" | "approved";
-export type ChargeCadence = "monthly" | "one_time";
+export type ChargeCadence = "monthly" | "annual" | "one_time";
 export type ChargeSource = "monthly_price" | "usage";
+
+/**
+ * The actual receipt behind a pushed usage line. When the owner forwards a
+ * receipt off the Month-by-month grid, the charge carries enough of that
+ * receipt's identity for the client portal to show it in full: who charged,
+ * when, the invoice number, and — via receiptId — the invoice image itself,
+ * served back to the client through the session-scoped image endpoint. Nothing
+ * here is the amount (that stays on the charge); this is the proof beside it.
+ */
+export interface ChargeReceipt {
+  /** Owner-vault receipt id. NEVER sent to the client; the image endpoint
+   *  resolves it server-side from the approved charge so invoices stay scoped. */
+  receiptId: string;
+  vendor?: string;
+  /** ISO date the charge posted (the receipt's own date). */
+  chargedAt?: string;
+  invoiceNumber?: string;
+  /** A rendered PNG of the invoice exists on disk. */
+  hasShot?: boolean;
+  /** An original PDF/image (as the vendor sent it) exists on disk. */
+  hasFile?: boolean;
+}
 
 export interface PortalCharge {
   id: string;
@@ -43,6 +65,9 @@ export interface PortalCharge {
   source: ChargeSource;
   /** Client portal shows the row only when this is "approved". */
   status: ChargeStatus;
+  /** The receipt this line was pushed from, when it was pushed from one. Carries
+   *  the invoice image and its details through to the client's Spending page. */
+  receipt?: ChargeReceipt;
   createdAt: string;
   approvedAt?: string;
 }
@@ -87,6 +112,17 @@ export function approvedMonthlyTotal(workspaceId: string): number {
   return round(
     listApprovedCharges(workspaceId)
       .filter((c) => (c.cadence || "monthly") === "monthly")
+      .reduce((s, c) => s + c.amountUsd, 0),
+  );
+}
+
+/** Sum of approved annual charges = what this account is billed per year for
+ *  yearly-cadence lines (a domain renewal, an annual plan). Kept apart from the
+ *  monthly run-rate so the client statement can show each at its true period. */
+export function approvedAnnualTotal(workspaceId: string): number {
+  return round(
+    listApprovedCharges(workspaceId)
+      .filter((c) => c.cadence === "annual")
       .reduce((s, c) => s + c.amountUsd, 0),
   );
 }
@@ -139,26 +175,61 @@ export function stageMonthlyCharge(
  */
 export function stageUsageCharge(
   workspaceId: string,
-  input: { label: string; amountUsd: number },
+  input: { label: string; amountUsd: number; receipt?: ChargeReceipt; cadence?: ChargeCadence },
 ): { charge?: PortalCharge; error?: string } {
   const amount = round(Number(input.amountUsd) || 0);
   const label = String(input.label || "").trim().slice(0, 80);
   if (!workspaceId) return { error: "missing_workspace" };
   if (!label) return { error: "missing_label" };
   if (amount <= 0) return { error: "no_amount" };
+  // A pushed receipt bills as the owner marked it: "monthly" and "annual" land in
+  // the recurring sections of the client statement (per month / per year),
+  // "one_time" as a one-off. The amount is still the real receipt figure either
+  // way; only the section it shows in differs.
+  const cadence: ChargeCadence =
+    input.cadence === "monthly" ? "monthly" : input.cadence === "annual" ? "annual" : "one_time";
   const charge: PortalCharge = {
     id: rid("chg"),
     workspaceId,
     label,
     amountUsd: amount,
-    cadence: "one_time",
+    cadence,
     source: "usage",
     status: "pending",
+    receipt: sanitizeReceipt(input.receipt),
     createdAt: nowIso(),
   };
   store.charges.push(charge);
   persist();
   return { charge };
+}
+
+/** Keep only the receipt fields we store, and only when a real receipt id is
+ *  present. A usage push with no receipt (a metered line) stays receipt-less. */
+function sanitizeReceipt(r?: ChargeReceipt): ChargeReceipt | undefined {
+  const id = String(r?.receiptId || "").trim();
+  if (!id) return undefined;
+  return {
+    receiptId: id.slice(0, 120),
+    vendor: r?.vendor ? String(r.vendor).slice(0, 80) : undefined,
+    chargedAt: r?.chargedAt ? String(r.chargedAt).slice(0, 40) : undefined,
+    invoiceNumber: r?.invoiceNumber ? String(r.invoiceNumber).slice(0, 80) : undefined,
+    hasShot: !!r?.hasShot,
+    hasFile: !!r?.hasFile,
+  };
+}
+
+/**
+ * The vault receipt id behind an APPROVED charge for this workspace — the only
+ * gate the client portal's invoice-image endpoint trusts. Returns null unless
+ * the charge exists, belongs to this workspace, is approved, and carries a
+ * receipt, so a client can never pull an invoice that isn't on their own live
+ * statement.
+ */
+export function approvedChargeReceiptId(workspaceId: string, chargeId: string): string | null {
+  const c = store.charges.find((x) => x.id === chargeId && x.workspaceId === workspaceId);
+  if (!c || c.status !== "approved" || !c.receipt) return null;
+  return c.receipt.receiptId || null;
 }
 
 /** Approve a pending charge -> it becomes visible on the client portal. */
