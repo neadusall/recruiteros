@@ -3384,12 +3384,17 @@
       var box = $("#dwCharges"); if (!box) return;
       if (!charges.length) { box.innerHTML = '<div class="note">No charges staged. Nothing shows on their Spending tab.</div>'; return; }
       var pendingIds = charges.filter(function (c) { return c.status !== "approved"; }).map(function (c) { return c.id; });
+      // One-time charges are the folded receipts (e.g. "Zapmail … plus 32 names")
+      // that pile up on the statement; offer to clear the whole pile at once. The
+      // per-row Remove below still handles a single line.
+      var oneTimeIds = charges.filter(function (c) { return c.cadence === "one_time"; }).map(function (c) { return c.id; });
       var cadNote = function (c) { return c.cadence === "one_time" ? "one-time" : c.cadence === "annual" ? "/yr" : "/mo"; };
       // A batch staged from the Month-by-month grid arrives as several pending rows
-      // at once; approve them all in one click rather than one at a time.
-      var head = pendingIds.length > 1
-        ? '<div class="btn-row" style="margin-bottom:8px"><a class="btn btn-primary btn-sm" id="cApproveAll">Approve all ' + pendingIds.length + ' pending &amp; send →</a></div>'
-        : "";
+      // at once; approve — or clear the one-time pile — in one click, not row by row.
+      var headBtns = "";
+      if (pendingIds.length > 1) headBtns += '<a class="btn btn-primary btn-sm" id="cApproveAll">Approve all ' + pendingIds.length + ' pending &amp; send →</a> ';
+      if (oneTimeIds.length > 1) headBtns += '<a class="btn btn-sm btn-danger" id="cRemoveOneTime">Remove all ' + oneTimeIds.length + ' one-time</a>';
+      var head = headBtns ? '<div class="btn-row" style="margin-bottom:8px">' + headBtns + '</div>' : "";
       box.innerHTML = head + '<table class="otable"><tbody>' + charges.map(function (c) {
         var live = c.status === "approved";
         var pill = live ? '<span class="pill active">Live on portal</span>' : '<span class="pill susp">Pending</span>';
@@ -3409,6 +3414,19 @@
           send("/owner/portal-spend", "PATCH", { workspaceId: wsId, id: pendingIds[i], action: "approve" })
             .then(function (r) { if (r.ok) n++; nextApprove(i + 1); })
             .catch(function () { nextApprove(i + 1); });
+        })(0);
+      });
+      var rmOne = $("#cRemoveOneTime");
+      if (rmOne) rmOne.addEventListener("click", function () {
+        if (!confirm("Remove all " + oneTimeIds.length + " one-time charges from this client's Spending page?\n\n" +
+          "This deletes them for good. Recurring monthly/annual charges are left in place.")) return;
+        rmOne.classList.add("disabled"); rmOne.textContent = "Removing…";
+        var n = 0;
+        (function nextDel(i) {
+          if (i >= oneTimeIds.length) { toast(n + " one-time charge" + (n === 1 ? "" : "s") + " removed"); loadCharges(wsId); return; }
+          send("/owner/portal-spend?workspaceId=" + encodeURIComponent(wsId) + "&id=" + encodeURIComponent(oneTimeIds[i]), "DELETE")
+            .then(function (r) { if (r.ok) n++; nextDel(i + 1); })
+            .catch(function () { nextDel(i + 1); });
         })(0);
       });
       $$("#dwCharges tr[data-cid]").forEach(function (row) {
