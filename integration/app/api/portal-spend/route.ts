@@ -14,6 +14,7 @@ import { requireSession, ok } from "../../../lib/api";
 import {
   listApprovedCharges,
   approvedMonthlyTotal,
+  approvedAnnualTotal,
   approvedOneTimeTotal,
 } from "../../../lib/owner/portalSpend";
 
@@ -27,10 +28,23 @@ export async function GET(req: Request) {
     amountUsd: c.amountUsd,
     cadence: c.cadence || "monthly",
     since: c.approvedAt || c.createdAt,
+    // The actual receipt behind this line, when it was pushed from one. The
+    // vault id is NOT exposed; the client fetches the image by CHARGE id via
+    // /api/portal-spend/receipt/<id>, which re-checks approval + ownership.
+    receipt: c.receipt
+      ? {
+          vendor: c.receipt.vendor,
+          date: c.receipt.chargedAt,
+          invoiceNumber: c.receipt.invoiceNumber,
+          hasImage: !!(c.receipt.hasShot || c.receipt.hasFile),
+          hasFile: !!c.receipt.hasFile,
+        }
+      : undefined,
   }));
   return ok({
     charges,
     monthlyTotalUsd: approvedMonthlyTotal(workspaceId),
+    annualTotalUsd: approvedAnnualTotal(workspaceId),
     oneTimeTotalUsd: approvedOneTimeTotal(workspaceId),
     currency: "USD",
   });

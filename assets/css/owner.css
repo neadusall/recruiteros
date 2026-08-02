@@ -250,6 +250,56 @@ button.rc-clearbtn[data-restore] { color: var(--brand); }
 .rc-cell.rc-waived .rc-dash { opacity: 0.65; }
 .rc-total { background: var(--bg-soft); }
 
+/* Cherry-pick a receipt for the client's Spending page. The checkbox rides in the
+   top-left corner of the cell; a picked cell gets a brand-tinted ring so the
+   selection is legible at a glance across the grid. */
+.rc-pick {
+  position: absolute; top: 4px; left: 4px; z-index: 2; display: inline-flex; align-items: center;
+  gap: 4px; cursor: pointer; opacity: 0.55; transition: opacity 0.12s ease;
+}
+.rc-cell:hover .rc-pick, .rc-pick input:checked, .rc-pick.sent { opacity: 1; }
+.rc-pick input { cursor: pointer; accent-color: var(--brand); width: 15px; height: 15px; margin: 0; }
+.rc-cell:has(.rc-pick input:checked) { box-shadow: inset 0 0 0 2px var(--brand); }
+.rc-pick.sent { cursor: default; opacity: 0.85; }
+.rc-pick.sent input { cursor: default; }
+.rc-picksent { font-size: 9.5px; font-weight: 700; color: var(--ok, var(--brand)); white-space: nowrap; }
+/* A month holding more than one invoice: the badge says how many will be sent, so
+   ticking one box that forwards two lines is never a surprise. */
+.rc-pickn { font-size: 9.5px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
+
+/* The sticky push bar at the foot of the grid. Sits inside the card and only
+   appears once something is ticked, so it never takes space when idle. */
+.rc-pushbar { position: sticky; bottom: 0; margin-top: 10px; }
+.rc-pushbar-in {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  padding: 9px 12px; border: 1px solid var(--brand); border-radius: 8px;
+  background: var(--brand-soft); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+.rc-pushbar-in { display: block; }
+.rc-pushbar-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.rc-pushbar-n { font-size: 13px; font-variant-numeric: tabular-nums; }
+.rc-pushbar-acts { display: inline-flex; align-items: center; gap: 12px; }
+.rc-pushbar-acts .row-mini { margin: 0; }
+
+/* The reviewable list of receipts about to be pushed, each with its cadence
+   toggle so monthly and one-time are set BEFORE they reach the client. Capped in
+   height so a big selection scrolls rather than pushing the button off-screen. */
+.rc-pushlist { margin-top: 8px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.rc-pushrow {
+  display: flex; align-items: center; gap: 10px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--brand) 18%, transparent); font-size: 12.5px;
+}
+.rc-pushrow-l { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-pushrow-a { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.rc-cad { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; flex: 0 0 auto; }
+.rc-cadbtn {
+  border: 0; background: transparent; color: var(--text-muted); font-size: 11px; font-weight: 600;
+  padding: 3px 9px; cursor: pointer; line-height: 1.5;
+}
+.rc-cadbtn + .rc-cadbtn { border-left: 1px solid var(--border-strong); }
+.rc-cadbtn.on { background: var(--brand); color: #fff; }
+.rc-cad-note { flex: 0 0 auto; font-size: 11px; }
+
 .rcpt-anoms li { list-style: none; margin-left: -14px; padding-left: 12px; border-left: 3px solid transparent; }
 .rcpt-anoms li.sev-high { border-left-color: var(--danger); }
 .rcpt-anoms li.sev-medium { border-left-color: var(--warn); }

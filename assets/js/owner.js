@@ -143,7 +143,7 @@
   function spendPushBtn(label, amt) {
     amt = Number(amt) || 0;
     if (amt <= 0) return '<span class="note">—</span>';
-    return '<a class="btn btn-sm push-spend" data-label="' + esc(label) + '" data-amt="' + amt + '" title="Send this row to the client\'s Spending page (one click approves + sends it)">Send to Spending</a>';
+    return '<a class="btn btn-sm push-spend" data-label="' + esc(label) + '" data-amt="' + amt + '" title="Stage this row for the client\'s Spending page (you approve it below before it sends)">Stage for Spending</a>';
   }
   // A pushable cost table: [{label, amount}] -> rows with a push button each.
   function pushCostTable(rows) {
@@ -1416,26 +1416,270 @@
       else cb(null);
     }).catch(function () { cb(null); });
   }
-  // One click from the Month-by-month grid: create the charge on the client's
-  // Spending page AND approve it, so it lands live for their accountant at once.
+  // One click from the Month-by-month grid: STAGE the whole row's spend on the
+  // client's account as pending. It does NOT go live — the owner approves it on
+  // the account's Spending panel, so nothing reaches app.lumesp without sign-off.
   function sendSpendToClient(el, label, amt) {
     if (!(amt > 0)) { toast("Nothing to send on this row."); return; }
     resolveClientWs(function (wsId, wsName) {
       if (!wsId) { toast("No client account found to send to."); return; }
-      el.classList.add("is-busy"); var orig = el.textContent; el.textContent = "Sending…";
+      el.classList.add("is-busy"); var orig = el.textContent; el.textContent = "Staging…";
       send("/owner/portal-spend", "POST", { workspaceId: wsId, source: "usage", label: label, amountUsd: amt }).then(function (r) {
         var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
-        if (!cid) { toast((r.data && r.data.message) || "Couldn't send"); el.classList.remove("is-busy"); el.textContent = orig; return; }
-        send("/owner/portal-spend", "PATCH", { workspaceId: wsId, id: cid, action: "approve" }).then(function () {
-          toast("Sent to " + (wsName || "client") + " Spending"); el.classList.remove("is-busy"); el.classList.add("sent"); el.textContent = "Sent ✓";
-        }).catch(function () { el.classList.remove("is-busy"); el.classList.add("sent"); el.textContent = "Sent ✓"; });
+        if (!cid) { toast((r.data && r.data.message) || "Couldn't stage"); el.classList.remove("is-busy"); el.textContent = orig; return; }
+        toast("Staged for " + (wsName || "client") + " — approve to send");
+        el.classList.remove("is-busy"); el.classList.add("sent"); el.textContent = "Staged ✓";
+        showStagedBar(wsId, wsName, 1, 0);
       }).catch(function () { toast("Couldn't reach the server"); el.classList.remove("is-busy"); el.textContent = orig; });
     });
   }
-  /** "Send to Spending" on a whole row (its total in the window). */
+  /* ---- Cherry-pick receipts and rows -> the client's Spending page ----
+     The whole point of this grid: tick the receipts (individual month cells) and
+     the rows you want, then push the chosen set to the client's app.lumesp
+     Spending tab in one go. Each ticked receipt lands as its OWN one-time line at
+     its own proven amount, owner-approved so it shows the moment it is sent. A
+     session record of what was already sent greys those boxes so the same receipt
+     can't be double-billed by a stray second click. */
+  var rcSel = {};      // "ri|period" -> true, a picked cell
+  var rcSent = {};     // "ri|period" -> true, sent to Spending this session
+  var rcCadence = {};  // receiptId -> "monthly"|"one_time", owner override of the read cadence
+
+  /* The dollar figure a cell can push: a proven receipt amount, or a metered
+     cell's counted usage. Estimates ("no receipt", "due") are NOT pushable — you
+     only ever forward money that actually left the business. 0 means no checkbox. */
+  function cellAmt(c) {
+    if (!c) return 0;
+    if (c.actualUsd > 0) return c.actualUsd;
+    if (c.status === "metered" && c.countedUsd > 0) return c.countedUsd;
+    return 0;
+  }
+  function rcSelKeys() { return Object.keys(rcSel); }
+
+  /* Resolve a "ri|period" pick key back to its live row + cell in the grid data. */
+  function cellByKey(pkey) {
+    var idx = String(pkey).indexOf("|");
+    if (idx < 0) return null;
+    var ri = Number(pkey.slice(0, idx)), period = pkey.slice(idx + 1);
+    var rows = (rcptData && rcptData.matrix && rcptData.matrix.rows) || [];
+    var row = rows[ri]; if (!row) return null;
+    var cell = (row.cells || []).filter(function (c) { return c.period === period; })[0];
+    return cell ? { row: row, cell: cell, ri: ri } : null;
+  }
+
+  /* Flatten the current selection into the actual lines that will be pushed: ONE
+     per receipt, not one per cell, so a month that holds two invoices sends two
+     separate lines — each with its own amount, its own invoice number, and its
+     own receipt image following it to the client. A metered cell (no invoice)
+     sends a single receipt-less line for its counted usage. Each item is tagged
+     with the cell key it came from so the cell can be marked sent once all of its
+     receipts land. */
+  function resolvePush() {
+    var out = [];
+    rcSelKeys().forEach(function (pkey) {
+      var rc = cellByKey(pkey); if (!rc) return;
+      var row = rc.row, c = rc.cell, mlab = monthLabel(c.period);
+      if (c.receipts && c.receipts.length) {
+        c.receipts.forEach(function (r) {
+          if (!(r.amountUsd > 0)) return;
+          var lbl = (row.vendor || "Spend") + " — " + mlab + (r.invoiceNumber ? " · #" + r.invoiceNumber : "");
+          // Cadence read off the invoice, overridable by the owner. "recurring" on
+          // the receipt means it bills monthly on the client; anything else is a
+          // one-time charge. The two ZapMail invoices land on opposite sides of
+          // this line, which is what keeps them separated for the client.
+          var def = r.cadence === "recurring" ? "monthly" : "one_time";
+          out.push({
+            key: pkey,
+            receiptId: r.id,
+            label: lbl.slice(0, 80),
+            amt: r.amountUsd,
+            cadence: rcCadence[r.id] || def,
+            receipt: {
+              receiptId: r.id,
+              vendor: row.vendor,
+              chargedAt: r.chargedAt,
+              invoiceNumber: r.invoiceNumber,
+              hasShot: !!r.hasShot,
+              hasFile: !!r.hasFile
+            }
+          });
+        });
+      } else {
+        var amt = cellAmt(c);
+        if (amt > 0) out.push({ key: pkey, label: (row.vendor || "Spend") + " — " + mlab, amt: amt, cadence: "one_time" });
+      }
+    });
+    return out;
+  }
+
+  /** The checkbox that sits on a pushable cell, reflecting current pick/sent state.
+      A cell that holds more than one invoice says so, since ticking it forwards
+      every one of them as its own line. */
+  function cellPick(row, c, ri) {
+    var amt = cellAmt(c);
+    if (!(amt > 0)) return "";
+    var pkey = ri + "|" + c.period;
+    var sent = !!rcSent[pkey], on = !!rcSel[pkey];
+    var many = c.receipts && c.receipts.length > 1 ? c.receipts.length : 0;
+    return '<label class="rc-pick' + (sent ? " sent" : "") + '" title="' +
+      esc(sent ? "Already staged for approval"
+        : many ? "Select these " + many + " receipts to stage for the client's Spending page"
+        : "Select this receipt to stage for the client's Spending page") + '">' +
+      '<input type="checkbox" data-rcpick="' + esc(pkey) + '"' +
+      (on ? " checked" : "") + (sent ? " disabled" : "") + ' />' +
+      (sent ? '<span class="rc-picksent">sent&nbsp;✓</span>'
+        : many ? '<span class="rc-pickn">×' + many + '</span>' : "") + '</label>';
+  }
+
+  /** Row-level controls: cherry-pick every receipt on the row, or one-click send
+      the whole row as a single consolidated line. */
   function sendRowAct(r, ri) {
-    if (!(r.totalCountedUsd > 0)) return "";
-    return '<div class="row-acts"><a class="row-mini" data-sendrow="' + ri + '">Send to Spending →</a></div>';
+    var acts = [];
+    var pickable = (r.cells || []).filter(function (c) { return cellAmt(c) > 0 && !rcSent[ri + "|" + c.period]; }).length;
+    if (pickable) acts.push('<a class="row-mini" data-pickrow="' + ri + '">Select receipt' + (pickable > 1 ? "s" : "") + '</a>');
+    if (r.totalCountedUsd > 0) acts.push('<a class="row-mini" data-sendrow="' + ri + '">Stage row →</a>');
+    if (!acts.length) return "";
+    return '<div class="row-acts">' + acts.join("") + '</div>';
+  }
+
+  /** The sticky action bar at the foot of the grid: what's picked, and the button
+      that pushes it. Rebuilt from rcSel on every selection change and after a
+      re-render, so it always matches the ticked boxes above it. */
+  function renderPushBar() {
+    var bar = $("#rcPushBar"); if (!bar) return;
+    var items = resolvePush();
+    if (!items.length) { bar.hidden = true; bar.innerHTML = ""; return; }
+    var total = items.reduce(function (t, it) { return t + (it.amt || 0); }, 0);
+    var monthlyN = items.filter(function (it) { return it.cadence === "monthly"; }).length;
+    var annualN = items.filter(function (it) { return it.cadence === "annual"; }).length;
+    var oneN = items.length - monthlyN - annualN;
+    var split = [];
+    if (monthlyN) split.push(monthlyN + " monthly");
+    if (annualN) split.push(annualN + " annual");
+    if (oneN) split.push(oneN + " one-time");
+    // One reviewable line per receipt, each with a Monthly / Annually / One-time
+    // toggle so a month holding a subscription AND a one-off (ZapMail) is billed
+    // on the right side and nothing is lumped together. The toggle starts on the
+    // receipt's read cadence and the owner sets it from there.
+    function cadBtn(rid, val, lab, cur) {
+      return '<button type="button" class="rc-cadbtn' + (cur === val ? " on" : "") +
+        '" data-cadset="' + esc(rid) + '" data-cad="' + val + '">' + lab + '</button>';
+    }
+    var lines = items.map(function (it) {
+      var toggle = it.receiptId
+        ? '<span class="rc-cad">' +
+            cadBtn(it.receiptId, "monthly", "Monthly", it.cadence) +
+            cadBtn(it.receiptId, "annual", "Annually", it.cadence) +
+            cadBtn(it.receiptId, "one_time", "One-time", it.cadence) +
+          '</span>'
+        : '<span class="rc-cad-note note">pay per use</span>';
+      return '<div class="rc-pushrow"><span class="rc-pushrow-l">' + esc(it.label) + '</span>' +
+        '<span class="rc-pushrow-a">' + usd(it.amt) + '</span>' + toggle + '</div>';
+    }).join("");
+    bar.hidden = false;
+    bar.innerHTML =
+      '<div class="rc-pushbar-in">' +
+        '<div class="rc-pushbar-top">' +
+          '<span class="rc-pushbar-n">' + items.length + ' receipt' + (items.length > 1 ? "s" : "") +
+          ' · <strong>' + usd(total) + '</strong>' + (split.length ? ' · ' + esc(split.join(", ")) : "") +
+          ' <span class="note">— staged for your approval, not sent yet</span></span>' +
+          '<span class="rc-pushbar-acts">' +
+          '<a class="row-mini" id="rcPushClear">Clear</a>' +
+          '<button class="btn btn-sm" id="rcPushGo">Stage for approval →</button>' +
+          '</span>' +
+        '</div>' +
+        '<div class="rc-pushlist">' + lines + '</div>' +
+      '</div>';
+    var go = $("#rcPushGo"); if (go) go.addEventListener("click", pushSelection);
+    var cl = $("#rcPushClear"); if (cl) cl.addEventListener("click", clearSelection);
+    $$("#rcPushBar [data-cadset]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        rcCadence[b.dataset.cadset] = b.dataset.cad;
+        renderPushBar();
+      });
+    });
+  }
+  function setPick(pkey, on) {
+    if (on) rcSel[pkey] = true;
+    else delete rcSel[pkey];
+    renderPushBar();
+  }
+  function clearSelection() {
+    rcSel = {};
+    $$('#view .rc-pick input').forEach(function (cb) { cb.checked = false; });
+    renderPushBar();
+  }
+  /** Mark a cell as staged this session: untick, disable, badge it, drop it from
+      the pending selection. Guards against staging the same receipt twice. */
+  function markSent(pkey) {
+    rcSent[pkey] = true;
+    delete rcSel[pkey];
+    var cb = $('#view .rc-pick input[data-rcpick="' + pkey + '"]');
+    if (!cb) return;
+    cb.checked = false; cb.disabled = true;
+    var lab = cb.closest && cb.closest(".rc-pick");
+    if (lab && !lab.querySelector(".rc-picksent")) {
+      lab.classList.add("sent");
+      var s = document.createElement("span"); s.className = "rc-picksent"; s.innerHTML = "staged";
+      lab.appendChild(s);
+    }
+  }
+  /** After staging, the bar becomes a confirmation: the receipts are on the client's
+      account as PENDING and nothing shows on app.lumesp until the owner approves
+      them. One click from here opens that account's approval panel. */
+  function showStagedBar(wsId, wsName, okCount, failCount) {
+    var bar = $("#rcPushBar"); if (!bar) return;
+    bar.hidden = false;
+    bar.innerHTML =
+      '<div class="rc-pushbar-in"><div class="rc-pushbar-top">' +
+      '<span class="rc-pushbar-n">' + okCount + ' receipt' + (okCount !== 1 ? "s" : "") +
+      ' staged for <strong>' + esc(wsName || "client") + '</strong> · pending your approval' +
+      (failCount ? ' · ' + failCount + ' failed' : "") +
+      ' <span class="note">— nothing shows on their Spending page until you approve it</span></span>' +
+      '<span class="rc-pushbar-acts">' +
+      '<a class="row-mini" id="rcStagedDismiss">Dismiss</a>' +
+      '<button class="btn btn-sm" id="rcStagedApprove">Review &amp; approve →</button>' +
+      '</span></div></div>';
+    var ap = $("#rcStagedApprove");
+    if (ap) ap.addEventListener("click", function () { if (typeof openAccount === "function") openAccount(wsId); });
+    var dm = $("#rcStagedDismiss");
+    if (dm) dm.addEventListener("click", function () { bar.hidden = true; bar.innerHTML = ""; });
+  }
+  /** Stage every picked receipt onto the client's account as PENDING — one after
+      another so a stall on one doesn't wedge the rest. Nothing is approved here:
+      the owner approves each on the account's Spending panel, so nothing reaches
+      app.lumesp without a deliberate sign-off. */
+  function pushSelection() {
+    var items = resolvePush();
+    if (!items.length) return;
+    resolveClientWs(function (wsId, wsName) {
+      if (!wsId) { toast("No client account found to send to."); return; }
+      var go = $("#rcPushGo"); if (go) { go.disabled = true; go.textContent = "Staging…"; }
+      var okCount = 0, failCount = 0;
+      // Per-cell success tally: a cell is marked staged (and locked) only once every
+      // receipt it holds has been staged, so a partial failure leaves it pickable.
+      var need = {}, done = {};
+      items.forEach(function (it) { need[it.key] = (need[it.key] || 0) + 1; });
+      (function next(i) {
+        if (i >= items.length) {
+          Object.keys(done).forEach(function (k) { if (done[k] === need[k]) markSent(k); });
+          renderPushBar();
+          if (okCount > 0) showStagedBar(wsId, wsName, okCount, failCount);
+          else toast(failCount ? failCount + " could not be staged" : "Nothing to stage");
+          return;
+        }
+        var it = items[i];
+        // STAGE ONLY. The charge lands as pending; it is invisible to the client
+        // until the owner approves it on the account's Spending panel. No approve
+        // call here — that is the deliberate sign-off the owner asked to keep.
+        var payload = { workspaceId: wsId, source: "usage", label: it.label, amountUsd: it.amt, cadence: it.cadence || "one_time" };
+        if (it.receipt) payload.receipt = it.receipt;
+        send("/owner/portal-spend", "POST", payload).then(function (r) {
+          var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
+          if (!cid) { failCount++; next(i + 1); return; }
+          okCount++; done[it.key] = (done[it.key] || 0) + 1; next(i + 1);
+        }).catch(function () { failCount++; next(i + 1); });
+      })(0);
+    });
   }
 
   function receiptMatrix(d) {
@@ -1465,7 +1709,7 @@
          reads "no receipt". Offered only when there is something to split or drop. */
       (loose ? '<button class="btn btn-sm" id="rcRelink">' + esc(looseLabel(d)) + '</button>' : "") +
       '</div></div>' +
-      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate.' +
+      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate. <strong>Tick</strong> the receipts (or a whole row) you want on the client\'s bill and stage them from the bar at the foot of the grid — each is set Monthly, Annual or One-time and lands on the client\'s account as <strong>pending</strong>. Nothing shows on their app.lumesp Spending page until you approve it.' +
       /* Where the books open. Said out loud so the missing earlier months read as a
          starting point rather than as spend that went unrecorded. */
       (d.registerStart ? ' The books open in ' + esc(monthLabelLong(d.registerStart)) + ': nothing charged before then is reported on this page.' : '') +
@@ -1535,7 +1779,8 @@
       html += '<td class="num"><span class="' + cls + '">' + pct(t.coveragePct) + '</span></td>';
     });
     html += '<td class="num"><span class="' + (m.totals.coveragePct >= 90 ? "margin-good" : "margin-mid") + '">' + pct(m.totals.coveragePct) + '</span></td></tr>';
-    return html + '</tfoot></table></div></div>';
+    return html + '</tfoot></table></div>' +
+      '<div class="rc-pushbar" id="rcPushBar" hidden></div></div>';
   }
 
   /* One month of one service. Every month that has paper behind it carries a labelled
@@ -1653,7 +1898,11 @@
         inner += '<button class="rc-view ghost rc-clearbtn" data-clear="' + esc(key) + '" title="' + esc("No charge for " + monthLabel(c.period) + " — blank this one cell") + '">Clear</button>';
       }
     }
-    return '<td class="' + cls + '"' + attr + ' title="' + esc(monthLabel(c.period) + " · " + (CELL_LABEL[c.status] || c.status)) + '">' + inner + '</td>';
+    /* The pick checkbox rides on top of every cell that has real money behind it,
+       so an accountant-facing receipt can be ticked and forwarded without leaving
+       the grid. It is stopPropagation'd in the wiring so ticking never also opens
+       the viewer under it. */
+    return '<td class="' + cls + '"' + attr + ' title="' + esc(monthLabel(c.period) + " · " + (CELL_LABEL[c.status] || c.status)) + '">' + cellPick(row, c, ri) + inner + '</td>';
   }
 
   /* Receipts whose document is on file but whose picture is not. An API figure never had a
@@ -1996,6 +2245,35 @@
     $$("#view .rc-mhead[data-month]").forEach(function (b) {
       b.addEventListener("click", function (e) { e.stopPropagation(); openMonthReceipts(b.dataset.month); });
     });
+    /* Cherry-pick a receipt into the push selection. The checkbox sits ON the cell,
+       so any click inside its label (the box, its padding, the "sent" badge) must
+       be stopped from bubbling to the cell and opening the viewer underneath. */
+    $$("#view .rc-pick").forEach(function (lab) {
+      lab.addEventListener("click", function (e) { e.stopPropagation(); });
+    });
+    $$("#view .rc-pick input").forEach(function (cb) {
+      cb.addEventListener("change", function (e) {
+        e.stopPropagation();
+        setPick(cb.dataset.rcpick, cb.checked);
+      });
+    });
+    /* Select (or, if all are already ticked, clear) every unsent receipt on a row. */
+    $$("#view [data-pickrow]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var pre = a.dataset.pickrow + "|";
+        var boxes = $$("#view .rc-pick input").filter(function (cb) {
+          return cb.dataset.rcpick.indexOf(pre) === 0 && !cb.disabled;
+        });
+        var allOn = boxes.length && boxes.every(function (cb) { return cb.checked; });
+        boxes.forEach(function (cb) {
+          cb.checked = !allOn;
+          setPick(cb.dataset.rcpick, cb.checked);
+        });
+      });
+    });
+    /* Rebuild the bar from whatever selection survived this re-render. */
+    renderPushBar();
     /* Put a row that has no line item onto the register, prefilled. The amount comes from
        what was actually charged in the window rather than being left at zero, because a
        row created at $0 immediately reports itself as "no price on file" and the person
@@ -2963,7 +3241,7 @@
         return { label: titleCase(k), amount: a.costByCategory[k] };
       }).sort(function (x, y) { return y.amount - x.amount; });
       html += '<h3 style="font-size:13px;margin:16px 0 6px">Cost by category · ' + esc(win) + '</h3>' +
-        '<div class="note" style="margin-bottom:6px">Click <strong>Send to Spending</strong> on any line to approve + send it to the client\'s Spending page in one click. Sent rows lock so you can\'t double-send; remove one below to clear it (only you can clear, the accountant can only view and download).</div>' +
+        '<div class="note" style="margin-bottom:6px">Click <strong>Stage for Spending</strong> on any line to add it to the client\'s pending list below — it does not send until you approve it there. Staged rows lock so you can\'t double-stage; remove one below to clear it (only you can, the accountant can only view and download).</div>' +
         pushCostTable(catRows);
     }
 
@@ -2999,7 +3277,7 @@
     html += '<h3 style="font-size:13px;margin:16px 0 6px">On their Spending page</h3>' +
       '<div class="note" style="margin-bottom:8px">Everything you have sent to this client\'s <strong>Spending</strong> page, live for their accountant to view and download (CSV/PDF). They cannot change or delete anything, only you can. Remove a row here to clear it off their receipt.</div>' +
       '<div class="btn-row" style="margin-bottom:8px">' +
-      '<a class="btn btn-sm" id="dwStageCharge">Send monthly charge (' + usd(a.monthlyPriceUsd) + '/mo)</a></div>' +
+      '<a class="btn btn-sm" id="dwStageCharge">Stage monthly charge (' + usd(a.monthlyPriceUsd) + '/mo)</a></div>' +
       '<div id="dwCharges">Loading…</div>';
 
     // API access (reselling): lend house keys to this customer, with terms.
@@ -3016,7 +3294,7 @@
     // recent usage — each event can be pushed to the client's Spending tab.
     if (d.recentUsage && d.recentUsage.length) {
       html += '<h3 style="font-size:13px;margin:16px 0 6px">Recent cost events</h3>' +
-        '<div class="note" style="margin-bottom:6px">Click <strong>Send to Spending</strong> to approve + send any event to the client\'s Spending page in one click. Remove it below to clear it off their receipt.</div>' +
+        '<div class="note" style="margin-bottom:6px">Click <strong>Stage for Spending</strong> to add any event to the client\'s pending list — it sends only after you approve it below. Remove it below to clear it off their receipt.</div>' +
         '<table class="otable"><tbody>';
       d.recentUsage.slice(0, 12).forEach(function (e) {
         var sub = e.source || e.category || "";
@@ -3089,9 +3367,9 @@
       if (st === "approved") {
         b.setAttribute("data-sent", "live"); b.textContent = "On receipt ✓"; b.style.opacity = "0.6";
       } else if (st === "pending") {
-        b.setAttribute("data-sent", "pending"); b.textContent = "Sent · pending"; b.style.opacity = "0.72";
+        b.setAttribute("data-sent", "pending"); b.textContent = "Staged · pending"; b.style.opacity = "0.72";
       } else {
-        b.removeAttribute("data-sent"); b.textContent = "Send to Spending"; b.style.opacity = "";
+        b.removeAttribute("data-sent"); b.textContent = "Stage for Spending"; b.style.opacity = "";
       }
     });
   }
@@ -3105,17 +3383,34 @@
       annotateSent(charges); // keep every "→ Spending" button's sent-state in sync
       var box = $("#dwCharges"); if (!box) return;
       if (!charges.length) { box.innerHTML = '<div class="note">No charges staged. Nothing shows on their Spending tab.</div>'; return; }
-      box.innerHTML = '<table class="otable"><tbody>' + charges.map(function (c) {
+      var pendingIds = charges.filter(function (c) { return c.status !== "approved"; }).map(function (c) { return c.id; });
+      var cadNote = function (c) { return c.cadence === "one_time" ? "one-time" : c.cadence === "annual" ? "/yr" : "/mo"; };
+      // A batch staged from the Month-by-month grid arrives as several pending rows
+      // at once; approve them all in one click rather than one at a time.
+      var head = pendingIds.length > 1
+        ? '<div class="btn-row" style="margin-bottom:8px"><a class="btn btn-primary btn-sm" id="cApproveAll">Approve all ' + pendingIds.length + ' pending &amp; send →</a></div>'
+        : "";
+      box.innerHTML = head + '<table class="otable"><tbody>' + charges.map(function (c) {
         var live = c.status === "approved";
-        var oneTime = c.cadence === "one_time";
         var pill = live ? '<span class="pill active">Live on portal</span>' : '<span class="pill susp">Pending</span>';
         return '<tr data-cid="' + esc(c.id) + '" data-live="' + (live ? "1" : "") + '">' +
-          '<td>' + esc(c.label) + ' <span class="note">' + (oneTime ? "one-time" : "/mo") + '</span></td>' +
+          '<td>' + esc(c.label) + ' <span class="note">' + cadNote(c) + '</span></td>' +
           '<td class="num">' + usd(c.amountUsd) + '</td>' +
           '<td>' + pill + '</td>' +
           '<td class="num"><a class="btn btn-sm c-toggle">' + (live ? "Pull back" : "Approve & send") + '</a> ' +
           '<a class="btn btn-sm c-del">Remove</a></td></tr>';
       }).join("") + '</tbody></table>';
+      var appAll = $("#cApproveAll");
+      if (appAll) appAll.addEventListener("click", function () {
+        appAll.classList.add("disabled"); appAll.textContent = "Approving…";
+        var n = 0;
+        (function nextApprove(i) {
+          if (i >= pendingIds.length) { toast(n + " approved, live on portal"); loadCharges(wsId); return; }
+          send("/owner/portal-spend", "PATCH", { workspaceId: wsId, id: pendingIds[i], action: "approve" })
+            .then(function (r) { if (r.ok) n++; nextApprove(i + 1); })
+            .catch(function () { nextApprove(i + 1); });
+        })(0);
+      });
       $$("#dwCharges tr[data-cid]").forEach(function (row) {
         var cid = row.dataset.cid, isLive = !!row.dataset.live;
         row.querySelector(".c-toggle").addEventListener("click", function () {
@@ -3156,34 +3451,32 @@
         if (sent) { toast("Already on their Spending. Remove it below to re-send."); return; }
         if (amt <= 0) { toast("This row has no cost to send."); return; }
         if (btn.classList.contains("is-busy")) return;
-        btn.classList.add("is-busy"); btn.textContent = "Sending…";
-        // One click = create the charge AND approve it, so it lands on the client's
-        // Spending page immediately. No separate approve step.
+        btn.classList.add("is-busy"); btn.textContent = "Staging…";
+        // Stage only: the charge lands as pending. It shows on the client's
+        // Spending page only after the owner approves it in the list below.
         send("/owner/portal-spend", "POST", { workspaceId: wsid, source: "usage", label: label, amountUsd: amt }).then(function (r) {
           var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
           if (!cid) {
-            toast((r.data && r.data.message) || "Couldn't send that row");
-            btn.classList.remove("is-busy"); btn.textContent = "Send to Spending";
+            toast((r.data && r.data.message) || "Couldn't stage that row");
+            btn.classList.remove("is-busy"); btn.textContent = "Stage for Spending";
             return;
           }
-          send("/owner/portal-spend", "PATCH", { workspaceId: wsid, id: cid, action: "approve" }).then(function () {
-            toast("Sent “" + label + "” to their Spending");
-            loadCharges(wsid);
-          }).catch(function () { toast("Sent — check the list below to confirm"); loadCharges(wsid); });
+          toast("Staged “" + label + "” — approve below to send");
+          loadCharges(wsid);
         }).catch(function () {
           toast("Couldn't reach the server");
-          btn.classList.remove("is-busy"); btn.textContent = "Send to Spending";
+          btn.classList.remove("is-busy"); btn.textContent = "Stage for Spending";
         });
       });
     }
     var stageBtn = $("#dwStageCharge");
     if (stageBtn) stageBtn.addEventListener("click", function () {
+      // Stage only: the monthly charge lands as pending and shows on the client's
+      // Spending page only after the owner approves it in the list below.
       send("/owner/portal-spend", "POST", { workspaceId: id, source: "monthly_price" }).then(function (r) {
         var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
         if (!cid) { toast((r.data && r.data.message) || "Set a month-to-month price first"); return; }
-        send("/owner/portal-spend", "PATCH", { workspaceId: id, id: cid, action: "approve" }).then(function () {
-          toast("Monthly charge sent to their Spending"); loadCharges(id);
-        }).catch(function () { loadCharges(id); });
+        toast("Monthly charge staged — approve below to send"); loadCharges(id);
       });
     });
     $("#dwSave").addEventListener("click", function () {

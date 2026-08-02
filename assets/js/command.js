@@ -18681,9 +18681,11 @@
       // Recurring subscription vs one-time usage rows the owner pushed over. This
       // view is READ-ONLY for the account: no edit controls, only the monthly /
       // annual toggle, an enlarge popup, and a PDF download.
-      var monthly = charges.filter(function (c) { return (c.cadence || "monthly") !== "one_time"; });
+      var monthly = charges.filter(function (c) { return (c.cadence || "monthly") === "monthly"; });
+      var annualCharges = charges.filter(function (c) { return c.cadence === "annual"; });
       var oneTime = charges.filter(function (c) { return c.cadence === "one_time"; });
       var monthlyTotal = Number(d.monthlyTotalUsd) || monthly.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
+      var annualTotal = Number(d.annualTotalUsd) || annualCharges.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
       var oneTimeTotal = Number(d.oneTimeTotalUsd) || oneTime.reduce(function (s, c) { return s + (Number(c.amountUsd) || 0); }, 0);
       var wsName = (typeof wsDisplayName === "function" && wsDisplayName()) || "Spending";
       var period; try { period = localStorage.getItem("ros_spend_period") || "monthly"; } catch (e) { period = "monthly"; }
@@ -18694,7 +18696,13 @@
       function receiptHtml(per, opts) {
         opts = opts || {};
         var annual = per === "annual", mult = annual ? 12 : 1, suf = annual ? "/yr" : "/mo";
-        var recurTotal = monthlyTotal * mult, grand = recurTotal + oneTimeTotal;
+        // Monthly-cadence lines scale with the view (×12 in annual view). Annual-
+        // cadence lines are naturally per-year: shown as-is in the annual view,
+        // and as their per-month equivalent in the monthly view so the running
+        // total stays coherent whichever period you are looking at.
+        var monthlyInView = monthlyTotal * mult;
+        var annualInView = annual ? annualTotal : annualTotal / 12;
+        var recurTotal = monthlyInView + annualInView, grand = recurTotal + oneTimeTotal;
         var lineCol = opts.print ? "#e4e4ea" : "var(--line,rgba(120,120,140,.18))";
         var strong = opts.print ? "#c7c7d0" : "var(--line,rgba(120,120,140,.4))";
         var muted = opts.print ? "#6b7280" : "var(--muted,#8b93a1)";
@@ -18714,9 +18722,20 @@
           '<div style="font-weight:700;font-size:' + (big ? "20px" : "16px") + '">' + esc(wsName) + '</div>' +
           '<div style="font-size:12px;color:' + muted + '">Spending statement, ' + (annual ? "annual view" : "monthly view") + '</div></div></div>';
         if (monthly.length) {
-          h += seg("Subscription");
+          h += seg("Monthly subscription");
           h += monthly.map(function (c) { return row(c.label, (Number(c.amountUsd) || 0) * mult, suf); }).join("");
-          h += tot(annual ? "Subscription per year" : "Subscription per month", recurTotal);
+          h += tot(annual ? "Monthly subscription per year" : "Subscription per month", monthlyInView);
+        }
+        if (annualCharges.length) {
+          h += seg(annual ? "Annual subscriptions" : "Annual subscriptions (billed yearly)");
+          h += annualCharges.map(function (c) {
+            var a = Number(c.amountUsd) || 0;
+            // Annual view: the true yearly figure. Monthly view: its per-month
+            // share, with the real yearly amount named so nothing is hidden.
+            return annual ? row(c.label, a, "/yr")
+              : row(c.label + " — billed " + m(a) + "/yr", a / 12, "/mo");
+          }).join("");
+          h += tot(annual ? "Annual subscriptions per year" : "Annual subscriptions per month", annualInView);
         }
         if (oneTime.length) {
           h += seg("One-time charges");
@@ -18729,6 +18748,58 @@
 
       function segBtn(val, label) {
         return '<button class="btn btn-sm ' + (period === val ? "btn-primary" : "btn-ghost") + '" data-period="' + val + '" style="min-width:76px">' + label + '</button>';
+      }
+
+      // The actual receipts, one per pushed line: the vendor, the date, the
+      // invoice number and — for anything that arrived with a document — the
+      // invoice image itself, viewable in full and downloadable as the vendor
+      // sent it. Fetched by CHARGE id from the session-scoped endpoint, so a
+      // customer only ever sees invoices on their own live statement.
+      function fmtDate(s) {
+        if (!s) return "";
+        var t = Date.parse(s); if (isNaN(t)) return "";
+        try { return new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }); }
+        catch (e) { return ""; }
+      }
+      function receiptImgUrl(cid, which) {
+        return API + "/portal-spend/receipt/" + encodeURIComponent(cid) + "?v=" + (which || "png");
+      }
+      function receiptsGalleryHtml() {
+        // Every pushed line that has an invoice behind it — monthly AND one-time —
+        // so a vendor that billed a subscription and a one-off in the same month
+        // (ZapMail) shows both, each tagged and each with its own document.
+        // Monthly first, then one-time, so the two are visually grouped.
+        var withR = charges.filter(function (c) { return c.receipt; });
+        if (!withR.length) return "";
+        // Rank monthly, then annual, then one-time, so like sits with like.
+        function cadRank(c) { var cd = c.cadence || "monthly"; return cd === "monthly" ? 0 : cd === "annual" ? 1 : 2; }
+        withR.sort(function (a, b) { return cadRank(a) - cadRank(b); });
+        var rows = withR.map(function (c) {
+          var r = c.receipt || {};
+          var cd = c.cadence || "monthly";
+          var cadLabel = cd === "annual" ? "Annual" : cd === "one_time" ? "One-time" : "Monthly";
+          var cadClass = cd === "annual" ? "sp-rtag-yr" : cd === "one_time" ? "sp-rtag-one" : "sp-rtag-mo";
+          var per = cd === "annual" ? "/yr" : cd === "one_time" ? "" : "/mo";
+          var tag = '<span class="sp-rtag ' + cadClass + '">' + cadLabel + '</span>';
+          var sub = [r.vendor, fmtDate(r.date), r.invoiceNumber ? "Invoice #" + r.invoiceNumber : ""]
+            .filter(Boolean).join(" · ");
+          var thumb = r.hasImage
+            ? '<img class="sp-rthumb" src="' + receiptImgUrl(c.id, "thumb") + '" alt="receipt" loading="lazy" />'
+            : '<div class="sp-rthumb sp-rnoimg">no image</div>';
+          var acts = r.hasImage
+            ? '<button class="btn btn-ghost btn-sm sp-rview" data-cid="' + esc(c.id) + '">View receipt</button>' +
+              (r.hasFile ? '<a class="btn btn-ghost btn-sm" href="' + receiptImgUrl(c.id, "file") + '" target="_blank" rel="noopener">Download</a>' : "")
+            : '<span class="muted" style="font-size:12px">no document</span>';
+          return '<div class="sp-rrow">' + thumb +
+            '<div class="sp-rmeta"><div class="sp-rlabel">' + esc(c.label) + ' ' + tag + '</div>' +
+            (sub ? '<div class="sp-rsub muted">' + esc(sub) + '</div>' : "") + '</div>' +
+            '<div class="sp-ramt">' + m(Number(c.amountUsd) || 0) + (per ? '<span class="sp-rper muted">' + per + '</span>' : "") + '</div>' +
+            '<div class="sp-racts">' + acts + '</div></div>';
+        }).join("");
+        return '<div class="card" style="margin-bottom:16px">' +
+          '<div class="sp-rhead">Receipts on your account</div>' +
+          '<div class="muted" style="font-size:12px;margin-bottom:10px">Each charge above, with the invoice it was billed from. <strong>Monthly</strong> lines recur each month, <strong>Annual</strong> once a year, <strong>One-time</strong> once. Open one to see the full receipt, or download the original.</div>' +
+          '<div class="sp-rlist">' + rows + '</div></div>';
       }
 
       // Download to PDF via a print-friendly window (user picks "Save as PDF").
@@ -18748,13 +18819,28 @@
       function downloadCsv() {
         var annual = period === "annual", mult = annual ? 12 : 1;
         function q(s) { s = String(s == null ? "" : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+        var annualInView = annual ? annualTotal : annualTotal / 12;
         var rows = [["Item", "Type", "Amount (USD)"]];
-        monthly.forEach(function (c) { rows.push([c.label, annual ? "Subscription (per year)" : "Subscription (per month)", ((Number(c.amountUsd) || 0) * mult).toFixed(2)]); });
-        oneTime.forEach(function (c) { rows.push([c.label, "One-time", (Number(c.amountUsd) || 0).toFixed(2)]); });
+        monthly.forEach(function (c) {
+          var r = c.receipt || {};
+          var det = [annual ? "Monthly subscription (per year)" : "Monthly subscription (per month)", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
+          rows.push([c.label, det, ((Number(c.amountUsd) || 0) * mult).toFixed(2)]);
+        });
+        annualCharges.forEach(function (c) {
+          var a = Number(c.amountUsd) || 0, r = c.receipt || {};
+          var det = ["Annual subscription (billed yearly)", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
+          rows.push([c.label, det, (annual ? a : a / 12).toFixed(2)]);
+        });
+        oneTime.forEach(function (c) {
+          var r = c.receipt || {};
+          var det = ["One-time", fmtDate(r.date), r.invoiceNumber ? "#" + r.invoiceNumber : ""].filter(Boolean).join(" · ");
+          rows.push([c.label, det, (Number(c.amountUsd) || 0).toFixed(2)]);
+        });
         rows.push([]);
-        if (monthly.length) rows.push([annual ? "Subscription total (per year)" : "Subscription total (per month)", "", (monthlyTotal * mult).toFixed(2)]);
+        if (monthly.length) rows.push([annual ? "Monthly subscription total (per year)" : "Subscription total (per month)", "", (monthlyTotal * mult).toFixed(2)]);
+        if (annualCharges.length) rows.push([annual ? "Annual subscriptions total (per year)" : "Annual subscriptions total (per month)", "", annualInView.toFixed(2)]);
         if (oneTime.length) rows.push(["One-time total", "", oneTimeTotal.toFixed(2)]);
-        rows.push([annual ? "Total per year" : "Total this month", "", (monthlyTotal * mult + oneTimeTotal).toFixed(2)]);
+        rows.push([annual ? "Total per year" : "Total this month", "", (monthlyTotal * mult + annualInView + oneTimeTotal).toFixed(2)]);
         var csv = rows.map(function (r) { return r.map(q).join(","); }).join("\r\n");
         var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
         var url = URL.createObjectURL(blob);
@@ -18776,7 +18862,19 @@
               '</div>' +
             '</div>' +
             '<div id="spReceipt">' + receiptHtml(period, {}) + '</div>' +
-          '</div>';
+          '</div>' +
+          receiptsGalleryHtml();
+        // Open the full invoice image for one receipt.
+        Array.prototype.forEach.call(el.querySelectorAll(".sp-rview"), function (b) {
+          b.addEventListener("click", function () {
+            var cid = b.getAttribute("data-cid");
+            openModal("Receipt", "As the vendor billed it",
+              '<div style="text-align:center;max-height:70vh;overflow:auto">' +
+              '<img src="' + receiptImgUrl(cid, "png") + '" alt="receipt" ' +
+              'style="max-width:100%;height:auto;border-radius:8px;border:1px solid var(--line,rgba(120,120,140,.2))" />' +
+              '</div>');
+          });
+        });
         Array.prototype.forEach.call(el.querySelectorAll("[data-period]"), function (b) {
           b.addEventListener("click", function () {
             period = b.getAttribute("data-period");
