@@ -1082,7 +1082,34 @@ export async function harvestMailbox(
     client = new ImapFlow({ host: cfg.host, port: cfg.port, secure: true, auth, logger: false });
     await client.connect();
 
-    for (const folder of FOLDERS) {
+    /* WHICH FOLDERS TO ACTUALLY OPEN. The hardcoded FOLDERS list is a guess at each
+       provider's folder names, and a receipt hiding in a folder it did not name (a
+       registrar's confirmation sitting in Microsoft 365's "Deleted Items") is invisible.
+       So ask the server what it really has:
+         - Gmail keeps everything except Spam/Trash inside "[Gmail]/All Mail", so INBOX +
+           All Mail + Spam + Trash covers the account without re-reading every label.
+         - Everything else (Microsoft 365, custom IMAP) is swept folder by folder, skipping
+           only outgoing and non-mail folders — so Deleted Items, Junk, Archive and any
+           custom folder are all read. Falls back to the curated names if listing fails. */
+    let folders: string[] = FOLDERS;
+    try {
+      const paths = (await client.list()).map((f) => f.path).filter(Boolean);
+      if (paths.length) {
+        const isGmail = paths.some((p) => /^\[Gmail\]\/All Mail$/i.test(p));
+        if (isGmail) {
+          folders = ["INBOX", "[Gmail]/All Mail", "[Gmail]/Spam", "[Gmail]/Trash"]
+            .filter((f) => paths.some((p) => p.toLowerCase() === f.toLowerCase()));
+        } else {
+          const skip = /^(?:sent items|sent|sent mail|drafts|outbox|notes|calendar|contacts|tasks|journal|sync issues|conversation history|rss feeds|rss subscriptions)(?:\/|$)/i;
+          folders = paths.filter((p) => !skip.test(p));
+          if (!folders.some((p) => p.toLowerCase() === "inbox")) folders.unshift("INBOX");
+        }
+      }
+    } catch {
+      /* server would not list folders — fall back to the curated names */
+    }
+
+    for (const folder of folders) {
       let lock: { release: () => void } | null = null;
       try {
         lock = await client.getMailboxLock(folder, { readOnly: true } as never);
