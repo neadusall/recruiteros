@@ -35,7 +35,7 @@ import {
   VENDOR_SOURCES, PROCESSOR_DOMAINS, GENERIC_SUBJECT_HINTS, NON_CHARGE_HINTS,
   vendorSourceFor, type VendorSource,
 } from "./receiptSources";
-import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge } from "./receiptMatch";
+import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge, type DupeCandidate } from "./receiptMatch";
 import { pullEmailDocument, type FetchedDocument, type PullResult } from "./receiptLinks";
 import { relevanceOf, filingUnknownVendors } from "./receiptRelevance";
 import { getMsImapToken, msBillingMailboxes } from "./msOauth";
@@ -1235,8 +1235,23 @@ async function importMessage(
   const fingerprint = createHash("sha1")
     .update([mm.messageId || "", match.vendor, parsed.amountUsd.toFixed(2), chargedAt, parsed.invoiceNumber || ""].join("|"))
     .digest("hex");
-  // Same message, or the same charge arriving twice (invoice + payment confirmation).
+  // Same message seen twice.
   if (store.receipts.some((r) => fingerprintOf(r) === fingerprint)) return { status: "duplicate" };
+  // The same CHARGE arriving in a different email (an invoice, then a payment
+  // confirmation, or a re-send) carries a new messageId, so the fingerprint above
+  // misses it. Catch it by the content test the duplicate sweep uses — vendor +
+  // amount + day, with invoice/period compatible — so a re-run can never stack a
+  // second copy of a charge already on file.
+  const incoming: DupeCandidate = {
+    id: "",
+    vendor: match.vendor,
+    amountUsd: parsed.kind === "charge" ? parsed.amountUsd : -Math.abs(parsed.amountUsd),
+    chargedAt,
+    invoiceNumber: parsed.invoiceNumber,
+    itemId: match.itemId,
+    period,
+  };
+  if (store.receipts.some((r) => isSameCharge(r, incoming))) return { status: "duplicate" };
   // Deleted by hand: the email is still in the mailbox, but the owner has already said
   // this one does not belong in the books.
   if (isReceiptDismissed(fingerprint, store.dismissed || [])) return { status: "duplicate" };
@@ -1875,6 +1890,32 @@ export async function repairVault(opts: { dryRun?: boolean } = {}): Promise<Vaul
   return out;
 }
 
+/**
+ * Collapse every charge that got filed twice, keeping the best copy and carrying its
+ * fields across first. This is the same content-based test the manual repair uses
+ * (vendor + amount + day, invoice/period compatible) — NOT the message fingerprint — so
+ * the same charge that arrived in two emails, or was swept before the ingest guard
+ * existed, is folded to one. Cheap and idempotent: with nothing duplicated it touches
+ * nothing, so it is safe to run on every sweep and every grid load. Returns how many
+ * copies were removed.
+ */
+export async function dedupeVault(): Promise<{ removed: number }> {
+  await ensureReceiptsReady();
+  let removed = 0, changed = false;
+  for (const g of findDuplicates(store.receipts)) {
+    if (!g.drop.length) continue;
+    Object.assign(g.keep, mergeFields(g.keep, g.drop));
+    g.keep.updatedAt = nowIso();
+    const gone = new Set(g.drop.map((d) => d.id));
+    store.receipts = store.receipts.filter((r) => !gone.has(r.id));
+    for (const id of gone) await removeArtifacts(id);
+    removed += g.drop.length;
+    changed = true;
+  }
+  if (changed) persist();
+  return { removed };
+}
+
 /** What the console needs to know about whether the vault is tidy, without changing it. */
 export async function vaultHealth(): Promise<{ unlinked: number; duplicates: number; linkable: number }> {
   const dry = await repairVault({ dryRun: true });
@@ -1934,6 +1975,9 @@ export async function harvestAll(monthsBack = 3): Promise<{ ok: boolean; reason?
   } finally {
     inFlight = null;
   }
+  // Every pull ends by collapsing any charge that got filed twice, so re-running a
+  // sweep can never leave the vault with stacked duplicates.
+  await dedupeVault().catch(() => {});
   return { ok: reports.some((r) => r.ok), reports };
 }
 

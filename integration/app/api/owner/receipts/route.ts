@@ -25,7 +25,7 @@ import { listSpendItems } from "../../../../lib/owner/spendRegister";
 import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
-  pullerStates, lastPullerReportAt, renderMissingShots, repairVault, vaultHealth,
+  pullerStates, lastPullerReportAt, renderMissingShots, repairVault, vaultHealth, dedupeVault,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
@@ -46,6 +46,12 @@ export async function GET(req: Request) {
   const g = requireOwner(req);
   if ("response" in g) return g.response;
   const months = Number(new URL(req.url).searchParams.get("months")) || 12;
+
+  /* The grid is never rendered over duplicates. Before anything is read, collapse any
+     charge that got filed twice (the same invoice arriving in two emails, or copies swept
+     before the ingest guard existed), so every figure and receipt count on the page is the
+     de-duplicated truth. Idempotent: with nothing duplicated it does nothing. */
+  await dedupeVault().catch(() => {});
 
   /* The vendor-billed figures are read synchronously while the grid is built, so the store
      has to be hydrated before that: on a cold container the first page view would otherwise
