@@ -805,16 +805,40 @@ export interface MailMessage {
 /** Is this message a paid charge, and if not, why not. */
 export function classify(msg: MailMessage): { billing: boolean; reason?: string } {
   const hay = `${msg.subject} ${msg.fromName || ""} ${msg.from}`.toLowerCase();
-  const body = (msg.text || "").toLowerCase().slice(0, 4000);
+  /* Read the HTML too, stripped to text. Most vendor receipts — registrars especially —
+     are HTML-only, so looking at msg.text alone saw an EMPTY body and skipped a mail whose
+     whole receipt (the $ line items, the total) was sitting in the markup. That one omission
+     is why every Dynadot "Order Finished" was invisible. */
+  const body = `${msg.text || ""} ${stripHtml(msg.html || "")}`.toLowerCase().slice(0, 8000);
   for (const bad of NON_CHARGE_HINTS) {
     if (hay.includes(bad)) return { billing: false, reason: `not a charge: subject says "${bad}"` };
   }
   const domain = (msg.from.split("@")[1] || "").toLowerCase();
-  const vendorHit = VENDOR_SOURCES.some((s) => s.from.some((f) => domain === f || domain.endsWith("." + f) || msg.from.toLowerCase() === f));
+  const from = msg.from.toLowerCase();
+  const vendorSrc = VENDOR_SOURCES.find((s) => s.from.some((f) => domain === f || domain.endsWith("." + f) || from === f));
   const processorHit = PROCESSOR_DOMAINS.some((p) => domain === p || domain.endsWith("." + p));
-  const subjectHit = GENERIC_SUBJECT_HINTS.some((h) => hay.includes(h));
-  const bodyHit = /amount paid|total paid|payment received|you paid|amount charged|receipt #|invoice #/.test(body);
-  if (subjectHit || ((vendorHit || processorHit) && bodyHit)) return { billing: true };
+  /* A sender we KNOW bills us: one of our vendors, or a payment processor. */
+  const known = !!vendorSrc || processorHit;
+
+  /* A currency figure anywhere in the body: "$10.88", "US$10.88", "10.88 USD", "9,00 €".
+     A dollar amount from a vendor we pay is the strongest receipt signal there is. */
+  const hasMoney = /(?:us\$|\$|€|£|₹)\s?\d[\d,]*(?:[.,]\d{1,2})?|\d[\d,]*[.,]\d{2}\s?(?:usd|eur|gbp|cad|inr)/i.test(body);
+  /* Billing words: the generic set PLUS this sender's own vocabulary — a registrar's
+     confirmation says "order"/"renewal"/"domain", never "invoice". */
+  const subjectHit =
+    GENERIC_SUBJECT_HINTS.some((h) => hay.includes(h)) ||
+    (vendorSrc ? vendorSrc.subject.some((h) => hay.includes(h)) : false);
+  const bodyHit = /amount paid|total paid|payment received|you paid|amount charged|order total|grand total|subtotal|receipt|invoice|thank you for your (?:order|purchase|payment)/i.test(body);
+
+  /* A RECOGNISED sender that put a billing word OR a dollar amount in the mail is billing us,
+     whatever it titled the message. This is what finally catches the registrar
+     order-confirmations ("Order Finished", body full of $ line items, the word "invoice"
+     nowhere in it). The amount parser downstream is the real gate — it drops anything with no
+     figure — so being generous here only costs a parse, never a phantom charge. */
+  if (known && (subjectHit || bodyHit || hasMoney)) return { billing: true };
+  /* An UNKNOWN sender still needs an explicit billing phrase, so personal mail with a stray
+     "$5 off" never floods the books. */
+  if (subjectHit && bodyHit) return { billing: true };
   return { billing: false, reason: "no billing signal in subject, sender or body" };
 }
 
