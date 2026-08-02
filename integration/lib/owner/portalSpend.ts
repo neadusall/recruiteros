@@ -232,6 +232,26 @@ export function approvedChargeReceiptId(workspaceId: string, chargeId: string): 
   return c.receipt.receiptId || null;
 }
 
+/**
+ * The vault id AND the naming details for one approved charge's receipt, gated exactly like
+ * approvedChargeReceiptId. Used to build a human filename ("vendor-2026-07-01.pdf") when the
+ * client downloads the real invoice, so a saved receipt is recognisable on disk rather than
+ * a bare charge id.
+ */
+export function approvedChargeReceiptMeta(
+  workspaceId: string,
+  chargeId: string,
+): { receiptId: string; vendor?: string; chargedAt?: string; invoiceNumber?: string } | null {
+  const c = store.charges.find((x) => x.id === chargeId && x.workspaceId === workspaceId);
+  if (!c || c.status !== "approved" || !c.receipt || !c.receipt.receiptId) return null;
+  return {
+    receiptId: c.receipt.receiptId,
+    vendor: c.receipt.vendor,
+    chargedAt: c.receipt.chargedAt,
+    invoiceNumber: c.receipt.invoiceNumber,
+  };
+}
+
 /** Approve a pending charge -> it becomes visible on the client portal. */
 export function approveCharge(workspaceId: string, id: string): PortalCharge | null {
   const c = store.charges.find((x) => x.id === id && x.workspaceId === workspaceId);

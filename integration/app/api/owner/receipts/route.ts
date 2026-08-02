@@ -12,6 +12,9 @@
  *   POST   { action:"relink", dryRun? }     -> put every charge on the register line it
  *                                              paid for, and drop any copy of a charge
  *                                              already on file
+ *   POST   { action:"onePerCell" }          -> keep ONE receipt per vendor-month cell and
+ *                                              drop the extras (owner presses it once; the
+ *                                              rest are re-added by hand)
  *   POST   multipart/form-data -> attach a receipt downloaded by hand
  *   PATCH  { id, ... }         -> correct a parsed figure / reassign a vendor / mark reviewed
  *   DELETE ?id=…               -> drop one
@@ -26,6 +29,7 @@ import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
   pullerStates, lastPullerReportAt, renderMissingShots, repairVault, vaultHealth,
+  collapseToOnePerCell,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
@@ -178,6 +182,11 @@ export async function POST(req: Request) {
      a charge already on file. The nightly tick does this too; the button is for the owner
      looking at one merged block right now. */
   if (b?.action === "relink") return ok({ vault: await repairVault({ dryRun: !!b.dryRun }) });
+  /* Collapse every vendor-month cell to one receipt, keeping the best copy and dropping the
+     rest. Deliberate and destructive across genuinely separate charges too, so it is only
+     ever this explicit press — the owner is left with a clean one-per-cell skeleton and adds
+     any real second charge back by hand. */
+  if (b?.action === "onePerCell") return ok(await collapseToOnePerCell());
   return fail("unknown_action", 400);
 }
 

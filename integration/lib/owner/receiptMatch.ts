@@ -279,7 +279,7 @@ export function findDuplicates<T extends DupeCandidate>(receipts: T[]): Array<Du
 
     /* Best copy first, so the keeper of each group is decided before anything is compared
        against it and the outcome does not depend on vault order. */
-    const ranked = bucket.slice().sort((a, b) => quality(b) - quality(a) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+    const ranked = bucket.slice().sort((a, b) => copyQuality(b) - copyQuality(a) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
 
     const groups: Array<{ keep: T; drop: T[] }> = [];
     for (const r of ranked) {
@@ -339,9 +339,10 @@ function compatible(a?: string, b?: string): boolean {
 /**
  * Which copy of a charge is worth keeping. The vendor's own document outranks everything:
  * it is the thing the whole vault exists to hold, and a figure without one is only a claim
- * about a charge.
+ * about a charge. Exported so the "one receipt per cell" collapse ranks keepers by the same
+ * rule the duplicate sweep does.
  */
-function quality(r: DupeCandidate): number {
+export function copyQuality(r: DupeCandidate): number {
   let n = 0;
   if (r.fileMime) n += 100;          // the vendor's own file is on disk
   if (r.hasShot) n += 40;            // ...and it rendered

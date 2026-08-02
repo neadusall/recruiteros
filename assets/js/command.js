@@ -18798,9 +18798,12 @@
           var thumb = r.hasImage
             ? '<img class="sp-rthumb" src="' + receiptImgUrl(c.id, "thumb") + '" alt="receipt" loading="lazy" />'
             : '<div class="sp-rthumb sp-rnoimg">no image</div>';
+          // Download the REAL receipt: the original file the vendor sent when we have it,
+          // otherwise the rendered invoice image — either way a real saved copy, not just a
+          // preview. dl=1 tells the endpoint to send it as a file download, not open inline.
           var acts = (r.hasImage
             ? '<button class="btn btn-ghost btn-sm sp-rview" data-cid="' + esc(c.id) + '">View receipt</button>' +
-              (r.hasFile ? '<a class="btn btn-ghost btn-sm" href="' + receiptImgUrl(c.id, "file") + '" target="_blank" rel="noopener">Download</a>' : "")
+              '<a class="btn btn-ghost btn-sm" href="' + receiptImgUrl(c.id, r.hasFile ? "file" : "png") + '&dl=1" target="_blank" rel="noopener">Download</a>'
             : '<span class="muted" style="font-size:12px">no document</span>') +
             (canManage ? ' <button class="btn btn-ghost btn-sm sp-del" data-cid="' + esc(c.id) + '" style="color:var(--danger,#e5484d)">Remove</button>' : '');
           return '<div class="sp-rrow">' + thumb +
@@ -18905,7 +18908,7 @@
             b.disabled = true; b.style.opacity = ".4";
             send("/portal-spend?id=" + encodeURIComponent(cid), "DELETE").then(function (r) {
               if (r.ok) { toast("Charge removed"); renderSpendStatement(el); }
-              else { b.disabled = false; b.style.opacity = ""; toast(r.status === 403 ? "Only the account owner can remove charges" : "Couldn't remove that charge"); }
+              else { b.disabled = false; b.style.opacity = ""; toast(r.status === 403 ? "You need account-manager access to remove charges" : "Couldn't remove that charge"); }
             }).catch(function () { b.disabled = false; b.style.opacity = ""; });
           });
         });

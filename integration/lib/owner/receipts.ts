@@ -35,7 +35,7 @@ import {
   VENDOR_SOURCES, PROCESSOR_DOMAINS, GENERIC_SUBJECT_HINTS, NON_CHARGE_HINTS,
   vendorSourceFor, type VendorSource,
 } from "./receiptSources";
-import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge } from "./receiptMatch";
+import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge, copyQuality } from "./receiptMatch";
 import { pullEmailDocument, type FetchedDocument, type PullResult } from "./receiptLinks";
 import { relevanceOf, filingUnknownVendors } from "./receiptRelevance";
 import { getMsImapToken, msBillingMailboxes } from "./msOauth";
@@ -1924,6 +1924,59 @@ export async function repairVault(opts: { dryRun?: boolean } = {}): Promise<Vaul
   out.priced = await learnPrices(items, opts.dryRun).catch(() => []);
 
   return out;
+}
+
+/**
+ * Collapse every vendor-month CELL down to a single receipt, keeping the best copy.
+ *
+ * The month-by-month grid is one row per line item, one column per month; a cell is their
+ * intersection. A wide sweep can leave a stack of receipts in one cell — an invoice and its
+ * payment confirmation, a portal pull and an emailed copy, a re-send, plus genuinely
+ * separate charges the vendor billed in the same month. This keeps the ONE best copy per
+ * cell and drops the rest, leaving a clean skeleton of one receipt per cell that the owner
+ * can top up by hand where a month really did carry more than one charge.
+ *
+ * The keeper is chosen by the same rule the duplicate sweep uses (copyQuality: the vendor's
+ * own document over a bare figure, a rendered shot over a raw file, a portal/email source
+ * over an API line), ties broken by the earliest filed so the result is stable. Anything a
+ * dropped copy carried that the keeper lacks — an invoice number, a line-item link — is
+ * merged onto the keeper first, so no detail is lost with the copy.
+ *
+ * This is DELIBERATE and destructive across genuinely separate charges too, not just exact
+ * duplicates, so it only ever runs from an explicit owner press — never on a page load, or
+ * it would eat the second charge the owner just re-added by hand.
+ */
+export async function collapseToOnePerCell(): Promise<{ removed: number; cells: number }> {
+  await ensureReceiptsReady();
+  /* Group by the cell the grid would draw the receipt in: its line item when it has one,
+     otherwise its vendor, crossed with its billing month. */
+  const buckets = new Map<string, Receipt[]>();
+  for (const r of store.receipts) {
+    const month = r.period && /^\d{4}-\d{2}$/.test(r.period)
+      ? r.period
+      : String(r.chargedAt || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    const key = (r.itemId ? "item:" + r.itemId : "vendor:" + String(r.vendor || "").trim().toLowerCase()) + "|" + month;
+    buckets.set(key, [...(buckets.get(key) || []), r]);
+  }
+
+  let removed = 0, cells = 0, changed = false;
+  for (const [, bucket] of buckets) {
+    if (bucket.length < 2) continue;
+    const ranked = bucket.slice().sort((a, b) => copyQuality(b) - copyQuality(a) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+    const keep = ranked[0];
+    const drop = ranked.slice(1);
+    Object.assign(keep, mergeFields(keep, drop));
+    keep.updatedAt = nowIso();
+    const gone = new Set(drop.map((d) => d.id));
+    store.receipts = store.receipts.filter((r) => !gone.has(r.id));
+    for (const id of gone) await removeArtifacts(id);
+    removed += drop.length;
+    cells += 1;
+    changed = true;
+  }
+  if (changed) persist();
+  return { removed, cells };
 }
 
 /** What the console needs to know about whether the vault is tidy, without changing it. */
