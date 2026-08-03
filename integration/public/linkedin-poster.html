@@ -49,7 +49,7 @@
   /* Header */
   html.embed body{min-height:0;background:transparent}
   html.embed header .brand,html.embed header .divider{display:none}
-  header{display:flex;align-items:center;gap:13px;padding:14px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header{display:flex;align-items:center;gap:13px;padding:12px 22px;border-bottom:1px solid var(--line);flex-wrap:wrap}
   .brand{display:flex;align-items:center;gap:10px;flex:none}
   .brand .mark{width:24px;height:24px;border-radius:6px;background:var(--accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;flex:none}
   .brand .mark svg{width:14px;height:14px;display:block}
@@ -64,19 +64,27 @@
   .conn.on .dot{background:var(--ok)}
   .conn.off .dot{background:var(--warn)}
 
-  /* Tabs */
-  .viewtabs{display:flex;gap:2px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--rad);padding:3px}
+  .viewtabs{display:flex;gap:2px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--rad);padding:3px;flex-wrap:wrap}
   .viewtabs button{border:0;background:transparent;color:var(--mut);font:inherit;font-size:13px;font-weight:500;
-    padding:5px 13px;border-radius:var(--rad-sm);cursor:pointer}
+    padding:5px 12px;border-radius:var(--rad-sm);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
   .viewtabs button.active{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(10,14,20,.07)}
-  .viewtabs button .n{display:inline-block;min-width:16px;margin-left:5px;padding:0 4px;border-radius:8px;
+  .viewtabs button .n{display:inline-block;min-width:16px;padding:0 4px;border-radius:8px;
     background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:600;text-align:center}
 
-  main{max-width:1160px;margin:0 auto;padding:20px 24px 60px}
+  /* Today strip */
+  .todaybar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .tp{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:var(--mut);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px;background:var(--bg);cursor:pointer}
+  .tp b{color:var(--ink);font-weight:600}
+  .tp .d{width:7px;height:7px;border-radius:50%;flex:none}
+  .tp .d.ok{background:var(--ok)} .tp .d.warn{background:var(--warn)} .tp .d.acc{background:var(--accent)}
+  .tp:hover{border-color:var(--faint)}
+
+  main{max-width:1280px;margin:0 auto;padding:18px 22px 60px}
   .view{display:none}
   .view.active{display:block}
-  .grid2{display:grid;grid-template-columns:380px 1fr;gap:18px;align-items:start}
-  @media (max-width:900px){.grid2{grid-template-columns:1fr}}
+  .grid2{display:grid;grid-template-columns:390px 1fr;gap:18px;align-items:start}
+  @media (max-width:980px){.grid2{grid-template-columns:minmax(0,1fr)}}
 
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:16px}
   .card h3{margin:0 0 4px;font-size:14px;font-weight:600}
@@ -115,10 +123,123 @@
   .count{font-size:11.5px;color:var(--faint);text-align:right;margin-top:4px}
   .errbox{background:var(--bad-soft);color:var(--bad);border-radius:var(--rad-sm);padding:8px 11px;font-size:12.5px;margin-top:10px}
   .notice{background:var(--warn-soft);color:var(--warn);border-radius:var(--rad-sm);padding:9px 12px;font-size:12.5px;margin-bottom:14px}
+  .statchip{display:inline-flex;align-items:center;font-size:11px;font-weight:600;border-radius:999px;padding:2px 9px;background:var(--accent-soft);color:var(--accent)}
+  .docchip{display:inline-block;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent);border-radius:999px;
+    padding:4px 12px;font-size:12px;font-weight:600;vertical-align:middle}
 
+  /* ── Studio ── */
+  .studio{display:grid;grid-template-columns:300px minmax(0,1fr);gap:18px;align-items:start}
+  @media (max-width:1080px){.studio{grid-template-columns:minmax(0,1fr)}}
+  .rail{display:flex;flex-direction:column;gap:8px}
+  .railcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:11px 13px;cursor:pointer}
+  .railcard:hover{border-color:var(--faint)}
+  .railcard.active{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .railcard .rc-top{display:flex;align-items:center;gap:7px;margin-bottom:5px;flex-wrap:wrap}
+  .railcard .rc-txt{font-size:12.5px;color:var(--mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .railcard .rc-when{font-size:11px;color:var(--faint);margin-top:5px}
+  .work{min-width:0}
+  .workgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,430px);gap:18px;align-items:start}
+  @media (max-width:1180px){.workgrid{grid-template-columns:minmax(0,1fr)}}
+  @media (max-width:600px){.pv.desktop,.pv.mobile{width:100%}}
+
+  /* LinkedIn-true preview */
+  .pvwrap{position:sticky;top:14px}
+  .pvbar{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .pvbar .lab{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;flex:1}
+  .devtoggle{display:flex;gap:2px;background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:2px}
+  .devtoggle button{border:0;background:transparent;color:var(--mut);font:inherit;font-size:11.5px;font-weight:600;padding:3px 11px;border-radius:999px;cursor:pointer}
+  .devtoggle button.active{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(10,14,20,.07)}
+  .pv{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:14px 0 6px;margin:0 auto;max-width:100%;overflow:hidden}
+  .pv.desktop{width:552px} .pv.mobile{width:382px}
+  .pvhead{display:flex;gap:10px;padding:0 16px;align-items:flex-start}
+  .pvavatar{width:48px;height:48px;border-radius:50%;background:var(--accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:17px;flex:none}
+  .pvwho{min-width:0}
+  .pvname{font-size:14px;font-weight:600;color:var(--ink);line-height:1.3}
+  .pvhl{font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .pvtime{font-size:12px;color:var(--faint);display:inline-flex;align-items:center;gap:4px}
+  .pvtime svg{width:12px;height:12px}
+  .pvbody{padding:10px 16px 4px;font-size:14px;line-height:1.45;white-space:pre-wrap;overflow-wrap:break-word}
+  .fold{color:var(--faint);font-weight:600;cursor:pointer}
+  .fold:hover{color:var(--accent)}
+  .pvmedia{margin-top:8px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .pvmedia img{width:100%;display:block;max-height:420px;object-fit:cover}
+  .pvdoc{display:flex;flex-direction:column;gap:0}
+  .pvdoc .pd-face{background:var(--panel-2);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;padding:44px 20px;color:var(--mut)}
+  .pvdoc .pd-face svg{width:38px;height:38px;color:var(--faint)}
+  .pvdoc .pd-cap{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;font-size:12px;color:var(--mut);border-top:1px solid var(--line)}
+  .pvdoc .pd-cap b{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}
+  .pvacts{display:flex;justify-content:space-around;padding:4px 8px 0;margin-top:6px;border-top:1px solid var(--line)}
+  .pvacts span{display:inline-flex;align-items:center;gap:6px;color:var(--mut);font-size:12.5px;font-weight:600;padding:9px 10px}
+  .pvacts svg{width:15px;height:15px}
+  .pvcomment{display:flex;gap:8px;padding:10px 16px 12px;align-items:flex-start}
+  .pvcomment .mini{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:11px;flex:none}
+  .pvcomment .cbub{background:var(--panel-2);border-radius:2px 12px 12px 12px;padding:8px 11px;font-size:12.5px;color:var(--ink);min-width:0;overflow-wrap:break-word}
+  .pvcomment .cbub .cwho{font-weight:600;font-size:12px;margin-bottom:2px}
+
+  /* Editor */
+  .fmtbar{display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  .fmtbar .fbtn{border:1px solid var(--line-2);background:var(--panel);color:var(--ink);border-radius:var(--rad-sm);
+    font-size:12.5px;font-weight:600;padding:4px 10px;cursor:pointer}
+  .fmtbar .fbtn:hover{border-color:var(--faint)}
+  .fmtbar .sep{width:1px;height:16px;background:var(--line)}
+  .hookpanel{border:1px solid var(--line);border-radius:var(--rad);background:var(--panel);margin:8px 0;max-height:260px;overflow:auto}
+  .hookpanel .hcat{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:10px 12px 4px}
+  .hookpanel .hk{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--ink);font:inherit;font-size:13px;padding:7px 12px;cursor:pointer;border-radius:0}
+  .hookpanel .hk:hover{background:var(--accent-soft)}
   .imgrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
   .thumb{width:64px;height:64px;border-radius:var(--rad-sm);border:2px solid var(--line);object-fit:cover;cursor:pointer;background:var(--panel-2)}
   .thumb.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .thumb.file{display:inline-flex;align-items:center;justify-content:center;padding:0;font:inherit;font-size:10.5px;
+    font-weight:700;color:var(--mut);letter-spacing:.03em;cursor:pointer}
+  .slidestrip{border:1px solid var(--line);border-radius:var(--rad);padding:12px 14px;margin-top:12px;background:var(--panel-2)}
+  .slidestrip .ss-t{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+  .slidestrip .srow{display:flex;gap:8px;align-items:flex-start;margin-bottom:8px}
+  .slidestrip .sn{width:22px;height:22px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none;margin-top:6px}
+  .slidestrip textarea{min-height:0;font-size:12.5px}
+  details.cmp{border:1px solid var(--line);border-radius:var(--rad);background:var(--panel);margin-top:12px}
+  details.cmp summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--mut);padding:10px 14px;list-style:none}
+  details.cmp summary::-webkit-details-marker{display:none}
+  details.cmp[open] summary{border-bottom:1px solid var(--line)}
+  details.cmp .src{margin:12px 14px;max-height:220px}
+  .schedrow{display:none;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+  .schedrow.open{display:flex}
+  .schedrow input{width:auto}
+
+  /* Calendar */
+  .cal{display:flex;flex-direction:column;gap:8px}
+  .calday{display:flex;gap:12px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:11px 14px}
+  .calday.today{border-color:var(--accent-line)}
+  .calday .cd-date{width:86px;flex:none}
+  .calday .cd-date b{display:block;font-size:13px}
+  .calday .cd-date span{font-size:11.5px;color:var(--faint)}
+  .calday .cd-slots{display:flex;gap:8px;flex-wrap:wrap;min-width:0;flex:1}
+  .slotchip{display:inline-flex;align-items:center;gap:7px;border:1px dashed var(--line-2);border-radius:999px;
+    padding:5px 12px;font-size:12px;color:var(--faint)}
+  .slotchip.filled{border-style:solid;border-color:var(--accent-line);background:var(--accent-soft);color:var(--ink);cursor:pointer;max-width:360px}
+  .slotchip.filled:hover{border-color:var(--accent)}
+  .slotchip .t{font-weight:600;color:var(--mut);flex:none}
+  .slotchip .x{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* Performance */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:14px 16px}
+  .kpi .kv{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+  .kpi .kl{font-size:12px;color:var(--mut);margin-top:4px}
+  .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+  .chart .cbar{cursor:pointer}
+  .chart .cbar:hover{opacity:.8}
+  .chart .axis{font-size:10.5px;fill:var(--faint)}
+  .chart .val{font-size:10.5px;font-weight:600;fill:var(--mut)}
+  .chart .grid{stroke:var(--line);stroke-width:1}
+  #chartTip{position:fixed;background:var(--ink);color:var(--bg);font-size:12px;padding:6px 10px;border-radius:6px;
+    pointer-events:none;opacity:0;z-index:60;max-width:260px;transition:opacity .1s}
+  details.tbl{margin-top:8px}
+  details.tbl summary{font-size:11.5px;color:var(--faint);cursor:pointer}
+  details.tbl table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+  details.tbl td,details.tbl th{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);color:var(--mut)}
+  details.tbl th{color:var(--faint);font-weight:600}
+
   .imggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
   .imgcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);overflow:hidden}
   .imgcard img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--panel-2)}
@@ -128,31 +249,13 @@
     background:var(--panel-2);color:var(--mut);text-decoration:none}
   .filetile svg{width:34px;height:34px;color:var(--faint)}
   .filetile .ftype{border:1px solid var(--line-2);border-radius:999px;padding:2px 10px;font-size:11px;font-weight:600;letter-spacing:.04em}
-  .thumb.file{display:inline-flex;align-items:center;justify-content:center;padding:0;font:inherit;font-size:10.5px;
-    font-weight:700;color:var(--mut);letter-spacing:.03em;cursor:pointer}
-  .docchip{display:inline-block;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent);border-radius:999px;
-    padding:4px 12px;font-size:12px;font-weight:600;vertical-align:middle}
 
-  .feedprev{border:1px solid var(--line);border-radius:var(--rad-sm);background:var(--panel-2);padding:9px 12px;margin-top:8px}
-  .feedprev .fp-t{font-size:10.5px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
-  .feedprev .fp-b{font-size:13px;white-space:pre-wrap;color:var(--ink)}
-  .feedprev .fp-more{color:var(--mut);font-weight:600}
-  .statchip{display:inline-flex;align-items:center;font-size:11px;font-weight:600;border-radius:999px;padding:2px 9px;background:var(--accent-soft);color:var(--accent)}
   .dayrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
   .dayrow label{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line-2);border-radius:999px;
     padding:4px 10px;font-size:12px;color:var(--ink);font-weight:500;margin:0;cursor:pointer}
   .chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);font-weight:500;margin-top:14px}
-
-  .cmpgrid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:14px;align-items:start}
-  @media (max-width:900px){.cmpgrid{grid-template-columns:1fr}}
-  .cmplab{font-size:11px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin:2px 0 6px}
-  .src.cmp{max-height:288px}
-
-  .schedrow{display:none;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
-  .schedrow.open{display:flex}
-  .schedrow input{width:auto}
-
+  .meter{height:7px;background:var(--panel-2);border-radius:999px;overflow:hidden;margin:8px 0 4px}
+  .meter i{display:block;height:100%;background:var(--accent);border-radius:999px}
   .kv{display:flex;gap:8px;font-size:12.5px;margin:4px 0;color:var(--mut)}
   .kv b{color:var(--ink);min-width:130px;font-weight:600}
 
@@ -171,18 +274,30 @@
   <div><div class="ttl">LinkedIn Poster</div><div class="sub">Inspiration in, your story out. Nothing posts without your approval.</div></div>
   <div class="spacer"></div>
   <div class="viewtabs" id="tabs">
-    <button data-view="inbox" class="active">Inbox<span class="n" id="nInbox">0</span></button>
-    <button data-view="drafts">Drafts<span class="n" id="nDrafts">0</span></button>
-    <button data-view="queue">Queue<span class="n" id="nQueue">0</span></button>
-    <button data-view="images">Media</button>
+    <button data-view="studio" class="active">Studio<span class="n" id="nDrafts">0</span></button>
+    <button data-view="create">Sources<span class="n" id="nInbox">0</span></button>
+    <button data-view="calendar">Calendar<span class="n" id="nQueue">0</span></button>
+    <button data-view="media">Media</button>
+    <button data-view="performance">Performance</button>
     <button data-view="settings">Settings</button>
   </div>
   <span class="conn off" id="conn"><span class="dot"></span><span id="connTxt">Checking connection…</span></span>
 </header>
 
+<div class="todaybar" id="todayBar"></div>
+
 <main>
-  <!-- ============================ INBOX ============================ -->
-  <section class="view active" id="view-inbox">
+  <!-- ============================ STUDIO =========================== -->
+  <section class="view active" id="view-studio">
+    <div id="studioNotices"></div>
+    <div class="studio">
+      <div class="rail" id="draftRail"></div>
+      <div class="work" id="draftWork"></div>
+    </div>
+  </section>
+
+  <!-- =========================== SOURCES =========================== -->
+  <section class="view" id="view-create">
     <div class="grid2">
       <div>
         <div class="card">
@@ -193,7 +308,7 @@
           <label>Link (optional)</label>
           <input type="url" id="inUrl" placeholder="https://www.linkedin.com/posts/…" />
           <label>Post text</label>
-          <textarea id="inText" rows="7" placeholder="Paste the post content"></textarea>
+          <textarea id="inText" rows="6" placeholder="Paste the post content"></textarea>
           <div class="btnrow">
             <button class="btn primary" id="btnSave">Save to inbox</button>
             <button class="btn" id="btnSaveRewrite">Save + rewrite now</button>
@@ -209,7 +324,7 @@
         </div>
         <div class="card" style="margin-top:16px">
           <h3>Followed creators</h3>
-          <p class="hint">Follow a profile once and every new post they publish lands in this inbox automatically, your archive to rewrite from. Checked about once a day.</p>
+          <p class="hint">Follow a profile once and every new post they publish lands in this inbox automatically, your archive to rewrite from. Checked about once a day; the first pull digs months back.</p>
           <label>LinkedIn profile link</label>
           <input type="url" id="watchUrl" placeholder="https://www.linkedin.com/in/…" />
           <label>Name (optional)</label>
@@ -223,23 +338,18 @@
     </div>
   </section>
 
-  <!-- ============================ DRAFTS =========================== -->
-  <section class="view" id="view-drafts">
-    <div id="draftNotices"></div>
-    <div id="draftList"></div>
-  </section>
-
-  <!-- ============================ QUEUE ============================ -->
-  <section class="view" id="view-queue">
+  <!-- =========================== CALENDAR ========================== -->
+  <section class="view" id="view-calendar">
     <div id="queueNotices"></div>
-    <div id="queueList"></div>
+    <div id="calWrap"></div>
+    <div id="postedWrap" style="margin-top:22px"></div>
   </section>
 
   <!-- ============================ MEDIA ============================ -->
-  <section class="view" id="view-images">
+  <section class="view" id="view-media">
     <div class="card" style="margin-bottom:16px">
       <h3>Approved media library</h3>
-      <p class="hint">Upload brand-safe media once; attach it to drafts with one click. Generated quote cards land here too. A PDF publishes as a native LinkedIn document post (readers swipe through the pages), the format with the highest engagement on the platform right now.</p>
+      <p class="hint">Upload brand-safe media once; attach it to drafts with one click. Generated quote cards and carousels land here too. A PDF publishes as a native LinkedIn document post (readers swipe through the pages), the format with the highest engagement on the platform right now.</p>
       <div class="btnrow" style="margin-top:0">
         <button class="btn primary" id="btnUpload">Upload media</button>
         <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,application/pdf,video/mp4" style="display:none" />
@@ -247,7 +357,12 @@
       </div>
     </div>
     <div class="imggrid" id="imgGrid"></div>
-    <div class="empty" id="imgEmpty" style="display:none"><b>No media yet</b>Upload a photo, a PDF, or a short video, or generate a quote card from a draft.</div>
+    <div class="empty" id="imgEmpty" style="display:none"><b>No media yet</b>Upload a photo, a PDF, or a short video, or generate a quote card or carousel from a draft.</div>
+  </section>
+
+  <!-- ========================= PERFORMANCE ========================= -->
+  <section class="view" id="view-performance">
+    <div id="perfWrap"></div>
   </section>
 
   <!-- =========================== SETTINGS ========================== -->
@@ -256,6 +371,7 @@
       <div>
         <div class="card" style="margin-bottom:16px">
           <h3>Your voice</h3>
+          <div id="voiceMeter"></div>
           <p class="hint">The rewriter follows this contract. The more real you make it, the more the drafts sound like you.</p>
           <label>Display name (shown on quote cards)</label>
           <input type="text" id="setName" placeholder="Ryan Neadow" />
@@ -310,12 +426,17 @@
 </main>
 
 <div id="toast"></div>
+<div id="chartTip"></div>
 
 <script>
 (function () {
   "use strict";
-  var S = { inbox: [], drafts: [], images: [], settings: {}, ayrshare: {}, automation: {}, anthropicConfigured: false };
-  var pickImageFor = null; // draftId currently choosing an image
+  var S = { inbox: [], drafts: [], images: [], settings: {}, ayrshare: {}, automation: {}, anthropicConfigured: false, watchlist: [] };
+  var sel = null;           // selected draft id in the Studio
+  var device = "desktop";   // preview device
+  var pvOpen = false;       // preview fold expanded
+  var pickOpen = false;     // media picker open for selected draft
+  var hooksOpen = false;
 
   /* ------------------------------ utils ------------------------------ */
   function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -323,6 +444,7 @@
   function fmtTime(iso) { if (!iso) return ""; var d = new Date(iso); return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
   function mediaUrl(id) { return "/api/linkedin/poster/media/" + id; }
   function imgById(id) { for (var i = 0; i < S.images.length; i++) if (S.images[i].id === id) return S.images[i]; return null; }
+  function draftById(id) { for (var i = 0; i < S.drafts.length; i++) if (S.drafts[i].id === id) return S.drafts[i]; return null; }
   function mediaKind(i) {
     if (!i || !i.mime) return "image";
     if (i.mime === "application/pdf") return "pdf";
@@ -330,11 +452,23 @@
     return "image";
   }
   function kindTag(k) { return k === "pdf" ? "PDF" : "MP4"; }
-  var FEED_FOLD = 210;
-  function feedPreviewHtml(text) {
-    var t = String(text || "");
-    return esc(t.slice(0, FEED_FOLD)) + (t.length > FEED_FOLD ? '<span class="fp-more"> …see more</span>' : "");
+  function fileIcon(k) {
+    return k === "video"
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
   }
+  function busy(btn, on, label) {
+    if (!btn) return;
+    if (on) { btn.dataset.txt = btn.innerHTML; btn.innerHTML = '<span class="spin"></span> ' + (label || "Working…"); btn.disabled = true; }
+    else { btn.innerHTML = btn.dataset.txt || btn.innerHTML; btn.disabled = false; }
+  }
+  var FEED_FOLD = 210;
+  function initials() {
+    var n = (S.settings.displayName || "You").trim().split(/\s+/);
+    return ((n[0] || "Y")[0] + (n[1] ? n[1][0] : "")).toUpperCase();
+  }
+  function firstLine(t) { return (String(t || "").split("\n")[0] || "").trim(); }
+
   function nextFreeSlot() {
     var st = S.settings || {};
     var days = String(st.postingDays || "").split(",").filter(function (x) { return x !== ""; }).map(Number);
@@ -359,16 +493,57 @@
     }
     return null;
   }
-  function fileIcon(k) {
-    return k === "video"
-      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg>'
-      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+
+  /* Unicode bold/italic (LinkedIn has no native formatting; this is how every
+     market tool fakes it). Letters + digits for bold; letters for italic. */
+  function mapAlpha(t, upBase, lowBase, digBase) {
+    var out = "";
+    for (var i = 0; i < t.length; i++) {
+      var c = t.codePointAt(i);
+      if (c > 0xffff) { out += t[i]; continue; }
+      if (c >= 65 && c <= 90) out += String.fromCodePoint(upBase + (c - 65));
+      else if (c >= 97 && c <= 122) out += String.fromCodePoint(lowBase + (c - 97));
+      else if (digBase && c >= 48 && c <= 57) out += String.fromCodePoint(digBase + (c - 48));
+      else out += t[i];
+    }
+    return out;
   }
-  function busy(btn, on, label) {
-    if (!btn) return;
-    if (on) { btn.dataset.txt = btn.innerHTML; btn.innerHTML = '<span class="spin"></span> ' + (label || "Working…"); btn.disabled = true; }
-    else { btn.innerHTML = btn.dataset.txt || btn.innerHTML; btn.disabled = false; }
-  }
+  function toBold(t) { return mapAlpha(t, 0x1D5D4, 0x1D5EE, 0x1D7EC); }
+  function toItalic(t) { return mapAlpha(t, 0x1D608, 0x1D622, 0); }
+
+  var HOOKS = [
+    ["Contrarian", [
+      "Everyone is hiring wrong and nobody wants to say it.",
+      "The best candidates never apply.",
+      "Stop asking for five years of experience.",
+      "Your job post is the reason nobody great applied.",
+      "Speed wins searches. Not salary."
+    ]],
+    ["Story", [
+      "A candidate told me something I can't stop thinking about.",
+      "Last week a hiring manager changed my mind.",
+      "I almost gave up on a search. Then this happened.",
+      "The best interview I ever saw lasted eleven minutes."
+    ]],
+    ["Insight", [
+      "Ghosting is a symptom, not a personality trait.",
+      "Counteroffers fail for one simple reason.",
+      "The salary conversation belongs in the first call.",
+      "References tell you more in tone than in words.",
+      "Great teams hire for trajectory, not pedigree."
+    ]],
+    ["Market", [
+      "This market punishes slow decisions.",
+      "The talent shortage is really a trust shortage.",
+      "Every open role costs more than the hire that fills it.",
+      "Clinics that move in a week win the candidate."
+    ]],
+    ["Question", [
+      "What made you take your current job?",
+      "What is the one interview question that actually works?",
+      "Would you take a title cut for a better manager?"
+    ]]
+  ];
 
   function api(action, payload) {
     var b = Object.assign({ action: action }, payload || {});
@@ -397,26 +572,7 @@
   }
 
   /* ---------------------------- rendering ---------------------------- */
-  function renderAll() { renderHeader(); renderInbox(); renderWatchlist(); renderDrafts(); renderQueue(); renderImages(); renderSettings(); }
-
-  function renderWatchlist() {
-    var list = S.watchlist || [];
-    var note = document.getElementById("watchNote");
-    var eng = S.engine || {};
-    note.innerHTML = (list.length && !eng.ready)
-      ? '<div class="notice" style="margin-top:12px;margin-bottom:0">Automatic pulls start once your LinkedIn account is connected in the LinkedIn tool.</div>' : "";
-    document.getElementById("watchList").innerHTML = list.map(function (w) {
-      var status = w.lastError ? "last pull did not go through, it will retry"
-        : w.lastPulledAt ? "last pulled " + fmtTime(w.lastPulledAt)
-        : "waiting for the first pull";
-      return '<div class="item" style="margin-top:12px;margin-bottom:0">' +
-        '<div class="meta"><b>' + esc(w.name) + "</b><span>· " + esc(status) + "</span></div>" +
-        '<div class="btnrow" style="margin-top:6px">' +
-        '<button class="btn small" data-act="watch-pull" data-id="' + w.id + '">Pull now</button>' +
-        '<button class="btn danger small" data-act="watch-del" data-id="' + w.id + '">Unfollow</button>' +
-        "</div></div>";
-    }).join("");
-  }
+  function renderAll() { renderHeader(); renderToday(); renderStudio(); renderCreate(); renderWatchlist(); renderCalendar(); renderMedia(); renderPerformance(); renderSettings(); }
 
   function renderHeader() {
     var drafts = S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; }).length;
@@ -438,10 +594,165 @@
     }
   }
 
-  function renderInbox() {
+  function renderToday() {
+    var el = document.getElementById("todayBar");
+    var waiting = S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; }).length;
+    var queued = S.drafts.filter(function (d) { return d.status === "approved"; }).length;
+    var today = new Date().toDateString();
+    var postedToday = S.drafts.some(function (d) { return d.status === "posted" && d.postedAt && new Date(d.postedAt).toDateString() === today; });
+    var slot = nextFreeSlot();
+    el.innerHTML =
+      '<span class="tp" data-go="studio"><span class="d ' + (waiting ? "acc" : "ok") + '"></span>' + (waiting ? "<b>" + waiting + "</b>&nbsp;waiting for your approve" : "Nothing waiting on you") + "</span>" +
+      '<span class="tp" data-go="calendar"><span class="d ' + (postedToday ? "ok" : "warn") + '"></span>' + (postedToday ? "Posted today" : "Nothing published yet today") + "</span>" +
+      '<span class="tp" data-go="calendar"><b>' + queued + "</b>&nbsp;scheduled</span>" +
+      '<span class="tp" data-go="settings">' + (slot ? "Next slot&nbsp;<b>" + slot.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) + "</b>" : "Set a posting schedule") + "</span>";
+  }
+  document.getElementById("todayBar").addEventListener("click", function (e) {
+    var p = e.target.closest("[data-go]"); if (p) showView(p.dataset.go);
+  });
+
+  /* ---------- Studio: rail + workspace ---------- */
+  function studioList() { return S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; }); }
+
+  function renderStudio() {
+    var list = studioList();
+    var n = document.getElementById("studioNotices");
+    n.innerHTML = !S.anthropicConfigured ? '<div class="notice">AI is not enabled on the server yet, so the rewriter is offline. You can still write and publish posts manually.</div>' : "";
+    if (!list.length) {
+      document.getElementById("draftRail").innerHTML = "";
+      document.getElementById("draftWork").innerHTML =
+        '<div class="empty"><b>No drafts waiting</b>Pull ideas in the Sources tab, write an original post, or spotlight an open job. Every draft lands here for a quick approve or discard.</div>';
+      return;
+    }
+    if (!sel || !list.some(function (d) { return d.id === sel; })) { sel = list[0].id; pvOpen = false; pickOpen = false; hooksOpen = false; }
+    var rail = list.map(function (d) {
+      var img = d.imageId ? imgById(d.imageId) : null;
+      var chip = d.status === "failed" ? '<span class="badge failed">failed</span>'
+        : d.jobSpotlight ? '<span class="statchip">job spotlight</span>'
+        : d.aiOriginal ? '<span class="statchip">original</span>'
+        : d.sourceAuthor ? '<span class="badge draft">rewrite</span>' : '<span class="badge draft">draft</span>';
+      return '<div class="railcard' + (d.id === sel ? " active" : "") + '" data-act="sel-draft" data-id="' + d.id + '">' +
+        '<div class="rc-top">' + chip + (img ? '<span class="statchip">' + (mediaKind(img) === "image" ? "image" : kindTag(mediaKind(img))) + "</span>" : "") + "</div>" +
+        '<div class="rc-txt">' + esc(firstLine(d.text) || "(empty draft)") + "</div>" +
+        '<div class="rc-when">' + fmtTime(d.updatedAt) + (d.sourceAuthor ? " · idea from " + esc(d.sourceAuthor) : "") + "</div></div>";
+    }).join("");
+    document.getElementById("draftRail").innerHTML = rail;
+    document.getElementById("draftWork").innerHTML = workspaceHtml(draftById(sel));
+  }
+
+  function liPreview(d) {
+    var st = S.settings || {};
+    var img = d.imageId ? imgById(d.imageId) : null;
+    var k = img ? mediaKind(img) : null;
+    var text = d.text || "";
+    var folded = !pvOpen && text.length > FEED_FOLD;
+    var bodyHtml = esc(folded ? text.slice(0, FEED_FOLD) : text) +
+      (folded ? ' <span class="fold" data-act="fold">…see more</span>' : (text.length > FEED_FOLD ? ' <span class="fold" data-act="fold">see less</span>' : ""));
+    var media = "";
+    if (img && k === "image") media = '<div class="pvmedia"><img src="' + mediaUrl(img.id) + '" alt="" /></div>';
+    else if (img && k === "pdf") {
+      var pages = img.slides && img.slides.length ? img.slides.length : null;
+      media = '<div class="pvmedia pvdoc"><div class="pd-face">' + fileIcon("pdf") + '<span style="font-size:12px">Document</span></div>' +
+        '<div class="pd-cap"><b>' + esc(img.name) + "</b><span>" + (pages ? pages + " pages" : "PDF") + "</span></div></div>";
+    } else if (img && k === "video") {
+      media = '<div class="pvmedia pvdoc"><div class="pd-face">' + fileIcon("video") + '<span style="font-size:12px">Video</span></div>' +
+        '<div class="pd-cap"><b>' + esc(img.name) + "</b><span>MP4</span></div></div>";
+    }
+    var globe = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm5.5 6.5h-2.05a11 11 0 00-.9-4.03A5.51 5.51 0 0113.5 7.5zm-5.5 6a9.5 9.5 0 01-1.42-4.5h2.84A9.5 9.5 0 018 13.5zm-1.42-6A9.5 9.5 0 018 2.5a9.5 9.5 0 011.42 5zM5.45 3.47a11 11 0 00-.9 4.03H2.5a5.51 5.51 0 012.95-4.03zM2.5 8.5h2.05c.08 1.44.4 2.82.9 4.03A5.51 5.51 0 012.5 8.5zm8.05 4.03c.5-1.21.82-2.59.9-4.03h2.05a5.51 5.51 0 01-2.95 4.03z"/></svg>';
+    var icoLike = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11H3V10zM7 11l4.2-7.6a1.8 1.8 0 013.3 1.2L14 9h5.4a2 2 0 012 2.3l-1.2 7a2 2 0 01-2 1.7H7"/></svg>';
+    var icoCmt = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 01-8 8H4l2-3a8 8 0 1115-5z"/></svg>';
+    var icoRep = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>';
+    var icoSend = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>';
+    var fc = (d.firstComment || "").trim();
+    return '<div class="pv ' + device + '">' +
+      '<div class="pvhead"><span class="pvavatar">' + esc(initials()) + '</span>' +
+      '<div class="pvwho"><div class="pvname">' + esc(st.displayName || "Your name") + "</div>" +
+      '<div class="pvhl">' + esc(st.headline || st.brandLine || "Your headline") + "</div>" +
+      '<div class="pvtime">Now · ' + globe + "</div></div></div>" +
+      '<div class="pvbody">' + bodyHtml + "</div>" + media +
+      '<div class="pvacts"><span>' + icoLike + "Like</span><span>" + icoCmt + "Comment</span><span>" + icoRep + "Repost</span><span>" + icoSend + "Send</span></div>" +
+      (fc ? '<div class="pvcomment"><span class="mini">' + esc(initials()) + '</span><div class="cbub"><div class="cwho">' + esc(st.displayName || "You") + "</div>" + esc(fc) + "</div></div>" : "") +
+      "</div>";
+  }
+
+  function workspaceHtml(d) {
+    if (!d) return "";
+    var img = d.imageId ? imgById(d.imageId) : null;
+    var chooser = pickOpen ?
+      '<div class="imgrow">' +
+      (S.images.length ? S.images.map(function (i) {
+        var k = mediaKind(i);
+        if (k === "image") {
+          return '<img class="thumb' + (d.imageId === i.id ? " sel" : "") + '" src="' + mediaUrl(i.id) + '" title="' + esc(i.name) + '" data-act="pick-img" data-id="' + d.id + '" data-img="' + i.id + '" />';
+        }
+        return '<button class="thumb file' + (d.imageId === i.id ? " sel" : "") + '" title="' + esc(i.name) + '" data-act="pick-img" data-id="' + d.id + '" data-img="' + i.id + '">' + kindTag(k) + "</button>";
+      }).join("") : '<span class="sub">Library is empty. Upload in the Media tab, or generate a card.</span>') +
+      '<button class="btn small" data-act="clear-img" data-id="' + d.id + '">No media</button>' +
+      "</div>" : "";
+    var hooks = hooksOpen ?
+      '<div class="hookpanel">' + HOOKS.map(function (g) {
+        return '<div class="hcat">' + esc(g[0]) + "</div>" + g[1].map(function (h) {
+          return '<button class="hk" data-act="use-hook" data-hook="' + esc(h) + '">' + esc(h) + "</button>";
+        }).join("");
+      }).join("") + "</div>" : "";
+    var slides = "";
+    if (img && img.slides && img.slides.length) {
+      slides = '<div class="slidestrip"><div class="ss-t">Carousel slides (edit, then re-render)</div>' +
+        img.slides.map(function (s, i) {
+          return '<div class="srow"><span class="sn">' + (i + 1) + '</span><textarea rows="2" maxlength="240" data-slide="' + i + '">' + esc(s) + "</textarea></div>";
+        }).join("") +
+        '<div class="btnrow" style="margin-top:4px"><button class="btn small primary" data-act="rerender-carousel" data-id="' + d.id + '">Re-render carousel</button></div></div>';
+    }
+    var srcChip = d.sourceAuthor ? "idea from <b>" + esc(d.sourceAuthor) + "</b> (attribution only, never posted)"
+      : d.jobSpotlight ? '<span class="statchip">job spotlight' + (d.jobTitle ? ": " + esc(d.jobTitle) : "") + "</span> <span>client never named</span>"
+      : d.aiOriginal ? '<span class="statchip">original, written for your brand</span>' : "original";
+    return '<div class="workgrid"><div>' +
+      '<div class="item" style="margin-bottom:0" data-draft="' + d.id + '">' +
+      '<div class="meta"><span class="badge ' + d.status + '">' + (d.status === "failed" ? "failed" : "draft") + "</span><span>" + srcChip + "</span><span>· " + fmtTime(d.updatedAt) + "</span></div>" +
+      '<div class="fmtbar">' +
+      '<button class="fbtn" data-act="fmt-bold" title="Bold the selected text">B</button>' +
+      '<button class="fbtn" style="font-style:italic" data-act="fmt-italic" title="Italicize the selected text">I</button>' +
+      '<span class="sep"></span>' +
+      '<button class="fbtn" data-act="hooks">Hooks</button>' +
+      '<span class="sub" style="margin-left:auto">first ' + FEED_FOLD + ' characters show in the feed</span>' +
+      "</div>" + hooks +
+      '<textarea rows="10" maxlength="3000" data-act="edit" data-id="' + d.id + '">' + esc(d.text) + "</textarea>" +
+      '<div class="count">' + d.text.length + " / 3000</div>" +
+      (d.error ? '<div class="errbox">Publish failed: ' + esc(d.error) + "</div>" : "") +
+      '<div class="imgrow">' +
+      '<button class="btn small" data-act="choose-img" data-id="' + d.id + '">' + (img ? "Change media" : "Attach media") + "</button>" +
+      '<button class="btn small" data-act="make-card" data-id="' + d.id + '">Quote card</button>' +
+      '<button class="btn small" data-act="make-carousel" data-id="' + d.id + '">Carousel</button>' +
+      (img ? '<span class="sub">' + esc(img.name) + "</span>" : '<span class="sub">No media attached.</span>') +
+      "</div>" + chooser + slides +
+      '<label>First comment (links belong here, not in the post)</label>' +
+      '<textarea rows="2" maxlength="1200" data-act="edit-fc" data-id="' + d.id + '" placeholder="Optional. Posts by itself right after the post publishes.">' + esc(d.firstComment || "") + "</textarea>" +
+      (d.sourceText ? '<details class="cmp"><summary>Compare with the original post</summary><div class="src">' + esc(d.sourceText) + "</div></details>" : "") +
+      '<div class="btnrow">' +
+      (d.status === "failed"
+        ? '<button class="btn primary" data-act="retry" data-id="' + d.id + '">Retry publish</button>'
+        : '<button class="btn primary" data-act="post-now" data-id="' + d.id + '">Approve + post now</button>' +
+          '<button class="btn" data-act="post-slot" data-id="' + d.id + '">Approve + next slot</button>' +
+          '<button class="btn" data-act="open-sched" data-id="' + d.id + '">Approve + schedule</button>') +
+      '<button class="btn" data-act="regen" data-id="' + d.id + '">Regenerate</button>' +
+      '<button class="btn danger" data-act="discard" data-id="' + d.id + '">Discard</button>' +
+      "</div>" +
+      '<div class="schedrow" id="sched-' + d.id + '"><input type="datetime-local" id="when-' + d.id + '" />' +
+      '<button class="btn primary small" data-act="sched-confirm" data-id="' + d.id + '">Schedule</button>' +
+      '<button class="btn small" data-act="sched-cancel" data-id="' + d.id + '">Cancel</button></div>' +
+      "</div></div>" +
+      '<div class="pvwrap"><div class="pvbar"><span class="lab">LinkedIn preview</span>' +
+      '<div class="devtoggle"><button data-dev="desktop" class="' + (device === "desktop" ? "active" : "") + '">Desktop</button>' +
+      '<button data-dev="mobile" class="' + (device === "mobile" ? "active" : "") + '">Mobile</button></div></div>' +
+      '<div id="pvHost">' + liPreview(d) + "</div></div>" +
+      "</div>";
+  }
+
+  /* ---------- Sources ---------- */
+  function renderCreate() {
     var el = document.getElementById("inboxList");
     if (!S.inbox.length) {
-      el.innerHTML = '<div class="empty"><b>Inbox is empty</b>Paste a post you liked on the left. Curate the input, approve the output.</div>';
+      el.innerHTML = '<div class="empty"><b>Inbox is empty</b>Paste a post you liked on the left, or follow a creator and let the archive build itself.</div>';
       return;
     }
     el.innerHTML = S.inbox.map(function (it) {
@@ -457,113 +768,100 @@
     }).join("");
   }
 
-  function draftCard(d) {
-    var img = d.imageId ? imgById(d.imageId) : null;
-    var atk = img ? mediaKind(img) : null;
-    var chooser = pickImageFor === d.id ?
-      '<div class="imgrow">' +
-      (S.images.length ? S.images.map(function (i) {
-        var k = mediaKind(i);
-        if (k === "image") {
-          return '<img class="thumb' + (d.imageId === i.id ? " sel" : "") + '" src="' + mediaUrl(i.id) + '" title="' + esc(i.name) + '" data-act="pick-img" data-id="' + d.id + '" data-img="' + i.id + '" />';
-        }
-        return '<button class="thumb file' + (d.imageId === i.id ? " sel" : "") + '" title="' + esc(i.name) + '" data-act="pick-img" data-id="' + d.id + '" data-img="' + i.id + '">' + kindTag(k) + "</button>";
-      }).join("") : '<span class="sub">Library is empty. Upload in the Media tab, or generate a card.</span>') +
-      '<button class="btn small" data-act="clear-img" data-id="' + d.id + '">No media</button>' +
-      "</div>" : "";
-    var orig = d.sourceText || null;
-    if (!orig && d.sourceId) { for (var oi = 0; oi < S.inbox.length; oi++) if (S.inbox[oi].id === d.sourceId) orig = S.inbox[oi].text; }
-    var editor = '<textarea rows="9" maxlength="3000" data-act="edit" data-id="' + d.id + '">' + esc(d.text) + "</textarea>" +
-      '<div class="count">' + d.text.length + " / 3000</div>" +
-      '<div class="feedprev"><div class="fp-t">Feed preview, before the fold</div><div class="fp-b">' + feedPreviewHtml(d.text) + "</div></div>";
-    return '<div class="item" data-draft="' + d.id + '">' +
-      '<div class="meta"><span class="badge ' + d.status + '">' + (d.status === "failed" ? "failed" : "draft") + "</span>" +
-      (d.sourceAuthor ? "<span>idea from <b>" + esc(d.sourceAuthor) + "</b> (attribution only, never posted)</span>"
-        : d.jobSpotlight ? '<span class="statchip">job spotlight' + (d.jobTitle ? ": " + esc(d.jobTitle) : "") + "</span><span>client never named</span>"
-        : d.aiOriginal ? '<span class="statchip">original, written for your brand</span>' : "<span>original</span>") +
-      "<span>· " + fmtTime(d.updatedAt) + "</span></div>" +
-      (orig
-        ? '<div class="cmpgrid"><div><div class="cmplab">The post you saved' + (d.sourceAuthor ? " (by " + esc(d.sourceAuthor) + ")" : "") + '</div>' +
-          '<div class="src cmp">' + esc(orig) + "</div></div>" +
-          '<div><div class="cmplab">Your version, compare before you approve</div>' + editor + "</div></div>"
-        : editor) +
-      (d.error ? '<div class="errbox">Publish failed: ' + esc(d.error) + "</div>" : "") +
-      '<div class="imgrow">' +
-      (!img ? '<span class="sub">No media attached.</span>'
-        : atk === "image" ? '<img class="thumb sel" src="' + mediaUrl(img.id) + '" title="' + esc(img.name) + '" />'
-        : '<span class="docchip" title="' + esc(img.name) + '">' + kindTag(atk) + " · " + esc(img.name) + "</span>") +
-      '<button class="btn small" data-act="choose-img" data-id="' + d.id + '">' + (img ? "Change media" : "Attach media") + "</button>" +
-      '<button class="btn small" data-act="make-card" data-id="' + d.id + '">Generate quote card</button>' +
-      '<button class="btn small" data-act="make-carousel" data-id="' + d.id + '">Generate carousel</button>' +
-      "</div>" + chooser +
-      '<label>First comment (links belong here, not in the post)</label>' +
-      '<textarea rows="2" maxlength="1200" data-act="edit-fc" data-id="' + d.id + '" placeholder="Optional. Posts by itself right after the post publishes.">' + esc(d.firstComment || "") + "</textarea>" +
-      '<div class="btnrow">' +
-      (d.status === "failed"
-        ? '<button class="btn primary" data-act="retry" data-id="' + d.id + '">Retry publish</button>'
-        : '<button class="btn primary" data-act="post-now" data-id="' + d.id + '">Approve + post now</button>' +
-          '<button class="btn" data-act="post-slot" data-id="' + d.id + '">Approve + next slot</button>' +
-          '<button class="btn" data-act="open-sched" data-id="' + d.id + '">Approve + schedule</button>') +
-      '<button class="btn" data-act="regen" data-id="' + d.id + '">Regenerate</button>' +
-      '<button class="btn danger" data-act="discard" data-id="' + d.id + '">Discard</button>' +
-      "</div>" +
-      '<div class="schedrow" id="sched-' + d.id + '"><input type="datetime-local" id="when-' + d.id + '" />' +
-      '<button class="btn primary small" data-act="sched-confirm" data-id="' + d.id + '">Schedule</button>' +
-      '<button class="btn small" data-act="sched-cancel" data-id="' + d.id + '">Cancel</button></div>' +
-      "</div>";
+  function renderWatchlist() {
+    var list = S.watchlist || [];
+    var note = document.getElementById("watchNote");
+    var eng = S.engine || {};
+    note.innerHTML = (list.length && !eng.ready)
+      ? '<div class="notice" style="margin-top:12px;margin-bottom:0">Automatic pulls start once your LinkedIn account is connected in the LinkedIn tool.</div>' : "";
+    document.getElementById("watchList").innerHTML = list.map(function (w) {
+      var status = w.lastError ? "last pull did not go through, it will retry"
+        : w.lastPulledAt ? "last pulled " + fmtTime(w.lastPulledAt)
+        : "waiting for the first pull";
+      return '<div class="item" style="margin-top:12px;margin-bottom:0">' +
+        '<div class="meta"><b>' + esc(w.name) + "</b><span>· " + esc(status) + "</span></div>" +
+        '<div class="btnrow" style="margin-top:6px">' +
+        '<button class="btn small" data-act="watch-pull" data-id="' + w.id + '">Pull now</button>' +
+        '<button class="btn danger small" data-act="watch-del" data-id="' + w.id + '">Unfollow</button>' +
+        "</div></div>";
+    }).join("");
   }
 
-  function renderDrafts() {
-    var el = document.getElementById("draftList");
-    var list = S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; });
-    var n = document.getElementById("draftNotices");
-    n.innerHTML = !S.anthropicConfigured ? '<div class="notice">AI is not enabled on the server yet, so the rewriter is offline. You can still write and publish posts manually.</div>' : "";
-    el.innerHTML = list.length ? list.map(draftCard).join("") :
-      '<div class="empty"><b>No drafts</b>Rewrite something from your inbox, and review it here before it can ever post.</div>';
-  }
-
-  function renderQueue() {
-    var el = document.getElementById("queueList");
+  /* ---------- Calendar ---------- */
+  function renderCalendar() {
+    var n = document.getElementById("queueNotices");
     var sched = S.drafts.filter(function (d) { return d.status === "approved"; })
       .sort(function (a, b) { return String(a.scheduledAt).localeCompare(String(b.scheduledAt)); });
-    var posted = S.drafts.filter(function (d) { return d.status === "posted"; })
-      .sort(function (a, b) { return String(b.postedAt).localeCompare(String(a.postedAt)); });
-    var n = document.getElementById("queueNotices");
     n.innerHTML = (sched.length && !(S.automation.enabled && S.automation.armed))
       ? '<div class="notice">Scheduled posts publish on the automation clock, which is not armed on this server (AUTOMATION_ENABLED). They will wait until it is on; Approve + post now always works.</div>' : "";
-    var html = "";
-    if (sched.length) {
-      html += sched.map(function (d) {
-        var img = d.imageId ? imgById(d.imageId) : null;
-        return '<div class="item"><div class="meta"><span class="badge approved">scheduled</span><b>' + fmtTime(d.scheduledAt) + "</b>" +
-          (img ? '<span class="docchip">' + (mediaKind(img) === "image" ? "Image" : kindTag(mediaKind(img))) + " · " + esc(img.name) + "</span>" : "") +
-          (d.firstComment ? '<span class="statchip">first comment ready</span>' : "") + "</div>" +
-          '<div class="src">' + esc(d.text) + "</div>" +
-          '<div class="btnrow"><button class="btn" data-act="unschedule" data-id="' + d.id + '">Cancel schedule</button></div></div>';
-      }).join("");
-    }
-    if (posted.length) {
-      html += posted.map(function (d) {
-        var st = d.stats || null;
-        var chips = "";
-        if (st) {
-          if (typeof st.reactions === "number") chips += '<span class="statchip">' + st.reactions + " reactions</span>";
-          if (typeof st.comments === "number") chips += '<span class="statchip">' + st.comments + " comments</span>";
-          if (typeof st.impressions === "number") chips += '<span class="statchip">' + st.impressions + " views</span>";
+
+    var st = S.settings || {};
+    var days = String(st.postingDays || "").split(",").filter(function (x) { return x !== ""; }).map(Number);
+    var times = String(st.postingTimes || "").split(",").map(function (t) { return t.trim(); }).filter(function (t) { return /^\d{1,2}:\d{2}$/.test(t); })
+      .sort(function (a, b) { return (+a.split(":")[0] * 60 + +a.split(":")[1]) - (+b.split(":")[0] * 60 + +b.split(":")[1]); });
+    var byMinute = {};
+    sched.forEach(function (d) { byMinute[new Date(d.scheduledAt).getTime()] = d; });
+
+    var rows = "";
+    var todayStr = new Date().toDateString();
+    for (var add = 0; add < 14; add++) {
+      var day = new Date(); day.setDate(day.getDate() + add); day.setHours(0, 0, 0, 0);
+      var isSlotDay = days.indexOf(day.getDay()) >= 0;
+      var chips = "";
+      var used = {};
+      if (isSlotDay) {
+        times.forEach(function (t) {
+          var hm = t.split(":");
+          var at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), +hm[0], +hm[1], 0, 0);
+          var hit = byMinute[at.getTime()];
+          if (hit) {
+            used[hit.id] = 1;
+            chips += '<span class="slotchip filled" data-act="unschedule" data-id="' + hit.id + '" title="Click to cancel this schedule"><span class="t">' + esc(t) + '</span><span class="x">' + esc(firstLine(hit.text)) + "</span></span>";
+          } else if (at.getTime() > Date.now()) {
+            chips += '<span class="slotchip"><span class="t">' + esc(t) + "</span>open</span>";
+          }
+        });
+      }
+      sched.forEach(function (d) {
+        var at = new Date(d.scheduledAt);
+        if (at.toDateString() === day.toDateString() && !used[d.id]) {
+          chips += '<span class="slotchip filled" data-act="unschedule" data-id="' + d.id + '" title="Click to cancel this schedule"><span class="t">' +
+            at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + '</span><span class="x">' + esc(firstLine(d.text)) + "</span></span>";
         }
-        return '<div class="item"><div class="meta"><span class="badge posted">posted</span><span>' + fmtTime(d.postedAt) + "</span>" +
-          (d.postUrl ? ' · <a href="' + esc(d.postUrl) + '" target="_blank" rel="noopener">view on LinkedIn</a>' : "") + chips + "</div>" +
-          '<div class="src">' + esc(d.text) + "</div>" +
-          (d.firstCommentPosted === false ? '<div class="notice" style="margin-top:10px;margin-bottom:0">The first comment did not attach. Add it on LinkedIn manually.</div>' : "") +
-          '<div class="btnrow"><button class="btn small" data-act="reuse" data-id="' + d.id + '">Reuse as new draft</button></div></div>';
-      }).join("");
+      });
+      if (!chips && !isSlotDay) continue;
+      rows += '<div class="calday' + (day.toDateString() === todayStr ? " today" : "") + '"><div class="cd-date"><b>' +
+        day.toLocaleDateString([], { weekday: "short" }) + "</b><span>" + day.toLocaleDateString([], { month: "short", day: "numeric" }) + "</span></div>" +
+        '<div class="cd-slots">' + (chips || '<span class="slotchip">no slots</span>') + "</div></div>";
     }
+    document.getElementById("calWrap").innerHTML = rows
+      ? '<div class="cal">' + rows + "</div>"
+      : '<div class="empty"><b>No schedule yet</b>Save a posting schedule in Settings and this becomes your content calendar: slots fill as you approve.</div>';
+
+    var posted = S.drafts.filter(function (d) { return d.status === "posted"; })
+      .sort(function (a, b) { return String(b.postedAt).localeCompare(String(a.postedAt)); });
     var toolbar = posted.some(function (d) { return d.provider === "engine"; })
       ? '<div class="btnrow" style="margin:0 0 12px"><button class="btn small" data-act="stats-refresh">Refresh performance</button></div>' : "";
-    el.innerHTML = html ? toolbar + html : '<div class="empty"><b>Queue is empty</b>Approved posts wait here until their scheduled time; published posts keep their receipt.</div>';
+    document.getElementById("postedWrap").innerHTML = posted.length
+      ? "<h3 style='font-size:14px;margin:0 0 10px'>Published</h3>" + toolbar + posted.map(function (d) {
+          var stt = d.stats || null;
+          var chips = "";
+          if (stt) {
+            if (typeof stt.reactions === "number") chips += '<span class="statchip">' + stt.reactions + " reactions</span>";
+            if (typeof stt.comments === "number") chips += '<span class="statchip">' + stt.comments + " comments</span>";
+            if (typeof stt.impressions === "number") chips += '<span class="statchip">' + stt.impressions + " views</span>";
+          }
+          return '<div class="item"><div class="meta"><span class="badge posted">posted</span><span>' + fmtTime(d.postedAt) + "</span>" +
+            (d.postUrl ? ' · <a href="' + esc(d.postUrl) + '" target="_blank" rel="noopener">view on LinkedIn</a>' : "") + chips + "</div>" +
+            '<div class="src">' + esc(d.text) + "</div>" +
+            (d.firstCommentPosted === false ? '<div class="notice" style="margin-top:10px;margin-bottom:0">The first comment did not attach. Add it on LinkedIn manually.</div>' : "") +
+            '<div class="btnrow"><button class="btn small" data-act="reuse" data-id="' + d.id + '">Reuse as new draft</button></div></div>';
+        }).join("")
+      : "";
   }
 
-  function renderImages() {
+  /* ---------- Media ---------- */
+  function renderMedia() {
     var grid = document.getElementById("imgGrid"), empty = document.getElementById("imgEmpty");
     grid.innerHTML = S.images.map(function (i) {
       var k = mediaKind(i);
@@ -578,6 +876,81 @@
     empty.style.display = S.images.length ? "none" : "block";
   }
 
+  /* ---------- Performance ---------- */
+  function barChart(title, labels, values, tipLabels) {
+    var W = 460, H = 190, padL = 8, padB = 22, padT = 26;
+    var max = Math.max.apply(null, values.concat([1]));
+    var bw = Math.max(10, Math.floor((W - padL * 2) / values.length) - 8);
+    var maxIdx = values.indexOf(max);
+    var bars = "", axes = "";
+    for (var g = 1; g <= 2; g++) {
+      var gy = padT + (H - padT - padB) * (g / 3);
+      axes += '<line class="grid" x1="' + padL + '" y1="' + gy + '" x2="' + (W - padL) + '" y2="' + gy + '"/>';
+    }
+    values.forEach(function (v, i) {
+      var x = padL + i * ((W - padL * 2) / values.length) + 4;
+      var h = Math.round((H - padT - padB) * (v / max));
+      var y = H - padB - h;
+      bars += '<rect class="cbar" x="' + x + '" y="' + y + '" width="' + bw + '" height="' + Math.max(h, 2) +
+        '" rx="4" fill="var(--accent)" data-tip="' + esc(tipLabels[i] + ": " + v) + '"/>';
+      if (i === maxIdx && v > 0) bars += '<text class="val" x="' + (x + bw / 2) + '" y="' + (y - 5) + '" text-anchor="middle">' + v + "</text>";
+      bars += '<text class="axis" x="' + (x + bw / 2) + '" y="' + (H - 7) + '" text-anchor="middle">' + esc(labels[i]) + "</text>";
+    });
+    var table = '<details class="tbl"><summary>View as table</summary><table><tr><th>Bucket</th><th>Value</th></tr>' +
+      values.map(function (v, i) { return "<tr><td>" + esc(tipLabels[i]) + "</td><td>" + v + "</td></tr>"; }).join("") + "</table></details>";
+    return '<div class="card chart"><h3>' + esc(title) + '</h3>' +
+      '<svg viewBox="0 0 ' + W + " " + H + '" width="100%" height="' + H + '" role="img" aria-label="' + esc(title) + '">' +
+      '<line class="grid" x1="' + padL + '" y1="' + (H - padB) + '" x2="' + (W - padL) + '" y2="' + (H - padB) + '"/>' +
+      axes + bars + "</svg>" + table + "</div>";
+  }
+
+  function renderPerformance() {
+    var el = document.getElementById("perfWrap");
+    var posted = S.drafts.filter(function (d) { return d.status === "posted"; })
+      .sort(function (a, b) { return String(b.postedAt).localeCompare(String(a.postedAt)); });
+    if (!posted.length) {
+      el.innerHTML = '<div class="empty"><b>No published posts yet</b>Approve your first post and this becomes your scoreboard: reach, reactions, and what to double down on.</div>';
+      return;
+    }
+    var monthAgo = Date.now() - 30 * 86400000;
+    var last30 = posted.filter(function (d) { return new Date(d.postedAt).getTime() > monthAgo; });
+    var sum = function (k) { return posted.reduce(function (a, d) { return a + ((d.stats && typeof d.stats[k] === "number") ? d.stats[k] : 0); }, 0); };
+    var best = null;
+    posted.forEach(function (d) { if (d.stats && typeof d.stats.reactions === "number" && (!best || d.stats.reactions > best.stats.reactions)) best = d; });
+
+    var weeks = [], wl = [], wv = [];
+    for (var w = 7; w >= 0; w--) {
+      var start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - start.getDay() - w * 7);
+      var end = new Date(start.getTime() + 7 * 86400000);
+      var cnt = posted.filter(function (d) { var t = new Date(d.postedAt).getTime(); return t >= start.getTime() && t < end.getTime(); }).length;
+      weeks.push(cnt); wl.push(start.toLocaleDateString([], { month: "numeric", day: "numeric" })); wv.push("Week of " + start.toLocaleDateString([], { month: "short", day: "numeric" }));
+    }
+    var withStats = posted.filter(function (d) { return d.stats && typeof d.stats.reactions === "number"; }).slice(0, 10).reverse();
+    var kpis =
+      '<div class="kpis">' +
+      '<div class="kpi"><div class="kv">' + last30.length + '</div><div class="kl">posts, last 30 days</div></div>' +
+      '<div class="kpi"><div class="kv">' + sum("reactions") + '</div><div class="kl">reactions, all tracked</div></div>' +
+      '<div class="kpi"><div class="kv">' + sum("comments") + '</div><div class="kl">comments, all tracked</div></div>' +
+      '<div class="kpi"><div class="kv">' + sum("impressions") + '</div><div class="kl">views, all tracked</div></div>' +
+      "</div>";
+    var bestCard = best
+      ? '<div class="card" style="margin-bottom:16px"><h3>Best performer</h3>' +
+        '<div class="meta" style="display:flex;gap:8px;margin:6px 0 8px"><span class="statchip">' + best.stats.reactions + ' reactions</span>' +
+        (typeof best.stats.comments === "number" ? '<span class="statchip">' + best.stats.comments + " comments</span>" : "") + "</div>" +
+        '<div class="src">' + esc(best.text) + "</div>" +
+        '<div class="btnrow"><button class="btn small" data-act="reuse" data-id="' + best.id + '">Reuse as new draft</button></div></div>'
+      : "";
+    var charts = '<div class="charts">' +
+      barChart("Posts per week", wl, weeks, wv) +
+      (withStats.length
+        ? barChart("Reactions per post (latest tracked)", withStats.map(function (d, i) { return String(i + 1); }), withStats.map(function (d) { return d.stats.reactions; }), withStats.map(function (d) { return firstLine(d.text).slice(0, 60); }))
+        : "") +
+      "</div>";
+    el.innerHTML = kpis + bestCard + charts +
+      '<div class="btnrow"><button class="btn small" data-act="stats-refresh">Refresh performance</button><span class="sub">Counters update automatically every few hours once the engine is connected.</span></div>';
+  }
+
+  /* ---------- Settings ---------- */
   function renderSettings() {
     var st = S.settings || {};
     document.getElementById("setName").value = st.displayName || "";
@@ -588,6 +961,11 @@
     document.getElementById("setIndustries").value = st.industries || "";
     document.getElementById("setAuto").checked = st.autoRewrite !== false;
     document.getElementById("setTimes").value = st.postingTimes || "";
+    var fields = [st.displayName, st.headline, st.voiceProfile, st.storyBank, st.brandLine, st.industries, st.postingTimes];
+    var done = fields.filter(function (f) { return String(f || "").trim(); }).length;
+    var pct = Math.round(100 * done / fields.length);
+    document.getElementById("voiceMeter").innerHTML =
+      '<div class="meter"><i style="width:' + pct + '%"></i></div><div class="sub">' + pct + "% set up. The fuller this is, the better every draft gets.</div>";
     var pdays = String(st.postingDays || "").split(",");
     document.getElementById("dayRow").innerHTML = [["1", "Mon"], ["2", "Tue"], ["3", "Wed"], ["4", "Thu"], ["5", "Fri"], ["6", "Sat"], ["0", "Sun"]]
       .map(function (p) {
@@ -626,7 +1004,7 @@
     api("add_inspiration", { author: document.getElementById("inAuthor").value, url: document.getElementById("inUrl").value, text: text })
       .then(function (r) {
         document.getElementById("inText").value = ""; document.getElementById("inUrl").value = "";
-        if (rewrite) return api("rewrite", { inspirationId: r.item.id }).then(function () { showView("drafts"); toast("Draft ready for your review."); });
+        if (rewrite) return api("rewrite", { inspirationId: r.item.id }).then(function () { showView("studio"); toast("Draft ready for your review."); });
         toast("Saved to inbox.");
       })
       .catch(function (e) { toast(e.message); })
@@ -637,7 +1015,7 @@
     var topic = prompt("Topic or angle? (optional, blank lets the writer pick)") || "";
     var btn = this; busy(btn, true, "Writing…");
     api("make_original", { guidance: topic })
-      .then(function () { showView("drafts"); toast("Original draft ready for your review."); return load(); })
+      .then(function () { showView("studio"); toast("Original draft ready for your review."); return load(); })
       .catch(function (e) { toast(e.message); })
       .then(function () { busy(btn, false); });
   });
@@ -645,7 +1023,7 @@
   document.getElementById("btnJobPost").addEventListener("click", function () {
     var btn = this; busy(btn, true, "Writing…");
     api("make_job_post", {})
-      .then(function () { showView("drafts"); toast("Job spotlight ready for your review. The client is never named."); return load(); })
+      .then(function () { showView("studio"); toast("Job spotlight ready for your review. The client is never named."); return load(); })
       .catch(function (e) { toast(/^no_open_jobs/.test(e.message || "") ? "No open jobs in the Job Library yet." : e.message); })
       .then(function () { busy(btn, false); });
   });
@@ -695,6 +1073,7 @@
       .catch(function (e) { toast(e.message); })
       .then(function () { busy(btn, false); });
   });
+
   document.getElementById("btnSaveSlots").addEventListener("click", function () {
     var btn = this; busy(btn, true, "Saving…");
     var days = Array.prototype.slice.call(document.querySelectorAll("#dayRow input[type=checkbox]"))
@@ -718,14 +1097,45 @@
       .catch(function (e) { toast(e.message); }).then(function () { busy(btn, false); });
   });
 
-  // Delegated clicks for list items (inbox, drafts, queue, images).
+  // Device toggle (delegated: the toggle re-renders with the workspace).
+  document.body.addEventListener("click", function (e) {
+    var dv = e.target.closest("[data-dev]");
+    if (dv) { device = dv.dataset.dev; var d = draftById(sel); if (d) document.getElementById("draftWork").innerHTML = workspaceHtml(d); }
+  });
+
+  // Delegated clicks for everything else.
   document.body.addEventListener("click", function (e) {
     var b = e.target.closest("[data-act]"); if (!b) return;
     var act = b.dataset.act, id = b.dataset.id;
-    if (act === "rewrite") {
+    if (act === "sel-draft") {
+      sel = id; pvOpen = false; pickOpen = false; hooksOpen = false; renderStudio();
+    } else if (act === "fold") {
+      pvOpen = !pvOpen; var dd = draftById(sel); if (dd) document.getElementById("pvHost").innerHTML = liPreview(dd);
+    } else if (act === "fmt-bold" || act === "fmt-italic") {
+      var ta = document.querySelector('textarea[data-act="edit"][data-id="' + sel + '"]');
+      if (!ta) return;
+      var a = ta.selectionStart, z = ta.selectionEnd;
+      if (a === z) { toast("Select the words to format first."); return; }
+      var mid = ta.value.slice(a, z);
+      var next = act === "fmt-bold" ? toBold(mid) : toItalic(mid);
+      ta.value = ta.value.slice(0, a) + next + ta.value.slice(z);
+      saveDraftText(sel, ta.value, true);
+      var card = ta.closest(".item"); var c = card && card.querySelector(".count"); if (c) c.textContent = ta.value.length + " / 3000";
+      var dd2 = draftById(sel); if (dd2) { dd2.text = ta.value; document.getElementById("pvHost").innerHTML = liPreview(dd2); }
+    } else if (act === "hooks") {
+      hooksOpen = !hooksOpen; var d3 = draftById(sel); if (d3) document.getElementById("draftWork").innerHTML = workspaceHtml(d3);
+    } else if (act === "use-hook") {
+      var d4 = draftById(sel); if (!d4) return;
+      var hook = b.dataset.hook;
+      d4.text = hook + "\n\n" + d4.text;
+      hooksOpen = false;
+      saveDraftText(sel, d4.text, true, true);
+      document.getElementById("draftWork").innerHTML = workspaceHtml(d4);
+      toast("Hook added as your first line. Edit it into your own words.");
+    } else if (act === "rewrite") {
       busy(b, true, "Rewriting…");
       api("rewrite", { inspirationId: id })
-        .then(function () { showView("drafts"); toast("Draft ready for your review."); return load(); })
+        .then(function () { showView("studio"); toast("Draft ready for your review."); return load(); })
         .catch(function (err) { toast(err.message); busy(b, false); });
     } else if (act === "del-insp") {
       api("delete_inspiration", { id: id }).then(load).catch(function (err) { toast(err.message); });
@@ -735,14 +1145,22 @@
       api("regenerate", { draftId: id, guidance: guidance })
         .then(load).catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "discard") {
-      api("discard_draft", { draftId: id }).then(load).catch(function (err) { toast(err.message); });
+      api("discard_draft", { draftId: id }).then(function () { toast("Discarded."); return load(); }).catch(function (err) { toast(err.message); });
     } else if (act === "post-now") {
       if (!confirm("Publish this post to LinkedIn now?")) return;
       flushDraftText(id);
       busy(b, true, "Publishing…");
       api("approve", { draftId: id })
-        .then(function (r) { toast(r.draft.status === "posted" ? "Published to LinkedIn." : "Publish failed: " + (r.draft.error || "unknown")); showView("queue"); return load(); })
+        .then(function (r) { toast(r.draft.status === "posted" ? "Published to LinkedIn." : "Publish failed: " + (r.draft.error || "unknown")); showView("calendar"); return load(); })
         .catch(function (err) { toast(err.message); busy(b, false); load(); });
+    } else if (act === "post-slot") {
+      var slot = nextFreeSlot();
+      if (!slot) { toast("Set your posting schedule in Settings first."); showView("settings"); return; }
+      if (!confirm("Schedule this post for " + slot.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "?")) return;
+      flushDraftText(id);
+      api("approve", { draftId: id, when: slot.toISOString() })
+        .then(function () { toast("Scheduled."); showView("calendar"); return load(); })
+        .catch(function (err) { toast(err.message); });
     } else if (act === "open-sched") {
       var row = document.getElementById("sched-" + id); if (row) row.classList.add("open");
     } else if (act === "sched-cancel") {
@@ -752,9 +1170,10 @@
       if (!v) { toast("Pick a date and time."); return; }
       flushDraftText(id);
       api("approve", { draftId: id, when: new Date(v).toISOString() })
-        .then(function () { toast("Scheduled."); showView("queue"); return load(); })
+        .then(function () { toast("Scheduled."); showView("calendar"); return load(); })
         .catch(function (err) { toast(err.message); });
     } else if (act === "unschedule") {
+      if (!confirm("Cancel this schedule and send it back to drafts?")) return;
       api("cancel_schedule", { draftId: id }).then(function () { toast("Back in drafts."); return load(); }).catch(function (err) { toast(err.message); });
     } else if (act === "retry") {
       busy(b, true, "Publishing…");
@@ -762,23 +1181,35 @@
         .then(function (r) { toast(r.draft.status === "posted" ? "Published to LinkedIn." : "Publish failed: " + (r.draft.error || "unknown")); return load(); })
         .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "choose-img") {
-      pickImageFor = pickImageFor === id ? null : id; renderDrafts();
+      pickOpen = !pickOpen; var d5 = draftById(sel); if (d5) document.getElementById("draftWork").innerHTML = workspaceHtml(d5);
     } else if (act === "pick-img") {
       api("update_draft", { draftId: id, imageId: b.dataset.img })
-        .then(function () { pickImageFor = null; return load(); }).catch(function (err) { toast(err.message); });
+        .then(function () { pickOpen = false; return load(); }).catch(function (err) { toast(err.message); });
     } else if (act === "clear-img") {
       api("update_draft", { draftId: id, imageId: null })
-        .then(function () { pickImageFor = null; return load(); }).catch(function (err) { toast(err.message); });
+        .then(function () { pickOpen = false; return load(); }).catch(function (err) { toast(err.message); });
     } else if (act === "make-card") {
-      var d = null;
-      for (var i = 0; i < S.drafts.length; i++) if (S.drafts[i].id === id) d = S.drafts[i];
-      var firstLine = d ? (d.text.split("\n")[0] || "").trim() : "";
-      var headline = prompt("Card headline:", firstLine.slice(0, 140));
+      var d6 = draftById(id);
+      var headline = prompt("Card headline:", (d6 ? firstLine(d6.text) : "").slice(0, 140));
       if (!headline) return;
       busy(b, true, "Rendering…");
       api("make_card", { headline: headline })
         .then(function (r) { return api("update_draft", { draftId: id, imageId: r.image.id }); })
         .then(function () { toast("Quote card attached."); return load(); })
+        .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
+    } else if (act === "make-carousel") {
+      flushDraftText(id);
+      busy(b, true, "Building…");
+      api("make_carousel", { draftId: id })
+        .then(function (r) { toast("Carousel attached: " + r.slides.length + " slides. Edit any slide below and re-render."); return load(); })
+        .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
+    } else if (act === "rerender-carousel") {
+      var texts = Array.prototype.slice.call(document.querySelectorAll("[data-slide]"))
+        .map(function (t) { return t.value.trim(); }).filter(Boolean);
+      if (texts.length < 2) { toast("A carousel needs at least 2 slides."); return; }
+      busy(b, true, "Rendering…");
+      api("make_carousel", { draftId: id, slides: texts })
+        .then(function () { toast("Carousel re-rendered."); return load(); })
         .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "del-img") {
       if (!confirm("Delete this from the library?")) return;
@@ -786,7 +1217,12 @@
     } else if (act === "watch-pull") {
       busy(b, true, "Pulling…");
       api("watch_pull", { id: id })
-        .then(function (r) { toast(r.added ? r.added + " new post" + (r.added === 1 ? "" : "s") + " added to your inbox." : "Nothing new since the last pull."); return load(); })
+        .then(function (r) {
+          var m = r.added ? r.added + " new post" + (r.added === 1 ? "" : "s") + " added" : "Nothing new since the last pull";
+          if (r.drafted) m += ", " + r.drafted + " rewritten into Drafts";
+          toast(m + ".");
+          return load();
+        })
         .catch(function (err) {
           toast(/^engine_not_ready/.test(err.message || "")
             ? "Connect your LinkedIn account in the LinkedIn tool first."
@@ -794,23 +1230,9 @@
         }).then(function () { busy(b, false); load(); });
     } else if (act === "watch-del") {
       api("watch_remove", { id: id }).then(load).catch(function (err) { toast(err.message); });
-    } else if (act === "make-carousel") {
-      flushDraftText(id);
-      busy(b, true, "Building…");
-      api("make_carousel", { draftId: id })
-        .then(function (r) { toast("Carousel attached: " + r.slides.length + " slides. It publishes as a swipeable document."); return load(); })
-        .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
-    } else if (act === "post-slot") {
-      var slot = nextFreeSlot();
-      if (!slot) { toast("Set your posting schedule in Settings first."); showView("settings"); return; }
-      if (!confirm("Schedule this post for " + slot.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "?")) return;
-      flushDraftText(id);
-      api("approve", { draftId: id, when: slot.toISOString() })
-        .then(function () { toast("Scheduled."); showView("queue"); return load(); })
-        .catch(function (err) { toast(err.message); });
     } else if (act === "reuse") {
       api("duplicate", { draftId: id })
-        .then(function () { toast("Copied to Drafts."); showView("drafts"); return load(); })
+        .then(function () { toast("Copied to Drafts."); showView("studio"); return load(); })
         .catch(function (err) { toast(err.message); });
     } else if (act === "stats-refresh") {
       busy(b, true, "Checking…");
@@ -824,32 +1246,57 @@
     }
   });
 
-  // Live character count + feed preview while typing.
+  // Autosave draft edits on blur (and before approve/schedule via flushDraftText).
+  document.body.addEventListener("blur", function (e) {
+    var t = e.target;
+    if (t && t.matches && t.matches('textarea[data-act="edit"]')) saveDraftText(t.dataset.id, t.value);
+    if (t && t.matches && t.matches('textarea[data-act="edit-fc"]')) saveDraftFc(t.dataset.id, t.value);
+  }, true);
+  function flushDraftText(id) {
+    var t = document.querySelector('textarea[data-act="edit"][data-id="' + id + '"]');
+    if (t) saveDraftText(id, t.value, true);
+    var f = document.querySelector('textarea[data-act="edit-fc"][data-id="' + id + '"]');
+    if (f) saveDraftFc(id, f.value);
+  }
+  function saveDraftText(id, value, silent, force) {
+    var d = draftById(id);
+    if (!d || (!force && d.text === value)) return;
+    d.text = value; // optimistic; server scrubs and clamps
+    api("update_draft", { draftId: id, text: value }).catch(function (err) { if (!silent) toast(err.message); });
+  }
+  function saveDraftFc(id, value) {
+    var d = draftById(id);
+    if (!d || (d.firstComment || "") === value) return;
+    d.firstComment = value;
+    api("update_draft", { draftId: id, firstComment: value }).catch(function () {});
+  }
+
+  // Live character count + LinkedIn preview while typing.
   document.body.addEventListener("input", function (e) {
     var t = e.target;
     if (t && t.matches && t.matches('textarea[data-act="edit"]')) {
       var card = t.closest(".item"); if (!card) return;
       var c = card.querySelector(".count"); if (c) c.textContent = t.value.length + " / 3000";
-      var fp = card.querySelector(".fp-b"); if (fp) fp.innerHTML = feedPreviewHtml(t.value);
+      var d = draftById(t.dataset.id);
+      if (d) { d.text = t.value; var host = document.getElementById("pvHost"); if (host) host.innerHTML = liPreview(d); }
+    }
+    if (t && t.matches && t.matches('textarea[data-act="edit-fc"]')) {
+      var d2 = draftById(t.dataset.id);
+      if (d2) { d2.firstComment = t.value; var host2 = document.getElementById("pvHost"); if (host2) host2.innerHTML = liPreview(d2); }
     }
   });
 
-  // Autosave draft edits on blur (and before approve/schedule via flushDraftText).
-  document.body.addEventListener("blur", function (e) {
-    var t = e.target;
-    if (t && t.matches && t.matches('textarea[data-act="edit"]')) saveDraftText(t.dataset.id, t.value);
-  }, true);
-  function flushDraftText(id) {
-    var t = document.querySelector('textarea[data-act="edit"][data-id="' + id + '"]');
-    if (t) saveDraftText(id, t.value, true);
-  }
-  function saveDraftText(id, value, silent) {
-    var d = null;
-    for (var i = 0; i < S.drafts.length; i++) if (S.drafts[i].id === id) d = S.drafts[i];
-    if (!d || d.text === value) return;
-    d.text = value; // optimistic; server scrubs and clamps
-    api("update_draft", { draftId: id, text: value }).catch(function (err) { if (!silent) toast(err.message); });
-  }
+  // Chart hover tooltips.
+  var tip = document.getElementById("chartTip");
+  document.body.addEventListener("mousemove", function (e) {
+    var m = e.target.closest && e.target.closest(".cbar");
+    if (m && m.dataset.tip) {
+      tip.textContent = m.dataset.tip;
+      tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 270) + "px";
+      tip.style.top = (e.clientY - 34) + "px";
+      tip.style.opacity = "1";
+    } else tip.style.opacity = "0";
+  });
 
   load();
 })();

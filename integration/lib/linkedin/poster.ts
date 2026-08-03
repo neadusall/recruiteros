@@ -88,6 +88,8 @@ export interface PosterImage {
   file: string;
   mime: string;
   kind: "upload" | "card";
+  /** For generated carousels: the slide texts, so the UI can edit + re-render. */
+  slides?: string[];
   createdAt: string;
 }
 
@@ -1089,15 +1091,20 @@ function slideSvg(text: string, index: number, total: number, settings: PosterSe
  * available, structural fallback otherwise), render each as a branded Meridian
  * slide, assemble the PDF, save it to the library, and attach it to the draft.
  */
-export async function generateCarousel(ws: string, opts: { draftId: string }): Promise<{ image: PosterImage; slides: string[] }> {
+export async function generateCarousel(ws: string, opts: { draftId: string; slides?: string[] }): Promise<{ image: PosterImage; slides: string[] }> {
   await ensureLoaded();
   const s = wsState(ws);
   const d = s.drafts.find((x) => x.id === opts.draftId);
   if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
   if (!d.text.trim()) throw Object.assign(new Error("empty_post"), { status: 400 });
 
-  let slides: string[] | null = null;
-  if (process.env.ANTHROPIC_API_KEY) {
+  // Explicit slides (the UI's slide editor re-rendering) skip the AI split.
+  let slides: string[] | null = (opts.slides ?? [])
+    .map((x) => scrubDashes(String(x).trim()).slice(0, 240))
+    .filter(Boolean)
+    .slice(0, 10);
+  if (slides.length < 2) slides = null;
+  if (!slides && process.env.ANTHROPIC_API_KEY) {
     try { slides = await generateSlides(d.text); } catch { slides = null; }
   }
   if (!slides) slides = splitSlidesNaive(d.text);
@@ -1119,6 +1126,7 @@ export async function generateCarousel(ws: string, opts: { draftId: string }): P
   const img: PosterImage = {
     id, file, mime: "application/pdf", kind: "card",
     name: ("Carousel: " + slides[0]).slice(0, 80),
+    slides,
     createdAt: nowIso(),
   };
   s.images.unshift(img);

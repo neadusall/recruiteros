@@ -79,6 +79,7 @@ interface PosterPost {
   draftId?: string;
   imageId?: string | null;
   firstComment?: string;
+  slides?: unknown[];
   when?: string;
   name?: string;
   dataUrl?: string;
@@ -151,7 +152,8 @@ export async function POST(req: Request) {
         return ok({ draft: await createJobSpotlightDraft(ws) });
       case "make_carousel": {
         if (!b.draftId) return fail("draftId_required");
-        return ok(await generateCarousel(ws, { draftId: b.draftId }));
+        const slides = Array.isArray(b.slides) ? b.slides.filter((x): x is string => typeof x === "string") : undefined;
+        return ok(await generateCarousel(ws, { draftId: b.draftId, slides }));
       }
       case "duplicate": {
         if (!b.draftId) return fail("draftId_required");
