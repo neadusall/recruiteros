@@ -23033,23 +23033,49 @@
     }
     function vmStartRec(lineId) {
       vmReset();
-      vmR = { lineId: lineId, phase: "asking", chunks: [], rate: 48000, t0: 0, timer: null, blob: null, url: "", sec: 0, err: "" };
+      vmR = { lineId: lineId, phase: "asking", chunks: [], rate: 48000, t0: 0, timer: null, blob: null, url: "", sec: 0, err: "", peak: 0, level: 0 };
+      // Create the AudioContext inside the click itself: created outside a user
+      // gesture it can start "suspended", the processor never fires, and a
+      // recording silently captures nothing (timer runs, audio does not).
+      var AC = window.AudioContext || window.webkitAudioContext;
+      try {
+        vmR.actx = new AC();
+        if (vmR.actx.state === "suspended") vmR.actx.resume();
+      } catch (e) {}
       paintVmail(P.getState(), true);
-      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then(function (stream) {
+      // Record from the mic picked in the dialer's Microphone menu, not the OS
+      // default (on Windows those often differ, and the default can be dead).
+      var micId = ((P.getState().devices || {}).micId) || "";
+      var wanted = { audio: { echoCancellation: true, noiseSuppression: true } };
+      if (micId) wanted.audio.deviceId = { exact: micId };
+      navigator.mediaDevices.getUserMedia(wanted).catch(function () {
+        // The remembered device may be gone; fall back to the default mic.
+        return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      }).then(function (stream) {
         if (!vmR || vmR.lineId !== lineId || vmR.phase !== "asking" || !document.body.contains(el)) {
           stream.getTracks().forEach(function (t) { t.stop(); });
           return;
         }
-        var AC = window.AudioContext || window.webkitAudioContext;
         vmR.stream = stream;
-        vmR.actx = new AC();
+        if (!vmR.actx) vmR.actx = new AC();
+        if (vmR.actx.state === "suspended") { try { vmR.actx.resume(); } catch (e) {} }
         vmR.rate = vmR.actx.sampleRate;
         vmR.src = vmR.actx.createMediaStreamSource(stream);
         vmR.proc = vmR.actx.createScriptProcessor(4096, 1, 1);
         vmR.gain = vmR.actx.createGain();
         vmR.gain.gain.value = 0; // keeps the graph pulling samples without echoing the mic
         vmR.proc.onaudioprocess = function (ev) {
-          if (vmR && vmR.phase === "rec") vmR.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+          if (!vmR || vmR.phase !== "rec") return;
+          var data = ev.inputBuffer.getChannelData(0);
+          vmR.chunks.push(new Float32Array(data));
+          // Real input level for the meter + proof we actually heard audio.
+          var pk = 0;
+          for (var i = 0; i < data.length; i += 4) {
+            var a = Math.abs(data[i]);
+            if (a > pk) pk = a;
+          }
+          vmR.level = Math.min(1, pk * 1.6);
+          if (pk > vmR.peak) vmR.peak = pk;
         };
         vmR.src.connect(vmR.proc);
         vmR.proc.connect(vmR.gain);
@@ -23062,8 +23088,10 @@
           var sec = Math.floor((Date.now() - vmR.t0) / 1000);
           var t = $("#bdpVmTimer");
           if (t) t.textContent = bdpFmtDur(sec) + " / " + bdpFmtDur(VM_MAX_SEC);
+          var fill = $("#bdpVmMeter");
+          if (fill) fill.style.width = Math.round(vmR.level * 100) + "%";
           if (sec >= VM_MAX_SEC) vmStopRec();
-        }, 250);
+        }, 120);
         paintVmail(P.getState(), true);
       }).catch(function () {
         if (!vmR) return;
@@ -23079,7 +23107,16 @@
       vmCleanupAudio();
       vmR.chunks = [];
       var wav = vmEncodeWav(chunks, rate, 16000);
-      if (!wav) { vmReset(); toast("Nothing was recorded. Try again."); paintVmail(P.getState(), true); return; }
+      // A take nobody could hear is a failure, not a greeting: no samples at
+      // all, or a peak at the noise floor (dead or wrong microphone).
+      if (!wav || vmR.peak < 0.004) {
+        vmR.phase = "error";
+        vmR.err = wav
+          ? "Your microphone stayed silent. Pick the right microphone in the dialer's Microphone menu below, check it isn't muted in Windows, and record again."
+          : "No audio arrived from your microphone. Check the browser's microphone permission and try again.";
+        paintVmail(P.getState(), true);
+        return;
+      }
       vmR.phase = "preview";
       vmR.blob = wav;
       vmR.url = URL.createObjectURL(wav);
@@ -23177,10 +23214,11 @@
           } else if (vmR.phase === "rec") {
             html += '<div class="bdp-vm-panel"><span class="bdp-vm-dot"></span>' +
               '<span style="font:500 13px var(--mono);color:var(--text)" id="bdpVmTimer">0:00 / ' + bdpFmtDur(VM_MAX_SEC) + "</span>" +
+              '<div class="bdp-meter" style="flex:1;margin:0" title="Your microphone level"><span class="bdp-meter-fill" id="bdpVmMeter"></span></div>' +
               '<button class="btn btn-sm btn-primary" id="bdpVmStop" style="margin-left:auto">Stop</button></div>';
           } else if (vmR.phase === "preview" || vmR.phase === "saving") {
             html += '<div class="bdp-vm-panel" style="flex-wrap:wrap">' +
-              '<audio controls src="' + vmR.url + '" style="width:100%;height:32px"></audio>' +
+              '<audio controls id="bdpVmAudio" src="' + vmR.url + '" style="width:100%;height:32px"></audio>' +
               '<span style="font:400 12px var(--font);color:var(--text-dim)">' + vmR.sec + 's recorded. Listen back, then save it.</span>' +
               '<span style="margin-left:auto;display:inline-flex;gap:8px">' +
               '<button class="btn btn-sm" id="bdpVmDiscard"' + (vmR.phase === "saving" ? " disabled" : "") + ">Discard</button>" +
@@ -23202,10 +23240,13 @@
         b.addEventListener("click", function () {
           try { if (vmPlayer) { vmPlayer.pause(); vmPlayer = null; } } catch (e) {}
           vmPlayer = new Audio(API + "/phone/voicemail/audio/" + encodeURIComponent(b.getAttribute("data-vmplay")));
+          vmPlayer.onerror = function () { toast("Could not play the greeting. Re-record it if this keeps happening."); };
           vmPlayer.play().catch(function () { toast("Could not play the greeting"); });
         });
       });
       var vs = $("#bdpVmStop"); if (vs) vs.addEventListener("click", vmStopRec);
+      var pa = $("#bdpVmAudio");
+      if (pa) pa.onerror = function () { toast("The recording could not be played back. Discard it and record again."); };
       var sv = $("#bdpVmSave"); if (sv) sv.addEventListener("click", vmSave);
       var dc = $("#bdpVmDiscard"); if (dc) dc.addEventListener("click", function () { vmReset(); paintVmail(P.getState(), true); });
       var dm = $("#bdpVmDismiss"); if (dm) dm.addEventListener("click", function () { vmReset(); paintVmail(P.getState(), true); });
