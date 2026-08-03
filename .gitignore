@@ -30,6 +30,9 @@ node_modules
 # durable on-disk store (in-market pool snapshots, accounts, sessions) — never commit
 .data/
 **/.data/
+# stray snapshot dir the build writes when a data path resolves to "undefined" — junk, never commit
+undefined/
+**/undefined/
 
 # server-local one-time setup markers
 .egress-setup-*
