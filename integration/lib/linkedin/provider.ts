@@ -119,21 +119,40 @@ class UnipileError extends Error {
   }
 }
 
+// Transport failures raised BEFORE a connection exists. Only these retry: the
+// request never reached the provider, so a retry cannot double-send whatever
+// the method. (EAI_AGAIN = the box's DNS resolver browning out; seen live
+// 2026-08-03 as recruiter-facing 502s on the seat-connect button.)
+const PRECONNECT_ERRORS = new Set([
+  "EAI_AGAIN", "ENOTFOUND", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
 async function unipile<T>(path: string, init: RequestInit = {}): Promise<T> {
   const dsn = DSN();
   const apiKey = API_KEY();
   if (!dsn || !apiKey) {
     throw new UnipileError("UNIPILE_DSN / UNIPILE_API_KEY are not configured", 500);
   }
-  const res = await fetch(`https://${dsn}/api/v1${path}`, {
-    ...init,
-    headers: {
-      "X-API-KEY": apiKey,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
+  let res: Response;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await fetch(`https://${dsn}/api/v1${path}`, {
+        ...init,
+        headers: {
+          "X-API-KEY": apiKey,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(init.headers ?? {}),
+        },
+      });
+      break;
+    } catch (err) {
+      const code = String((err as { cause?: { code?: string } })?.cause?.code ?? "");
+      if (attempt >= 3 || !PRECONNECT_ERRORS.has(code)) throw err;
+      await new Promise((r) => setTimeout(r, 400 * attempt));
+    }
+  }
   const body = await res.json().catch(() => undefined);
   if (!res.ok) {
     throw new UnipileError(
