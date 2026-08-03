@@ -837,9 +837,17 @@ export function classify(msg: MailMessage): { billing: boolean; reason?: string 
   const hasMoney = /(?:us\$|\$|€|£|₹)\s?\d[\d,]*(?:[.,]\d{1,2})?|\d[\d,]*[.,]\d{2}\s?(?:usd|eur|gbp|cad|inr)/i.test(body);
   /* Billing words: the generic set PLUS this sender's own vocabulary — a registrar's
      confirmation says "order"/"renewal"/"domain", never "invoice". */
+  /* Subject vocabulary is tested against the SUBJECT and the sender's DISPLAY NAME only,
+     never the raw from-address. Folding the address in was a silent leak: the generic hint
+     "billing" matched every mail from billing@dynadot.com, and each vendor's own vocab carries
+     its name ("rapidapi", "hetzner"), which the from-domain always contains — so between them
+     they filed EVERY message a known vendor ever sent, newsletters and all, as a receipt. A
+     receipt is named in the subject ("Order confirmation", "Your renewal receipt"), not by the
+     bare fact that it arrived from a vendor's server. */
+  const subjectHay = `${msg.subject} ${msg.fromName || ""}`.toLowerCase();
   const subjectHit =
-    GENERIC_SUBJECT_HINTS.some((h) => hay.includes(h)) ||
-    (vendorSrc ? vendorSrc.subject.some((h) => hay.includes(h)) : false);
+    GENERIC_SUBJECT_HINTS.some((h) => subjectHay.includes(h)) ||
+    (vendorSrc ? vendorSrc.subject.some((h) => subjectHay.includes(h)) : false);
   const bodyHit = /amount paid|total paid|payment received|you paid|amount charged|order total|grand total|subtotal|receipt|invoice|thank you for your (?:order|purchase|payment)/i.test(body);
   /* The vendor's own document, attached: a PDF, or a file named like a receipt/invoice, IS
      a receipt on its own — this is the "actually has an invoice attached" half of the rule. */
