@@ -234,6 +234,31 @@ export async function DELETE(req: Request) {
   if ("response" in g) return g.response;
 
   const p = new URL(req.url).searchParams;
+
+  /**
+   * ?vendor=<name> clears every receipt filed against one vendor, INCLUDING the ones the
+   * grid cannot show.
+   *
+   * This exists because the id list cannot express the case that needed it. The grid is
+   * filtered to the months the books cover, so a receipt dated outside that window is
+   * invisible - and a GoDaddy row appeared with no receipts, no line item and no way to
+   * act on it, driven entirely by four receipts dated 2024, 2025, 2027 and 2028. The two
+   * future ones were expiry dates misread as charge dates. The browser could not delete
+   * what it was never sent.
+   *
+   * Matched on the exact vendor name the grid shows, never a substring: "AWS" must not
+   * take "AWS Marketplace" with it.
+   */
+  const vendor = (p.get("vendor") || "").trim();
+  if (vendor) {
+    const all = await listReceipts();
+    const mine = all.filter((r) => r.vendor.trim().toLowerCase() === vendor.toLowerCase());
+    if (!mine.length) return fail("not_found", 404);
+    let n = 0;
+    for (const r of mine) if (await deleteReceipt(r.id)) n++;
+    return ok({ deleted: n, vendor });
+  }
+
   const ids = [...(p.get("ids") || "").split(","), p.get("id") || ""]
     .map((s) => s.trim())
     .filter(Boolean);

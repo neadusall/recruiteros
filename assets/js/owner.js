@@ -1841,7 +1841,13 @@
    * A charge that arrived unexpected and a pay-per-use total both want the same thing.
    */
   function registerAct(r, ri) {
-    return '<div class="row-acts"><a class="row-mini" data-badd="' + ri + '">Add to the register</a></div>';
+    /* A row with nothing visible in it still has to be clearable. GoDaddy drew an empty
+       row off four receipts dated outside the months the grid covers, so there was
+       nothing on screen to delete and no line item to remove: the row could not be got
+       rid of at all. "Clear this vendor" goes at it by NAME on the server, which is the
+       only handle that reaches a receipt the browser was never sent. */
+    return '<div class="row-acts"><a class="row-mini" data-badd="' + ri + '">Add to the register</a>' +
+      '<a class="row-mini danger" data-vdel="' + esc(r.vendor) + '">Clear this vendor</a></div>';
   }
 
   /** Every receipt this row is showing, across all its months, in grid order. */
@@ -2347,6 +2353,23 @@
         sendSpendToClient(a, (r.vendor || "Spend") + (r.label ? " — " + r.label : ""), r.totalCountedUsd);
       });
     });
+    /* Clear every receipt for a vendor, including any the grid could not show because it
+       falls outside the months the books cover. The confirmation says that plainly: this
+       reaches further than the row you are looking at, and that is the whole point of it. */
+    $$("#view [data-vdel]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var v = a.dataset.vdel;
+        if (!confirm("Clear every receipt filed against " + v + "?\n\nThis includes any dated outside the months shown here, " +
+          "which is usually why a row looks empty. The row goes once nothing is left pointing at it. " +
+          "If those emails are still in the mailbox, a later pull can find them again.")) return;
+        send("/owner/receipts?vendor=" + encodeURIComponent(v), "DELETE").then(function (res) {
+          if (!res.ok) { toast(res.status === 404 ? "Nothing on file for " + v : "Could not clear that"); return; }
+          toast((res.data && res.data.deleted) + " receipt(s) cleared from " + v);
+          viewBurn();
+        });
+      });
+    });
     /* Clear a whole row's paperwork. stopPropagation because the row header sits next to
        cells that open the viewer, and a delete that also opened something would be read
        as having done nothing. */
@@ -2726,6 +2749,11 @@
        intentions and only one of them is reachable from wanting to look at it. */
     html += '<button class="btn btn-ghost btn-sm" id="rcvEdit">Correct the details</button>' +
       '<button class="btn btn-ghost btn-sm rcv-del" id="rcvDel">Delete this receipt</button>' +
+      /* Clearing a whole cell without clearing the row: a vendor-month that collected the
+         wrong paperwork should be emptiable on its own, and stepping through six receipts
+         pressing Delete six times is not a feature. The cell itself stays and goes back to
+         "no receipt", which is the honest state for a month whose proof was thrown out. */
+      (many ? '<button class="btn btn-ghost btn-sm rcv-del" id="rcvDelAll">Delete all ' + rcvList.length + ' here</button>' : '') +
       '<button class="btn btn-ghost btn-sm" id="rcvDone">Close</button></div>';
 
     $("#rcvBody").innerHTML = html;
@@ -2734,6 +2762,13 @@
     $("#rcvEdit").addEventListener("click", function () { closeViewer(); editReceipt(v.id); });
     $("#rcvDel").addEventListener("click", function () {
       deleteReceipts([v.id], v.vendor + " " + usd(Math.abs(v.amountUsd)) + " of " + (v.chargedAt || "").slice(0, 10));
+    });
+    if ($("#rcvDelAll")) $("#rcvDelAll").addEventListener("click", function () {
+      var total = rcvList.reduce(function (t, x) { return t + Math.abs(x.amountUsd || 0); }, 0);
+      /* The context is the month heading the viewer was opened under, so the prompt names
+         the same cell the person clicked rather than a vendor that may differ per receipt. */
+      deleteReceipts(rcvList.map(function (x) { return x.id; }),
+        (v.vendor || "this vendor") + (rcvContext ? " · " + rcvContext : ""), total);
     });
     /* Every receipt opens at fit: stepping to the next one keeps the zoom of the last is a
        nice idea until the next invoice is a different shape and opens mid-page. */
