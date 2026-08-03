@@ -133,6 +133,19 @@ function rc(r: Partial<Receipt>): Receipt {
   check("a different month's email receipt stands", junkWhy(unrelated, [portal, unrelated]), null);
 }
 
+/* ---- a repaired row is not junk: doubting a date is not doubting who was paid ---- */
+{
+  /* The date repair used to lower confidence to 0.5, and the relevance rung then read the
+     row as unevidenced and flagged two real GoDaddy orders for deletion on the next pass.
+     A sender the vendor's catalogue claims is evidence from outside the body, whatever the
+     stored confidence says. */
+  const repaired = {
+    ...rc({}), vendor: "GoDaddy", confidence: 0.5, amountUsd: 30.98,
+    subject: "Ryan Nead, thank you for your order.", from: "donotreply@godaddy.com",
+  };
+  check("a date-repaired row from the vendor's own domain stands", junkWhy(repaired, [repaired]), null);
+}
+
 /* ---- a refund has to be stated, not mentioned ---- */
 {
   const order = parseReceiptText("Thank you for your order. Order total $30.98. See our Refund Policy at godaddy.com/refunds.");

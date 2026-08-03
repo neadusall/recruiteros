@@ -1871,10 +1871,10 @@ export function junkWhy(r: Receipt, all: Receipt[], items: SpendItem[] = []): st
      domain the vendor still claims, from a payment processor, or must actually NAME the
      vendor in its subject or body. */
   const domain = ((r.from || "").split("@")[1] || "").toLowerCase();
+  const src = vendorSourceFor(r.vendor);
+  const claimed = !!domain && !!src && src.from.some((f) => domain === f || domain.endsWith("." + f));
+  const viaProcessor = !!domain && PROCESSOR_DOMAINS.some((p) => domain === p || domain.endsWith("." + p));
   if (domain) {
-    const src = vendorSourceFor(r.vendor);
-    const claimed = !!src && src.from.some((f) => domain === f || domain.endsWith("." + f));
-    const viaProcessor = PROCESSOR_DOMAINS.some((p) => domain === p || domain.endsWith("." + p));
     const hay = `${r.subject || ""} ${r.excerpt || ""}`.toLowerCase();
     const named = namedIn(hay, r.vendor) || (src?.merchant || []).some((mm) => namedIn(hay, mm));
     if (!claimed && !viaProcessor && !named) {
@@ -1908,9 +1908,16 @@ export function junkWhy(r: Receipt, all: Receipt[], items: SpendItem[] = []): st
   /* A receipt-shaped message from a vendor the owner has retired everywhere is still not
      this company's money. The stored vendor is used as-is (never re-guessed, which could
      downgrade a processor receipt), and an itemId only counts while its row still exists:
-     trusting a pointer at a deleted row would keep a retired vendor's receipts forever. */
+     trusting a pointer at a deleted row would keep a retired vendor's receipts forever.
+     A sender the vendor's own catalogue claims (or a payment processor) is evidence from
+     OUTSIDE the body, so the stored confidence is not second-guessed for those: a repair
+     that marked a row "ask for a look" over a date must not read as doubt about WHO was
+     paid. */
   const itemId = r.itemId && items.some((i) => i.id === r.itemId) ? r.itemId : undefined;
-  const rel = relevanceOf({ vendor: r.vendor, itemId, confidence: r.confidence }, items);
+  const rel = relevanceOf(
+    { vendor: r.vendor, itemId, confidence: claimed || viaProcessor ? undefined : r.confidence },
+    items,
+  );
   if (!rel.ours && !filingUnknownVendors()) return rel.why;
 
   return null;
@@ -1949,12 +1956,14 @@ export async function purgeJunkEmail(opts: { dryRun?: boolean } = {}): Promise<{
     if (r.amountUsd < 0 && !statedRefund) {
       r.amountUsd = Math.abs(r.amountUsd); r.kind = "charge"; r.updatedAt = nowIso(); repaired++;
     }
-    /* Date repair: a charge cannot postdate the sweep that filed it. */
+    /* Date repair: a charge cannot postdate the sweep that filed it. The vendor confidence
+       is left alone on purpose: this repair doubts the DATE, not who was paid, and lowering
+       confidence here once made the relevance rung read a repaired row as junk on the next
+       pass. */
     const filedDay = (r.createdAt || "").slice(0, 10);
     if (filedDay && r.chargedAt > filedDay) {
       r.chargedAt = filedDay;
       r.period = filedDay.slice(0, 7);
-      r.confidence = Math.min(r.confidence ?? 1, 0.5);
       r.updatedAt = nowIso(); repaired++;
     }
   }
