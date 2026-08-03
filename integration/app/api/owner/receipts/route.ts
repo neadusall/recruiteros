@@ -39,6 +39,8 @@ import {
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
 import { VENDOR_SOURCES } from "../../../../lib/owner/receiptSources";
 import { receiptRouting } from "../../../../lib/owner/mailRoutes";
+import { sentReceiptIds } from "../../../../lib/owner/portalSpend";
+import { listFullAccounts } from "../../../../lib/owner";
 import { listVault } from "../../../../lib/owner/vault";
 import { ensureVendorUsageReady } from "../../../../lib/owner/vendorUsage";
 import { closeHistory, monthToClose, ensureCloseReady } from "../../../../lib/owner/monthClose";
@@ -99,9 +101,24 @@ export async function GET(req: Request) {
     .then((entries) => receiptRouting({ entries, mailboxes: boxes, receipts: allReceipts }))
     .catch(() => null);
 
+  /* WHICH RECEIPTS ARE ALREADY ON THE CLIENT'S STATEMENT.
+     The grid used to remember this only for the current page: a marker set in the browser
+     when you pressed Send, gone the moment you reloaded. So after a refresh there was no
+     way to tell what had gone over and what had not, and the safe-feeling move was to send
+     the row again, which is exactly how the same invoice ends up on a client's bill twice.
+     Read from the charge store instead, so it survives reloads, deploys and a different
+     computer. OWNER-ONLY: this route answers 404 to anyone who is not the owner, so the
+     accountant on the Lume side never sees any of it. */
+  const accounts = (() => { try { return listFullAccounts(); } catch { return []; } })();
+  const client = accounts.find((x) => /lumesp/i.test(x.domain || "") || /lume/i.test(x.name || "")) || accounts[0];
+  const sent = client?.workspaceId
+    ? { ...sentReceiptIds(client.workspaceId), client: client.name || "the client" }
+    : { receiptIds: [], invoiceNumbers: [], client: "" };
+
   return ok({
     matrix,
     vault,
+    sent,
     close: {
       /* The verdict per month, newest first: what the unattended job decided and when. */
       history: closeHistory().slice(0, 6),
@@ -187,6 +204,16 @@ export async function POST(req: Request) {
     if (!vendor) return fail("vendor_required", 400);
     if (!/^\d{4}-\d{2}$/.test(period)) return fail("period_required", 400);
     if (!Number.isFinite(amount)) return fail("amount_required", 400);
+    /* ⚠️ ZERO IS NOT AN AMOUNT, IT IS AN UNFILLED FIELD. `Number.isFinite(0)` is true, so
+       a blank box sailed through and filed a receipt that appears in the cell, bumps the
+       count to "2 receipts", and moves the figure not at all. That reads as the grid
+       failing to add up rather than as a form that was never completed, which is exactly
+       how it was reported. A real charge is never $0; a refund is negative. */
+    if (amount === 0) {
+      return fail("amount_required", 422, {
+        message: "Enter the amount on this invoice. A receipt for $0 would show in the cell without changing the total.",
+      });
+    }
 
     let filePart: { bytes: Buffer; mime: string; name: string } | undefined;
     if (file && typeof file === "object" && "arrayBuffer" in file) {

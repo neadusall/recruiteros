@@ -1620,7 +1620,9 @@
     var amt = cellAmt(c);
     if (!(amt > 0)) return "";
     var pkey = ri + "|" + c.period;
-    var sent = !!rcSent[pkey], on = !!rcSel[pkey];
+    /* A cell whose receipts are already on the statement cannot be ticked. The session
+       marker still applies within a page, and the server's answer applies across them. */
+    var sent = !!rcSent[pkey] || cellSent(c), on = !!rcSel[pkey];
     var many = c.receipts && c.receipts.length > 1 ? c.receipts.length : 0;
     return '<label class="rc-pick' + (sent ? " sent" : "") + '" title="' +
       esc(sent ? "Already staged for approval"
@@ -2017,6 +2019,34 @@
       n + ' receipt' + (n > 1 ? 's' : '') + '</a></div>';
   }
 
+  /**
+   * Is this receipt already on the client's statement?
+   *
+   * Read from the SERVER, not from a marker set in this browser when Send was pressed.
+   * That marker died on every reload, so after a refresh there was no way to tell what had
+   * gone over, and the safe-feeling move was to send the row again. That is exactly how an
+   * invoice ends up on a client's bill twice.
+   *
+   * Matched on the vendor's invoice number first, because it is the vendor's own identity
+   * for that charge and it survives a re-parse, a corrected figure or the receipt being
+   * deleted and re-harvested under a new id. The receipt id is the fallback.
+   */
+  function sentToClient(r) {
+    var sent = rcptData && rcptData.sent;
+    if (!sent || !r) return false;
+    var num = String(r.invoiceNumber || "").trim().toLowerCase();
+    if (num && (sent.invoiceNumbers || []).indexOf(num) >= 0) return true;
+    return (sent.receiptIds || []).indexOf(r.id) >= 0;
+  }
+  function clientLabel() {
+    return (rcptData && rcptData.sent && rcptData.sent.client) || "the client";
+  }
+  /** Every receipt in a cell already sent, so the cell can say so as a whole. */
+  function cellSent(c) {
+    var list = (c && c.receipts) || [];
+    return list.length > 0 && list.every(sentToClient);
+  }
+
   function matrixCell(row, c, ri) {
     var cls = "rc-cell rc-" + c.status;
     var key = ri + "|" + c.period;
@@ -2033,6 +2063,9 @@
             : '<div class="rc-noshot">no image</div>') +
         '<button class="rc-view" data-view="' + esc(key) + '" title="' + esc("Open the " + monthLabel(c.period) + " receipt for " + row.vendor) + '">' +
         (many ? "View " + c.receipts.length + " receipts" : "View receipt") + '</button>' +
+        /* Said on the cell itself, because this is the thing you scan the grid for when
+           you are working out what is left to send. */
+        (cellSent(c) ? '<div class="rc-sent" title="' + esc("Already on " + clientLabel() + "’s statement") + '">Sent to ' + esc(clientLabel()) + '</div>' : "") +
         (c.note ? '<div class="note" style="font-size:10.5px">' + esc(c.note) + '</div>' : "");
     } else if (c.status === "missing") {
       inner = '<div class="rc-amt est">' + usd(c.expectedUsd) + '</div><div class="rc-gap">no receipt</div>' +
@@ -3287,7 +3320,8 @@
       fld("Vendor", '<input id="atVendor" value="' + esc(row ? row.vendor : "") + '" />') +
       fld("Line item", itemSelect("atItem", row ? row.itemId : "")) +
       fld("Month", '<input id="atPeriod" value="' + esc(period) + '" placeholder="2026-07" />') +
-      fld("Amount (USD)", '<input id="atAmount" type="number" step="0.01" value="' + esc(String(amount)) + '" />') +
+      fld("Amount (USD)", '<input id="atAmount" type="number" step="0.01" value="' + esc(String(amount)) + '" placeholder="0.00" required />' +
+        (amount === "" ? '<div class="note" style="margin-top:4px">Blank on purpose: the figure already in this cell belongs to the receipt that is there. Type what THIS invoice was for.</div>' : "")) +
       fld("Charged on", '<input id="atCharged" type="date" />') +
       fld("Invoice #", '<input id="atInvoice" />') +
       fld("Receipt file (PDF or image)", '<input id="atFile" type="file" accept="image/*,application/pdf" />') +
@@ -3304,7 +3338,10 @@
       var amt = Number($("#atAmount").value);
       if (!vendor) { toast("Vendor is required"); return; }
       if (!/^\d{4}-\d{2}$/.test(period2)) { toast("Month must look like 2026-07"); return; }
-      if (!isFinite(amt)) { toast("Enter the amount"); return; }
+      /* Zero is what an empty box parses to once it has been through Number(), and it
+         files a receipt that shows in the cell while moving the figure not at all. Caught
+         here as well as on the server so the owner is told before the upload, not after. */
+      if (!isFinite(amt) || amt === 0) { toast("Enter the amount on this invoice"); return; }
       var fd = new FormData();
       fd.append("vendor", vendor);
       fd.append("period", period2);

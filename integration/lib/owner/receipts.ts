@@ -1538,6 +1538,26 @@ export async function attachDocument(
   await saveArtifact(id, `src.${extFromMime(file.mime, file.name)}`, file.bytes).catch(() => {});
   const shot = await renderShot(id, shotInputFor(file));
 
+  /* READ THE FIGURE OFF THE DOCUMENT THAT WAS JUST UPLOADED.
+     A receipt attached by hand starts with whatever the owner typed, and an empty box
+     parses to 0 - which files a row that appears in the cell, bumps it to "2 receipts",
+     and moves the total not at all. That reads as the grid failing to add up rather than
+     as a form that was not finished. The invoice itself knows the answer, so ask it.
+     Only ever fills a BLANK: a figure the owner typed is never overwritten by a parser,
+     because they are looking at the same document and they are the ones who can tell a
+     total from a subtotal. Same for the invoice number. */
+  if (!(Math.abs(r.amountUsd) > 0) && file.mime.includes("pdf")) {
+    const text = await pdfToText(file.bytes).catch(() => "");
+    const read = text ? parseReceiptText(text) : null;
+    if (read && read.amountUsd > 0) {
+      r.amountUsd = read.kind === "charge" ? read.amountUsd : -Math.abs(read.amountUsd);
+      r.currency = read.currency || r.currency;
+      if (!r.invoiceNumber && read.invoiceNumber) r.invoiceNumber = read.invoiceNumber;
+      r.matchedBy = "amount read off the attached invoice";
+      r.notes = [r.notes, "Amount read from the uploaded document."].filter(Boolean).join(" ");
+    }
+  }
+
   r.fileName = file.name;
   r.fileMime = file.mime;
   r.fileBytes = file.bytes.length;
@@ -1550,6 +1570,7 @@ export async function attachDocument(
   persist();
   return { ok: true, receipt: r };
 }
+
 
 /**
  * File (or refresh) a figure pulled straight from a vendor's billing API. Keyed on

@@ -147,7 +147,7 @@ export function approvedOneTimeTotal(workspaceId: string): number {
 export function stageMonthlyCharge(
   workspaceId: string,
   input: { amountUsd: number; label?: string },
-): { charge?: PortalCharge; error?: string } {
+): { charge?: PortalCharge; error?: string; duplicate?: boolean } {
   const amount = round(Number(input.amountUsd) || 0);
   if (!workspaceId) return { error: "missing_workspace" };
   if (amount <= 0) return { error: "no_monthly_price" };
@@ -176,7 +176,7 @@ export function stageMonthlyCharge(
 export function stageUsageCharge(
   workspaceId: string,
   input: { label: string; amountUsd: number; receipt?: ChargeReceipt; cadence?: ChargeCadence },
-): { charge?: PortalCharge; error?: string } {
+): { charge?: PortalCharge; error?: string; duplicate?: boolean } {
   const amount = round(Number(input.amountUsd) || 0);
   const label = String(input.label || "").trim().slice(0, 80);
   if (!workspaceId) return { error: "missing_workspace" };
@@ -188,6 +188,21 @@ export function stageUsageCharge(
   // way; only the section it shows in differs.
   const cadence: ChargeCadence =
     input.cadence === "monthly" ? "monthly" : input.cadence === "annual" ? "annual" : "one_time";
+  const receipt = sanitizeReceipt(input.receipt);
+
+  /* ⚠️ THE SAME INVOICE MUST NEVER LAND ON A CLIENT'S STATEMENT TWICE.
+     Nothing stopped it before: every push created a new charge, so re-sending a row after
+     adding one receipt to it re-sent all the others with it, and an accountant reconciling
+     against the vendor's own numbers would find the same invoice charged two or three
+     times with no way to tell which was real.
+     The vendor's INVOICE NUMBER is the right key, because it is the vendor's own identity
+     for that charge and it survives everything on our side: a re-parse, a corrected
+     amount, a relabelled row, even the receipt being deleted and re-harvested under a new
+     id. Where a vendor issued no number the receipt id is the fallback, which still covers
+     the ordinary case of pressing Send twice. */
+  const existing = findSameCharge(workspaceId, receipt);
+  if (existing) return { charge: existing, duplicate: true };
+
   const charge: PortalCharge = {
     id: rid("chg"),
     workspaceId,
@@ -196,12 +211,48 @@ export function stageUsageCharge(
     cadence,
     source: "usage",
     status: "pending",
-    receipt: sanitizeReceipt(input.receipt),
+    receipt,
     createdAt: nowIso(),
   };
   store.charges.push(charge);
   persist();
   return { charge };
+}
+
+/**
+ * The charge already on this account for the same invoice, if there is one.
+ *
+ * Matched on the vendor's invoice number first and the receipt id second. Deliberately
+ * NOT on vendor + amount + date: a client can genuinely be charged the same figure twice
+ * in one month by one vendor (two domains at $12.99, two identical top-ups), and refusing
+ * the second would silently understate their bill. Only an identity the VENDOR issued is
+ * safe to treat as "this is the same charge".
+ *
+ * A charge the owner has since removed does not block a re-send: it is gone from the
+ * store, so this finds nothing and the push goes through.
+ */
+export function findSameCharge(workspaceId: string, receipt?: ChargeReceipt): PortalCharge | undefined {
+  if (!receipt) return undefined;
+  const num = (receipt.invoiceNumber || "").trim().toLowerCase();
+  const rid_ = (receipt.receiptId || "").trim();
+  return store.charges.find((c) => {
+    if (c.workspaceId !== workspaceId || !c.receipt) return false;
+    const cn = (c.receipt.invoiceNumber || "").trim().toLowerCase();
+    if (num && cn) return cn === num;
+    return !!rid_ && c.receipt.receiptId === rid_;
+  });
+}
+
+/** Every receipt id this workspace already holds, so the console can show what is sent. */
+export function sentReceiptIds(workspaceId: string): { receiptIds: string[]; invoiceNumbers: string[] } {
+  const receiptIds: string[] = [];
+  const invoiceNumbers: string[] = [];
+  for (const c of store.charges) {
+    if (c.workspaceId !== workspaceId || !c.receipt) continue;
+    if (c.receipt.receiptId) receiptIds.push(c.receipt.receiptId);
+    if (c.receipt.invoiceNumber) invoiceNumbers.push(c.receipt.invoiceNumber.trim().toLowerCase());
+  }
+  return { receiptIds, invoiceNumbers };
 }
 
 /** Keep only the receipt fields we store, and only when a real receipt id is
