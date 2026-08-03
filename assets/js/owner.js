@@ -1433,6 +1433,82 @@
       }).catch(function () { toast("Couldn't reach the server"); el.classList.remove("is-busy"); el.textContent = orig; });
     });
   }
+  /**
+   * Everything on one row that should become its own line on the client's statement.
+   *
+   * One line per RECEIPT, carrying that receipt so the invoice travels with the figure.
+   * A month with money but no receipt on file still goes, as a bare figure, because
+   * leaving it out would understate the row; it is labelled so the gap is visible on the
+   * statement rather than hidden inside a total.
+   */
+  function rowStageItems(r) {
+    var out = [];
+    (r.cells || []).forEach(function (c) {
+      var mlab = monthLabel(c.period);
+      var list = (c.receipts || []).map(function (x) { return receiptById(x.id) || x; })
+        .filter(function (x) { return x && x.amountUsd > 0; });
+      if (list.length) {
+        list.forEach(function (x) {
+          out.push({
+            key: null,
+            label: ((r.vendor || "Spend") + " — " + mlab + (x.invoiceNumber ? " · #" + x.invoiceNumber : "")).slice(0, 80),
+            amt: x.amountUsd,
+            /* Read off the invoice, so a plan fee and a one-off purchase stay apart on
+               the client's statement instead of both reading as recurring. */
+            cadence: rcCadence[x.id] || (x.cadence === "recurring" ? "monthly" : "one_time"),
+            receipt: {
+              receiptId: x.id, vendor: r.vendor, chargedAt: x.chargedAt,
+              invoiceNumber: x.invoiceNumber, hasShot: !!x.hasShot, hasFile: !!x.hasFile
+            }
+          });
+        });
+        return;
+      }
+      var amt = cellAmt(c);
+      if (amt > 0) {
+        out.push({
+          key: null,
+          label: ((r.vendor || "Spend") + " — " + mlab + " (no invoice on file)").slice(0, 80),
+          amt: amt, cadence: "one_time"
+        });
+      }
+    });
+    return out;
+  }
+
+  /** Stage a whole row, one line per invoice, sequentially so one stall cannot wedge the rest. */
+  function stageRow(el, r) {
+    var items = rowStageItems(r);
+    if (!items.length) { toast("This row has no cost to send."); return; }
+    var withDoc = items.filter(function (i) { return !!i.receipt; }).length;
+    resolveClientWs(function (wsId, wsName) {
+      if (!wsId) { toast("No client account found to send to."); return; }
+      el.classList.add("is-busy");
+      var orig = el.textContent;
+      el.textContent = "Staging…";
+      var okCount = 0, failCount = 0;
+      (function next(i) {
+        if (i >= items.length) {
+          el.classList.remove("is-busy");
+          if (okCount) {
+            el.classList.add("sent");
+            el.textContent = "Staged ✓";
+            showStagedBar(wsId, wsName, okCount, failCount);
+            toast(okCount + " line" + (okCount === 1 ? "" : "s") + " staged, " + withDoc + " with the invoice attached");
+          } else { el.textContent = orig; toast("Nothing could be staged"); }
+          return;
+        }
+        var it = items[i];
+        var payload = { workspaceId: wsId, source: "usage", label: it.label, amountUsd: it.amt, cadence: it.cadence };
+        if (it.receipt) payload.receipt = it.receipt;
+        send("/owner/portal-spend", "POST", payload).then(function (res) {
+          if (res && res.ok && res.data && res.data.charge && res.data.charge.id) okCount++; else failCount++;
+          next(i + 1);
+        }).catch(function () { failCount++; next(i + 1); });
+      })(0);
+    });
+  }
+
   /* ---- Cherry-pick receipts and rows -> the client's Spending page ----
      The whole point of this grid: tick the receipts (individual month cells) and
      the rows you want, then push the chosen set to the client's app.lumesp
@@ -2350,7 +2426,14 @@
         if (a.classList.contains("is-busy") || a.classList.contains("sent")) return;
         var r = ((rcptData && rcptData.matrix && rcptData.matrix.rows) || [])[Number(a.dataset.sendrow)];
         if (!r || !(r.totalCountedUsd > 0)) { toast("This row has no cost to send."); return; }
-        sendSpendToClient(a, (r.vendor || "Spend") + (r.label ? " — " + r.label : ""), r.totalCountedUsd);
+        /* ⚠️ A ROW MUST BE STAGED RECEIPT BY RECEIPT, NOT AS ONE FIGURE. Staging the row
+           total sent a single line carrying no invoice at all: all six charges already on
+           the client's account read `receipt: no`, so the accountant got numbers with
+           nothing behind them, which is the one thing this whole pipeline exists to avoid.
+           Each invoice now goes as its own line with its own document, exactly as ticking
+           the cells by hand does; only a month with no receipt on file falls back to the
+           bare figure, and it says so. */
+        stageRow(a, r);
       });
     });
     /* Clear every receipt for a vendor, including any the grid could not show because it
