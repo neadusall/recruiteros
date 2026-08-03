@@ -2684,7 +2684,7 @@
     var cell = row && (row.cells || []).filter(function (c) { return c.period === parts[1]; })[0];
     if (!row) return;
     if (cell && cell.receipts && cell.receipts.length) {
-      openViewer(cell.receipts.map(function (r) { return receiptById(r.id) || r; }), 0, monthLabel(cell.period));
+      openViewer(cell.receipts.map(function (r) { return receiptById(r.id) || r; }), 0, monthLabel(cell.period), key);
       return;
     }
     /* Nothing on file. Rather than a dead click, say where this month's receipt lives and
@@ -2726,7 +2726,48 @@
     openViewer(all, at, monthLabel(period) + " · every receipt");
   }
 
-  function openViewer(list, index, context) {
+  /* Which vendor-month the viewer was opened from, when it was opened from a cell.
+     Kept so the footer can offer to add ANOTHER receipt to that same cell: a month can
+     genuinely hold more than one invoice (a plan fee and a one-off on the same account),
+     and until now a cell that already had one had no way to take a second. */
+  var rcvCellKey = "";
+
+  /**
+   * Put a document on a receipt that already exists, from wherever the owner is standing.
+   *
+   * Shared by the viewer's empty state and the "Correct it" drawer so the two can never
+   * drift: one endpoint, one size limit, one way of reporting the awkward middle outcome
+   * where the FILE is safely stored but the picture could not be drawn from it. Those are
+   * different results and a flat "done" hides the one worth knowing about.
+   */
+  function uploadReceiptFile(receiptId, file, btn, label) {
+    if (!file) { toast("Choose a file first"); return; }
+    if (file.size > 20 * 1024 * 1024) { toast("That file is over 20MB"); return; }
+    if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
+    var fd = new FormData();
+    /* receiptId is what makes this an ATTACH rather than a second receipt for the same
+       charge, which would show the money twice. */
+    fd.append("receiptId", receiptId);
+    fd.append("file", file);
+    return fetch(API + "/owner/receipts", { method: "POST", credentials: "include", body: fd })
+      .then(function (r) { return r.json().catch(function () { return null; }); })
+      .then(function (res) {
+        if (btn) { btn.disabled = false; btn.textContent = label || "Attach"; }
+        var rec = res && (res.receipt || (res.data && res.data.receipt));
+        if (!rec) { toast("Could not attach that file"); return; }
+        toast(rec.hasShot ? "Invoice attached" : "File saved, but the picture could not be drawn");
+        closeViewer();
+        closeDrawer();
+        viewBurn();
+      })
+      .catch(function () {
+        if (btn) { btn.disabled = false; btn.textContent = label || "Attach"; }
+        toast("Could not reach the server");
+      });
+  }
+
+  function openViewer(list, index, context, cellKey) {
+    rcvCellKey = cellKey || "";
     rcvList = (list || []).filter(Boolean);
     if (!rcvList.length) return;
     rcvIndex = Math.max(0, Math.min(index || 0, rcvList.length - 1));
@@ -2910,8 +2951,14 @@
     } else if (v.source === "api") {
       html += apiStatement(v);
     } else {
+      /* THE PANEL THAT SAYS "ATTACH THE PDF" NOW LETS YOU ATTACH THE PDF. It told the
+         owner exactly what to do and offered no way to do it: the upload lived one click
+         deeper, inside "Correct the details", which is where you go to fix a FIGURE. An
+         instruction with no control next to it reads as a broken screen. */
       html += '<div class="rcv-none"><div class="rcv-none-t">No invoice image on file</div>' +
-        '<p class="note">The charge is recorded but the document was never captured. Attach the PDF or a screenshot and it will show here.</p></div>';
+        '<p class="note">The charge is recorded but the document was never captured. Attach the PDF or a screenshot and it will show here.</p>' +
+        '<div class="rcv-none-act"><input type="file" id="rcvFile" accept="application/pdf,image/png,image/jpeg,image/webp" />' +
+        '<button class="btn btn-primary btn-sm" id="rcvUp">Attach the invoice</button></div></div>';
     }
 
     html += '<div class="rcv-foot">';
@@ -2931,6 +2978,8 @@
          wrong paperwork should be emptiable on its own, and stepping through six receipts
          pressing Delete six times is not a feature. The cell itself stays and goes back to
          "no receipt", which is the honest state for a month whose proof was thrown out. */
+      /* A month can hold more than one invoice, and the grid should let you say so. */
+      (rcvCellKey ? '<button class="btn btn-ghost btn-sm" id="rcvAddMore">Add another receipt to this month</button>' : '') +
       (many ? '<button class="btn btn-ghost btn-sm rcv-del" id="rcvDelAll">Delete all ' + rcvList.length + ' here</button>' : '') +
       '<button class="btn btn-ghost btn-sm" id="rcvDone">Close</button></div>';
 
@@ -2940,6 +2989,20 @@
     $("#rcvEdit").addEventListener("click", function () { closeViewer(); editReceipt(v.id); });
     $("#rcvDel").addEventListener("click", function () {
       deleteReceipts([v.id], v.vendor + " " + usd(Math.abs(v.amountUsd)) + " of " + (v.chargedAt || "").slice(0, 10));
+    });
+    if ($("#rcvUp")) $("#rcvUp").addEventListener("click", function () {
+      var inp = $("#rcvFile");
+      uploadReceiptFile(v.id, inp && inp.files && inp.files[0], $("#rcvUp"), "Attach the invoice");
+    });
+    if ($("#rcvAddMore")) $("#rcvAddMore").addEventListener("click", function () {
+      var c = cellFromKey(rcvCellKey);
+      if (!c.row) { toast("That cell is no longer on the grid"); return; }
+      closeViewer();
+      /* Prefilled with the vendor and the month, so the only thing left is the file and
+         the figure. The amount is deliberately NOT prefilled from the cell here: the cell
+         already holds a receipt, so its figure belongs to that one, and carrying it over
+         would quietly propose charging the same amount twice. */
+      openAttach(c.row, { period: c.period });
     });
     if ($("#rcvDelAll")) $("#rcvDelAll").addEventListener("click", function () {
       var total = rcvList.reduce(function (t, x) { return t + Math.abs(x.amountUsd || 0); }, 0);
@@ -3015,7 +3078,7 @@
        line, so a ledger-only or unregistered row (no itemId) has nowhere to record it. */
     var canWaive = !!(row && row.itemId && /^\d{4}-\d{2}$/.test(period));
     ensureViewer();
-    rcvList = []; rcvIndex = 0; rcvContext = "";
+    rcvList = []; rcvIndex = 0; rcvContext = ""; rcvCellKey = "";
     document.body.classList.add("rcv-open");
     $("#rcv").classList.add("show");
     $("#rcvTitle").textContent = row.vendor;
@@ -3174,29 +3237,7 @@
     $("#dwClose").addEventListener("click", closeDrawer);
     $("#rcUpload").addEventListener("click", function () {
       var inp = $("#rcFile");
-      var f = inp && inp.files && inp.files[0];
-      if (!f) { toast("Choose a file first"); return; }
-      if (f.size > 20 * 1024 * 1024) { toast("That file is over 20MB"); return; }
-      var btn = $("#rcUpload");
-      btn.disabled = true; btn.textContent = "Uploading…";
-      var fd = new FormData();
-      /* receiptId is what tells the endpoint to attach to THIS row rather than file a
-         second receipt for the same charge. */
-      fd.append("receiptId", v.id);
-      fd.append("file", f);
-      fetch(API + "/owner/receipts", { method: "POST", credentials: "include", body: fd })
-        .then(function (r) { return r.json().catch(function () { return null; }); })
-        .then(function (res) {
-          btn.disabled = false; btn.textContent = "Attach";
-          var rec = res && (res.receipt || (res.data && res.data.receipt));
-          if (!rec) { toast("Could not attach that file"); return; }
-          /* A render can fail long after the file itself is safely stored, and those are
-             different outcomes: the document IS on file and downloadable either way. */
-          toast(rec.hasShot ? "Invoice attached" : "File saved, but the picture could not be drawn");
-          closeDrawer();
-          viewBurn();
-        })
-        .catch(function () { btn.disabled = false; btn.textContent = "Attach"; toast("Could not reach the server"); });
+      uploadReceiptFile(v.id, inp && inp.files && inp.files[0], $("#rcUpload"), v.hasFile ? "Replace" : "Attach");
     });
     $("#rcSave").addEventListener("click", function () {
       send("/owner/receipts", "PATCH", {
