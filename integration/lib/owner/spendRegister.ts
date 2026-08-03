@@ -204,7 +204,11 @@ export const SEED: SeedItem[] = [
     amountUsd: 60, at: "2026-07-01", status: "active", verified: true,
     purpose: "Recruiter-triggered Boost phones: name + city/state to cell numbers from US public records.",
     impact: "The best-performing phone source in the stack: a 92.9% cell-check pass rate and the highest reply count of any source. Phones are what convert a sourced name into a conversation, and at $60 for 22,500 requests this is the cheapest reliable way to get them.",
-    link: { rapidHost: "skip-tracing-working-api.p.rapidapi.com", envKeys: ["RAPIDAPI_SKIPTRACE_HOST"], ledgerSource: "skiptrace", outcomeSource: "skiptrace" },
+    /* ledgerSource must be the tag the usage ledger actually writes ("rapidapi_skiptrace",
+       from premiumPhone.ts), not the outcome tag. Seeded as "skiptrace" it claimed nothing,
+       so the same usage surfaced as a phantom "Pay per use, not on the register" row in
+       Month by month and was double-counted on top of this plan's $60. */
+    link: { rapidHost: "skip-tracing-working-api.p.rapidapi.com", envKeys: ["RAPIDAPI_SKIPTRACE_HOST"], ledgerSource: "rapidapi_skiptrace", outcomeSource: "skiptrace" },
   },
 
   /* ---- Metered vendors: real cost comes from the usage ledger ---- */
@@ -425,7 +429,7 @@ interface RegisterStore {
  * quietly keeps its old value and nothing anywhere reports a problem. That is what happened
  * here, and 17 is the repair.
  */
-const SEED_VERSION = 18;
+const SEED_VERSION = 19;
 const SNAP_KEY = "owner_spend_register_v1";
 
 /**
@@ -535,6 +539,25 @@ const SEED_CORRECTIONS: Array<{
       vendorLabel: "Mailbox Slot",
       purpose: SEED.find((s) => s.vendor === "Sending.ac")?.purpose,
       notes: SEED.find((s) => s.vendor === "Sending.ac")?.notes,
+    },
+  },
+  {
+    /* The row's ledgerSource was seeded as "skiptrace", but the usage ledger writes this
+       vendor's spend under "rapidapi_skiptrace" (premiumPhone.ts). A key that matches
+       nothing claims nothing, so the Boost phones usage surfaced in Month by month as its
+       own "RAPIDAPI_SKIPTRACE - pay per use, not on the register" row and its dollars were
+       counted on top of the $60 plan that already pays for them. Forced past the verified
+       guard because `verified` came from the seed itself, and `when` keeps it narrow: only
+       the known-wrong key is rewritten, so a link the owner has since edited stands. */
+    vendor: "RapidAPI", label: "Skip Tracing Working API",
+    force: true,
+    when: (i) => i.link?.ledgerSource === "skiptrace",
+    patch: {
+      link: {
+        rapidHost: "skip-tracing-working-api.p.rapidapi.com",
+        envKeys: ["RAPIDAPI_SKIPTRACE_HOST"],
+        ledgerSource: "rapidapi_skiptrace", outcomeSource: "skiptrace",
+      },
     },
   },
   {
