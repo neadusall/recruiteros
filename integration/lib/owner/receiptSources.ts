@@ -287,14 +287,6 @@ export const VENDOR_SOURCES: VendorSource[] = [
     portal: "https://vercel.com/account/invoices",
   },
   {
-    vendor: "AWS",
-    channel: "email_vendor",
-    from: ["amazonaws.com", "aws.amazon.com", "amazon.com"],
-    subject: ["aws", "amazon web services", "invoice", "bill", "billing statement"],
-    portal: "https://console.aws.amazon.com/billing/home#/bills",
-    setup: "AWS emails a monthly notice and keeps the PDF in the billing console. Settle first whether the video bucket is billed here at all.",
-  },
-  {
     vendor: "GitHub",
     channel: "email_vendor",
     from: ["github.com"],
@@ -364,16 +356,15 @@ export const VENDOR_SOURCES: VendorSource[] = [
     merchant: ["cartesia"],
     portal: "https://play.cartesia.ai/",
   },
-  {
-    vendor: "TidyCal",
-    channel: "email_processor",
-    from: ["tidycal.com", "appsumo.com", "stripe.com"],
-    subject: ["tidycal", "receipt", "invoice", "order"],
-    merchant: ["tidycal", "appsumo"],
-    portal: "https://tidycal.com/account/billing",
-    setup: "Often bought once through AppSumo rather than subscribed. If that is what happened, the receipt is an AppSumo order and the row should be marked Paid once.",
-  },
 ];
+
+/* RETIRED BY THE OWNER, 2026-08-03: AWS and TidyCal are not costs of this business.
+ * Both were already on SEED_RETIREMENTS so their register rows had gone, but leaving them
+ * HERE would have kept collecting them: `relevanceOf` treats any catalogued vendor as
+ * ours, so every sweep re-filed the receipts the owner had just deleted. A vendor is
+ * retired in two places or it is not retired at all.
+ * AWS also carried the worst of the substring collisions ("aws" sits inside draws, laws
+ * and flaws), which is what filed a $50,000 marketing email as an infrastructure bill. */
 
 /** Generic billing signals used when no vendor rule matches: still catch the charge. */
 export const GENERIC_SUBJECT_HINTS = [
