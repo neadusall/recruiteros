@@ -947,30 +947,117 @@
   }
   function recordFlow(body) {
     if (!navigator.mediaDevices || !window.MediaRecorder) { toastMsg("Recording is not supported in this browser"); return; }
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-      var rec = new MediaRecorder(stream);
-      S.recorder = rec; S.recChunks = [];
-      rec.ondataavailable = function (ev) { if (ev.data.size) S.recChunks.push(ev.data); };
-      var m = el('<div class="modal-bg"><div class="modal-card"><div class="lio-wiz-head"><b>Recording...</b></div>' +
-        '<div class="lio-wiz-body"><div class="lio-dim">Speak your voice note (20 to 45 seconds works best).</div></div>' +
-        '<div class="modal-foot"><button class="btn btn-primary" id="recStop">Stop and save</button><button class="btn btn-ghost" id="recCancel">Cancel</button></div></div></div>');
-      document.body.appendChild(m);
-      rec.onstop = function () {
-        stream.getTracks().forEach(function (t) { t.stop(); });
-        if (!S.recChunks.length) { m.remove(); return; }
-        var blob = new Blob(S.recChunks, { type: rec.mimeType || "audio/webm" });
-        var rd = new FileReader();
-        rd.onload = function () {
-          var name = "Recording " + new Date().toLocaleString();
-          act("voice_save", { asset: { name: name, mode: "static", audioBase64: rd.result, audioExt: /ogg/.test(blob.type) ? "ogg" : /mp4/.test(blob.type) ? "m4a" : "webm" } })
-            .then(function () { m.remove(); toastMsg("Recording saved"); tabVoice(body); });
+    // One modal owns the whole take: a live level bar, elapsed timer, blinking
+    // record dot, a mic picker, and a silence warning, so the recruiter can SEE
+    // the mic working instead of trusting a static "Recording..." label.
+    var m = el('<div class="modal-bg"><div class="modal-card">' +
+      '<div class="lio-wiz-head"><b>Record a voice note</b></div>' +
+      '<div class="lio-wiz-body">' +
+      '<div class="lio-dim" style="margin-bottom:8px">Speak your voice note (20 to 45 seconds works best).</div>' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">' +
+      '<span id="recDot" style="width:10px;height:10px;border-radius:50%;background:var(--danger,#c0392b);flex:none;opacity:.35"></span>' +
+      '<div style="flex:1;height:14px;border-radius:7px;background:rgba(128,128,128,.18);overflow:hidden">' +
+      '<div id="recLevel" style="height:100%;width:0%;border-radius:7px;background:var(--ok,#1a9c6b);transition:width .08s linear"></div></div>' +
+      '<b id="recTime" class="lio-mono" style="min-width:44px;text-align:right">0:00</b></div>' +
+      '<div id="recHint" class="lio-dim" style="min-height:18px">Waiting for the microphone...</div>' +
+      '<div style="margin-top:8px"><select id="recMic" class="lio-input" style="max-width:100%"></select></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-primary" id="recStop" disabled>Stop and save</button><button class="btn btn-ghost" id="recCancel">Cancel</button></div>' +
+      '</div></div>');
+    document.body.appendChild(m);
+    var stream = null, rec = null, actx = null, raf = 0, timer = 0, t0 = 0, peak = 0, cancelled = false, micsFilled = false;
+    function teardown() {
+      if (raf) cancelAnimationFrame(raf); raf = 0;
+      if (timer) clearInterval(timer); timer = 0;
+      if (actx) { try { actx.close(); } catch (e) {} actx = null; }
+      if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+    }
+    function fmt(s) { return Math.floor(s / 60) + ":" + ("0" + Math.floor(s % 60)).slice(-2); }
+    function meter() {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return; // no meter support: recording still works, the dot still blinks
+      actx = new AC();
+      var an = actx.createAnalyser(); an.fftSize = 512;
+      actx.createMediaStreamSource(stream).connect(an);
+      var buf = new Uint8Array(an.fftSize);
+      var bar = m.querySelector("#recLevel"), hint = m.querySelector("#recHint");
+      function tick() {
+        an.getByteTimeDomainData(buf);
+        var max = 0;
+        for (var i = 0; i < buf.length; i++) { var v = Math.abs(buf[i] - 128); if (v > max) max = v; }
+        bar.style.width = Math.min(100, Math.round((max / 128) * 260)) + "%";
+        if (max > peak) peak = max;
+        if ((Date.now() - t0) / 1000 > 3 && peak < 4) {
+          hint.innerHTML = '<span style="color:var(--danger,#c0392b)">Not hearing you. Try another microphone below, or check your headset mute switch.</span>';
+        } else if (peak >= 4) {
+          hint.textContent = "Mic is live. The green bar moves with your voice.";
+        }
+        raf = requestAnimationFrame(tick);
+      }
+      raf = requestAnimationFrame(tick);
+    }
+    function fillMics(st) {
+      if (micsFilled) return; micsFilled = true;
+      var sel = m.querySelector("#recMic");
+      navigator.mediaDevices.enumerateDevices().then(function (devs) {
+        var mics = devs.filter(function (d) { return d.kind === "audioinput"; });
+        var track = st.getAudioTracks()[0];
+        var liveId = (track && track.getSettings && track.getSettings().deviceId) || "";
+        sel.innerHTML = mics.map(function (d, i) {
+          return '<option value="' + esc(d.deviceId) + '"' + (d.deviceId === liveId ? " selected" : "") + ">" + esc(d.label || ("Microphone " + (i + 1))) + "</option>";
+        }).join("");
+        if (mics.length < 2) sel.style.display = "none"; // nothing to choose between
+        sel.onchange = function () {
+          // Switching devices restarts the take: one mic, one clean recording.
+          S.recChunks = [];
+          if (rec && rec.state !== "inactive") { rec.onstop = null; rec.stop(); }
+          start(sel.value);
+          toastMsg("Switched microphone, the take restarted");
         };
-        rd.readAsDataURL(blob);
-      };
-      m.querySelector("#recStop").onclick = function () { rec.stop(); };
-      m.querySelector("#recCancel").onclick = function () { S.recChunks = []; rec.stop(); m.remove(); };
-      rec.start();
-    }).catch(function () { toastMsg("Microphone permission was refused"); });
+      }).catch(function () { sel.style.display = "none"; });
+    }
+    function start(deviceId) {
+      teardown(); peak = 0;
+      var want = deviceId ? { audio: { deviceId: { exact: deviceId } } } : { audio: true };
+      navigator.mediaDevices.getUserMedia(want).then(function (st) {
+        if (cancelled) { st.getTracks().forEach(function (t) { t.stop(); }); return; }
+        stream = st;
+        rec = new MediaRecorder(st);
+        S.recorder = rec; S.recChunks = [];
+        rec.ondataavailable = function (ev) { if (ev.data.size) S.recChunks.push(ev.data); };
+        rec.onstop = function () {
+          var chunks = S.recChunks;
+          var mime = rec.mimeType || "audio/webm";
+          teardown();
+          if (cancelled || !chunks.length) { m.remove(); return; }
+          var blob = new Blob(chunks, { type: mime });
+          var rd = new FileReader();
+          rd.onload = function () {
+            var name = "Recording " + new Date().toLocaleString();
+            act("voice_save", { asset: { name: name, mode: "static", audioBase64: rd.result, audioExt: /ogg/.test(blob.type) ? "ogg" : /mp4/.test(blob.type) ? "m4a" : "webm" } })
+              .then(function () { m.remove(); toastMsg("Recording saved"); tabVoice(body); });
+          };
+          rd.readAsDataURL(blob);
+        };
+        t0 = Date.now();
+        var timeEl = m.querySelector("#recTime"), dot = m.querySelector("#recDot");
+        timer = setInterval(function () {
+          timeEl.textContent = fmt((Date.now() - t0) / 1000);
+          dot.style.opacity = dot.style.opacity === "1" ? ".35" : "1";
+        }, 500);
+        m.querySelector("#recStop").disabled = false;
+        meter();
+        rec.start();
+        fillMics(st);
+      }).catch(function () { teardown(); m.remove(); toastMsg("Microphone permission was refused"); });
+    }
+    m.querySelector("#recStop").onclick = function () { if (rec && rec.state !== "inactive") rec.stop(); };
+    m.querySelector("#recCancel").onclick = function () {
+      cancelled = true; S.recChunks = [];
+      if (rec && rec.state !== "inactive") { rec.onstop = null; rec.stop(); }
+      teardown(); m.remove();
+    };
+    start("");
   }
   function voiceApprovals(vb, items) {
     vb.innerHTML = items.length
