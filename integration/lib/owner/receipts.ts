@@ -33,6 +33,7 @@ import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 import { listSpendItems, setLearnedPrice, type SpendItem } from "./spendRegister";
 import {
   VENDOR_SOURCES, PROCESSOR_DOMAINS, GENERIC_SUBJECT_HINTS, NON_CHARGE_HINTS,
+  RECEIPT_SUBJECT_RE, PAYMENT_SUBJECT_RE, NOT_A_PAYMENT_SUBJECT_RE, STRONG_BODY_RE,
   vendorSourceFor, type VendorSource,
 } from "./receiptSources";
 import { resolveSpendItem, findDuplicates, mergeFields, isSameCharge, copyQuality } from "./receiptMatch";
@@ -174,6 +175,9 @@ interface ReceiptStore {
    * ignores this and can be pressed any number of times.
    */
   onePerCellRunAt?: string;
+  /** When the one-time "purge marketing filed as receipts" cleanup ran (same one-shot
+   *  pattern: first grid load after it shipped, then never again). */
+  junkPurgeRunAt?: string;
 }
 
 const SNAP_KEY = "owner_spend_receipts_v1";
@@ -192,6 +196,7 @@ export function ensureReceiptsReady(): Promise<void> {
         if (s?.pullers) store.pullers = s.pullers;
         if (s?.pullerReportAt) store.pullerReportAt = s.pullerReportAt;
         if (s?.onePerCellRunAt) store.onePerCellRunAt = s.onePerCellRunAt;
+        if (s?.junkPurgeRunAt) store.junkPurgeRunAt = s.junkPurgeRunAt;
       })
       .catch(() => {});
   }
@@ -688,9 +693,14 @@ export function parseReceiptText(raw: string): ParsedReceipt | null {
   const text = raw.replace(/\r/g, "").replace(/[ \t]+/g, " ");
   const low = text.toLowerCase();
 
-  const kind: ReceiptKind = /\brefund(ed)?\b|credit note|reversal/i.test(low)
-    ? (/credit note/i.test(low) ? "credit_note" : "refund")
-    : "charge";
+  /* A refund has to be STATED, not merely mentioned: "Refund Policy" in an order email's
+     footer is not a refund, and treating it as one filed real GoDaddy and Namecheap orders
+     as negative amounts. */
+  const kind: ReceiptKind = /credit note/i.test(low)
+    ? "credit_note"
+    : /your refund|refund (?:issued|processed|completed|confirmation|receipt|of\s*[$€£])|has been refunded|we(?:'ve| have) refunded|was refunded|amount refunded|payment reversal/i.test(low)
+      ? "refund"
+      : "charge";
 
   /* --- amount --- */
   const TOTAL_PHRASES = [
@@ -797,6 +807,12 @@ function ymd(y: number, mo: number, d: number): string {
   return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 function isoMonth(d: string): string | undefined { return /^\d{4}-\d{2}/.test(d) ? d.slice(0, 7) : undefined; }
+/** YYYY-MM-DD plus n days, UTC, for sanity-bounding parsed dates against the mail's own date. */
+function addDays(day: string, n: number): string {
+  const t = Date.parse(`${day.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(t)) return day;
+  return new Date(t + n * 86400000).toISOString().slice(0, 10);
+}
 
 /* ============================ classifying + matching ============================ */
 
@@ -811,16 +827,34 @@ export interface MailMessage {
   attachments: Array<{ filename: string; contentType: string; content: Buffer }>;
 }
 
-/** Is this message a paid charge, and if not, why not. */
+/** Is this message a paid charge, and if not, why not.
+ *
+ * ⚠️ THE SUBJECT TEST MUST NEVER LOOK AT THE SENDER ADDRESS. The old haystack was
+ * subject + fromName + from, and every vendor's hint list starts with its own name — so
+ * EVERY mail from linkedin.com contained "linkedin", every mail from tidycal.com contained
+ * "tidycal", and one nightly sweep filed 165 job alerts, Prime Day promotions and AppSumo
+ * deal blasts as vendor charges (a $100,000 salary in a job title became a $100,000
+ * LinkedIn receipt). A vendor's name on a message only says who SENT it; whether it is a
+ * RECEIPT has to be said by receipt words, and those live in the subject and body alone.
+ */
 export function classify(msg: MailMessage): { billing: boolean; reason?: string } {
-  const hay = `${msg.subject} ${msg.fromName || ""} ${msg.from}`.toLowerCase();
+  const subject = (msg.subject || "").toLowerCase();
+  /* fromName rides along for the veto only: "LinkedIn Job Alerts" in a display name is a
+     reason to doubt a message, never a reason to file one. */
+  const subjectHay = `${subject} ${(msg.fromName || "").toLowerCase()}`;
   /* Read the HTML too, stripped to text. Most vendor receipts — registrars especially —
      are HTML-only, so looking at msg.text alone saw an EMPTY body and skipped a mail whose
      whole receipt (the $ line items, the total) was sitting in the markup. That one omission
      is why every Dynadot "Order Finished" was invisible. */
   const body = `${msg.text || ""} ${stripHtml(msg.html || "")}`.toLowerCase().slice(0, 8000);
   for (const bad of NON_CHARGE_HINTS) {
-    if (hay.includes(bad)) return { billing: false, reason: `not a charge: subject says "${bad}"` };
+    if (subjectHay.includes(bad)) return { billing: false, reason: `not a charge: subject says "${bad}"` };
+  }
+  /* An invoice being generated/issued is not money moving; the payment confirmation for
+     the same charge follows and is the one that files. Counting both double-bills the
+     month, and counting an invoice that is never paid books money that never left. */
+  if (NOT_A_PAYMENT_SUBJECT_RE.test(msg.subject || "")) {
+    return { billing: false, reason: "an invoice being issued, not a payment; the payment confirmation is the charge" };
   }
   const domain = (msg.from.split("@")[1] || "").toLowerCase();
   const from = msg.from.toLowerCase();
@@ -829,18 +863,15 @@ export function classify(msg: MailMessage): { billing: boolean; reason?: string 
   /* A sender we KNOW bills us: one of our vendors, or a payment processor. */
   const known = !!vendorSrc || processorHit;
 
-  /* A currency figure anywhere in the body: "$10.88", "US$10.88", "10.88 USD", "9,00 €".
-     It CORROBORATES a receipt; it never proves one. A payroll notice, a "$5 off" promo and
-     an email signature that quotes a salary all carry money and not one of them is a charge
-     we paid — so a bare dollar amount is no longer allowed to file anything by itself. That
-     over-generous rule is exactly what swept salaries and quotes into the books. */
-  const hasMoney = /(?:us\$|\$|€|£|₹)\s?\d[\d,]*(?:[.,]\d{1,2})?|\d[\d,]*[.,]\d{2}\s?(?:usd|eur|gbp|cad|inr)/i.test(body);
-  /* Billing words: the generic set PLUS this sender's own vocabulary — a registrar's
-     confirmation says "order"/"renewal"/"domain", never "invoice". */
-  const subjectHit =
-    GENERIC_SUBJECT_HINTS.some((h) => hay.includes(h)) ||
-    (vendorSrc ? vendorSrc.subject.some((h) => hay.includes(h)) : false);
-  const bodyHit = /amount paid|total paid|payment received|you paid|amount charged|order total|grand total|subtotal|receipt|invoice|thank you for your (?:order|purchase|payment)/i.test(body);
+  /* A subject that STATES a completed charge: "Your receipt from…", "Invoice 086…",
+     "Order Received", "Payment Confirmation", "Order - Thank You". This is the signal that
+     files. Whether the vendor is one of OURS is a separate question that relevanceOf
+     answers afterwards, so a personal order still classifies as billing here and is then
+     reported as a stranger instead of filed. */
+  const subjectStrong = RECEIPT_SUBJECT_RE.test(msg.subject || "") || PAYMENT_SUBJECT_RE.test(msg.subject || "");
+  /* Body phrases that state a completed charge — NOT bare "receipt"/"invoice", which any
+     marketing email about a billing product also contains. */
+  const bodyStrong = STRONG_BODY_RE.test(body);
   /* The vendor's own document, attached: a PDF, or a file named like a receipt/invoice, IS
      a receipt on its own — this is the "actually has an invoice attached" half of the rule. */
   const hasInvoiceDoc = (msg.attachments || []).some((a) => {
@@ -848,22 +879,34 @@ export function classify(msg: MailMessage): { billing: boolean; reason?: string 
     const type = (a.contentType || "").toLowerCase();
     return type.includes("pdf") || name.endsWith(".pdf") || /receipt|invoice|statement|order/.test(name);
   });
+  /* Weak corroboration for a known sender carrying a document: generic billing vocabulary
+     in the SUBJECT (not the sender), or this vendor's own words minus its identity — a
+     vendor's name and merchant strings are excluded because they are on every mail it
+     sends, receipts and newsletters alike. */
+  const identity = new Set(
+    [vendorSrc?.vendor || "", ...(vendorSrc?.merchant || [])].map((s) => s.toLowerCase()).filter(Boolean),
+  );
+  const weakHit =
+    GENERIC_SUBJECT_HINTS.some((h) => subject.includes(h)) ||
+    (vendorSrc ? vendorSrc.subject.some((h) => !identity.has(h) && subject.includes(h)) : false);
 
-  /* A receipt SAYS it is one, or CARRIES the document that is one. A recognised sender that
-     used a billing word (subject or body) or attached an invoice is billing us, whatever it
-     titled the message — this still catches the registrar order-confirmations, whose subjects
-     say "order"/"renewal" and whose bodies say "order total"/"subtotal". What it no longer
-     does is file a mail whose ONLY billing-shaped thing is a stray dollar figure: no receipt
-     word, no invoice document, no charge. */
-  const billingWord = subjectHit || bodyHit;
-  if (known && (billingWord || hasInvoiceDoc)) return { billing: true };
-  /* An UNKNOWN sender still needs an explicit billing phrase, so personal mail with a stray
-     "$5 off" never floods the books. */
-  if (subjectHit && bodyHit) return { billing: true };
+  if (subjectStrong) return { billing: true };
+  /* A known biller whose body states the charge ("Amount paid $50.00", "Order Total") —
+     but only when the SUBJECT carries a billing word too. A known sender's body alone is
+     not enough, because known senders relay other people's words: a forwarded LinkedIn
+     InMail quoting a demand letter's "Total Paid: $11,900" filed itself as an $11,900
+     LinkedIn charge on exactly this rung. */
+  if (known && bodyStrong && weakHit) return { billing: true };
+  /* A known biller that attached the invoice itself, with at least a billing word in the
+     subject: the document is the receipt. */
+  if (known && hasInvoiceDoc && (weakHit || bodyStrong)) return { billing: true };
+  /* An unknown sender needs the strong subject AND a body that agrees. */
+  if (weakHit && bodyStrong) return { billing: true };
+  const hasMoney = /(?:us\$|\$|€|£|₹)\s?\d[\d,]*(?:[.,]\d{1,2})?|\d[\d,]*[.,]\d{2}\s?(?:usd|eur|gbp|cad|inr)/i.test(body);
   return {
     billing: false,
     reason: hasMoney
-      ? "carries a dollar amount but no receipt word or invoice document — not a charge"
+      ? "carries a dollar amount but nothing states a completed charge; marketing and notices carry prices too"
       : "no billing signal in subject, sender or body",
   };
 }
@@ -1290,8 +1333,14 @@ async function importMessage(
     return { status: "rejected", reason: `no amount could be read from the message or its attachment${why}`, documentError };
   }
 
-  const chargedAt = parsed.chargedAt || mm.date.slice(0, 10);
-  const period = parsed.period || chargedAt.slice(0, 7);
+  /* A charge cannot postdate the email that reports it by more than a few days: a date
+     parsed out of the body that lands months ahead is a domain EXPIRY or a next-renewal
+     date, not the charge date (a GoDaddy order filed itself into 2028 this way). */
+  const mailDay = mm.date.slice(0, 10);
+  let chargedAt = parsed.chargedAt || mailDay;
+  if (mailDay && chargedAt > addDays(mailDay, 7)) chargedAt = mailDay;
+  let period = parsed.period || chargedAt.slice(0, 7);
+  if (period > addDays(mailDay, 40).slice(0, 7)) period = chargedAt.slice(0, 7);
   /* The amount and the line-item label are what tell one of a vendor's listings from
      another, so the router gets them rather than the raw message alone. */
   const match = matchVendor(mm, items, { amountUsd: parsed.amountUsd, period, description: parsed.description });
@@ -1781,6 +1830,159 @@ export async function purgeNotOurs(opts: { dryRun?: boolean } = {}): Promise<{
     persist();
   }
   return { removed: opts.dryRun ? 0 : doomed.length, kept: store.receipts.length, charges: doomed };
+}
+
+/* ---- taking the marketing back out of the books --------------------------------------
+
+   The relevance filter asks "is this vendor ours?" — and the junk sweeps of 2026-08-02/03
+   sailed through it, because the vendors WERE ours. Job alerts filed as LinkedIn charges,
+   Prime Day promotions as AWS, AppSumo deal blasts as TidyCal, "payment unsuccessful"
+   notices as Anthropic: real vendor, fictional charge, 180+ rows of it. The classifier now
+   refuses those MESSAGES; this sweep applies the same judgement to what is already filed. */
+
+export interface JunkPurgeEntry {
+  id: string; vendor: string; amountUsd: number; period: string; chargedAt: string;
+  subject?: string; from?: string; why: string;
+}
+
+/** The message-level verdict on a receipt already in the vault. Null means it stands.
+ *  `items` is the live spend register, for the vendor-relevance rung: a receipt whose
+ *  vendor the owner has retired from BOTH the register and the source catalogue (AWS,
+ *  TidyCal) has no line left to prove and goes with the marketing. */
+export function junkWhy(r: Receipt, all: Receipt[], items: SpendItem[] = []): string | null {
+  /* Rebuild what classify() needs from what the receipt kept of its message. The excerpt
+     is the first 1,200 chars of the body text, which is where every strong billing phrase
+     lives; a receipt that arrived with the vendor's own document gets that counted too. */
+  const msg: MailMessage = {
+    subject: r.subject || "",
+    from: r.from || "",
+    date: r.chargedAt || "",
+    text: r.excerpt || "",
+    attachments: r.fileName
+      ? [{ filename: r.fileName, contentType: r.fileMime || "", content: Buffer.alloc(0) }]
+      : [],
+  };
+  const c = classify(msg);
+  if (!c.billing) return c.reason || "not a record of a completed charge";
+
+  /* The message is receipt-shaped — is it from somewhere that can speak for this vendor?
+     amazon.com used to be listed under AWS and appsumo.com under TidyCal, so every retail
+     order and marketplace deal wore a real vendor's name. A kept receipt must be from a
+     domain the vendor still claims, from a payment processor, or must actually NAME the
+     vendor in its subject or body. */
+  const domain = ((r.from || "").split("@")[1] || "").toLowerCase();
+  if (domain) {
+    const src = vendorSourceFor(r.vendor);
+    const claimed = !!src && src.from.some((f) => domain === f || domain.endsWith("." + f));
+    const viaProcessor = PROCESSOR_DOMAINS.some((p) => domain === p || domain.endsWith("." + p));
+    const hay = `${r.subject || ""} ${r.excerpt || ""}`.toLowerCase();
+    const named = namedIn(hay, r.vendor) || (src?.merchant || []).some((mm) => namedIn(hay, mm));
+    if (!claimed && !viaProcessor && !named) {
+      return `sent from ${domain}, which does not identify ${r.vendor}, and the message never names them`;
+    }
+  }
+
+  /* The vendor's own invoice, pulled from their portal or API, outranks the email that
+     announced the same charge: keeping both counts the money twice (Zapmail's July was on
+     file twice this way — the Stripe receipt email AND the portal invoice). An email copy
+     of a charge a portal/api receipt already proves is the copy that goes. */
+  const dup = all.some((o) => {
+    if (o.id === r.id || (o.source !== "portal" && o.source !== "api")) return false;
+    if (o.vendor.toLowerCase() !== r.vendor.toLowerCase() || o.period !== r.period) return false;
+    if (Math.abs(Math.abs(o.amountUsd) - Math.abs(r.amountUsd)) < 0.01) return true;
+    if (o.amountPaidUsd != null && Math.abs(o.amountPaidUsd - Math.abs(r.amountUsd)) < 0.01) return true;
+    /* The amounts can legitimately differ between the two records of ONE charge: the email
+       carries what the card was billed, the portal invoice the full cost before applied
+       credit (Zapmail: $391.66 charged of a $441.66 invoice). The vendor's own invoice
+       number settles it — when the email's attached document or text carries the portal
+       receipt's invoice number, they are the same charge. */
+    const inv = (o.invoiceNumber || "").toLowerCase();
+    if (inv.length >= 6) {
+      const hay = `${r.fileName || ""} ${r.subject || ""} ${r.excerpt || ""}`.toLowerCase();
+      if (hay.includes(inv)) return true;
+    }
+    return false;
+  });
+  if (dup) return "the vendor's own invoice for this charge is already on file from the portal";
+
+  /* A receipt-shaped message from a vendor the owner has retired everywhere is still not
+     this company's money. The stored vendor is used as-is (never re-guessed, which could
+     downgrade a processor receipt), and an itemId only counts while its row still exists:
+     trusting a pointer at a deleted row would keep a retired vendor's receipts forever. */
+  const itemId = r.itemId && items.some((i) => i.id === r.itemId) ? r.itemId : undefined;
+  const rel = relevanceOf({ vendor: r.vendor, itemId, confidence: r.confidence }, items);
+  if (!rel.ours && !filingUnknownVendors()) return rel.why;
+
+  return null;
+}
+
+/**
+ * Re-judge every email-harvested receipt under the current classifier and take out the
+ * ones that were never receipts. Portal/api/manual rows are never touched (they came from
+ * a vendor's own billing page), nor is anything the owner has marked reviewed. Each
+ * removal is fingerprint-dismissed so neither the nightly sweep nor a manual pull can
+ * refile the same message. Survivors get two repairs: a "refund" that never stated one
+ * goes back to being a positive charge, and a charge date parsed off a domain-expiry
+ * line (years in the future) is pulled back to when the mail actually arrived.
+ */
+export async function purgeJunkEmail(opts: { dryRun?: boolean } = {}): Promise<{
+  removed: number; repaired: number; kept: number; charges: JunkPurgeEntry[];
+}> {
+  await ensureReceiptsReady();
+  const doomed: JunkPurgeEntry[] = [];
+  let repaired = 0;
+
+  for (const r of store.receipts) {
+    if (r.source !== "email" || r.reviewed) continue;
+    const why = junkWhy(r, store.receipts);
+    if (why) {
+      doomed.push({
+        id: r.id, vendor: r.vendor, amountUsd: r.amountUsd, period: r.period,
+        chargedAt: r.chargedAt, subject: r.subject, from: r.from, why,
+      });
+      continue;
+    }
+    if (opts.dryRun) continue;
+    /* Sign repair: negative money must be a STATED refund, not a "Refund Policy" footer. */
+    const says = `${r.subject || ""} ${r.excerpt || ""}`.toLowerCase();
+    const statedRefund = /your refund|refund (?:issued|processed|completed|confirmation|receipt|of\s*[$€£])|has been refunded|we(?:'ve| have) refunded|was refunded|amount refunded|credit note|payment reversal/.test(says);
+    if (r.amountUsd < 0 && !statedRefund) {
+      r.amountUsd = Math.abs(r.amountUsd); r.kind = "charge"; r.updatedAt = nowIso(); repaired++;
+    }
+    /* Date repair: a charge cannot postdate the sweep that filed it. */
+    const filedDay = (r.createdAt || "").slice(0, 10);
+    if (filedDay && r.chargedAt > filedDay) {
+      r.chargedAt = filedDay;
+      r.period = filedDay.slice(0, 7);
+      r.confidence = Math.min(r.confidence ?? 1, 0.5);
+      r.updatedAt = nowIso(); repaired++;
+    }
+  }
+
+  if (!opts.dryRun && doomed.length) {
+    const gone = new Set(doomed.map((d) => d.id));
+    for (const r of store.receipts) if (gone.has(r.id)) dismissFingerprint(fingerprintOf(r));
+    store.receipts = store.receipts.filter((r) => !gone.has(r.id));
+    for (const d of doomed) await removeArtifacts(d.id).catch(() => {});
+  }
+  if (!opts.dryRun && (doomed.length || repaired)) persist();
+  return { removed: opts.dryRun ? 0 : doomed.length, repaired, kept: store.receipts.length, charges: doomed };
+}
+
+/**
+ * Run the junk purge ONCE, on the next grid load after this ships, then remember it did —
+ * same shape as collapseToOnePerCellOnce, and for the same reason: the cleanup needs no
+ * button press and no SSH, and being one-shot it can never re-delete something the owner
+ * later re-adds by hand. The nightly sweep cannot refile any of it, because the same
+ * classifier that judged it here now refuses those messages at the door.
+ */
+export async function purgeJunkEmailOnce(): Promise<{ removed: number; repaired: number; ran: boolean }> {
+  await ensureReceiptsReady();
+  if (store.junkPurgeRunAt) return { removed: 0, repaired: 0, ran: false };
+  const res = await purgeJunkEmail();
+  store.junkPurgeRunAt = nowIso();
+  persist();
+  return { removed: res.removed, repaired: res.repaired, ran: true };
 }
 
 /** Every file a receipt owns: the picture, the thumbnail, and the vendor's own document. */

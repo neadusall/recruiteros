@@ -15,6 +15,10 @@
  *   POST   { action:"onePerCell" }          -> keep ONE receipt per vendor-month cell and
  *                                              drop the extras (owner presses it once; the
  *                                              rest are re-added by hand)
+ *   POST   { action:"purgeJunk", dryRun? }  -> re-judge every email-harvested receipt under
+ *                                              the strict classifier and take out the ones
+ *                                              that were never receipts (also runs itself
+ *                                              once, on the first GET after shipping)
  *   POST   multipart/form-data -> attach a receipt downloaded by hand
  *   PATCH  { id, ... }         -> correct a parsed figure / reassign a vendor / mark reviewed
  *   DELETE ?id=…               -> drop one
@@ -29,7 +33,7 @@ import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
   pullerStates, lastPullerReportAt, renderMissingShots, repairVault, vaultHealth,
-  collapseToOnePerCell, collapseToOnePerCellOnce,
+  collapseToOnePerCell, collapseToOnePerCellOnce, purgeJunkEmail, purgeJunkEmailOnce,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
@@ -57,6 +61,13 @@ export async function GET(req: Request) {
      happens on the owner's next page load without a button press — and being one-shot, it
      can never touch a second charge the owner re-adds by hand later. */
   await collapseToOnePerCellOnce().catch(() => {});
+
+  /* Same one-shot shape for the marketing that got filed as receipts: the first grid load
+     after the strict classifier shipped re-judges every email-harvested receipt under it
+     and takes out the ones that were never receipts (job alerts as LinkedIn, Prime Day as
+     AWS, deal blasts as TidyCal). Fingerprint-dismissed on the way out, so no sweep can
+     refile them. */
+  await purgeJunkEmailOnce().catch(() => {});
 
   /* The vendor-billed figures are read synchronously while the grid is built, so the store
      has to be hydrated before that: on a cold container the first page view would otherwise
@@ -194,6 +205,7 @@ export async function POST(req: Request) {
      ever this explicit press — the owner is left with a clean one-per-cell skeleton and adds
      any real second charge back by hand. */
   if (b?.action === "onePerCell") return ok(await collapseToOnePerCell());
+  if (b?.action === "purgeJunk") return ok(await purgeJunkEmail({ dryRun: !!b.dryRun }));
   return fail("unknown_action", 400);
 }
 

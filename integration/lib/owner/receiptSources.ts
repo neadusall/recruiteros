@@ -364,13 +364,21 @@ export const VENDOR_SOURCES: VendorSource[] = [
  * ours, so every sweep re-filed the receipts the owner had just deleted. A vendor is
  * retired in two places or it is not retired at all.
  * AWS also carried the worst of the substring collisions ("aws" sits inside draws, laws
- * and flaws), which is what filed a $50,000 marketing email as an infrastructure bill. */
+ * and flaws), which is what filed a $50,000 marketing email as an infrastructure bill.
+ * Their mail streams were also the worst of the junk: amazon.com is Amazon RETAIL (Prime
+ * Day blasts, shipped-order notices, a $10,000 grocery sweepstake all filed as AWS), and
+ * appsumo.com is a MARKETPLACE mailing daily deals for hundreds of products (all filed as
+ * TidyCal, one for $2.7M — a revenue brag in a marketing subject line). If either vendor
+ * ever comes back, list only their own billing domains, never the marketplace's. */
 
-/** Generic billing signals used when no vendor rule matches: still catch the charge. */
+/** Generic billing signals used when no vendor rule matches: still catch the charge.
+ *  ⚠️ Weak corroboration ONLY — never enough to file on its own. "billing", "paid" and
+ *  "renewal notice" used to live here and each one filed marketing ("Multi-tenant billing
+ *  portal", "prepaid", GoDaddy renewal REMINDERS) as money spent. */
 export const GENERIC_SUBJECT_HINTS = [
   "receipt", "invoice", "payment received", "payment confirmation", "thanks for your payment",
-  "thank you for your payment", "your payment", "subscription renewed", "billing", "charged",
-  "order confirmation", "renewal notice", "auto-recharge", "credit purchase", "paid",
+  "thank you for your payment", "your payment", "subscription renewed",
+  "order confirmation", "auto-recharge", "credit purchase",
 ];
 
 /** Messages that LOOK like billing but are not a charge. Excluded, and counted as excluded. */
@@ -378,7 +386,47 @@ export const NON_CHARGE_HINTS = [
   "payment failed", "payment declined", "card declined", "action required to keep",
   "your trial", "trial ending", "upgrade to", "invoice is due", "past due", "unpaid invoice",
   "reminder: invoice", "estimate", "quote",
+  /* A renewal NOTICE quotes the price of a charge that has not happened yet; filing it
+     invents the charge, sometimes years in the future (the domain's expiry date parses as
+     the period). Same for a failed payment, an expiry warning, a security notice, a support
+     ticket and a 3-D Secure prompt: money is named, none of it moved. */
+  "renewal notice", "was unsuccessful", "payment unsuccessful", "expires soon",
+  "expiring soon", "new sign-in", "sign-in detected", "verification reminder",
+  "rate limit", "[ticket",
 ];
+
+/**
+ * A subject line that STATES this is a record of money that moved. This is the strong
+ * signal the classifier files on: every real vendor receipt in the vault matches one of
+ * these ("Your receipt from…", "Invoice 086000951457", "Order Received (order …)",
+ * "Credit Card Payment Confirmation", "[Telnyx LLC] Payment Success", "Order - Thank You").
+ * A vendor's name in the subject is deliberately NOT here: every mail a vendor sends has
+ * its name on it, which is how job alerts became LinkedIn charges and product news became
+ * Hetzner spend.
+ */
+export const RECEIPT_SUBJECT_RE =
+  /\breceipt\b|\binvoice\s*#?\s*\d|\b(?:your|new) invoice\b|\border\s+(?:confirmation|received|summary|finished|completed?)\b|\border\b.{0,12}\bthank you\b|\bthank you\b.{0,16}\border\b|\bthank you for (?:your )?purchas/i;
+
+/** More payment-shaped subjects, kept apart only for readability. */
+export const PAYMENT_SUBJECT_RE =
+  /\bpayment\s+(?:confirmation|received|success(?:ful)?|processed)\b|\bthank you for your payment\b|\bauto.?recharge\b|\bbilling statement\b|\brenewal confirmation\b|\bhas been renewed\b|\bcredit purchase\b/i;
+
+/**
+ * Subjects that carry a billing word and still are not a payment: an invoice being
+ * GENERATED (WHMCS mails "Invoice #N Generated" and "Customer Invoice" before the payment
+ * confirmation for the same charge — counting both double-bills the month, and counting an
+ * unpaid invoice books money that may never move), and an invoice merely being ISSUED
+ * ("New invoice from X" arrives minutes before "Your receipt from X" for the same charge).
+ */
+export const NOT_A_PAYMENT_SUBJECT_RE =
+  /invoice\s*#?\s*\d+\s+generated\b|\bcustomer invoice\b|\bnew invoice from\b|racknerd - order\s+\d/i;
+
+/**
+ * Body phrases that state a completed charge. Deliberately NOT bare "receipt"/"invoice":
+ * a marketing email about an invoicing product contains the word "invoice" and no charge.
+ */
+export const STRONG_BODY_RE =
+  /amount paid|total paid|payment received|you paid|amount charged|order total|grand total|subtotal|payment of\s*(?:us)?[$€£]\s?\d[\d,.]*\s*(?:was|is)?\s*successful|successfully (?:paid|charged|processed)|thank you for your (?:order|purchase|payment)/i;
 
 export function vendorSourceFor(vendor: string): VendorSource | undefined {
   const v = (vendor || "").trim().toLowerCase();

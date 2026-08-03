@@ -52,6 +52,18 @@ async function run(req: Request) {
     return NextResponse.json({ ok: true, dryRun: purge !== "apply", ...r });
   }
 
+  /* Same contract for the message-level cleanup: marketing and notification emails that
+     were filed as receipts before the classifier refused them (job alerts as LinkedIn,
+     Prime Day as AWS, deal blasts as TidyCal). Dry run by default; &purgeJunk=apply
+     deletes, fingerprint-dismisses each one, and repairs surviving rows whose sign or
+     date the old parser got wrong. */
+  const purgeJunk = url.searchParams.get("purgeJunk");
+  if (purgeJunk) {
+    const { purgeJunkEmail } = await import("../../../../../lib/owner/receipts");
+    const r = await purgeJunkEmail({ dryRun: purgeJunk !== "apply" });
+    return NextResponse.json({ ok: true, dryRun: purgeJunk !== "apply", ...r });
+  }
+
   const pulls = withVendors ? await pullVendorApis(monthsBack, { force }).catch(() => []) : [];
 
   if (!wait) {
