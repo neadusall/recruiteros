@@ -1708,6 +1708,10 @@
          single "not on the register" block worth hundreds while every row underneath it
          reads "no receipt". Offered only when there is something to split or drop. */
       (loose ? '<button class="btn btn-sm" id="rcRelink">' + esc(looseLabel(d)) + '</button>' : "") +
+      /* When a wide sweep has stacked more than one receipt in a cell: keep the best one per
+         cell and drop the rest, so the grid reads one receipt per service per month. Only
+         shown when there is actually something to trim. */
+      (cellExtras(d) ? '<button class="btn btn-sm" id="rcOnePer" title="Keep the best receipt in each service-month cell and remove the extras. Add any real second charge back by hand.">Keep one receipt per cell (removes ' + cellExtras(d) + ')</button>' : "") +
       '</div></div>' +
       '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate. <strong>Tick</strong> the receipts (or a whole row) you want on the client\'s bill and stage them from the bar at the foot of the grid — each is set Monthly, Annual or One-time and lands on the client\'s account as <strong>pending</strong>. Nothing shows on their app.lumesp Spending page until you approve it.' +
       /* Where the books open. Said out loud so the missing earlier months read as a
@@ -1801,6 +1805,18 @@
     if (r.billing === "metered") return "Pay per use";
     return r.billing || "";
   }
+  /* How many receipts would go if every cell were trimmed to one: the sum, over every cell
+     that holds more than one, of the copies past the first. Zero hides the button. */
+  function cellExtras(d) {
+    var n = 0;
+    ((d && d.matrix && d.matrix.rows) || []).forEach(function (row) {
+      (row.cells || []).forEach(function (c) {
+        if (c.receipts && c.receipts.length > 1) n += c.receipts.length - 1;
+      });
+    });
+    return n;
+  }
+
   /* The button says what it is about to do, in the numbers it found. */
   function looseLabel(d) {
     var v = d.vault || {}, bits = [];
@@ -2202,6 +2218,27 @@
         if (v.linked) said.push(v.linked + " charge" + (v.linked > 1 ? "s" : "") + " now on their own line");
         if (v.deduped) said.push(v.deduped + " duplicate" + (v.deduped > 1 ? "s" : "") + " removed");
         toast(said.length ? said.join(" · ") : "Every charge was already on its own line");
+        viewBurn();
+      });
+    });
+
+    /* Trim every service-month cell down to its single best receipt. Destructive across real
+       separate charges too (that is the point — the owner tops those back up by hand), so it
+       asks first and says exactly how many copies it removed. */
+    var op = $("#rcOnePer");
+    if (op) op.addEventListener("click", function () {
+      if (!confirm("Keep only the best receipt in each service-month cell and remove the rest?\n\nThis clears the extra invoices a wide sweep stacked up, leaving one receipt per cell. Where a month really did have a second charge, add it back by hand afterwards. This cannot be undone (a fresh pull can re-fetch anything that is still in the mailbox).")) return;
+      var was = op.textContent;
+      op.classList.add("disabled");
+      op.textContent = "Trimming…";
+      send("/owner/receipts", "POST", { action: "onePerCell" }).then(function (r) {
+        op.classList.remove("disabled");
+        op.textContent = was;
+        var d = r.ok && r.data;
+        if (!d) { toast("Could not trim the receipts"); return; }
+        toast(d.removed
+          ? "Removed " + d.removed + " extra receipt" + (d.removed > 1 ? "s" : "") + " · one kept in each of " + d.cells + " cell" + (d.cells > 1 ? "s" : "")
+          : "Every cell already had just one receipt");
         viewBurn();
       });
     });
