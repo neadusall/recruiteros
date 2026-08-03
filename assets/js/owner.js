@@ -710,6 +710,35 @@
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") $$(".row-menu[open]").forEach(function (d) { d.removeAttribute("open"); });
     });
+    /* The popup is fixed to the viewport (see placeRowMenu), so any scroll - the page's
+       or the grid's own sideways scroll, hence capture - would leave it hanging away
+       from its row. Close it instead. */
+    window.addEventListener("scroll", function () {
+      $$(".row-menu[open]").forEach(function (d) { d.removeAttribute("open"); });
+    }, true);
+    window.addEventListener("resize", function () {
+      $$(".row-menu[open]").forEach(function (d) { d.removeAttribute("open"); });
+    });
+  }
+
+  /* Put an opened row menu where it can actually be seen. The menu sits inside the
+     grid's sticky first column, inside an overflow-x scroller: an absolutely
+     positioned popup there is clipped at the grid's bottom edge (which is exactly
+     where the last rows' menus open) and painted over by the sticky cells of the
+     rows below. So the popup is fixed to the viewport at the summary's corner,
+     flipped upward when there is no room below, kept on screen at the edges, and
+     only made visible once placed (the stylesheet ships it hidden). */
+  function placeRowMenu(d) {
+    var pop = d.querySelector(".row-menu-pop"), sm = d.querySelector("summary");
+    if (!pop || !sm) return;
+    var r = sm.getBoundingClientRect();
+    var w = pop.offsetWidth, h = pop.offsetHeight;
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    var top = r.bottom + 4;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 4);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    pop.style.visibility = "visible";
   }
 
   function viewBurn() {
@@ -2574,6 +2603,16 @@
       sm.addEventListener("click", function () {
         var mine = sm.parentNode;
         $$("#view .row-menu[open]").forEach(function (d) { if (d !== mine) d.removeAttribute("open"); });
+      });
+    });
+    /* Placement happens on the toggle event, not the click: it fires for keyboard
+       opens too, and only after the open state is real. Closing re-hides the popup
+       so a re-open can never paint one frame at its previous spot. */
+    $$("#view .row-menu").forEach(function (d) {
+      d.addEventListener("toggle", function () {
+        if (d.hasAttribute("open")) { placeRowMenu(d); return; }
+        var pop = d.querySelector(".row-menu-pop");
+        if (pop) pop.style.visibility = "hidden";
       });
     });
     /* Acting on an item closes the menu it came from: leaving it open over a grid that

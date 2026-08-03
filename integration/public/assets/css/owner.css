@@ -577,3 +577,72 @@ button.rc-clearbtn[data-restore] { color: var(--brand); }
 .rc-kind.k-once { background: var(--bg-soft); color: var(--text-muted); }
 .rc-kind.k-use { background: var(--warn-bg); color: var(--owner); }
 .rc-kind.k-loose { background: var(--danger-bg); color: var(--danger); }
+
+/* ---- Month by month: one primary action per row, the rest behind a menu ----
+   Seven separate links per row made the first column taller than the figures next to it
+   and buried the vendor name in the middle of the stack. The primary reads as a quiet
+   link, not a button, because it repeats down every row of a long grid and a column of
+   buttons is louder than the money it sits beside. */
+.row-acts { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.row-go {
+  font-size: 12px; font-weight: 600; color: var(--brand); cursor: pointer;
+  padding: 2px 0; white-space: nowrap;
+}
+.row-go:hover { text-decoration: underline; }
+
+.row-menu { position: relative; }
+.row-menu > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  font-size: 14px; line-height: 1; letter-spacing: 1px; color: var(--text-dim);
+  padding: 2px 6px; border-radius: var(--radius-sm); border: 1px solid transparent;
+}
+.row-menu > summary::-webkit-details-marker { display: none; }
+.row-menu > summary:hover { color: var(--text); background: var(--surface-2); border-color: var(--border); }
+.row-menu[open] > summary { color: var(--text); background: var(--surface-2); border-color: var(--border); }
+
+/* Fixed to the VIEWPORT, not absolute in the cell: the menu lives inside the grid's
+   sticky first column, which sits inside an overflow-x scroller, so an absolute popup
+   is clipped at the grid's bottom edge and painted over by the sticky cells of the
+   rows below. placeRowMenu() in owner.js sets top/left from the summary's on-screen
+   position and lifts visibility once placed; hidden here so it can never flash at the
+   viewport corner before that runs. */
+.row-menu-pop {
+  position: fixed; z-index: 80; top: 0; left: 0; min-width: 210px; visibility: hidden;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 5px;
+  display: flex; flex-direction: column;
+}
+.row-menu-pop a {
+  display: block; padding: 7px 10px; border-radius: var(--radius-sm);
+  font-size: 12.5px; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+.row-menu-pop a:hover { background: var(--surface-2); }
+/* Destructive items last, behind a rule, so the one that cannot be undone is never
+   next to the one reached for most. */
+.row-menu-pop a.danger { color: var(--danger); }
+.row-menu-pop a.danger:hover { background: var(--danger-bg); }
+.row-menu-pop a.danger:first-of-type { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 9px; }
+.row-menu-pop .row-menu-note { padding: 7px 10px; font-size: 11.5px; color: var(--text-dim); }
+
+/* Even position:fixed cannot escape the stacking context of the sticky cell it sits
+   in: every row's pinned cell carries the same z-index, and a LATER row's cell paints
+   over anything inside an earlier one. So the cell that owns the open menu is raised
+   above its siblings and the pinned header row while the menu is open. */
+.rc-matrix .rc-svc:has(.row-menu[open]) { z-index: 6; }
+
+/* The empty state's own upload control. Centred under the sentence that asks for it, so
+   the instruction and the thing that carries it out read as one block. */
+.rcv-none-act {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  justify-content: center; margin-top: 14px;
+}
+.rcv-none-act input[type="file"] { font-size: 12.5px; max-width: 100%; }
+
+/* "Sent to Lumesp" on a cell. Green and stated in words rather than a tick or a colour
+   change alone: the owner scans this grid to work out what is LEFT to send, and a state
+   you have to decode is no use for that. Quiet enough not to compete with the figure. */
+.rc-sent {
+  margin-top: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.01em;
+  color: var(--ok); background: var(--ok-bg);
+  border-radius: var(--radius-sm); padding: 2px 6px; display: inline-block;
+}

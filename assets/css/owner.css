@@ -600,8 +600,14 @@ button.rc-clearbtn[data-restore] { color: var(--brand); }
 .row-menu > summary:hover { color: var(--text); background: var(--surface-2); border-color: var(--border); }
 .row-menu[open] > summary { color: var(--text); background: var(--surface-2); border-color: var(--border); }
 
+/* Fixed to the VIEWPORT, not absolute in the cell: the menu lives inside the grid's
+   sticky first column, which sits inside an overflow-x scroller, so an absolute popup
+   is clipped at the grid's bottom edge and painted over by the sticky cells of the
+   rows below. placeRowMenu() in owner.js sets top/left from the summary's on-screen
+   position and lifts visibility once placed; hidden here so it can never flash at the
+   viewport corner before that runs. */
 .row-menu-pop {
-  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 210px;
+  position: fixed; z-index: 80; top: 0; left: 0; min-width: 210px; visibility: hidden;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 5px;
   display: flex; flex-direction: column;
@@ -618,8 +624,11 @@ button.rc-clearbtn[data-restore] { color: var(--brand); }
 .row-menu-pop a.danger:first-of-type { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 9px; }
 .row-menu-pop .row-menu-note { padding: 7px 10px; font-size: 11.5px; color: var(--text-dim); }
 
-/* Near the right-hand edge the popup would hang off the sticky column. */
-@media (max-width: 900px) { .row-menu-pop { left: auto; right: 0; } }
+/* Even position:fixed cannot escape the stacking context of the sticky cell it sits
+   in: every row's pinned cell carries the same z-index, and a LATER row's cell paints
+   over anything inside an earlier one. So the cell that owns the open menu is raised
+   above its siblings and the pinned header row while the menu is open. */
+.rc-matrix .rc-svc:has(.row-menu[open]) { z-index: 6; }
 
 /* The empty state's own upload control. Centred under the sentence that asks for it, so
    the instruction and the thing that carries it out read as one block. */

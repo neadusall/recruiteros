@@ -699,6 +699,48 @@
     return v || "";
   }
 
+  /* Installed once: a click anywhere outside a row menu closes it. */
+  var rowMenuDismiss = false;
+  function armRowMenuDismiss() {
+    if (rowMenuDismiss) return;
+    rowMenuDismiss = true;
+    document.addEventListener("click", function (e) {
+      $$(".row-menu[open]").forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute("open"); });
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") $$(".row-menu[open]").forEach(function (d) { d.removeAttribute("open"); });
+    });
+    /* The popup is fixed to the viewport (see placeRowMenu), so any scroll - the page's
+       or the grid's own sideways scroll, hence capture - would leave it hanging away
+       from its row. Close it instead. */
+    window.addEventListener("scroll", function () {
+      $$(".row-menu[open]").forEach(function (d) { d.removeAttribute("open"); });
+    }, true);
+    window.addEventListener("resize", function () {
+      $$(".row-menu[open]").forEach(function (d) { d.removeAttribute("open"); });
+    });
+  }
+
+  /* Put an opened row menu where it can actually be seen. The menu sits inside the
+     grid's sticky first column, inside an overflow-x scroller: an absolutely
+     positioned popup there is clipped at the grid's bottom edge (which is exactly
+     where the last rows' menus open) and painted over by the sticky cells of the
+     rows below. So the popup is fixed to the viewport at the summary's corner,
+     flipped upward when there is no room below, kept on screen at the edges, and
+     only made visible once placed (the stylesheet ships it hidden). */
+  function placeRowMenu(d) {
+    var pop = d.querySelector(".row-menu-pop"), sm = d.querySelector("summary");
+    if (!pop || !sm) return;
+    var r = sm.getBoundingClientRect();
+    var w = pop.offsetWidth, h = pop.offsetHeight;
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    var top = r.bottom + 4;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 4);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    pop.style.visibility = "visible";
+  }
+
   function viewBurn() {
     Promise.all([
       api("/owner/burn?window=" + win),
@@ -1404,7 +1446,12 @@
   // The client account that owner-pushed spend lands on (app.lumesp = Lume).
   // Resolved once from the accounts list by domain/name and cached for the session.
   var _clientWs = null;
+  /* Named on the send button, so it says where the receipts are going rather than
+     "the client". Filled on the first account lookup and reused after that. */
+  var rcClientName = "";
+
   function resolveClientWs(cb) {
+    if (_clientWs) rcClientName = _clientWs.name || rcClientName;
     if (_clientWs) { cb(_clientWs.id, _clientWs.name); return; }
     api("/owner/accounts").then(function (r) {
       var accts = (r && r.accounts) || [];
@@ -1412,7 +1459,7 @@
         var dom = (x.domain || "").toLowerCase(), nm = (x.name || "").toLowerCase();
         return dom.indexOf("lumesp") >= 0 || nm.indexOf("lume") >= 0;
       })[0] || accts[0];
-      if (pick) { _clientWs = { id: pick.workspaceId, name: pick.name }; cb(pick.workspaceId, pick.name); }
+      if (pick) { _clientWs = { id: pick.workspaceId, name: pick.name }; rcClientName = pick.name; cb(pick.workspaceId, pick.name); }
       else cb(null);
     }).catch(function () { cb(null); });
   }
@@ -1433,6 +1480,82 @@
       }).catch(function () { toast("Couldn't reach the server"); el.classList.remove("is-busy"); el.textContent = orig; });
     });
   }
+  /**
+   * Everything on one row that should become its own line on the client's statement.
+   *
+   * One line per RECEIPT, carrying that receipt so the invoice travels with the figure.
+   * A month with money but no receipt on file still goes, as a bare figure, because
+   * leaving it out would understate the row; it is labelled so the gap is visible on the
+   * statement rather than hidden inside a total.
+   */
+  function rowStageItems(r) {
+    var out = [];
+    (r.cells || []).forEach(function (c) {
+      var mlab = monthLabel(c.period);
+      var list = (c.receipts || []).map(function (x) { return receiptById(x.id) || x; })
+        .filter(function (x) { return x && x.amountUsd > 0; });
+      if (list.length) {
+        list.forEach(function (x) {
+          out.push({
+            key: null,
+            label: ((r.vendor || "Spend") + " — " + mlab + (x.invoiceNumber ? " · #" + x.invoiceNumber : "")).slice(0, 80),
+            amt: x.amountUsd,
+            /* Read off the invoice, so a plan fee and a one-off purchase stay apart on
+               the client's statement instead of both reading as recurring. */
+            cadence: rcCadence[x.id] || (x.cadence === "recurring" ? "monthly" : "one_time"),
+            receipt: {
+              receiptId: x.id, vendor: r.vendor, chargedAt: x.chargedAt,
+              invoiceNumber: x.invoiceNumber, hasShot: !!x.hasShot, hasFile: !!x.hasFile
+            }
+          });
+        });
+        return;
+      }
+      var amt = cellAmt(c);
+      if (amt > 0) {
+        out.push({
+          key: null,
+          label: ((r.vendor || "Spend") + " — " + mlab + " (no invoice on file)").slice(0, 80),
+          amt: amt, cadence: "one_time"
+        });
+      }
+    });
+    return out;
+  }
+
+  /** Stage a whole row, one line per invoice, sequentially so one stall cannot wedge the rest. */
+  function stageRow(el, r) {
+    var items = rowStageItems(r);
+    if (!items.length) { toast("This row has no cost to send."); return; }
+    var withDoc = items.filter(function (i) { return !!i.receipt; }).length;
+    resolveClientWs(function (wsId, wsName) {
+      if (!wsId) { toast("No client account found to send to."); return; }
+      el.classList.add("is-busy");
+      var orig = el.textContent;
+      el.textContent = "Staging…";
+      var okCount = 0, failCount = 0;
+      (function next(i) {
+        if (i >= items.length) {
+          el.classList.remove("is-busy");
+          if (okCount) {
+            el.classList.add("sent");
+            el.textContent = "Staged ✓";
+            showStagedBar(wsId, wsName, okCount, failCount);
+            toast(okCount + " line" + (okCount === 1 ? "" : "s") + " staged, " + withDoc + " with the invoice attached");
+          } else { el.textContent = orig; toast("Nothing could be staged"); }
+          return;
+        }
+        var it = items[i];
+        var payload = { workspaceId: wsId, source: "usage", label: it.label, amountUsd: it.amt, cadence: it.cadence };
+        if (it.receipt) payload.receipt = it.receipt;
+        send("/owner/portal-spend", "POST", payload).then(function (res) {
+          if (res && res.ok && res.data && res.data.charge && res.data.charge.id) okCount++; else failCount++;
+          next(i + 1);
+        }).catch(function () { failCount++; next(i + 1); });
+      })(0);
+    });
+  }
+
   /* ---- Cherry-pick receipts and rows -> the client's Spending page ----
      The whole point of this grid: tick the receipts (individual month cells) and
      the rows you want, then push the chosen set to the client's app.lumesp
@@ -1473,14 +1596,22 @@
      sends a single receipt-less line for its counted usage. Each item is tagged
      with the cell key it came from so the cell can be marked sent once all of its
      receipts land. */
+  /** Today, so a charge dated ahead of it is never offered to the client. */
+  function todayISO() { return new Date().toISOString().slice(0, 10); }
+
   function resolvePush() {
     var out = [];
+    var today = todayISO();
     rcSelKeys().forEach(function (pkey) {
       var rc = cellByKey(pkey); if (!rc) return;
       var row = rc.row, c = rc.cell, mlab = monthLabel(c.period);
       if (c.receipts && c.receipts.length) {
         c.receipts.forEach(function (r) {
           if (!(r.amountUsd > 0)) return;
+          /* PAST CHARGES ONLY. A receipt dated ahead of today is either a renewal notice
+             the parser misread as a charge or a bill that has not happened yet, and
+             neither belongs on a statement the client is being asked to settle. */
+          if ((r.chargedAt || "").slice(0, 10) > today) return;
           var lbl = (row.vendor || "Spend") + " — " + mlab + (r.invoiceNumber ? " · #" + r.invoiceNumber : "");
           // Cadence read off the invoice, overridable by the owner. "recurring" on
           // the receipt means it bills monthly on the client; anything else is a
@@ -1518,7 +1649,9 @@
     var amt = cellAmt(c);
     if (!(amt > 0)) return "";
     var pkey = ri + "|" + c.period;
-    var sent = !!rcSent[pkey], on = !!rcSel[pkey];
+    /* A cell whose receipts are already on the statement cannot be ticked. The session
+       marker still applies within a page, and the server's answer applies across them. */
+    var sent = !!rcSent[pkey] || cellSent(c), on = !!rcSel[pkey];
     var many = c.receipts && c.receipts.length > 1 ? c.receipts.length : 0;
     return '<label class="rc-pick' + (sent ? " sent" : "") + '" title="' +
       esc(sent ? "Already staged for approval"
@@ -1581,10 +1714,10 @@
         '<div class="rc-pushbar-top">' +
           '<span class="rc-pushbar-n">' + items.length + ' receipt' + (items.length > 1 ? "s" : "") +
           ' · <strong>' + usd(total) + '</strong>' + (split.length ? ' · ' + esc(split.join(", ")) : "") +
-          ' <span class="note">— staged for your approval, not sent yet</span></span>' +
+          ' <span class="note">ready to send to ' + esc(rcClientName || "the client") + '</span></span>' +
           '<span class="rc-pushbar-acts">' +
           '<a class="row-mini" id="rcPushClear">Clear</a>' +
-          '<button class="btn btn-sm" id="rcPushGo">Stage for approval →</button>' +
+          '<button class="btn btn-primary btn-sm" id="rcPushGo">Send ' + items.length + ' to ' + esc(rcClientName || "client") + '</button>' +
           '</span>' +
         '</div>' +
         '<div class="rc-pushlist">' + lines + '</div>' +
@@ -1632,12 +1765,12 @@
     bar.innerHTML =
       '<div class="rc-pushbar-in"><div class="rc-pushbar-top">' +
       '<span class="rc-pushbar-n">' + okCount + ' receipt' + (okCount !== 1 ? "s" : "") +
-      ' staged for <strong>' + esc(wsName || "client") + '</strong> · pending your approval' +
+      ' sent to <strong>' + esc(wsName || "client") + '</strong>' +
       (failCount ? ' · ' + failCount + ' failed' : "") +
-      ' <span class="note">— nothing shows on their Spending page until you approve it</span></span>' +
+      ' <span class="note">live on their Spending page now, with the invoice behind each one</span></span>' +
       '<span class="rc-pushbar-acts">' +
       '<a class="row-mini" id="rcStagedDismiss">Dismiss</a>' +
-      '<button class="btn btn-sm" id="rcStagedApprove">Review &amp; approve →</button>' +
+      '<button class="btn btn-sm" id="rcStagedApprove">Open their Spending →</button>' +
       '</span></div></div>';
     var ap = $("#rcStagedApprove");
     if (ap) ap.addEventListener("click", function () { if (typeof openAccount === "function") openAccount(wsId); });
@@ -1664,19 +1797,29 @@
           Object.keys(done).forEach(function (k) { if (done[k] === need[k]) markSent(k); });
           renderPushBar();
           if (okCount > 0) showStagedBar(wsId, wsName, okCount, failCount);
-          else toast(failCount ? failCount + " could not be staged" : "Nothing to stage");
+          else toast(failCount ? failCount + " could not be sent" : "Nothing to send");
           return;
         }
         var it = items[i];
-        // STAGE ONLY. The charge lands as pending; it is invisible to the client
-        // until the owner approves it on the account's Spending panel. No approve
-        // call here — that is the deliberate sign-off the owner asked to keep.
+        /* ONE STEP, BECAUSE PICKING IS THE APPROVAL. This used to stage the charge as
+           pending and leave a second sign-off on a different screen, which meant nothing
+           the owner sent ever actually arrived until they went and found the other panel.
+           Choosing a specific receipt off the grid IS the deliberate act; making them say
+           yes twice added a way to forget rather than a way to be careful.
+           The charge is still created first and approved second, so a failure between the
+           two leaves it pending and visible to the owner rather than half-sent. */
         var payload = { workspaceId: wsId, source: "usage", label: it.label, amountUsd: it.amt, cadence: it.cadence || "one_time" };
         if (it.receipt) payload.receipt = it.receipt;
         send("/owner/portal-spend", "POST", payload).then(function (r) {
           var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
           if (!cid) { failCount++; next(i + 1); return; }
-          okCount++; done[it.key] = (done[it.key] || 0) + 1; next(i + 1);
+          send("/owner/portal-spend", "PATCH", { workspaceId: wsId, id: cid, action: "approve" })
+            .then(function (a) {
+              if (a && a.ok) okCount++; else failCount++;
+              done[it.key] = (done[it.key] || 0) + 1;
+              next(i + 1);
+            })
+            .catch(function () { failCount++; next(i + 1); });
         }).catch(function () { failCount++; next(i + 1); });
       })(0);
     });
@@ -1713,7 +1856,7 @@
          shown when there is actually something to trim. */
       (cellExtras(d) ? '<button class="btn btn-sm" id="rcOnePer" title="Keep the best receipt in each service-month cell and remove the extras. Add any real second charge back by hand.">Keep one receipt per cell (removes ' + cellExtras(d) + ')</button>' : "") +
       '</div></div>' +
-      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate. <strong>Tick</strong> the receipts (or a whole row) you want on the client\'s bill and stage them from the bar at the foot of the grid — each is set Monthly, Annual or One-time and lands on the client\'s account as <strong>pending</strong>. Nothing shows on their app.lumesp Spending page until you approve it.' +
+      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate. <strong>Tick</strong> the receipts you want the client to see, then press <strong>Send</strong> in the bar at the foot of the grid. They appear on their Spending page straight away, each with its invoice behind it. Only charges already dated in the past can be sent.' +
       /* Where the books open. Said out loud so the missing earlier months read as a
          starting point rather than as spend that went unrecorded. */
       (d.registerStart ? ' The books open in ' + esc(monthLabelLong(d.registerStart)) + ': nothing charged before then is reported on this page.' : '') +
@@ -1749,14 +1892,7 @@
            already knows. That is the honest version of Edit here: it does something, and
            what it does is what the row needs. The column is sticky, so the actions stay
            put while the months scroll past. */
-        (r.itemId ? acts(r.itemId) : registerAct(r, ri)) +
-        sendRowAct(r, ri) +
-        /* Clearing a row's paperwork is a different act from deleting the register line,
-           so it is its own control and only appears when there is something to clear.
-           It counts the receipts the GRID is showing on this row, which includes the ones
-           an account fold claims at report time, so the number always matches what is
-           drawn above it. */
-        rowReceiptAct(r, ri) +
+        rowActions(r, ri) +
         '</th>';
       (r.cells || []).forEach(function (c) { html += matrixCell(r, c, ri); });
       html += '<td class="num rc-total"><strong>' + usd(r.totalCountedUsd) + '</strong>' +
@@ -1841,7 +1977,13 @@
    * A charge that arrived unexpected and a pay-per-use total both want the same thing.
    */
   function registerAct(r, ri) {
-    return '<div class="row-acts"><a class="row-mini" data-badd="' + ri + '">Add to the register</a></div>';
+    /* A row with nothing visible in it still has to be clearable. GoDaddy drew an empty
+       row off four receipts dated outside the months the grid covers, so there was
+       nothing on screen to delete and no line item to remove: the row could not be got
+       rid of at all. "Clear this vendor" goes at it by NAME on the server, which is the
+       only handle that reaches a receipt the browser was never sent. */
+    return '<div class="row-acts"><a class="row-mini" data-badd="' + ri + '">Add to the register</a>' +
+      '<a class="row-mini danger" data-vdel="' + esc(r.vendor) + '">Clear this vendor</a></div>';
   }
 
   /** Every receipt this row is showing, across all its months, in grid order. */
@@ -1852,11 +1994,86 @@
   }
 
   /** "Delete N receipts" on a row, shown only when the row actually has some. */
+
+  /**
+   * Everything you can do to one row, as ONE primary action plus a menu.
+   *
+   * These controls arrived one at a time - Edit, Delete, Select receipts, Stage row,
+   * Delete N receipts, Add to the register, Clear this vendor - and each was reasonable on
+   * its own. Together they turned every row's first column into five lines of red and blue
+   * text, taller than the figures beside it, and the vendor name (the only thing you
+   * actually scan for) got lost in the middle of it.
+   *
+   * So: the ONE thing this row is usually for stays visible, and the rest go behind "···".
+   * A menu is the right shape here because these are occasional, deliberate acts on a
+   * specific row, not things you sweep across the grid doing.
+   *
+   * Destructive items sit at the bottom, after a divider, so "Delete every receipt" is
+   * never adjacent to the item you reach for most.
+   */
+  function rowActions(r, ri) {
+    var pickable = (r.cells || []).filter(function (c) { return cellAmt(c) > 0 && !rcSent[ri + "|" + c.period]; }).length;
+    var nRec = rowReceipts(r).length;
+
+    /* The primary is what this row is FOR. A row with money on it is there to be sent to
+       the client; a row with no line item is there to be put on the register. */
+    /* ONE PATH TO THE CLIENT, NOT TWO. "Stage row" sent a row straight off on its own
+       while the checkboxes fed a different button at the foot of the grid, so there were
+       two ways to send with different results and no way to tell them apart. The row now
+       simply TICKS its own receipts into that one selection: everything goes out through
+       the same Send, and everything is reviewable in the bar before it does. */
+    var primary = r.itemId
+      ? (pickable ? '<a class="row-go" data-pickrow="' + ri + '">Select this row</a>' : "")
+      : '<a class="row-go" data-badd="' + ri + '">Add to the register</a>';
+
+    var items = [];
+    if (r.itemId) items.push('<a data-bedit="' + esc(r.itemId) + '">Edit this line</a>');
+    if (r.itemId && !pickable) items.push('<span class="row-menu-note">Nothing to send: no charge in these months</span>');
+    if (nRec) items.push('<a class="danger" data-rowdel="' + ri + '">Delete ' + nRec + ' receipt' + (nRec > 1 ? 's' : '') + '</a>');
+    if (!r.itemId) items.push('<a class="danger" data-vdel="' + esc(r.vendor) + '">Clear this vendor</a>');
+    if (r.itemId) items.push('<a class="danger" data-bdel="' + esc(r.itemId) + '">Delete this line</a>');
+    if (!items.length && !primary) return "";
+
+    var menu = items.length
+      ? '<details class="row-menu"><summary title="More actions" aria-label="More actions">···</summary>' +
+        '<div class="row-menu-pop">' + items.join("") + '</div></details>'
+      : "";
+    return '<div class="row-acts">' + primary + menu + '</div>';
+  }
+
   function rowReceiptAct(r, ri) {
     var n = rowReceipts(r).length;
     if (!n) return "";
     return '<div class="row-acts"><a class="row-mini danger" data-rowdel="' + ri + '">Delete ' +
       n + ' receipt' + (n > 1 ? 's' : '') + '</a></div>';
+  }
+
+  /**
+   * Is this receipt already on the client's statement?
+   *
+   * Read from the SERVER, not from a marker set in this browser when Send was pressed.
+   * That marker died on every reload, so after a refresh there was no way to tell what had
+   * gone over, and the safe-feeling move was to send the row again. That is exactly how an
+   * invoice ends up on a client's bill twice.
+   *
+   * Matched on the vendor's invoice number first, because it is the vendor's own identity
+   * for that charge and it survives a re-parse, a corrected figure or the receipt being
+   * deleted and re-harvested under a new id. The receipt id is the fallback.
+   */
+  function sentToClient(r) {
+    var sent = rcptData && rcptData.sent;
+    if (!sent || !r) return false;
+    var num = String(r.invoiceNumber || "").trim().toLowerCase();
+    if (num && (sent.invoiceNumbers || []).indexOf(num) >= 0) return true;
+    return (sent.receiptIds || []).indexOf(r.id) >= 0;
+  }
+  function clientLabel() {
+    return (rcptData && rcptData.sent && rcptData.sent.client) || "the client";
+  }
+  /** Every receipt in a cell already sent, so the cell can say so as a whole. */
+  function cellSent(c) {
+    var list = (c && c.receipts) || [];
+    return list.length > 0 && list.every(sentToClient);
   }
 
   function matrixCell(row, c, ri) {
@@ -1875,6 +2092,9 @@
             : '<div class="rc-noshot">no image</div>') +
         '<button class="rc-view" data-view="' + esc(key) + '" title="' + esc("Open the " + monthLabel(c.period) + " receipt for " + row.vendor) + '">' +
         (many ? "View " + c.receipts.length + " receipts" : "View receipt") + '</button>' +
+        /* Said on the cell itself, because this is the thing you scan the grid for when
+           you are working out what is left to send. */
+        (cellSent(c) ? '<div class="rc-sent" title="' + esc("Already on " + clientLabel() + "’s statement") + '">Sent to ' + esc(clientLabel()) + '</div>' : "") +
         (c.note ? '<div class="note" style="font-size:10.5px">' + esc(c.note) + '</div>' : "");
     } else if (c.status === "missing") {
       inner = '<div class="rc-amt est">' + usd(c.expectedUsd) + '</div><div class="rc-gap">no receipt</div>' +
@@ -2344,12 +2564,65 @@
         if (a.classList.contains("is-busy") || a.classList.contains("sent")) return;
         var r = ((rcptData && rcptData.matrix && rcptData.matrix.rows) || [])[Number(a.dataset.sendrow)];
         if (!r || !(r.totalCountedUsd > 0)) { toast("This row has no cost to send."); return; }
-        sendSpendToClient(a, (r.vendor || "Spend") + (r.label ? " — " + r.label : ""), r.totalCountedUsd);
+        /* ⚠️ A ROW MUST BE STAGED RECEIPT BY RECEIPT, NOT AS ONE FIGURE. Staging the row
+           total sent a single line carrying no invoice at all: all six charges already on
+           the client's account read `receipt: no`, so the accountant got numbers with
+           nothing behind them, which is the one thing this whole pipeline exists to avoid.
+           Each invoice now goes as its own line with its own document, exactly as ticking
+           the cells by hand does; only a month with no receipt on file falls back to the
+           bare figure, and it says so. */
+        stageRow(a, r);
+      });
+    });
+    /* Clear every receipt for a vendor, including any the grid could not show because it
+       falls outside the months the books cover. The confirmation says that plainly: this
+       reaches further than the row you are looking at, and that is the whole point of it. */
+    $$("#view [data-vdel]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var v = a.dataset.vdel;
+        if (!confirm("Clear every receipt filed against " + v + "?\n\nThis includes any dated outside the months shown here, " +
+          "which is usually why a row looks empty. The row goes once nothing is left pointing at it. " +
+          "If those emails are still in the mailbox, a later pull can find them again.")) return;
+        send("/owner/receipts?vendor=" + encodeURIComponent(v), "DELETE").then(function (res) {
+          if (!res.ok) { toast(res.status === 404 ? "Nothing on file for " + v : "Could not clear that"); return; }
+          toast((res.data && res.data.deleted) + " receipt(s) cleared from " + v);
+          viewBurn();
+        });
       });
     });
     /* Clear a whole row's paperwork. stopPropagation because the row header sits next to
        cells that open the viewer, and a delete that also opened something would be read
        as having done nothing. */
+    /* A row menu closes when you click anything else, including another row's menu.
+       Native <details> does not do this on its own, and two or three left hanging open
+       down a long grid is exactly the mess this menu was meant to remove. Bound once per
+       render, on the container, so it costs nothing per row. */
+    armRowMenuDismiss();
+    $$("#view .row-menu > summary").forEach(function (sm) {
+      sm.addEventListener("click", function () {
+        var mine = sm.parentNode;
+        $$("#view .row-menu[open]").forEach(function (d) { if (d !== mine) d.removeAttribute("open"); });
+      });
+    });
+    /* Placement happens on the toggle event, not the click: it fires for keyboard
+       opens too, and only after the open state is real. Closing re-hides the popup
+       so a re-open can never paint one frame at its previous spot. */
+    $$("#view .row-menu").forEach(function (d) {
+      d.addEventListener("toggle", function () {
+        if (d.hasAttribute("open")) { placeRowMenu(d); return; }
+        var pop = d.querySelector(".row-menu-pop");
+        if (pop) pop.style.visibility = "hidden";
+      });
+    });
+    /* Acting on an item closes the menu it came from: leaving it open over a grid that
+       has just re-rendered underneath points at a row that may have moved. */
+    $$("#view .row-menu-pop a").forEach(function (a) {
+      a.addEventListener("click", function () {
+        var d = a.closest(".row-menu");
+        if (d) d.removeAttribute("open");
+      });
+    });
     $$("#view [data-rowdel]").forEach(function (a) {
       a.addEventListener("click", function (e) {
         e.stopPropagation();
@@ -2483,7 +2756,7 @@
     var cell = row && (row.cells || []).filter(function (c) { return c.period === parts[1]; })[0];
     if (!row) return;
     if (cell && cell.receipts && cell.receipts.length) {
-      openViewer(cell.receipts.map(function (r) { return receiptById(r.id) || r; }), 0, monthLabel(cell.period));
+      openViewer(cell.receipts.map(function (r) { return receiptById(r.id) || r; }), 0, monthLabel(cell.period), key);
       return;
     }
     /* Nothing on file. Rather than a dead click, say where this month's receipt lives and
@@ -2525,7 +2798,48 @@
     openViewer(all, at, monthLabel(period) + " · every receipt");
   }
 
-  function openViewer(list, index, context) {
+  /* Which vendor-month the viewer was opened from, when it was opened from a cell.
+     Kept so the footer can offer to add ANOTHER receipt to that same cell: a month can
+     genuinely hold more than one invoice (a plan fee and a one-off on the same account),
+     and until now a cell that already had one had no way to take a second. */
+  var rcvCellKey = "";
+
+  /**
+   * Put a document on a receipt that already exists, from wherever the owner is standing.
+   *
+   * Shared by the viewer's empty state and the "Correct it" drawer so the two can never
+   * drift: one endpoint, one size limit, one way of reporting the awkward middle outcome
+   * where the FILE is safely stored but the picture could not be drawn from it. Those are
+   * different results and a flat "done" hides the one worth knowing about.
+   */
+  function uploadReceiptFile(receiptId, file, btn, label) {
+    if (!file) { toast("Choose a file first"); return; }
+    if (file.size > 20 * 1024 * 1024) { toast("That file is over 20MB"); return; }
+    if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
+    var fd = new FormData();
+    /* receiptId is what makes this an ATTACH rather than a second receipt for the same
+       charge, which would show the money twice. */
+    fd.append("receiptId", receiptId);
+    fd.append("file", file);
+    return fetch(API + "/owner/receipts", { method: "POST", credentials: "include", body: fd })
+      .then(function (r) { return r.json().catch(function () { return null; }); })
+      .then(function (res) {
+        if (btn) { btn.disabled = false; btn.textContent = label || "Attach"; }
+        var rec = res && (res.receipt || (res.data && res.data.receipt));
+        if (!rec) { toast("Could not attach that file"); return; }
+        toast(rec.hasShot ? "Invoice attached" : "File saved, but the picture could not be drawn");
+        closeViewer();
+        closeDrawer();
+        viewBurn();
+      })
+      .catch(function () {
+        if (btn) { btn.disabled = false; btn.textContent = label || "Attach"; }
+        toast("Could not reach the server");
+      });
+  }
+
+  function openViewer(list, index, context, cellKey) {
+    rcvCellKey = cellKey || "";
     rcvList = (list || []).filter(Boolean);
     if (!rcvList.length) return;
     rcvIndex = Math.max(0, Math.min(index || 0, rcvList.length - 1));
@@ -2709,8 +3023,14 @@
     } else if (v.source === "api") {
       html += apiStatement(v);
     } else {
+      /* THE PANEL THAT SAYS "ATTACH THE PDF" NOW LETS YOU ATTACH THE PDF. It told the
+         owner exactly what to do and offered no way to do it: the upload lived one click
+         deeper, inside "Correct the details", which is where you go to fix a FIGURE. An
+         instruction with no control next to it reads as a broken screen. */
       html += '<div class="rcv-none"><div class="rcv-none-t">No invoice image on file</div>' +
-        '<p class="note">The charge is recorded but the document was never captured. Attach the PDF or a screenshot and it will show here.</p></div>';
+        '<p class="note">The charge is recorded but the document was never captured. Attach the PDF or a screenshot and it will show here.</p>' +
+        '<div class="rcv-none-act"><input type="file" id="rcvFile" accept="application/pdf,image/png,image/jpeg,image/webp" />' +
+        '<button class="btn btn-primary btn-sm" id="rcvUp">Attach the invoice</button></div></div>';
     }
 
     html += '<div class="rcv-foot">';
@@ -2726,6 +3046,13 @@
        intentions and only one of them is reachable from wanting to look at it. */
     html += '<button class="btn btn-ghost btn-sm" id="rcvEdit">Correct the details</button>' +
       '<button class="btn btn-ghost btn-sm rcv-del" id="rcvDel">Delete this receipt</button>' +
+      /* Clearing a whole cell without clearing the row: a vendor-month that collected the
+         wrong paperwork should be emptiable on its own, and stepping through six receipts
+         pressing Delete six times is not a feature. The cell itself stays and goes back to
+         "no receipt", which is the honest state for a month whose proof was thrown out. */
+      /* A month can hold more than one invoice, and the grid should let you say so. */
+      (rcvCellKey ? '<button class="btn btn-ghost btn-sm" id="rcvAddMore">Add another receipt to this month</button>' : '') +
+      (many ? '<button class="btn btn-ghost btn-sm rcv-del" id="rcvDelAll">Delete all ' + rcvList.length + ' here</button>' : '') +
       '<button class="btn btn-ghost btn-sm" id="rcvDone">Close</button></div>';
 
     $("#rcvBody").innerHTML = html;
@@ -2734,6 +3061,27 @@
     $("#rcvEdit").addEventListener("click", function () { closeViewer(); editReceipt(v.id); });
     $("#rcvDel").addEventListener("click", function () {
       deleteReceipts([v.id], v.vendor + " " + usd(Math.abs(v.amountUsd)) + " of " + (v.chargedAt || "").slice(0, 10));
+    });
+    if ($("#rcvUp")) $("#rcvUp").addEventListener("click", function () {
+      var inp = $("#rcvFile");
+      uploadReceiptFile(v.id, inp && inp.files && inp.files[0], $("#rcvUp"), "Attach the invoice");
+    });
+    if ($("#rcvAddMore")) $("#rcvAddMore").addEventListener("click", function () {
+      var c = cellFromKey(rcvCellKey);
+      if (!c.row) { toast("That cell is no longer on the grid"); return; }
+      closeViewer();
+      /* Prefilled with the vendor and the month, so the only thing left is the file and
+         the figure. The amount is deliberately NOT prefilled from the cell here: the cell
+         already holds a receipt, so its figure belongs to that one, and carrying it over
+         would quietly propose charging the same amount twice. */
+      openAttach(c.row, { period: c.period });
+    });
+    if ($("#rcvDelAll")) $("#rcvDelAll").addEventListener("click", function () {
+      var total = rcvList.reduce(function (t, x) { return t + Math.abs(x.amountUsd || 0); }, 0);
+      /* The context is the month heading the viewer was opened under, so the prompt names
+         the same cell the person clicked rather than a vendor that may differ per receipt. */
+      deleteReceipts(rcvList.map(function (x) { return x.id; }),
+        (v.vendor || "this vendor") + (rcvContext ? " · " + rcvContext : ""), total);
     });
     /* Every receipt opens at fit: stepping to the next one keeps the zoom of the last is a
        nice idea until the next invoice is a different shape and opens mid-page. */
@@ -2802,7 +3150,7 @@
        line, so a ledger-only or unregistered row (no itemId) has nowhere to record it. */
     var canWaive = !!(row && row.itemId && /^\d{4}-\d{2}$/.test(period));
     ensureViewer();
-    rcvList = []; rcvIndex = 0; rcvContext = "";
+    rcvList = []; rcvIndex = 0; rcvContext = ""; rcvCellKey = "";
     document.body.classList.add("rcv-open");
     $("#rcv").classList.add("show");
     $("#rcvTitle").textContent = row.vendor;
@@ -2922,6 +3270,27 @@
     if (v.hasFile) {
       html += '<div class="btn-row"><a class="btn btn-sm" href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=file" target="_blank" rel="noopener">Open the original ' + esc((v.fileMime || "").indexOf("pdf") >= 0 ? "PDF" : "file") + '</a></div>';
     }
+    /* PUT A DOCUMENT ON A CHARGE THAT HAS NONE. Plenty of real charges are proven by
+       their figure and have no picture: a plain-text confirmation, an invoice that lives
+       behind a login, a month pulled from a billing API that issues no document at all.
+       Until this, the only way to get an image onto one was to attach a NEW receipt beside
+       it, which showed the same charge twice and pushed the coverage figure wrong the
+       other way. This replaces the document on the row that is already there. */
+    /* THREE STATES, AND THEY ARE NOT THE SAME THING. A row can hold the vendor's own file
+       (the real invoice), or only a PICTURE drawn from the body of an email, or nothing at
+       all. Telling the middle one it has "no document" is wrong and would read as a bug to
+       anyone looking at the image right above this line. */
+    html += '<h3 style="margin-top:18px">' + (v.hasFile ? "Replace the invoice" : "Attach the invoice") + '</h3>' +
+      '<p class="note" style="margin-top:0">' +
+      (v.hasFile
+        ? "The vendor's own file is on record. A new upload replaces it and redraws the picture."
+        : v.hasShot
+          ? "The picture here was drawn from the email, not from an invoice the vendor issued. Upload their PDF and it replaces both."
+          : "This charge has no document behind it. Upload the vendor's invoice (PDF, PNG or JPG) and it becomes the picture on the grid.") +
+      '</p>' +
+      '<div class="btn-row"><input type="file" id="rcFile" accept="application/pdf,image/png,image/jpeg,image/webp" />' +
+      '<button class="btn btn-sm" id="rcUpload">' + (v.hasFile ? "Replace" : "Attach") + '</button></div>';
+
     if (v.excerptPreview) html += '<h3 style="margin-top:16px">What the parser read</h3><pre class="rc-excerpt">' + esc(v.excerptPreview) + '</pre>';
 
     html += '<h3 style="margin-top:18px">Correct it</h3><div class="burn-form">' +
@@ -2938,6 +3307,10 @@
     $("#drawerBody").innerHTML = html;
     $("#scrim").classList.add("show"); $("#drawer").classList.add("show");
     $("#dwClose").addEventListener("click", closeDrawer);
+    $("#rcUpload").addEventListener("click", function () {
+      var inp = $("#rcFile");
+      uploadReceiptFile(v.id, inp && inp.files && inp.files[0], $("#rcUpload"), v.hasFile ? "Replace" : "Attach");
+    });
     $("#rcSave").addEventListener("click", function () {
       send("/owner/receipts", "PATCH", {
         id: v.id, vendor: $("#rcVendor").value.trim(), amountUsd: Number($("#rcAmount").value),
@@ -2986,7 +3359,8 @@
       fld("Vendor", '<input id="atVendor" value="' + esc(row ? row.vendor : "") + '" />') +
       fld("Line item", itemSelect("atItem", row ? row.itemId : "")) +
       fld("Month", '<input id="atPeriod" value="' + esc(period) + '" placeholder="2026-07" />') +
-      fld("Amount (USD)", '<input id="atAmount" type="number" step="0.01" value="' + esc(String(amount)) + '" />') +
+      fld("Amount (USD)", '<input id="atAmount" type="number" step="0.01" value="' + esc(String(amount)) + '" placeholder="0.00" required />' +
+        (amount === "" ? '<div class="note" style="margin-top:4px">Blank on purpose: the figure already in this cell belongs to the receipt that is there. Type what THIS invoice was for.</div>' : "")) +
       fld("Charged on", '<input id="atCharged" type="date" />') +
       fld("Invoice #", '<input id="atInvoice" />') +
       fld("Receipt file (PDF or image)", '<input id="atFile" type="file" accept="image/*,application/pdf" />') +
@@ -3003,7 +3377,10 @@
       var amt = Number($("#atAmount").value);
       if (!vendor) { toast("Vendor is required"); return; }
       if (!/^\d{4}-\d{2}$/.test(period2)) { toast("Month must look like 2026-07"); return; }
-      if (!isFinite(amt)) { toast("Enter the amount"); return; }
+      /* Zero is what an empty box parses to once it has been through Number(), and it
+         files a receipt that shows in the cell while moving the figure not at all. Caught
+         here as well as on the server so the owner is told before the upload, not after. */
+      if (!isFinite(amt) || amt === 0) { toast("Enter the amount on this invoice"); return; }
       var fd = new FormData();
       fd.append("vendor", vendor);
       fd.append("period", period2);
