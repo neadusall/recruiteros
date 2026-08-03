@@ -304,6 +304,34 @@ export async function attachNightIcp(
   return true;
 }
 
+/**
+ * Drop redundant crash-net checkpoints once the work they guarded has landed.
+ * A stale client that lost its connection blind-retries its search POST, and every
+ * killed attempt leaves its own self-minted checkpoint behind; when one attempt
+ * finally completes, those orphans are nothing but queued re-runs of a PAID search
+ * onto a list that already has the result. Only FOREIGN-boot checkpoints are swept:
+ * a checkpoint held by THIS process is another live request still doing its own
+ * work, and its own finally removes it.
+ */
+export async function sweepRecoveryTwins(
+  workspaceId: string,
+  match: (i: NightItem) => boolean,
+  keepId?: string,
+): Promise<number> {
+  await hydrate();
+  const orphans = store.filter((i) =>
+    i.workspaceId === workspaceId && i.id !== keepId &&
+    i.recovery && i.recovery.bootId !== BOOT_ID &&
+    i.stage !== "done" && i.stage !== "error" && match(i));
+  if (!orphans.length) return 0;
+  for (const i of orphans) {
+    const at = store.indexOf(i);
+    if (at >= 0) store.splice(at, 1);
+  }
+  await save();
+  return orphans.length;
+}
+
 export async function removeNightItem(workspaceId: string, id: string): Promise<boolean> {
   await hydrate();
   const i = store.findIndex((x) => x.id === id && x.workspaceId === workspaceId);

@@ -74,6 +74,7 @@ export {
 export { landlineDbReady, fillPhonesFromLandlineDb } from "./landlinePhones";
 export {
   listNightItems, addNightItem, removeNightItem, attachNightIcp, tickNightQueue, searchesInFlight,
+  sweepRecoveryTwins,
   type NightItem, type NightStage, type NightAddInput,
 } from "./nightQueue";
 
