@@ -4500,6 +4500,30 @@
         outcome: { em: '<svg class="isvg" aria-hidden="true"><use href="#i-loop"/></svg>', title: "Set the desk once. It runs every morning.", text: "Signal-led, multi-channel, in your voice, and either approved in minutes or fully hands-off on Autopilot." },
         cta: [["Browse the Sequence Library", "playbooks/sequences"], ["Build a campaign", "campaigns"], ["Autopilot", "autopilot"]],
       },
+
+      "linkedin-poster": {
+        icon: '<svg class="isvg" aria-hidden="true"><use href="#i-message"/></svg>', accent: "c", title: "LinkedIn Poster", tag: "BD · daily content",
+        oneLiner: "A daily LinkedIn presence that writes itself; your only job is approve or discard.",
+        mini: ['<svg class="isvg" aria-hidden="true"><use href="#i-radar"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>', '<svg class="isvg" aria-hidden="true"><use href="#i-trend"/></svg>'],
+        mission: "Point it at creators you rate, your open jobs, and your brand. Every day it pulls what is working on LinkedIn, rewrites the insight in your voice (never a copy), writes originals about your market, attaches the creative, and queues everything as drafts. You approve, drop it into the next slot, or discard. It publishes on your schedule, puts your link in the first comment, then pulls the engagement numbers back so your winners get reused.",
+        stages: [
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-radar"/></svg>', title: "Sources fill themselves", auto: "bot", body: "Follow a creator once and their new posts land in your inbox automatically; the first pull digs months back into their archive. Paste anything you like manually. Your open jobs and brand settings feed the original-post writer, one fresh draft a day.",
+            out: "<b>archive built</b> · followed creators + your jobs + your brand" },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg>', title: "Rewritten in your voice", auto: "bot", body: "The writer extracts the idea and rebuilds it as your story, in your voice, for your brand, never a copy and never an invented claim. Job spotlights never name the client. A branded quote card is attached on arrival; one click swaps it for a swipeable carousel PDF.",
+            out: "<b>draft ready</b> · voice matched · creative already attached" },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-check"/></svg>', title: "You approve in the Studio", auto: "you", body: "See the post exactly as LinkedIn will render it, next to the original it came from. Tighten the hook (a hook library is one click away), bold a phrase, edit the carousel slides, then Approve + next slot. Not right? Regenerate with direction, or discard in one click." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-send"/></svg>', title: "It publishes properly", auto: "bot", body: "Approved posts go out through your own LinkedIn engine on the posting schedule you set once. Your link publishes as the first comment, where the feed algorithm does not punish it. Nothing ever posts without your explicit approve." },
+          { icon: '<svg class="isvg" aria-hidden="true"><use href="#i-trend"/></svg>', title: "Winners come back", auto: "bot", body: "Reactions, comments, and views are pulled back onto every published post. The Performance tab shows what worked, and Reuse turns your best post into tomorrow's draft.",
+            out: "<b>tracked</b> · best performer resurfaces as a new draft" },
+        ],
+        wire: pbWireChrome("recruitersos · linkedin poster · studio", '<div class="pb-wire-cols">' +
+          '<div class="pb-skel"><div class="cap">Drafts waiting</div><div class="bar lg"></div><div class="bar md"></div><div class="bar lg"></div>' +
+            '<div style="margin-top:12px"><span class="pb-chip">Approve + next slot</span> <span class="pb-chip">Discard</span></div></div>' +
+          '<div class="pb-skel"><div class="cap">LinkedIn preview</div><div class="bar sm"></div><div class="bar lg"></div><div class="bar lg"></div><div class="bar md"></div>' +
+            '<div style="margin-top:12px"><span class="pb-chip">Like</span> <span class="pb-chip">Comment</span> <span class="pb-chip">Repost</span></div></div></div>'),
+        outcome: { em: '<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>', title: "Post every working day without writing every day.", text: "The feed sees a consistent, branded voice. You see a two-minute approval queue." },
+        cta: [["Open LinkedIn Poster", "linkedinposter"]],
+      },
     };
   }
 
@@ -4510,7 +4534,7 @@
     if (detail && DATA[detail]) return pbDetail(el, DATA, detail);
 
     // ---- Gallery ----
-    var order = ["flip-the-script", "jd-sourcing", "ai-vetting", "voice-drops", "campaign-models"];
+    var order = ["flip-the-script", "jd-sourcing", "ai-vetting", "voice-drops", "campaign-models", "linkedin-poster"];
     var cards = order.map(function (k) {
       var p = DATA[k];
       var mini = p.mini.map(function (m, i) {
@@ -4538,7 +4562,7 @@
         '<div class="pb-hero">' +
           '<span class="pb-eyebrow"><span class="dot"></span>The vision, seen</span>' +
           "<h2>How RecruitersOS works.</h2>" +
-          "<p>One idea, six ways to see it: stop interrupting strangers, start arriving at the right moment with a real reason. Open any workflow to watch it run step by step, then click a step to see the exact content it produces.</p>" +
+          "<p>One idea, seven ways to see it: stop interrupting strangers, start arriving at the right moment with a real reason. Open any workflow to watch it run step by step, then click a step to see the exact content it produces.</p>" +
         "</div>" +
         '<div class="pb-grid">' + cards + "</div>" +
       "</div>";
