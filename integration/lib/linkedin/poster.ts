@@ -5,8 +5,10 @@
  *   1. INBOX      — the recruiter saves posts they like (paste author + text).
  *   2. REWRITE    — the LLM extracts the INSIGHT and rebuilds it as a first-person
  *                   story in the recruiter's own voice (never a paraphrase).
- *   3. IMAGE      — attach one from the approved library, or generate a branded
- *                   quote card server-side (SVG -> sharp -> PNG).
+ *   3. MEDIA      — attach one item from the approved library: an image, a PDF
+ *                   (LinkedIn renders it as a swipeable document post), a short
+ *                   MP4, or a branded quote card generated server-side
+ *                   (SVG -> sharp -> PNG).
  *   4. APPROVAL   — nothing ever publishes without an explicit approve. Approve
  *                   posts now or schedules; the automation tick publishes when due.
  *   5. PUBLISH    — through our own LinkedIn engine first (LinkedIn OS's
@@ -46,8 +48,25 @@ export interface PosterDraft {
   /** Where the idea came from (kept for attribution in the UI, never posted). */
   sourceId?: string;
   sourceAuthor?: string;
+  /** The original post, snapshotted at rewrite time so the side-by-side
+   *  compare in Drafts survives the inbox item being deleted. Never posted. */
+  sourceText?: string;
+  /** True when the AI wrote this from the brand/industry context alone,
+   *  with no source post behind it. */
+  aiOriginal?: boolean;
+  /** True when the post advertises one of the workspace's open jobs
+   *  (blind: the client company is never named). */
+  jobSpotlight?: boolean;
+  /** The job title behind a spotlight, for the UI chip only. */
+  jobTitle?: string;
   text: string;
   imageId?: string;
+  /** Posted as the post's first comment right after publishing (links belong
+   *  there, not in the body: the feed algorithm punishes external links). */
+  firstComment?: string;
+  firstCommentPosted?: boolean;
+  /** Engagement counters pulled back from the provider after publishing. */
+  stats?: { reactions?: number; comments?: number; impressions?: number; at: string };
   status: DraftStatus;
   /** ISO time to publish; unset on "post now". */
   scheduledAt?: string;
@@ -81,8 +100,37 @@ export interface PosterSettings {
   voiceProfile: string;
   /** REAL anecdotes the rewriter may draw from. Truth rule: it never invents. */
   storyBank: string;
+  /** The recruiter's brand, e.g. "Lume · lumesp.com": steers the rewriter and
+   *  is stamped on generated quote cards and carousel slides. */
+  brandLine: string;
+  /** The market the desk serves, e.g. "ABA therapy and behavioral health
+   *  staffing". Grounds original posts in the recruiter's actual industry. */
+  industries: string;
+  /** Hands-off mode: posts pulled from followed creators are rewritten into
+   *  drafts automatically (approval still human, always). Default on. */
+  autoRewrite: boolean;
+  /** Posting slots for "Approve + next slot": CSV of weekday numbers (0-6,
+   *  Sunday=0) and CSV of HH:MM times, interpreted in the recruiter's browser. */
+  postingDays: string;
+  postingTimes: string;
   /** Ayrshare user-profile key for this workspace (Business plan); blank = primary. */
   ayrshareProfileKey: string;
+}
+
+/** A LinkedIn creator the recruiter follows: every new post they publish is
+ *  pulled into the inspiration inbox automatically (their archive to rewrite
+ *  from). Pulls ride the same LinkedIn OS Unipile connection as publishing. */
+export interface WatchedProfile {
+  id: string;
+  /** Display label in the UI; the inbox author for pulled posts. */
+  name: string;
+  /** linkedin.com/in/<identifier> public identifier. */
+  identifier: string;
+  addedAt: string;
+  lastPulledAt?: string;
+  lastError?: string;
+  /** Post ids already archived, so a pull never duplicates inbox items. */
+  seenPostIds: string[];
 }
 
 interface WorkspaceState {
@@ -90,6 +138,7 @@ interface WorkspaceState {
   drafts: PosterDraft[];
   images: PosterImage[];
   settings: PosterSettings;
+  watchlist: WatchedProfile[];
 }
 
 interface Store {
@@ -114,16 +163,21 @@ async function ensureLoaded(): Promise<void> {
 }
 
 function defaultSettings(): PosterSettings {
-  return { displayName: "", headline: "", voiceProfile: "", storyBank: "", ayrshareProfileKey: "" };
+  return {
+    displayName: "", headline: "", voiceProfile: "", storyBank: "",
+    brandLine: "", industries: "", autoRewrite: true, postingDays: "", postingTimes: "",
+    ayrshareProfileKey: "",
+  };
 }
 
 function wsState(ws: string): WorkspaceState {
   let s = store.workspaces[ws];
   if (!s) {
-    s = { inbox: [], drafts: [], images: [], settings: defaultSettings() };
+    s = { inbox: [], drafts: [], images: [], settings: defaultSettings(), watchlist: [] };
     store.workspaces[ws] = s;
   }
   if (!s.settings) s.settings = defaultSettings();
+  if (!s.watchlist) s.watchlist = [];
   return s;
 }
 
@@ -208,13 +262,157 @@ export async function deleteInspiration(ws: string, id: string): Promise<void> {
   persist();
 }
 
+/* --------------------------- followed creators --------------------------- */
+
+const WATCHLIST_MAX = 15;
+/** A profile is re-pulled by the automation tick once this much time passed. */
+const WATCH_PULL_EVERY_MS = 20 * 60 * 60 * 1000;
+
+function parseLinkedInIdentifier(input: string): string | null {
+  const t = (input ?? "").trim();
+  const m = /linkedin\.com\/in\/([^/?#]+)/i.exec(t);
+  if (m) return decodeURIComponent(m[1]).replace(/\/+$/, "");
+  if (/^[\w\-%.]{2,120}$/.test(t)) return t;
+  return null;
+}
+
+export async function addWatchedProfile(ws: string, opts: { name?: string; url: string }): Promise<WatchedProfile> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const identifier = parseLinkedInIdentifier(opts.url);
+  if (!identifier) throw Object.assign(new Error("bad_profile: paste a linkedin.com/in/... profile link"), { status: 400 });
+  if (s.watchlist.some((w) => w.identifier.toLowerCase() === identifier.toLowerCase())) {
+    throw Object.assign(new Error("already_following"), { status: 400 });
+  }
+  if (s.watchlist.length >= WATCHLIST_MAX) {
+    throw Object.assign(new Error(`watchlist_full: ${WATCHLIST_MAX} profiles max`), { status: 400 });
+  }
+  const w: WatchedProfile = {
+    id: rid(),
+    name: (opts.name ?? "").trim() || identifier,
+    identifier,
+    addedAt: nowIso(),
+    seenPostIds: [],
+  };
+  s.watchlist.unshift(w);
+  persist();
+  return w;
+}
+
+export async function removeWatchedProfile(ws: string, id: string): Promise<void> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  s.watchlist = s.watchlist.filter((w) => w.id !== id);
+  persist();
+}
+
+/** Tolerant reading of Unipile's posts list: field names vary by API version,
+ *  so probe the common shapes and keep only real, original posts with text. */
+const WATCH_BACKFILL_MS = 190 * 24 * 60 * 60 * 1000; // ~6 months
+
+function parseProviderPosts(r: unknown): Array<{ id: string; text: string; url?: string }> {
+  const rec = r as { items?: unknown[]; posts?: unknown[] } | unknown[];
+  const arr = Array.isArray(rec) ? rec : (Array.isArray((rec as { items?: unknown[] })?.items) ? (rec as { items: unknown[] }).items : (rec as { posts?: unknown[] })?.posts) ?? [];
+  const out: Array<{ id: string; text: string; url?: string }> = [];
+  for (const raw of arr) {
+    const p = raw as Record<string, unknown>;
+    if (!p || p.is_repost === true || p.repost_id) continue;
+    const id = String(p.id ?? p.post_id ?? p.social_id ?? "").trim();
+    const text = String(p.text ?? p.commentary ?? p.content ?? "").trim();
+    const url = typeof p.share_url === "string" ? p.share_url : typeof p.permalink === "string" ? p.permalink : undefined;
+    // Keep roughly six months of history when the provider reports a date;
+    // posts without a parseable date are kept.
+    const rawAt = p.parsed_datetime ?? p.created_at ?? p.date ?? p.posted_at;
+    if (typeof rawAt === "string") {
+      const at = Date.parse(rawAt);
+      if (Number.isFinite(at) && Date.now() - at > WATCH_BACKFILL_MS) continue;
+    }
+    if (id && text) out.push({ id, text, url });
+  }
+  return out;
+}
+
+/** Pull a followed creator's recent posts into the inspiration inbox (deduped
+ *  against everything already archived). Returns how many landed. */
+export async function pullWatchedProfile(ws: string, id: string): Promise<{ added: number; drafted: number }> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const w = s.watchlist.find((x) => x.id === id);
+  if (!w) throw Object.assign(new Error("profile_not_found"), { status: 404 });
+  const engine = await enginePublishStatus(ws);
+  if (!engine.ready) {
+    throw Object.assign(new Error("engine_not_ready: connect your LinkedIn account in the LinkedIn tool first"), { status: 409 });
+  }
+  try {
+    const { unipile } = await import("../providers");
+    const { listAccounts } = await import("./os/health");
+    const acct = (await listAccounts(ws)).find((a) => a.providerAccountId)!;
+    // First pull digs into the archive (about six months back, provider
+    // permitting); later pulls just top up with what's new.
+    const posts = parseProviderPosts(await unipile.listPosts(acct.providerAccountId as string, w.identifier, w.lastPulledAt ? 10 : 40));
+    const fresh: InspirationItem[] = [];
+    for (const p of posts) {
+      if (w.seenPostIds.includes(p.id)) continue;
+      w.seenPostIds.unshift(p.id);
+      fresh.push(await addInspiration(ws, { author: w.name, url: p.url, text: p.text }));
+    }
+    if (w.seenPostIds.length > 200) w.seenPostIds.length = 200;
+    w.lastPulledAt = nowIso();
+    w.lastError = undefined;
+    persist();
+    // Hands-off mode: rewrite what just landed into drafts awaiting approval.
+    // Capped per pull so a prolific creator can't burn the AI budget; a
+    // rewrite failure (key, quota) stops quietly, the inbox items remain.
+    let drafted = 0;
+    if (s.settings.autoRewrite !== false && process.env.ANTHROPIC_API_KEY) {
+      for (const it of fresh.slice(0, 5)) {
+        try {
+          const nd = await rewriteToDraft(ws, { inspirationId: it.id });
+          await autoAttachCard(ws, nd.id);
+          drafted += 1;
+        } catch { break; }
+      }
+    }
+    return { added: fresh.length, drafted };
+  } catch (e) {
+    w.lastPulledAt = nowIso();
+    w.lastError = (e as Error).message;
+    persist();
+    throw e;
+  }
+}
+
+/** Automation tick: refresh every workspace's followed creators, one profile
+ *  at a time, only when its last pull is old enough. Errors stay on the
+ *  profile row; one bad profile never stops the sweep. */
+export async function tickWatchedProfiles(now: Date = new Date()): Promise<number> {
+  await ensureLoaded();
+  let pulled = 0;
+  for (const [ws, s] of Object.entries(store.workspaces)) {
+    if (!s.watchlist?.length) continue;
+    const engine = await enginePublishStatus(ws);
+    if (!engine.ready) continue;
+    for (const w of s.watchlist) {
+      const last = w.lastPulledAt ? new Date(w.lastPulledAt).getTime() : 0;
+      if (now.getTime() - last < WATCH_PULL_EVERY_MS) continue;
+      try {
+        await pullWatchedProfile(ws, w.id);
+        pulled += 1;
+      } catch { /* recorded on the profile row; keep sweeping */ }
+    }
+  }
+  return pulled;
+}
+
 /* ----------------------------- rewriter --------------------------------- */
 
 const MODEL = () => process.env.RECRUITEROS_POSTER_MODEL ?? process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
 
 function rewriteSystem(settings: PosterSettings): string {
   return `You ghostwrite LinkedIn posts for a recruiter. You are given a SOURCE POST someone else wrote. Your job is NOT to paraphrase it. Extract the underlying INSIGHT, discard the wording entirely, and rebuild it as a first-person post in the recruiter's own voice, so it reads as their real story and point of view.
-
+${settings.brandLine ? `
+THE BRAND: the recruiter posts on behalf of ${settings.brandLine}. Sound like a senior recruiter there: confident, credible, client-and-candidate focused. Keep every claim consistent with a recruiting firm. Never name other companies' brands or tools.
+` : ""}
 THE RECRUITER'S VOICE PROFILE (follow it exactly):
 ${settings.voiceProfile || "Plainspoken, direct, warm. A working recruiter talking to their market, not a content marketer."}
 
@@ -262,6 +460,7 @@ export async function rewriteToDraft(ws: string, opts: {
     id: rid(),
     sourceId,
     sourceAuthor: sourceAuthor || undefined,
+    sourceText: sourceText.slice(0, 6000),
     text,
     status: "draft",
     createdAt: nowIso(),
@@ -280,7 +479,8 @@ export async function regenerateDraft(ws: string, draftId: string, guidance?: st
   if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
   if (d.status === "posted") throw Object.assign(new Error("already_posted"), { status: 400 });
   const src = d.sourceId ? s.inbox.find((i) => i.id === d.sourceId) : undefined;
-  const sourceText = src?.text ?? d.text;
+  const sourceText = src?.text ?? d.sourceText ?? d.text;
+  if (!d.sourceText && src) d.sourceText = src.text.slice(0, 6000);
   d.text = await generateRewrite(s.settings, sourceText, guidance);
   d.status = "draft";
   d.scheduledAt = undefined;
@@ -311,15 +511,213 @@ async function generateRewrite(settings: PosterSettings, sourceText: string, gui
   return scrubDashes(out).slice(0, 3000);
 }
 
+/* --------------------------- original posts ------------------------------ */
+
+/** Rotating angles keep a daily original from sounding like the same post. */
+const ORIGINAL_ANGLES = [
+  "advice for candidates in this market: one concrete, usable insight",
+  "an insight for hiring managers about what actually attracts great people",
+  "a market observation recruiters see before anyone else does",
+  "a common hiring myth in this industry, and the reality",
+  "an opinion about the hiring process: what should change and why",
+  "a lesson from the recruiting desk, told plainly",
+];
+
+function originalSystem(settings: PosterSettings, angle: string): string {
+  return `You write ORIGINAL LinkedIn posts for a recruiter. There is no source post: you create the idea yourself from the recruiter's real market context below.
+${settings.brandLine ? `
+THE BRAND: the recruiter posts on behalf of ${settings.brandLine}. Sound like a senior recruiter there: confident, credible, client-and-candidate focused. Never name other companies' brands or tools.
+` : ""}${settings.industries ? `
+THE MARKET THEY SERVE (stay inside it, be specific to it):
+${settings.industries}
+` : ""}
+TODAY'S ANGLE: ${angle}
+
+THE RECRUITER'S VOICE PROFILE (follow it exactly):
+${settings.voiceProfile || "Plainspoken, direct, warm. A working recruiter talking to their market, not a content marketer."}
+
+REAL STORY BANK (true anecdotes you may draw from; use at most one per post):
+${settings.storyBank || "(none provided)"}
+
+ABSOLUTE TRUTH RULES (non-negotiable, house rule):
+- NEVER fabricate a placement, a client, a candidate, a name, a number, a statistic, or an outcome.
+- Market commentary stays general and observational; cite NO specific figures unless they appear in the story bank.
+- If the story bank has a relevant TRUE story, tell it. Otherwise write insight-led, without inventing specifics.
+
+FORMAT RULES:
+- First line is the hook: under 60 characters, no clickbait, makes a scroller stop.
+- Short paragraphs, 1-2 sentences each, blank line between them. 600-1300 characters total.
+- End with one light question or takeaway line, not a hard CTA.
+- NO em-dashes anywhere. Use commas, colons, periods, or parentheses instead.
+- No emoji. No hashtag walls: zero to three relevant hashtags at the very end, or none.
+
+Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
+}
+
+async function generateOriginal(settings: PosterSettings, angle: string, topic?: string): Promise<string> {
+  const client = anthropicClient();
+  const msg = await client.messages.create({
+    model: MODEL(),
+    max_tokens: 1024,
+    system: originalSystem(settings, angle),
+    messages: [{ role: "user", content: topic?.trim() ? `The recruiter wants the post about: ${topic.trim().slice(0, 400)}\n\nWrite the post now.` : "Write the post now." }],
+  });
+  const out = msg.content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+  if (!out) throw new Error("original_empty");
+  return scrubDashes(out).slice(0, 3000);
+}
+
+/** Every hands-off draft ships with a creative already attached: a branded
+ *  quote card cut from the hook line. One click swaps it for a carousel or a
+ *  library image. Best-effort: a render hiccup never blocks the draft. */
+async function autoAttachCard(ws: string, draftId: string): Promise<void> {
+  const s = wsState(ws);
+  const d = s.drafts.find((x) => x.id === draftId);
+  if (!d || d.imageId) return;
+  const hook = (d.text.split("\n")[0] || "").trim();
+  if (!hook) return;
+  try {
+    const img = await generateQuoteCard(ws, { headline: hook.slice(0, 140) });
+    d.imageId = img.id;
+    d.updatedAt = nowIso();
+    persist();
+  } catch { /* creative is a bonus, never a blocker */ }
+}
+
+/** One original, brand-grounded post -> Drafts, creative attached. */
+export async function createOriginalDraft(ws: string, opts: { topic?: string }): Promise<PosterDraft> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const angle = ORIGINAL_ANGLES[s.drafts.filter((d) => d.aiOriginal).length % ORIGINAL_ANGLES.length];
+  const text = await generateOriginal(s.settings, angle, opts.topic);
+  const draft: PosterDraft = {
+    id: rid(),
+    text,
+    aiOriginal: true,
+    status: "draft",
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  s.drafts.unshift(draft);
+  if (s.drafts.length > 300) s.drafts.length = 300;
+  persist();
+  await autoAttachCard(ws, draft.id);
+  return draft;
+}
+
+/* ----------------------------- job spotlights ----------------------------- */
+
+function jobSpotlightSystem(settings: PosterSettings): string {
+  return `You write a LinkedIn post advertising ONE open role for a recruiter. It is a BLIND ad: the client company must stay confidential.
+
+CONFIDENTIALITY RULES (non-negotiable):
+- NEVER name the employer, the client company, or anything that identifies it (no company name, product names, office addresses, or "the only X in Y" phrasing).
+- Refer to it generically: "my client", "a growing team", "a well-run practice", whatever fits the JD.
+${settings.brandLine ? `- The RECRUITER'S brand may be referenced naturally: they post on behalf of ${settings.brandLine}.
+` : ""}
+TRUTH RULES:
+- Everything about the role comes ONLY from the job description below. Do not invent perks, salary, benefits, team size, or anything else.
+- Mention compensation only if the JD states it.
+
+THE RECRUITER'S VOICE PROFILE (follow it exactly):
+${settings.voiceProfile || "Plainspoken, direct, warm. A working recruiter talking to their market, not a content marketer."}
+
+FORMAT RULES:
+- First line is the hook: under 60 characters, aimed at the person who should want this job.
+- Short paragraphs, 1-2 sentences each, blank line between them. 500-1100 characters total.
+- Cover: what the role is, where (if stated), what makes it genuinely good (from the JD only).
+- End with a simple next step: DM the recruiter or comment to hear more. No links.
+- NO em-dashes anywhere. No emoji. Zero to three relevant hashtags at the very end, or none.
+
+Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
+}
+
+/** One open job -> a blind spotlight post in Drafts, creative attached.
+ *  Rotates through open jobs so repeated posts cover the whole desk. */
+export async function createJobSpotlightDraft(ws: string): Promise<PosterDraft> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const { ensureJobsReady, listJds } = await import("../jobs");
+  await ensureJobsReady();
+  const open = listJds(ws).filter((j) => j.status === "open" && j.text.trim());
+  if (!open.length) throw Object.assign(new Error("no_open_jobs: add jobs to the Job Library first"), { status: 409 });
+  const job = open[s.drafts.filter((d) => d.jobSpotlight).length % open.length];
+
+  const client = anthropicClient();
+  const msg = await client.messages.create({
+    model: MODEL(),
+    max_tokens: 1024,
+    system: jobSpotlightSystem(s.settings),
+    messages: [{ role: "user", content: `JOB TITLE: ${job.title}\n\nJOB DESCRIPTION:\n"""\n${job.text.slice(0, 5000)}\n"""\n\nWrite the blind spotlight post now.` }],
+  });
+  const out = msg.content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+  if (!out) throw new Error("spotlight_empty");
+
+  const draft: PosterDraft = {
+    id: rid(),
+    text: scrubDashes(out).slice(0, 3000),
+    aiOriginal: true,
+    jobSpotlight: true,
+    jobTitle: job.title.slice(0, 80),
+    status: "draft",
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  s.drafts.unshift(draft);
+  if (s.drafts.length > 300) s.drafts.length = 300;
+  persist();
+  await autoAttachCard(ws, draft.id);
+  return draft;
+}
+
+/**
+ * Hands-off originals: one fresh draft per workspace per day, so the recruiter
+ * always has something to approve. Alternates between a brand-grounded
+ * original and a blind spotlight of an open job (when the Job Library has
+ * any). Skips quietly when the drafts pile is already deep.
+ */
+export async function tickDailyOriginals(now: Date = new Date()): Promise<number> {
+  await ensureLoaded();
+  if (!process.env.ANTHROPIC_API_KEY) return 0;
+  const today = now.toISOString().slice(0, 10);
+  const dayNum = Math.floor(now.getTime() / 86_400_000);
+  let made = 0;
+  for (const [ws, s] of Object.entries(store.workspaces)) {
+    const st = s.settings;
+    if (!st || st.autoRewrite === false) continue;
+    if (!(st.brandLine || st.industries || st.voiceProfile)) continue;
+    if (s.drafts.some((d) => d.aiOriginal && d.createdAt.slice(0, 10) === today)) continue;
+    if (s.drafts.filter((d) => d.status === "draft").length >= 6) continue;
+    try {
+      if (dayNum % 2 === 0) {
+        try { await createJobSpotlightDraft(ws); } catch { await createOriginalDraft(ws, {}); }
+      } else {
+        await createOriginalDraft(ws, {});
+      }
+      made += 1;
+    } catch { /* key or quota; tomorrow's tick retries */ }
+  }
+  return made;
+}
+
 /* ------------------------------ drafts ---------------------------------- */
 
-export async function updateDraft(ws: string, draftId: string, patch: { text?: string; imageId?: string | null }): Promise<PosterDraft> {
+export async function updateDraft(ws: string, draftId: string, patch: { text?: string; imageId?: string | null; firstComment?: string }): Promise<PosterDraft> {
   await ensureLoaded();
   const s = wsState(ws);
   const d = s.drafts.find((x) => x.id === draftId);
   if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
   if (d.status === "posted") throw Object.assign(new Error("already_posted"), { status: 400 });
   if (typeof patch.text === "string") d.text = scrubDashes(patch.text).slice(0, 3000);
+  if (typeof patch.firstComment === "string") d.firstComment = scrubDashes(patch.firstComment).slice(0, 1200) || undefined;
   if (patch.imageId !== undefined) {
     if (patch.imageId && !s.images.some((i) => i.id === patch.imageId)) {
       throw Object.assign(new Error("image_not_found"), { status: 404 });
@@ -421,8 +819,12 @@ async function publishDraft(ws: string, d: PosterDraft): Promise<PosterDraft> {
       if (d.imageId) {
         const media = await readMediaById(d.imageId);
         if (media) {
-          const ext = media.mime === "image/png" ? ".png" : media.mime === "image/webp" ? ".webp" : ".jpg";
-          attachments = [{ bytes: media.bytes, mime: media.mime, name: "post" + ext }];
+          const meta = s.images.find((i) => i.id === d.imageId);
+          const ext = MIME_EXT[media.mime] ?? ".jpg";
+          // LinkedIn shows a document post's file name as its title, so keep
+          // the library name instead of a generic "post.pdf".
+          const base = (meta?.name ?? "post").replace(/\.[A-Za-z0-9]+$/, "").replace(/[^\w\- .]+/g, "").trim().slice(0, 60) || "post";
+          attachments = [{ bytes: media.bytes, mime: media.mime, name: base + ext }];
         }
       }
       const r = await unipile.createPost(acct.providerAccountId as string, d.text, attachments);
@@ -430,6 +832,16 @@ async function publishDraft(ws: string, d: PosterDraft): Promise<PosterDraft> {
       d.provider = "engine";
       d.providerPostId = r.id;
       d.postUrl = undefined; // the engine path doesn't return a share URL
+      const fc = (d.firstComment ?? "").trim();
+      if (fc && r.id) {
+        // Never let a comment hiccup fail an already-published post.
+        try {
+          await unipile.commentOnPost(acct.providerAccountId as string, r.id, fc);
+          d.firstCommentPosted = true;
+        } catch {
+          d.firstCommentPosted = false;
+        }
+      }
     } else if (ayrshareConfigured()) {
       const r = await publishLinkedInPost({
         text: d.text,
@@ -471,16 +883,21 @@ const MIME_EXT: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
   "image/webp": ".webp",
+  "application/pdf": ".pdf",
+  "video/mp4": ".mp4",
 };
 
+/** Unipile accepts post attachments up to 15MB (image, PDF, or video). Images
+ *  keep the tighter 8MB cap; a feed photo never needs more. */
 export async function uploadImage(ws: string, opts: { name?: string; dataUrl: string }): Promise<PosterImage> {
   await ensureLoaded();
   const s = wsState(ws);
-  const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(opts.dataUrl);
-  if (!m) throw Object.assign(new Error("bad_image: expected a png, jpeg, or webp data URL"), { status: 400 });
+  const m = /^data:(image\/(?:png|jpeg|webp)|application\/pdf|video\/mp4);base64,([A-Za-z0-9+/=]+)$/.exec(opts.dataUrl);
+  if (!m) throw Object.assign(new Error("bad_media: expected a png, jpeg, webp, pdf, or mp4 data URL"), { status: 400 });
   const mime = m[1];
   const bytes = Buffer.from(m[2], "base64");
-  if (bytes.length > 8 * 1024 * 1024) throw Object.assign(new Error("image_too_large: 8MB max"), { status: 400 });
+  const maxMb = mime.startsWith("image/") ? 8 : 15;
+  if (bytes.length > maxMb * 1024 * 1024) throw Object.assign(new Error(`media_too_large: ${maxMb}MB max`), { status: 400 });
   const id = rid();
   const file = id + MIME_EXT[mime];
   await writeMedia(file, bytes);
@@ -559,6 +976,7 @@ export async function generateQuoteCard(ws: string, opts: { headline: string }):
   <text font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="${fontSize}" font-weight="700" fill="#14181f" letter-spacing="-1">${tspans}</text>
   ${name ? `<text x="100" y="${size - 150}" font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="34" font-weight="700" fill="#14181f">${name}</text>` : ""}
   ${headlineSub ? `<text x="100" y="${size - 104}" font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="27" fill="#4b5364">${headlineSub}</text>` : ""}
+  ${s.settings.brandLine ? `<text x="${size - 100}" y="${size - 104}" text-anchor="end" font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="26" font-weight="600" fill="#2e5bd7">${escXml(s.settings.brandLine)}</text>` : ""}
   <rect x="100" y="${size - 190}" width="46" height="6" rx="3" fill="#2e5bd7"/>
 </svg>`;
 
@@ -577,6 +995,222 @@ export async function generateQuoteCard(ws: string, opts: { headline: string }):
   return img;
 }
 
+/* ------------------------------ carousels -------------------------------- */
+
+const CAROUSEL_SYSTEM = `You turn ONE LinkedIn post by a recruiter into a swipeable carousel. Use ONLY what the post says; never add facts, numbers, names, or claims that are not in it.
+
+Rules:
+- 5 to 7 slides. Slide 1 is the hook: under 10 words, pulled from the post's core idea.
+- Middle slides: one idea each, under 220 characters, plain confident sentences.
+- Last slide: the post's takeaway or closing question. Nothing invented.
+- NO em-dashes. No emoji. No hashtags.
+
+Return ONLY a JSON array of strings, one string per slide. No other text.`;
+
+async function generateSlides(sourceText: string): Promise<string[]> {
+  const client = anthropicClient();
+  const msg = await client.messages.create({
+    model: MODEL(),
+    max_tokens: 900,
+    system: CAROUSEL_SYSTEM,
+    messages: [{ role: "user", content: sourceText.slice(0, 4000) }],
+  });
+  const out = msg.content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+  const start = out.indexOf("["), end = out.lastIndexOf("]");
+  if (start < 0 || end <= start) throw new Error("carousel_parse");
+  const arr = JSON.parse(out.slice(start, end + 1));
+  if (!Array.isArray(arr)) throw new Error("carousel_parse");
+  const slides = arr
+    .filter((x): x is string => typeof x === "string" && !!x.trim())
+    .map((x) => scrubDashes(x.trim()).slice(0, 240));
+  if (slides.length < 2 || slides.length > 10) throw new Error("carousel_parse");
+  return slides;
+}
+
+/** No-AI fallback: hook = first line, then sentences grouped into slides. */
+function splitSlidesNaive(text: string): string[] {
+  const paras = text.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const hook = paras.shift() ?? text.slice(0, 120);
+  const slides = [hook.slice(0, 220)];
+  let cur = "";
+  for (const p of paras) {
+    if ((cur + " " + p).trim().length > 220) {
+      if (cur) slides.push(cur);
+      cur = p.slice(0, 220);
+    } else {
+      cur = (cur + " " + p).trim();
+    }
+  }
+  if (cur) slides.push(cur);
+  if (slides.length < 2) {
+    const sentences = text.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/).filter(Boolean);
+    slides.length = 0;
+    let acc = "";
+    for (const sn of sentences) {
+      if ((acc + " " + sn).trim().length > 200 && acc) { slides.push(acc); acc = sn; }
+      else acc = (acc + " " + sn).trim();
+    }
+    if (acc) slides.push(acc);
+  }
+  return slides.slice(0, 7);
+}
+
+function slideSvg(text: string, index: number, total: number, settings: PosterSettings): string {
+  const size = 1080;
+  const isHook = index === 0;
+  const fs = isHook ? (text.length > 60 ? 62 : 74) : text.length > 160 ? 46 : text.length > 90 ? 54 : 62;
+  const maxChars = Math.floor((size - 200) / (fs * 0.52));
+  const lines = wrapLines(text, maxChars, 8);
+  const lineH = Math.round(fs * 1.3);
+  const startY = Math.round((size - lines.length * lineH) / 2 - 20 + fs);
+  const name = escXml(settings.displayName || "");
+  const byline = escXml(settings.headline || "");
+  const brand = escXml(settings.brandLine || "");
+  const tspans = lines
+    .map((l, i) => `<tspan x="100" y="${startY + i * lineH}">${escXml(l)}</tspan>`)
+    .join("");
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+  <rect width="${size}" height="${size}" fill="#f7f8fa"/>
+  <rect x="40" y="40" width="${size - 80}" height="${size - 80}" rx="24" fill="#ffffff" stroke="#e5e8ee" stroke-width="2"/>
+  <rect x="100" y="${startY - fs - 46}" width="76" height="10" rx="5" fill="#2e5bd7"/>
+  <text font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="${fs}" font-weight="${isHook ? 700 : 600}" fill="#14181f" letter-spacing="-1">${tspans}</text>
+  ${name ? `<text x="100" y="${size - 150}" font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="32" font-weight="700" fill="#14181f">${name}</text>` : ""}
+  ${byline ? `<text x="100" y="${size - 106}" font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="26" fill="#4b5364">${byline}</text>` : ""}
+  ${brand ? `<text x="${size - 100}" y="${size - 106}" text-anchor="end" font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="26" font-weight="600" fill="#2e5bd7">${brand}</text>` : ""}
+  <text x="${size - 100}" y="${size - 150}" text-anchor="end" font-family="FreeSans, DejaVu Sans, Arial, sans-serif" font-size="26" fill="#8a93a5">${index + 1} / ${total}</text>
+</svg>`;
+}
+
+/**
+ * Turn a draft into a LinkedIn document post: split it into slides (AI when
+ * available, structural fallback otherwise), render each as a branded Meridian
+ * slide, assemble the PDF, save it to the library, and attach it to the draft.
+ */
+export async function generateCarousel(ws: string, opts: { draftId: string }): Promise<{ image: PosterImage; slides: string[] }> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const d = s.drafts.find((x) => x.id === opts.draftId);
+  if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
+  if (!d.text.trim()) throw Object.assign(new Error("empty_post"), { status: 400 });
+
+  let slides: string[] | null = null;
+  if (process.env.ANTHROPIC_API_KEY) {
+    try { slides = await generateSlides(d.text); } catch { slides = null; }
+  }
+  if (!slides) slides = splitSlidesNaive(d.text);
+
+  const sharp = (await import("sharp")).default;
+  const { jpegsToPdf } = await import("./carouselPdf");
+  const jpegs = [];
+  for (let i = 0; i < slides.length; i++) {
+    jpegs.push({
+      bytes: await sharp(Buffer.from(slideSvg(slides[i], i, slides.length, s.settings))).jpeg({ quality: 92 }).toBuffer(),
+      width: 1080,
+      height: 1080,
+    });
+  }
+  const pdf = jpegsToPdf(jpegs);
+  const id = rid();
+  const file = id + ".pdf";
+  await writeMedia(file, pdf);
+  const img: PosterImage = {
+    id, file, mime: "application/pdf", kind: "card",
+    name: ("Carousel: " + slides[0]).slice(0, 80),
+    createdAt: nowIso(),
+  };
+  s.images.unshift(img);
+  d.imageId = id;
+  d.updatedAt = nowIso();
+  persist();
+  return { image: img, slides };
+}
+
+/* --------------------------- reuse + performance -------------------------- */
+
+/** Evergreen recycling: copy a posted (or any) draft back into Drafts. */
+export async function duplicateDraft(ws: string, draftId: string): Promise<PosterDraft> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const d = s.drafts.find((x) => x.id === draftId);
+  if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
+  const nd: PosterDraft = {
+    id: rid(),
+    sourceId: d.sourceId,
+    sourceAuthor: d.sourceAuthor,
+    sourceText: d.sourceText,
+    text: d.text,
+    imageId: d.imageId && s.images.some((i) => i.id === d.imageId) ? d.imageId : undefined,
+    firstComment: d.firstComment,
+    status: "draft",
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  s.drafts.unshift(nd);
+  if (s.drafts.length > 300) s.drafts.length = 300;
+  persist();
+  return nd;
+}
+
+const STATS_FRESH_MS = 6 * 60 * 60 * 1000;
+const STATS_WINDOW_MS = 45 * 24 * 60 * 60 * 1000;
+
+function num(p: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const k of keys) {
+    const v = p[k];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
+
+/** Pull engagement counters for recent engine-published posts. `force` skips
+ *  the freshness gate (the manual "Refresh performance" button). */
+export async function refreshPostStats(ws: string, force = false): Promise<number> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const engine = await enginePublishStatus(ws);
+  if (!engine.ready) {
+    throw Object.assign(new Error("engine_not_ready: connect your LinkedIn account in the LinkedIn tool first"), { status: 409 });
+  }
+  const { unipile } = await import("../providers");
+  const { listAccounts } = await import("./os/health");
+  const acct = (await listAccounts(ws)).find((a) => a.providerAccountId)!;
+  const now = Date.now();
+  const targets = s.drafts.filter((d) =>
+    d.status === "posted" && d.provider === "engine" && d.providerPostId &&
+    d.postedAt && now - new Date(d.postedAt).getTime() < STATS_WINDOW_MS &&
+    (force || !d.stats || now - new Date(d.stats.at).getTime() > STATS_FRESH_MS),
+  ).slice(0, 20);
+  let updated = 0;
+  for (const d of targets) {
+    try {
+      const p = (await unipile.getPost(acct.providerAccountId as string, d.providerPostId as string)) as Record<string, unknown>;
+      const reactions = num(p, "reaction_counter", "reactions_count", "like_count", "num_likes");
+      const comments = num(p, "comment_counter", "comments_count", "num_comments");
+      const impressions = num(p, "impression_counter", "impressions_count", "view_count");
+      if (reactions !== undefined || comments !== undefined || impressions !== undefined) {
+        d.stats = { reactions, comments, impressions, at: nowIso() };
+        d.updatedAt = nowIso();
+        updated += 1;
+      }
+    } catch { /* one post's counters; keep going */ }
+  }
+  if (updated) persist();
+  return updated;
+}
+
+/** Automation sweep: refresh counters everywhere the engine is connected. */
+export async function tickAllPostStats(): Promise<number> {
+  await ensureLoaded();
+  let updated = 0;
+  for (const ws of Object.keys(store.workspaces)) {
+    try { updated += await refreshPostStats(ws, false); } catch { /* engine not ready */ }
+  }
+  return updated;
+}
+
 /* ----------------------------- settings --------------------------------- */
 
 export async function getSettings(ws: string): Promise<PosterSettings> {
@@ -593,6 +1227,11 @@ export async function saveSettings(ws: string, patch: Partial<PosterSettings>): 
     headline: clean(patch.headline, 120) ?? s.settings.headline,
     voiceProfile: clean(patch.voiceProfile, 4000) ?? s.settings.voiceProfile,
     storyBank: clean(patch.storyBank, 8000) ?? s.settings.storyBank,
+    brandLine: clean(patch.brandLine, 80) ?? s.settings.brandLine ?? "",
+    industries: clean(patch.industries, 500) ?? s.settings.industries ?? "",
+    autoRewrite: typeof patch.autoRewrite === "boolean" ? patch.autoRewrite : s.settings.autoRewrite !== false,
+    postingDays: clean(patch.postingDays, 40) ?? s.settings.postingDays ?? "",
+    postingTimes: clean(patch.postingTimes, 60) ?? s.settings.postingTimes ?? "",
     ayrshareProfileKey: typeof patch.ayrshareProfileKey === "string" ? patch.ayrshareProfileKey.trim().slice(0, 120) : s.settings.ayrshareProfileKey,
   };
   s.settings = next;
@@ -607,6 +1246,7 @@ export interface PosterState {
   drafts: PosterDraft[];
   images: PosterImage[];
   settings: PosterSettings;
+  watchlist: WatchedProfile[];
 }
 
 export async function getState(ws: string): Promise<PosterState> {
@@ -617,6 +1257,7 @@ export async function getState(ws: string): Promise<PosterState> {
     drafts: s.drafts.filter((d) => d.status !== "discarded"),
     images: s.images,
     settings: s.settings,
+    watchlist: s.watchlist,
   };
 }
 

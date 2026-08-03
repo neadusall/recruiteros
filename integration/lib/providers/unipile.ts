@@ -118,6 +118,15 @@ export class UnipileClient extends ProviderClient {
     });
   }
 
+  /** Fetch one post: engagement counters for the Poster's performance loop.
+   *  NOTE: confirm the exact path/shape against the current Unipile API. */
+  getPost(accountId: string, postId: string) {
+    return this.request({
+      path: `/api/v1/posts/${encodeURIComponent(postId)}`,
+      query: { account_id: accountId },
+    });
+  }
+
   /** Leave a comment on a post (the nurture "comment on their post" touch).
    *  NOTE: confirm the exact path/shape against the current Unipile API. */
   commentOnPost(accountId: string, postId: string, text: string) {

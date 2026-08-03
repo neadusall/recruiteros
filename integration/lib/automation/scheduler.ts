@@ -121,6 +121,16 @@ async function tickLinkedinPosts(): Promise<void> {
   await tickDuePosts(new Date());
 }
 
+/** Pull new posts from followed LinkedIn creators into the Poster inbox
+ *  (per-profile freshness gate inside; a quiet no-op until a workspace both
+ *  follows someone and has its LinkedIn account linked). */
+async function tickLinkedinWatch(): Promise<void> {
+  const { tickWatchedProfiles, tickAllPostStats, tickDailyOriginals } = await import("../linkedin/poster");
+  await tickWatchedProfiles(new Date());
+  await tickAllPostStats();
+  await tickDailyOriginals(new Date());
+}
+
 /** Build the daily LinkedIn BD engagement queue (idempotent per day; standby
  *  until email sending is live and a LinkedIn seat is connected). */
 async function tickLinkedinEngage(): Promise<void> {
@@ -204,6 +214,7 @@ const TICKS: TickSpec[] = [
   { key: "linkedin", label: "LinkedIn cadence", env: "RECRUITEROS_LINKEDIN_TICK_MS", defaultMs: 3 * 60_000, firstDelayMs: 30_000, fn: tickLinkedin },
   { key: "linkedin_os", label: "LinkedIn OS shared engine", env: "RECRUITEROS_LINKEDIN_OS_TICK_MS", defaultMs: 2 * 60_000, firstDelayMs: 40_000, fn: tickLinkedinOs },
   { key: "linkedin_posts", label: "LinkedIn Poster scheduled posts", env: "RECRUITEROS_LINKEDIN_POSTS_TICK_MS", defaultMs: 60_000, firstDelayMs: 35_000, fn: tickLinkedinPosts },
+  { key: "linkedin_watch", label: "LinkedIn Poster followed creators", env: "RECRUITEROS_LINKEDIN_WATCH_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 120_000, fn: tickLinkedinWatch },
   { key: "linkedin_engage", label: "LinkedIn BD engagement queue (daily drafts)", env: "RECRUITEROS_LINKEDIN_ENGAGE_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 110_000, fn: tickLinkedinEngage },
   { key: "voice", label: "Voicemail drops", env: "RECRUITEROS_VOICE_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 45_000, fn: tickVoice },
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },
