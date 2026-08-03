@@ -699,6 +699,19 @@
     return v || "";
   }
 
+  /* Installed once: a click anywhere outside a row menu closes it. */
+  var rowMenuDismiss = false;
+  function armRowMenuDismiss() {
+    if (rowMenuDismiss) return;
+    rowMenuDismiss = true;
+    document.addEventListener("click", function (e) {
+      $$(".row-menu[open]").forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute("open"); });
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") $$(".row-menu[open]").forEach(function (d) { d.removeAttribute("open"); });
+    });
+  }
+
   function viewBurn() {
     Promise.all([
       api("/owner/burn?window=" + win),
@@ -1404,7 +1417,12 @@
   // The client account that owner-pushed spend lands on (app.lumesp = Lume).
   // Resolved once from the accounts list by domain/name and cached for the session.
   var _clientWs = null;
+  /* Named on the send button, so it says where the receipts are going rather than
+     "the client". Filled on the first account lookup and reused after that. */
+  var rcClientName = "";
+
   function resolveClientWs(cb) {
+    if (_clientWs) rcClientName = _clientWs.name || rcClientName;
     if (_clientWs) { cb(_clientWs.id, _clientWs.name); return; }
     api("/owner/accounts").then(function (r) {
       var accts = (r && r.accounts) || [];
@@ -1412,7 +1430,7 @@
         var dom = (x.domain || "").toLowerCase(), nm = (x.name || "").toLowerCase();
         return dom.indexOf("lumesp") >= 0 || nm.indexOf("lume") >= 0;
       })[0] || accts[0];
-      if (pick) { _clientWs = { id: pick.workspaceId, name: pick.name }; cb(pick.workspaceId, pick.name); }
+      if (pick) { _clientWs = { id: pick.workspaceId, name: pick.name }; rcClientName = pick.name; cb(pick.workspaceId, pick.name); }
       else cb(null);
     }).catch(function () { cb(null); });
   }
@@ -1549,14 +1567,22 @@
      sends a single receipt-less line for its counted usage. Each item is tagged
      with the cell key it came from so the cell can be marked sent once all of its
      receipts land. */
+  /** Today, so a charge dated ahead of it is never offered to the client. */
+  function todayISO() { return new Date().toISOString().slice(0, 10); }
+
   function resolvePush() {
     var out = [];
+    var today = todayISO();
     rcSelKeys().forEach(function (pkey) {
       var rc = cellByKey(pkey); if (!rc) return;
       var row = rc.row, c = rc.cell, mlab = monthLabel(c.period);
       if (c.receipts && c.receipts.length) {
         c.receipts.forEach(function (r) {
           if (!(r.amountUsd > 0)) return;
+          /* PAST CHARGES ONLY. A receipt dated ahead of today is either a renewal notice
+             the parser misread as a charge or a bill that has not happened yet, and
+             neither belongs on a statement the client is being asked to settle. */
+          if ((r.chargedAt || "").slice(0, 10) > today) return;
           var lbl = (row.vendor || "Spend") + " — " + mlab + (r.invoiceNumber ? " · #" + r.invoiceNumber : "");
           // Cadence read off the invoice, overridable by the owner. "recurring" on
           // the receipt means it bills monthly on the client; anything else is a
@@ -1657,10 +1683,10 @@
         '<div class="rc-pushbar-top">' +
           '<span class="rc-pushbar-n">' + items.length + ' receipt' + (items.length > 1 ? "s" : "") +
           ' · <strong>' + usd(total) + '</strong>' + (split.length ? ' · ' + esc(split.join(", ")) : "") +
-          ' <span class="note">— staged for your approval, not sent yet</span></span>' +
+          ' <span class="note">ready to send to ' + esc(rcClientName || "the client") + '</span></span>' +
           '<span class="rc-pushbar-acts">' +
           '<a class="row-mini" id="rcPushClear">Clear</a>' +
-          '<button class="btn btn-sm" id="rcPushGo">Stage for approval →</button>' +
+          '<button class="btn btn-primary btn-sm" id="rcPushGo">Send ' + items.length + ' to ' + esc(rcClientName || "client") + '</button>' +
           '</span>' +
         '</div>' +
         '<div class="rc-pushlist">' + lines + '</div>' +
@@ -1708,12 +1734,12 @@
     bar.innerHTML =
       '<div class="rc-pushbar-in"><div class="rc-pushbar-top">' +
       '<span class="rc-pushbar-n">' + okCount + ' receipt' + (okCount !== 1 ? "s" : "") +
-      ' staged for <strong>' + esc(wsName || "client") + '</strong> · pending your approval' +
+      ' sent to <strong>' + esc(wsName || "client") + '</strong>' +
       (failCount ? ' · ' + failCount + ' failed' : "") +
-      ' <span class="note">— nothing shows on their Spending page until you approve it</span></span>' +
+      ' <span class="note">live on their Spending page now, with the invoice behind each one</span></span>' +
       '<span class="rc-pushbar-acts">' +
       '<a class="row-mini" id="rcStagedDismiss">Dismiss</a>' +
-      '<button class="btn btn-sm" id="rcStagedApprove">Review &amp; approve →</button>' +
+      '<button class="btn btn-sm" id="rcStagedApprove">Open their Spending →</button>' +
       '</span></div></div>';
     var ap = $("#rcStagedApprove");
     if (ap) ap.addEventListener("click", function () { if (typeof openAccount === "function") openAccount(wsId); });
@@ -1740,19 +1766,29 @@
           Object.keys(done).forEach(function (k) { if (done[k] === need[k]) markSent(k); });
           renderPushBar();
           if (okCount > 0) showStagedBar(wsId, wsName, okCount, failCount);
-          else toast(failCount ? failCount + " could not be staged" : "Nothing to stage");
+          else toast(failCount ? failCount + " could not be sent" : "Nothing to send");
           return;
         }
         var it = items[i];
-        // STAGE ONLY. The charge lands as pending; it is invisible to the client
-        // until the owner approves it on the account's Spending panel. No approve
-        // call here — that is the deliberate sign-off the owner asked to keep.
+        /* ONE STEP, BECAUSE PICKING IS THE APPROVAL. This used to stage the charge as
+           pending and leave a second sign-off on a different screen, which meant nothing
+           the owner sent ever actually arrived until they went and found the other panel.
+           Choosing a specific receipt off the grid IS the deliberate act; making them say
+           yes twice added a way to forget rather than a way to be careful.
+           The charge is still created first and approved second, so a failure between the
+           two leaves it pending and visible to the owner rather than half-sent. */
         var payload = { workspaceId: wsId, source: "usage", label: it.label, amountUsd: it.amt, cadence: it.cadence || "one_time" };
         if (it.receipt) payload.receipt = it.receipt;
         send("/owner/portal-spend", "POST", payload).then(function (r) {
           var cid = r && r.ok && r.data && r.data.charge && r.data.charge.id;
           if (!cid) { failCount++; next(i + 1); return; }
-          okCount++; done[it.key] = (done[it.key] || 0) + 1; next(i + 1);
+          send("/owner/portal-spend", "PATCH", { workspaceId: wsId, id: cid, action: "approve" })
+            .then(function (a) {
+              if (a && a.ok) okCount++; else failCount++;
+              done[it.key] = (done[it.key] || 0) + 1;
+              next(i + 1);
+            })
+            .catch(function () { failCount++; next(i + 1); });
         }).catch(function () { failCount++; next(i + 1); });
       })(0);
     });
@@ -1789,7 +1825,7 @@
          shown when there is actually something to trim. */
       (cellExtras(d) ? '<button class="btn btn-sm" id="rcOnePer" title="Keep the best receipt in each service-month cell and remove the extras. Add any real second charge back by hand.">Keep one receipt per cell (removes ' + cellExtras(d) + ')</button>' : "") +
       '</div></div>' +
-      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate. <strong>Tick</strong> the receipts (or a whole row) you want on the client\'s bill and stage them from the bar at the foot of the grid — each is set Monthly, Annual or One-time and lands on the client\'s account as <strong>pending</strong>. Nothing shows on their app.lumesp Spending page until you approve it.' +
+      '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate. <strong>Tick</strong> the receipts you want the client to see, then press <strong>Send</strong> in the bar at the foot of the grid. They appear on their Spending page straight away, each with its invoice behind it. Only charges already dated in the past can be sent.' +
       /* Where the books open. Said out loud so the missing earlier months read as a
          starting point rather than as spend that went unrecorded. */
       (d.registerStart ? ' The books open in ' + esc(monthLabelLong(d.registerStart)) + ': nothing charged before then is reported on this page.' : '') +
@@ -1825,14 +1861,7 @@
            already knows. That is the honest version of Edit here: it does something, and
            what it does is what the row needs. The column is sticky, so the actions stay
            put while the months scroll past. */
-        (r.itemId ? acts(r.itemId) : registerAct(r, ri)) +
-        sendRowAct(r, ri) +
-        /* Clearing a row's paperwork is a different act from deleting the register line,
-           so it is its own control and only appears when there is something to clear.
-           It counts the receipts the GRID is showing on this row, which includes the ones
-           an account fold claims at report time, so the number always matches what is
-           drawn above it. */
-        rowReceiptAct(r, ri) +
+        rowActions(r, ri) +
         '</th>';
       (r.cells || []).forEach(function (c) { html += matrixCell(r, c, ri); });
       html += '<td class="num rc-total"><strong>' + usd(r.totalCountedUsd) + '</strong>' +
@@ -1934,6 +1963,53 @@
   }
 
   /** "Delete N receipts" on a row, shown only when the row actually has some. */
+
+  /**
+   * Everything you can do to one row, as ONE primary action plus a menu.
+   *
+   * These controls arrived one at a time - Edit, Delete, Select receipts, Stage row,
+   * Delete N receipts, Add to the register, Clear this vendor - and each was reasonable on
+   * its own. Together they turned every row's first column into five lines of red and blue
+   * text, taller than the figures beside it, and the vendor name (the only thing you
+   * actually scan for) got lost in the middle of it.
+   *
+   * So: the ONE thing this row is usually for stays visible, and the rest go behind "···".
+   * A menu is the right shape here because these are occasional, deliberate acts on a
+   * specific row, not things you sweep across the grid doing.
+   *
+   * Destructive items sit at the bottom, after a divider, so "Delete every receipt" is
+   * never adjacent to the item you reach for most.
+   */
+  function rowActions(r, ri) {
+    var pickable = (r.cells || []).filter(function (c) { return cellAmt(c) > 0 && !rcSent[ri + "|" + c.period]; }).length;
+    var nRec = rowReceipts(r).length;
+
+    /* The primary is what this row is FOR. A row with money on it is there to be sent to
+       the client; a row with no line item is there to be put on the register. */
+    /* ONE PATH TO THE CLIENT, NOT TWO. "Stage row" sent a row straight off on its own
+       while the checkboxes fed a different button at the foot of the grid, so there were
+       two ways to send with different results and no way to tell them apart. The row now
+       simply TICKS its own receipts into that one selection: everything goes out through
+       the same Send, and everything is reviewable in the bar before it does. */
+    var primary = r.itemId
+      ? (pickable ? '<a class="row-go" data-pickrow="' + ri + '">Select this row</a>' : "")
+      : '<a class="row-go" data-badd="' + ri + '">Add to the register</a>';
+
+    var items = [];
+    if (r.itemId) items.push('<a data-bedit="' + esc(r.itemId) + '">Edit this line</a>');
+    if (r.itemId && !pickable) items.push('<span class="row-menu-note">Nothing to send: no charge in these months</span>');
+    if (nRec) items.push('<a class="danger" data-rowdel="' + ri + '">Delete ' + nRec + ' receipt' + (nRec > 1 ? 's' : '') + '</a>');
+    if (!r.itemId) items.push('<a class="danger" data-vdel="' + esc(r.vendor) + '">Clear this vendor</a>');
+    if (r.itemId) items.push('<a class="danger" data-bdel="' + esc(r.itemId) + '">Delete this line</a>');
+    if (!items.length && !primary) return "";
+
+    var menu = items.length
+      ? '<details class="row-menu"><summary title="More actions" aria-label="More actions">···</summary>' +
+        '<div class="row-menu-pop">' + items.join("") + '</div></details>'
+      : "";
+    return '<div class="row-acts">' + primary + menu + '</div>';
+  }
+
   function rowReceiptAct(r, ri) {
     var n = rowReceipts(r).length;
     if (!n) return "";
@@ -2456,6 +2532,25 @@
     /* Clear a whole row's paperwork. stopPropagation because the row header sits next to
        cells that open the viewer, and a delete that also opened something would be read
        as having done nothing. */
+    /* A row menu closes when you click anything else, including another row's menu.
+       Native <details> does not do this on its own, and two or three left hanging open
+       down a long grid is exactly the mess this menu was meant to remove. Bound once per
+       render, on the container, so it costs nothing per row. */
+    armRowMenuDismiss();
+    $$("#view .row-menu > summary").forEach(function (sm) {
+      sm.addEventListener("click", function () {
+        var mine = sm.parentNode;
+        $$("#view .row-menu[open]").forEach(function (d) { if (d !== mine) d.removeAttribute("open"); });
+      });
+    });
+    /* Acting on an item closes the menu it came from: leaving it open over a grid that
+       has just re-rendered underneath points at a row that may have moved. */
+    $$("#view .row-menu-pop a").forEach(function (a) {
+      a.addEventListener("click", function () {
+        var d = a.closest(".row-menu");
+        if (d) d.removeAttribute("open");
+      });
+    });
     $$("#view [data-rowdel]").forEach(function (a) {
       a.addEventListener("click", function (e) {
         e.stopPropagation();
