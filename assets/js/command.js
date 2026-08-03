@@ -24146,4 +24146,105 @@
       });
     }
   })();
+
+  /* ---------------- Silent self-update ----------------
+     Recruiters keep one portal tab open for WEEKS while the platform deploys many
+     times a day, and a stale bundle eventually misbehaves in ways support can't
+     reproduce (2026-08-03: searches pressed from a July-era tab kept dying without
+     a trace). Nobody should ever have to be told to refresh, so this watcher does
+     it for them: it notices a new build shipping (the bundle file's validators
+     change) and reloads the tab on its own the moment that is provably safe:
+     never during a running search or enrichment, never while the recruiter is
+     mid-typing, and by strong preference while the tab isn't even being looked
+     at. The reload keeps the same #view, so the recruiter comes back to exactly
+     the screen they left, on the current build, none the wiser. */
+  (function selfUpdate() {
+    var SRC = "/assets/js/command.js";
+    var base = null;    // the running bundle's version stamp, captured at startup
+    var pending = null; // a newer stamp seen on the server, waiting for a safe moment
+    var lastInput = Date.now();
+    function stampOf(res) {
+      return (res.headers.get("etag") || "") + "|" + (res.headers.get("last-modified") || "");
+    }
+    function probe() {
+      return fetch(SRC, { method: "HEAD", cache: "no-store" }).then(function (res) {
+        if (!res.ok) return;
+        var s = stampOf(res);
+        if (s === "|") return; // server exposes no validators: stay quiet forever
+        if (base === null) { base = s; return; }
+        if (s !== base) pending = s;
+      }).catch(function () { /* offline or mid-deploy: the next probe catches up */ });
+    }
+    function busy() {
+      // A live progress bar means a search or enrichment is mid-flight in THIS tab.
+      if (window.__jdProgTimer) return true;
+      // A hidden tab is always safe to swap out; nobody is looking at it.
+      if (document.hidden) return false;
+      // Mid-typing anywhere (including inside the OS Text frame) blocks the swap,
+      // as does any click or keystroke in the last three minutes.
+      var a = document.activeElement;
+      if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" ||
+                a.tagName === "IFRAME" || a.isContentEditable)) return true;
+      return (Date.now() - lastInput) < 180000;
+    }
+    /* A reload must be LOSSLESS: anything typed but not yet run (a pasted JD, a
+       half-filled list name) is stashed by element id and poured back into the
+       re-rendered view, so the swap is invisible even mid-draft. Text fields
+       only: selects and checkboxes drive view state and must render fresh. */
+    function stashDrafts() {
+      try {
+        var vals = {};
+        var els = document.querySelectorAll("textarea[id], input[id]");
+        Array.prototype.forEach.call(els, function (el) {
+          var t = (el.type || "text").toLowerCase();
+          if (t === "password" || t === "hidden" || t === "checkbox" || t === "radio" || t === "file") return;
+          if (el.value && String(el.value).trim()) vals[el.id] = el.value;
+        });
+        if (Object.keys(vals).length) sessionStorage.setItem("ros_selfupdate_drafts", JSON.stringify(vals));
+      } catch (e) {}
+    }
+    (function restoreDrafts() {
+      var raw = null;
+      try {
+        raw = sessionStorage.getItem("ros_selfupdate_drafts");
+        if (raw) sessionStorage.removeItem("ros_selfupdate_drafts");
+      } catch (e) {}
+      if (!raw) return;
+      var vals; try { vals = JSON.parse(raw); } catch (e) { return; }
+      var ids = Object.keys(vals); if (!ids.length) return;
+      // Views render async after routing, so wait for each field to exist, fill it
+      // only if it is still empty, and give up quietly after 15 seconds.
+      var until = Date.now() + 15000;
+      var t = setInterval(function () {
+        ids = ids.filter(function (id) {
+          var el = document.getElementById(id);
+          if (!el) return true; // not rendered yet: keep waiting
+          if (!el.value || !String(el.value).trim()) { try { el.value = vals[id]; } catch (e) {} }
+          return false;
+        });
+        if (!ids.length || Date.now() > until) clearInterval(t);
+      }, 500);
+    })();
+    function maybeReload() {
+      if (!pending || busy()) return;
+      try {
+        // One reload per version stamp: if this stamp already triggered one (a cache
+        // still serving the old bundle), stand down instead of reload-looping.
+        if (sessionStorage.getItem("ros_selfupdate") === pending) return;
+        sessionStorage.setItem("ros_selfupdate", pending);
+      } catch (e) {}
+      stashDrafts();
+      location.reload();
+    }
+    ["mousedown", "keydown", "wheel", "touchstart"].forEach(function (ev) {
+      window.addEventListener(ev, function () { lastInput = Date.now(); }, { passive: true });
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) { maybeReload(); }            // just looked away: the invisible moment
+      else if (pending) { maybeReload(); }               // came back to a known-stale tab
+      else { void probe(); }                             // came back after a while: re-check
+    });
+    setInterval(function () { void probe().then(maybeReload); }, 5 * 60 * 1000);
+    void probe();
+  })();
 })();

@@ -42,7 +42,7 @@ import {
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
   mergeSourcingRuns, getRapidQuota, runSalesNavSourcing, searchKindOf, applySalesNavResult,
-  gapFillContacts, listNightItems, addNightItem, removeNightItem, attachNightIcp,
+  gapFillContacts, listNightItems, addNightItem, removeNightItem, attachNightIcp, sweepRecoveryTwins,
   landlineDbReady,
   premiumPhoneQuote, runPremiumPhoneBoost,
 } from "../../../lib/sourcing";
@@ -54,7 +54,7 @@ import { withWorkspaceCreds } from "../../../lib/connected";
 import { listLinkedInAccounts } from "../../../lib/accounts";
 import { seatForUser } from "../../../lib/linkedin/seats";
 import { cred } from "../../../lib/providers/http";
-import { nowIso } from "../../../lib/core/ids";
+import { nowIso, rid } from "../../../lib/core/ids";
 import { dbEnabled } from "../../../lib/db";
 import { ostextImport, ostextStarterTemplate, type OsTextContact } from "../../../lib/ostextImport";
 
@@ -247,7 +247,14 @@ export async function POST(req: Request) {
       // there was nothing to recover and the recruiter's search vanished silently
       // (2026-07-31, a Lume run lost exactly this way at 5.7s in). Everything below is
       // derived from the request body alone, so there is nothing left to wait for here.
-      const recoveryToken = typeof b.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "";
+      // SELF-ARMING: a tab whose bundle predates the crash net sends no token, and
+      // for weeks-old always-open tabs that is the NORM, not the exception (2026-08-03:
+      // a Lume recruiter's searches kept dying to deploys precisely because her stale
+      // client armed nothing). Mint one server-side so every search is recoverable.
+      // A stale client can't watch a token it never sent, but the queue still finishes
+      // the search and the list appears under Your saved candidate lists on its own.
+      const recoveryToken =
+        (typeof b.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "") || rid("rcv");
       let recoveryId = "";
       if (recoveryToken) {
         try {
@@ -308,6 +315,15 @@ export async function POST(req: Request) {
         }));
         // Remember who we surfaced so a later fresh-only run skips them.
         await addSeenKeys(ws, result.candidates.map(candKey));
+        // The run just completed, so any OTHER armed checkpoint for this same JD is a
+        // dead attempt's orphan left by a stale client's blind retry, and would only
+        // queue a redundant re-run of a paid search. Matched on the JD text alone:
+        // attachNightIcp may have renamed the orphan, so names are not a stable key.
+        await sweepRecoveryTwins(
+          ws,
+          (i) => i.kind === "search" && !i.salesNav && i.jd === b.jd,
+          recoveryId,
+        ).catch(() => {});
         return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true });
       } finally {
         // The request ran to completion (either way, the client got a real answer),
@@ -339,7 +355,11 @@ export async function POST(req: Request) {
       // BEFORE the first slow step; the finally below removes it when this request
       // answers either way, and if the process dies the next boot's queue tick
       // re-runs the search server-side and lands it on the same list.
-      const snRecoveryToken = typeof b.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "";
+      // SELF-ARMING, same reason as the JD run above: a stale always-open tab sends
+      // no token, so mint one here. Its search then survives a deploy and the list
+      // still appears on its own, even though that tab can't narrate the recovery.
+      const snRecoveryToken =
+        (typeof b.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "") || rid("rcv");
       let snRecoveryId = "";
       if (snRecoveryToken) {
         try {
@@ -392,6 +412,10 @@ export async function POST(req: Request) {
           url, name: snTypedName, targetRunId: snTargetId || undefined, createdBy: actor,
         });
         if ("missingTarget" in applied) return fail("run_not_found", 404, { detail: applied.missingTarget });
+        // The result just landed, so any OTHER armed checkpoint for this same URL is a
+        // dead attempt's orphan (a stale client blind-retries this POST after a deploy
+        // kills it) and would only queue a redundant re-run of a paid pull.
+        await sweepRecoveryTwins(ws, (i) => i.salesNav?.url === url, snRecoveryId).catch(() => {});
         return ok({
           run: applied.run, mode: applied.mode, name: applied.name,
           linkedinFound: result.linkedinFound, expanded: result.expanded,
