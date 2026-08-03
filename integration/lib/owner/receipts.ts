@@ -830,7 +830,10 @@ export function classify(msg: MailMessage): { billing: boolean; reason?: string 
   const known = !!vendorSrc || processorHit;
 
   /* A currency figure anywhere in the body: "$10.88", "US$10.88", "10.88 USD", "9,00 €".
-     A dollar amount from a vendor we pay is the strongest receipt signal there is. */
+     It CORROBORATES a receipt; it never proves one. A payroll notice, a "$5 off" promo and
+     an email signature that quotes a salary all carry money and not one of them is a charge
+     we paid — so a bare dollar amount is no longer allowed to file anything by itself. That
+     over-generous rule is exactly what swept salaries and quotes into the books. */
   const hasMoney = /(?:us\$|\$|€|£|₹)\s?\d[\d,]*(?:[.,]\d{1,2})?|\d[\d,]*[.,]\d{2}\s?(?:usd|eur|gbp|cad|inr)/i.test(body);
   /* Billing words: the generic set PLUS this sender's own vocabulary — a registrar's
      confirmation says "order"/"renewal"/"domain", never "invoice". */
@@ -838,17 +841,31 @@ export function classify(msg: MailMessage): { billing: boolean; reason?: string 
     GENERIC_SUBJECT_HINTS.some((h) => hay.includes(h)) ||
     (vendorSrc ? vendorSrc.subject.some((h) => hay.includes(h)) : false);
   const bodyHit = /amount paid|total paid|payment received|you paid|amount charged|order total|grand total|subtotal|receipt|invoice|thank you for your (?:order|purchase|payment)/i.test(body);
+  /* The vendor's own document, attached: a PDF, or a file named like a receipt/invoice, IS
+     a receipt on its own — this is the "actually has an invoice attached" half of the rule. */
+  const hasInvoiceDoc = (msg.attachments || []).some((a) => {
+    const name = (a.filename || "").toLowerCase();
+    const type = (a.contentType || "").toLowerCase();
+    return type.includes("pdf") || name.endsWith(".pdf") || /receipt|invoice|statement|order/.test(name);
+  });
 
-  /* A RECOGNISED sender that put a billing word OR a dollar amount in the mail is billing us,
-     whatever it titled the message. This is what finally catches the registrar
-     order-confirmations ("Order Finished", body full of $ line items, the word "invoice"
-     nowhere in it). The amount parser downstream is the real gate — it drops anything with no
-     figure — so being generous here only costs a parse, never a phantom charge. */
-  if (known && (subjectHit || bodyHit || hasMoney)) return { billing: true };
+  /* A receipt SAYS it is one, or CARRIES the document that is one. A recognised sender that
+     used a billing word (subject or body) or attached an invoice is billing us, whatever it
+     titled the message — this still catches the registrar order-confirmations, whose subjects
+     say "order"/"renewal" and whose bodies say "order total"/"subtotal". What it no longer
+     does is file a mail whose ONLY billing-shaped thing is a stray dollar figure: no receipt
+     word, no invoice document, no charge. */
+  const billingWord = subjectHit || bodyHit;
+  if (known && (billingWord || hasInvoiceDoc)) return { billing: true };
   /* An UNKNOWN sender still needs an explicit billing phrase, so personal mail with a stray
      "$5 off" never floods the books. */
   if (subjectHit && bodyHit) return { billing: true };
-  return { billing: false, reason: "no billing signal in subject, sender or body" };
+  return {
+    billing: false,
+    reason: hasMoney
+      ? "carries a dollar amount but no receipt word or invoice document — not a charge"
+      : "no billing signal in subject, sender or body",
+  };
 }
 
 /**
@@ -2040,7 +2057,9 @@ export function startHarvest(monthsBack = 3): { started: boolean; reason?: strin
  * scheduler's entry point: a nightly tick means a month can never quietly pass without its
  * receipts, which a button someone has to remember to press cannot guarantee.
  */
-export async function harvestAll(monthsBack = 3): Promise<{ ok: boolean; reason?: string; reports: SweepReport[] }> {
+export async function harvestAll(
+  monthsBack = 3,
+): Promise<{ ok: boolean; reason?: string; reports: SweepReport[]; vault?: VaultRepair | null; shots?: ShotRepair }> {
   if (inFlight) return { ok: false, reason: "a sweep is already running", reports: [] };
   const boxes = billingMailboxes();
   if (!boxes.length) return { ok: false, reason: "no billing mailbox is configured", reports: [] };
@@ -2051,6 +2070,8 @@ export async function harvestAll(monthsBack = 3): Promise<{ ok: boolean; reason?
   inFlight = { startedAt: nowIso(), monthsBack, mailboxes: boxes.map((b) => b.user) };
 
   const reports: SweepReport[] = [];
+  let vault: VaultRepair | null = null;
+  let shots: ShotRepair = { checked: 0, rendered: 0, alreadyOk: 0, noSource: 0, failed: 0, failures: [] };
   try {
     for (const box of boxes) {
       reports.push(await harvestMailbox(box, since).catch((e: Error) => ({
@@ -2060,10 +2081,24 @@ export async function harvestAll(monthsBack = 3): Promise<{ ok: boolean; reason?
         documentsLinked: 0, documentFailures: [], skippedNotOurs: 0, otherSpend: [], byFolder: {}, rejects: [],
       })));
     }
+
+    /* Every sweep ends the same way, however it was started. Put each charge on the line it
+       actually paid for and drop any copy already on file, then draw the picture of any
+       receipt whose document is on disk but whose PNG is not. This used to live only in the
+       synchronous cron path, so a detached sweep (wait=0, which is how the box runs it to
+       dodge Caddy's timeout) imported the receipts and stopped there — the console then said
+       "no image" over an invoice already sitting on disk, and charges stayed stacked under
+       one vendor name instead of on the row each one paid for. Held inside the in-flight
+       lock so the grid the owner opens next is finished, not half-swept. */
+    vault = await repairVault().catch(() => null);
+    shots = await renderMissingShots().catch((e: Error) => ({
+      checked: 0, rendered: 0, alreadyOk: 0, noSource: 0, failed: 0,
+      failures: [{ id: "-", vendor: "-", period: "-", error: e?.message || "render failed" }],
+    }));
   } finally {
     inFlight = null;
   }
-  return { ok: reports.some((r) => r.ok), reports };
+  return { ok: reports.some((r) => r.ok), reports, vault, shots };
 }
 
 function round2(n: number): number { return Math.round((Number(n) || 0) * 100) / 100; }

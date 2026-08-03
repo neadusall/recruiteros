@@ -16,7 +16,7 @@
 
 import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../../lib/linkedin/auth";
-import { harvestAll, listReceipts, renderMissingShots, repairVault } from "../../../../../lib/owner/receipts";
+import { harvestAll, listReceipts } from "../../../../../lib/owner/receipts";
 import { listSpendItems } from "../../../../../lib/owner/spendRegister";
 import { buildSpendMatrix } from "../../../../../lib/owner/spendMatrix";
 import { pullVendorApis } from "../../../../../lib/owner/vendorPullers";
@@ -61,20 +61,12 @@ async function run(req: Request) {
 
   const result = await harvestAll(monthsBack);
 
-  /* Put every charge on the line it actually paid for, and take out any copy of a charge
-     already on file. A vendor that bills several listings separately (RapidAPI bills five)
-     produces one receipt per listing, and each belongs against its own register row rather
-     than in a single undifferentiated block under the vendor's name. Cheap: no browser, no
-     network, just the vault against the register. */
-  const vault = await repairVault().catch(() => null);
-
-  /* Then give every receipt back the picture of its own document. A render can fail long
-     after the document is safely filed, and until this ran nothing ever went back for it:
-     the row said "no image" forever with the vendor's invoice sitting on disk beside it. */
-  const shots = await renderMissingShots().catch((e) => ({
-    checked: 0, rendered: 0, alreadyOk: 0, noSource: 0, failed: 0,
-    failures: [{ id: "-", vendor: "-", period: "-", error: (e as Error)?.message || "repair failed" }],
-  }));
+  /* harvestAll now relinks and renders at the end of every sweep — charges onto the line
+     each paid for (RapidAPI bills five listings, one receipt apiece, and each belongs on its
+     own row), then the picture of any document still missing one. Read its results rather
+     than running a second pass over the same vault. */
+  const vault = result.vault ?? null;
+  const shots = result.shots ?? { checked: 0, rendered: 0, alreadyOk: 0, noSource: 0, failed: 0, failures: [] };
 
   const [items, receipts] = await Promise.all([listSpendItems(), listReceipts()]);
   const matrix = buildSpendMatrix(items, receipts, { months: Math.max(6, monthsBack), inboxConfigured: true });
