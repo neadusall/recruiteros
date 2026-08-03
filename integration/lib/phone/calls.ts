@@ -32,6 +32,7 @@ import {
   callsInPipeline, getInfra, ensurePhoneReady,
 } from "./store";
 import { shouldRecord, type CallRecord, type CallTurn } from "./types";
+import { greetingUrl } from "./voicemail";
 import { sipUriFor } from "./infra";
 import { matchByPhone } from "./contacts";
 import { analysisForMotion } from "./analysis";
@@ -40,6 +41,9 @@ import { analysisForMotion } from "./analysis";
 const RING_SECONDS = 25;
 /** Pipeline stages older than this are marked failed by the sweep. */
 const PIPELINE_TIMEOUT_MIN = 20;
+/** Voicemail message limits: hard cap + hang-up-on-silence. */
+const VM_MAX_MESSAGE_SECONDS = 180;
+const VM_SILENCE_SECONDS = 10;
 
 interface LegState {
   callId?: string;
@@ -155,6 +159,8 @@ export async function handlePhoneEvent(type: string, ev: any): Promise<string> {
       return "bridged";
     case "call.hangup":
       return handleHangup(ccid, ev, state);
+    case "call.playback.ended":
+      return handlePlaybackEnded(ccid, state);
     case "call.recording.saved":
       return handleRecordingSaved(ev, state);
     case "call.recording.transcription.saved":
@@ -230,7 +236,7 @@ async function handleInboundInitiated(ccid: string, ev: any): Promise<string> {
   if (!legs.length) {
     logCallEvent(call, "no_agents", "no registered browsers to ring");
     updateCall(call, { status: "missed", endedAt: nowIso() });
-    return "no_agents";
+    return (await maybeVoicemail(call)) ? "no_agents_voicemail" : "no_agents";
   }
   updateCall(call, { agentLegs: legs });
   return `ringing_${legs.length}`;
@@ -289,6 +295,25 @@ async function handleAnswered(ccid: string, ev: any, state: LegState): Promise<s
     return "bridged_inbound";
   }
 
+  if (state.role === "pstn" && call.direction === "inbound" && call.voicemail) {
+    // The caller's leg is answered into voicemail: play the line's greeting.
+    // The rest of the flow is webhook-driven (playback ended -> beep + record).
+    const line = call.lineId ? getLine(call.workspaceId, call.lineId) : undefined;
+    const file = line?.voicemail?.file;
+    if (!file) {
+      await withWorkspaceCreds(call.workspaceId, () => telnyx.hangup(ccid)).catch(() => {});
+      return "voicemail_gone";
+    }
+    try {
+      await withWorkspaceCreds(call.workspaceId, () => telnyx.playAudio(ccid, greetingUrl(file)));
+      logCallEvent(call, "voicemail_greeting");
+    } catch (e: any) {
+      logCallEvent(call, "voicemail_error", `greeting: ${String(e?.message ?? e).slice(0, 140)}`);
+      await withWorkspaceCreds(call.workspaceId, () => telnyx.hangup(ccid)).catch(() => {});
+    }
+    return "voicemail_greeting";
+  }
+
   if (state.role === "pstn" && call.direction === "outbound") {
     // The destination answered the transferred leg.
     updateCall(call, {
@@ -334,18 +359,80 @@ export async function setRecording(call: CallRecord, on: boolean): Promise<void>
   });
 }
 
-/** Decline an inbound call from the UI: drop the caller + all ringing legs. */
+/** Decline an inbound call from the UI: stop the ringing browsers, then send
+ *  the caller to voicemail when the line has a greeting, else drop them. */
 export async function declineCall(call: CallRecord): Promise<void> {
   if (call.status !== "ringing") return;
   updateCall(call, { status: "declined", endedAt: nowIso() });
   logCallEvent(call, "declined");
   await withWorkspaceCreds(call.workspaceId, async () => {
-    if (call.telnyxCallControlId) await telnyx.hangup(call.telnyxCallControlId).catch(() => {});
     for (const leg of call.agentLegs ?? []) {
       if (leg.status === "ringing") await telnyx.hangup(leg.ccid).catch(() => {});
       leg.status = "done";
     }
   });
+  if (!(await maybeVoicemail(call)) && call.telnyxCallControlId) {
+    await withWorkspaceCreds(call.workspaceId, () =>
+      telnyx.hangup(call.telnyxCallControlId!),
+    ).catch(() => {});
+  }
+}
+
+/* ---------------- voicemail ---------------- */
+
+/**
+ * Answer an unanswered inbound caller into voicemail when the line carries a
+ * recruiter-recorded greeting. Returns false when voicemail is not possible
+ * (no greeting, no PSTN leg) so callers fall back to a plain hangup. The flow
+ * from here is webhook-driven: call.answered plays the greeting,
+ * call.playback.ended beeps and records, call.hangup files the message into
+ * the recording -> transcription pipeline on this missed-call record.
+ */
+async function maybeVoicemail(call: CallRecord): Promise<boolean> {
+  if (call.direction !== "inbound" || !call.telnyxCallControlId) return false;
+  const line = call.lineId ? getLine(call.workspaceId, call.lineId) : undefined;
+  if (!line?.voicemail?.file) return false;
+  updateCall(call, { voicemail: true, vmStage: "greeting" });
+  logCallEvent(call, "voicemail_start");
+  try {
+    await withWorkspaceCreds(call.workspaceId, () =>
+      telnyx.answerCall(call.telnyxCallControlId!, {
+        phone: 1, callId: call.id, role: "pstn", workspaceId: call.workspaceId,
+      }),
+    );
+    return true;
+  } catch (e: any) {
+    // The caller may already be gone; leave the record as a plain miss.
+    logCallEvent(call, "voicemail_error", `answer: ${String(e?.message ?? e).slice(0, 140)}`);
+    updateCall(call, { voicemail: undefined, vmStage: undefined });
+    return false;
+  }
+}
+
+/** The greeting finished playing: beep, then record the caller's message. */
+async function handlePlaybackEnded(ccid: string, state: LegState): Promise<string> {
+  const call = state.callId
+    ? getCallAnyWorkspace(state.callId)
+    : findCallByControlId(ccid);
+  if (!call || !call.voicemail || call.vmStage !== "greeting") return "ignored";
+  updateCall(call, { vmStage: "message", recording: { ...call.recording, enabled: true } });
+  const settings = getPhoneSettings(call.workspaceId, call.motion);
+  try {
+    await withWorkspaceCreds(call.workspaceId, () =>
+      telnyx.recordStart(ccid, {
+        transcription: settings.transcriptionEnabled,
+        playBeep: true,
+        channels: "single",
+        maxLengthSecs: VM_MAX_MESSAGE_SECONDS,
+        timeoutSecs: VM_SILENCE_SECONDS,
+      }),
+    );
+    logCallEvent(call, "voicemail_recording");
+  } catch (e: any) {
+    logCallEvent(call, "voicemail_error", `record: ${String(e?.message ?? e).slice(0, 140)}`);
+    await withWorkspaceCreds(call.workspaceId, () => telnyx.hangup(ccid)).catch(() => {});
+  }
+  return "voicemail_message";
 }
 
 /* ---------------- hangup ---------------- */
@@ -359,6 +446,20 @@ async function handleHangup(ccid: string, ev: any, state: LegState): Promise<str
   const cause = String(ev?.hangup_cause ?? "");
   const leg = call.agentLegs?.find((l) => l.ccid === ccid);
   if (leg) leg.status = "done";
+
+  // A voicemail leg outlives its terminal (missed/declined) status: the
+  // caller's hangup here ends the greeting-or-message flow, and a recorded
+  // message enters the pipeline exactly like a recorded call would.
+  if (call.voicemail && ccid === call.telnyxCallControlId && call.vmStage) {
+    const left = call.vmStage === "message";
+    updateCall(call, {
+      vmStage: undefined,
+      pipeline: left && call.pipeline === "idle" ? "recording" : call.pipeline,
+    });
+    logCallEvent(call, "voicemail_end", left ? "message recorded" : "hung up during greeting");
+    meterVoicemail(call);
+    return "voicemail_end";
+  }
 
   const terminal = ["completed", "missed", "declined", "canceled", "failed"];
   if (terminal.includes(call.status)) return "already_final";
@@ -385,10 +486,14 @@ async function handleHangup(ccid: string, ev: any, state: LegState): Promise<str
     if (call.status === "ringing") {
       const stillRinging = (call.agentLegs ?? []).some((l) => l.status === "ringing");
       if (!stillRinging) {
+        // Nobody picked up. Voicemail takes the caller when the line has a
+        // greeting; otherwise drop the leg as before.
         finalizeCall(call, "missed", "no_answer");
-        await withWorkspaceCreds(call.workspaceId, () =>
-          telnyx.hangup(call.telnyxCallControlId!).catch(() => {}),
-        );
+        if (!(await maybeVoicemail(call))) {
+          await withWorkspaceCreds(call.workspaceId, () =>
+            telnyx.hangup(call.telnyxCallControlId!).catch(() => {}),
+          );
+        }
       }
       return "agent_leg_down";
     }
@@ -455,6 +560,24 @@ function meterCall(call: CallRecord, ev?: any): void {
   });
 }
 
+/** Meter the answered voicemail leg (greeting + message time). The call's own
+ *  durationSec stays 0 so a voicemail never reads as a connected call. */
+function meterVoicemail(call: CallRecord): void {
+  const started = call.events.find((e) => e.type === "voicemail_start")?.at;
+  const sec = started ? Math.round((Date.now() - Date.parse(started)) / 1000) : 0;
+  if (!Number.isFinite(sec) || sec <= 0) return;
+  recordUsage({
+    workspaceId: call.workspaceId,
+    motion: call.motion,
+    category: "messaging",
+    type: "voice_minute",
+    source: "telnyx",
+    quantity: Math.ceil(sec / 60),
+    unitCostUsd: rateCost("voice_minute"),
+    meta: { callId: call.id, direction: call.direction, voicemail: true },
+  });
+}
+
 /* ---------------- recording + transcription pipeline ---------------- */
 
 function callForRecordingEvent(ev: any, state: LegState): CallRecord | undefined {
@@ -492,6 +615,13 @@ function handleRecordingSaved(ev: any, state: LegState): string {
     pipelineAttempts: 0,
   });
   logCallEvent(call, "recording_saved");
+  // A voicemail message that hit its length/silence stop leaves the caller's
+  // leg up; end it now (no-op when the caller already hung up).
+  if (call.voicemail && call.vmStage === "message" && call.telnyxCallControlId) {
+    void withWorkspaceCreds(call.workspaceId, () =>
+      telnyx.hangup(call.telnyxCallControlId!),
+    ).catch(() => {});
+  }
   return "recording_saved";
 }
 
@@ -507,14 +637,20 @@ function handleTranscriptionSaved(ev: any, state: LegState): string {
   const call = callForRecordingEvent(ev, state);
   if (!call) return "unknown_call";
   const text = String(ev?.transcription_text ?? "").trim();
-  const transcript = parseTranscriptText(text, call);
+  // A voicemail message has exactly one speaker: the caller.
+  const transcript = parseTranscriptText(text, call).map((t): CallTurn =>
+    call.voicemail ? { ...t, role: "contact" } : t,
+  );
+  // Voicemail messages get a transcript but skip the BD conversation analysis:
+  // grading a 20-second one-sided message on opportunity axes is noise.
+  const analyze = transcript.length > 0 && !call.voicemail;
   updateCall(call, {
     transcript,
-    pipeline: transcript.length ? "analyzing" : "complete",
+    pipeline: analyze ? "analyzing" : "complete",
     pipelineAttempts: 0,
   });
   logCallEvent(call, "transcribed", `${text.length} chars`);
-  if (transcript.length) {
+  if (analyze) {
     // Fire the LLM pass without blocking the webhook response.
     void runAnalysis(call).catch(() => {});
   }
@@ -583,6 +719,11 @@ export async function runAnalysis(call: CallRecord): Promise<void> {
 /** Retry a failed pipeline from whatever stage the call is stuck at. */
 export async function retryPipeline(call: CallRecord): Promise<CallRecord> {
   if (call.transcript?.length) {
+    if (call.voicemail) {
+      // A transcribed voicemail is done: there is no analysis stage to retry.
+      updateCall(call, { pipeline: "complete", pipelineError: undefined });
+      return call;
+    }
     await runAnalysis(call);
     return call;
   }

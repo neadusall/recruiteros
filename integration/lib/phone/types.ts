@@ -43,6 +43,16 @@ export interface PhoneInfra {
 
 /* ============================== lines ============================== */
 
+/** A recorded voicemail greeting attached to one line. The audio file lives
+ *  on the durable data volume; `file` is its opaque on-disk name. */
+export interface VoicemailGreeting {
+  file: string;
+  durationSec?: number;
+  recordedAt: string;
+  recordedBy: string;
+  recordedByName?: string;
+}
+
 /** A Telnyx phone number connected to the portal phone system. */
 export interface PhoneLine {
   id: string;
@@ -61,6 +71,10 @@ export interface PhoneLine {
   assignedUserIds: string[];
   /** Inbound routing enabled (number's voice points at our WebRTC connection). */
   inboundEnabled: boolean;
+  /** The recruiter-recorded voicemail greeting for this number. When present,
+   *  unanswered inbound calls are answered, the greeting plays, and the
+   *  caller's message is recorded onto the missed-call record. */
+  voicemail?: VoicemailGreeting;
   createdAt: string;
   updatedAt: string;
 }
@@ -169,6 +183,11 @@ export interface CallRecord {
   telnyxSessionId?: string;
   telnyxLegId?: string;
   hangupCause?: string;
+  /** True when the unanswered call was sent to voicemail (greeting played).
+   *  The caller's message, if left, lands in `recording` + `transcript`. */
+  voicemail?: boolean;
+  /** Where the voicemail leg is: greeting playing, or message recording. */
+  vmStage?: "greeting" | "message";
   /** Browser legs dialed for this call (inbound rings every assigned user;
    *  outbound has exactly one). First answer wins, the rest are canceled. */
   agentLegs?: Array<{ ccid: string; userId: string; status: "ringing" | "answered" | "done" }>;

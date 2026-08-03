@@ -2387,6 +2387,23 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
   transition: width 90ms linear;
 }
 
+/* -- Voicemail greeting card: per-line rows + inline recorder panel -- */
+.bdp-vm-row {
+  display: flex; align-items: center; gap: 8px; padding: 9px 4px;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.bdp-vm-row > div:first-child { flex-basis: 150px; }
+.bdp-vm-row:last-child { border-bottom: none; }
+.bdp-vm-panel {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px; margin: 2px 0 8px;
+}
+.bdp-vm-dot {
+  width: 10px; height: 10px; flex: none; border-radius: 50%;
+  background: var(--danger);
+}
+
 .bdp-digit:active .d { transform: scale(.9); }
 .bdp-digit .d { transition: transform 90ms ease; display: inline-block; }
 @media (prefers-reduced-motion: reduce) {

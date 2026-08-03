@@ -22669,6 +22669,7 @@
           '<div class="bdp-kpis" id="bdpKpis"></div>' +
           '<div class="card" style="padding:16px;margin-top:16px" id="bdpQueue"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Call queue</h4>' + loading() + "</div>" +
           '<div class="card" style="padding:16px;margin-top:16px" id="bdpRecents"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recent calls</h4>' + loading() + "</div>" +
+          '<div class="card" style="padding:16px;margin-top:16px" id="bdpVmCard"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Voicemail greeting</h4>' + loading() + "</div>" +
         "</div>" +
       "</div>";
 
@@ -22964,7 +22965,8 @@
           '<button class="bdp-row-call" data-redial="' + esc(c.externalNumber) + '" title="Call ' + esc(bdpFmtNum(c.externalNumber)) + '">' + PHONE_SVG_SM + "</button>" +
           '<div style="text-align:right;flex:none;min-width:64px">' +
             (c.durationSec ? '<div style="font:500 12px var(--mono);color:var(--text-muted)">' + bdpFmtDur(c.durationSec) + "</div>" : "") +
-            (processing ? bdpPipeBadge(c) : bdpOppPill(opp)) +
+            (processing ? bdpPipeBadge(c) : bdpOppPill(opp) ||
+              (c.voicemail ? '<span style="font:500 11px var(--font);color:var(--brand)">Voicemail</span>' : "")) +
           "</div></div>";
       }).join("");
       host.innerHTML = '<h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recent calls</h4>' +
@@ -22981,9 +22983,213 @@
       });
     }
 
+    /* -- voicemail greeting: recorded straight from the mic, per line --
+       The mic is captured through WebAudio and encoded to a compact mono WAV
+       client-side (Telnyx playback needs wav/mp3, so no MediaRecorder webm).
+       While the recorder is busy the card is under its own control and the
+       20s summary repaints leave it alone. */
+    var vmR = null;
+    var VM_MAX_SEC = 60;
+    var vmPlayer = null;
+
+    function vmCleanupAudio() {
+      if (!vmR) return;
+      try { if (vmR.proc) vmR.proc.disconnect(); } catch (e) {}
+      try { if (vmR.src) vmR.src.disconnect(); } catch (e) {}
+      try { if (vmR.gain) vmR.gain.disconnect(); } catch (e) {}
+      try { if (vmR.stream) vmR.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      try { if (vmR.actx) vmR.actx.close(); } catch (e) {}
+      if (vmR.timer) { clearInterval(vmR.timer); vmR.timer = null; }
+      vmR.proc = vmR.src = vmR.gain = vmR.stream = vmR.actx = null;
+    }
+    function vmReset() {
+      vmCleanupAudio();
+      if (vmR && vmR.url) { try { URL.revokeObjectURL(vmR.url); } catch (e) {} }
+      vmR = null;
+    }
+    function vmStartRec(lineId) {
+      vmReset();
+      vmR = { lineId: lineId, phase: "asking", chunks: [], rate: 48000, t0: 0, timer: null, blob: null, url: "", sec: 0, err: "" };
+      paintVmail(P.getState(), true);
+      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }).then(function (stream) {
+        if (!vmR || vmR.lineId !== lineId || vmR.phase !== "asking" || !document.body.contains(el)) {
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          return;
+        }
+        var AC = window.AudioContext || window.webkitAudioContext;
+        vmR.stream = stream;
+        vmR.actx = new AC();
+        vmR.rate = vmR.actx.sampleRate;
+        vmR.src = vmR.actx.createMediaStreamSource(stream);
+        vmR.proc = vmR.actx.createScriptProcessor(4096, 1, 1);
+        vmR.gain = vmR.actx.createGain();
+        vmR.gain.gain.value = 0; // keeps the graph pulling samples without echoing the mic
+        vmR.proc.onaudioprocess = function (ev) {
+          if (vmR && vmR.phase === "rec") vmR.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+        };
+        vmR.src.connect(vmR.proc);
+        vmR.proc.connect(vmR.gain);
+        vmR.gain.connect(vmR.actx.destination);
+        vmR.phase = "rec";
+        vmR.t0 = Date.now();
+        vmR.timer = setInterval(function () {
+          if (!document.body.contains(el)) { vmReset(); return; }
+          if (!vmR || vmR.phase !== "rec") return;
+          var sec = Math.floor((Date.now() - vmR.t0) / 1000);
+          var t = $("#bdpVmTimer");
+          if (t) t.textContent = bdpFmtDur(sec) + " / " + bdpFmtDur(VM_MAX_SEC);
+          if (sec >= VM_MAX_SEC) vmStopRec();
+        }, 250);
+        paintVmail(P.getState(), true);
+      }).catch(function () {
+        if (!vmR) return;
+        vmR.phase = "error";
+        vmR.err = "Microphone access is blocked. Allow the microphone in your browser and try again.";
+        paintVmail(P.getState(), true);
+      });
+    }
+    function vmStopRec() {
+      if (!vmR || vmR.phase !== "rec") return;
+      vmR.sec = Math.max(1, Math.round((Date.now() - vmR.t0) / 1000));
+      var chunks = vmR.chunks, rate = vmR.rate;
+      vmCleanupAudio();
+      vmR.chunks = [];
+      var wav = vmEncodeWav(chunks, rate, 16000);
+      if (!wav) { vmReset(); toast("Nothing was recorded. Try again."); paintVmail(P.getState(), true); return; }
+      vmR.phase = "preview";
+      vmR.blob = wav;
+      vmR.url = URL.createObjectURL(wav);
+      paintVmail(P.getState(), true);
+    }
+    function vmSave() {
+      if (!vmR || !vmR.blob || vmR.phase !== "preview") return;
+      vmR.phase = "saving";
+      paintVmail(P.getState(), true);
+      var lineId = vmR.lineId, sec = vmR.sec;
+      var fr = new FileReader();
+      fr.onload = function () {
+        var b64 = String(fr.result || "").replace(/^data:[^,]*,/, "");
+        send("/phone/voicemail", "POST", { action: "save", lineId: lineId, audio: b64, durationSec: sec }).then(function (r) {
+          if (!r.ok) {
+            if (vmR) vmR.phase = "preview";
+            toast((r.data && r.data.error) || "Could not save the greeting");
+            paintVmail(P.getState(), true);
+            return;
+          }
+          vmReset();
+          toast("Voicemail greeting saved");
+          P.refreshSummary().catch(function () {});
+        });
+      };
+      fr.readAsDataURL(vmR.blob);
+    }
+    function vmRemove(lineId) {
+      send("/phone/voicemail", "POST", { action: "remove", lineId: lineId }).then(function (r) {
+        if (!r.ok) { toast((r.data && r.data.error) || "Could not remove the greeting"); return; }
+        toast("Voicemail greeting removed");
+        P.refreshSummary().catch(function () {});
+      });
+    }
+    /** Mono 16-bit PCM WAV from captured Float32 chunks, downsampled to outRate. */
+    function vmEncodeWav(chunks, srcRate, outRate) {
+      var total = 0, i;
+      for (i = 0; i < chunks.length; i++) total += chunks[i].length;
+      if (!total) return null;
+      var all = new Float32Array(total), off = 0;
+      for (i = 0; i < chunks.length; i++) { all.set(chunks[i], off); off += chunks[i].length; }
+      var ratio = srcRate / outRate;
+      var outLen = Math.floor(all.length / ratio);
+      if (!outLen) return null;
+      var pcm = new Int16Array(outLen);
+      for (i = 0; i < outLen; i++) {
+        var s = Math.max(-1, Math.min(1, all[Math.floor(i * ratio)]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      var buf = new ArrayBuffer(44 + pcm.length * 2);
+      var v = new DataView(buf);
+      function wstr(o, str) { for (var j = 0; j < str.length; j++) v.setUint8(o + j, str.charCodeAt(j)); }
+      wstr(0, "RIFF"); v.setUint32(4, 36 + pcm.length * 2, true); wstr(8, "WAVE");
+      wstr(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, outRate, true); v.setUint32(28, outRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      wstr(36, "data"); v.setUint32(40, pcm.length * 2, true);
+      for (i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, pcm[i], true);
+      return new Blob([buf], { type: "audio/wav" });
+    }
+
+    function paintVmail(st, force) {
+      var host = $("#bdpVmCard"); if (!host) return;
+      // The recorder owns the card while it is busy; background repaints wait.
+      if (vmR && !force) return;
+      var lines = (st.summary && st.summary.lines) || [];
+      var head4 = '<h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Voicemail greeting</h4>';
+      if (!lines.length) {
+        host.innerHTML = head4 + '<div style="font:400 12.5px var(--font);color:var(--text-dim)">Once a number is assigned to you, record your greeting here.</div>';
+        return;
+      }
+      var html = head4 +
+        '<div style="font:400 12px var(--font);color:var(--text-dim);margin:-2px 0 10px;line-height:1.5">Callers hear your greeting when you cannot answer. Their message is recorded and lands in your call history.</div>';
+      lines.forEach(function (l) {
+        var mineRow = vmR && vmR.lineId === l.id;
+        html += '<div class="bdp-vm-row">' +
+          '<div style="min-width:0;flex:1"><div style="font:500 13px var(--font);color:var(--text)">' +
+            esc(l.label && l.label !== l.e164 ? l.label + " · " + bdpFmtNum(l.e164) : bdpFmtNum(l.e164)) + "</div>" +
+          '<div style="font:400 11.5px var(--font);color:var(--text-dim)">' +
+          (l.voicemail
+            ? "Recorded " + esc(bdpFmtWhen(l.voicemail.recordedAt)) + (l.voicemail.durationSec ? " · " + l.voicemail.durationSec + "s" : "")
+            : "No greeting yet") + "</div></div>";
+        if (!mineRow) {
+          if (l.voicemail) {
+            html += '<button class="btn btn-sm" data-vmplay="' + esc(l.voicemail.file) + '">Listen</button>' +
+              '<button class="btn btn-sm" data-vmrec="' + esc(l.id) + '">Re-record</button>' +
+              '<button class="btn btn-sm" data-vmdel="' + esc(l.id) + '" title="Remove the greeting. Unanswered calls just ring out.">Remove</button>';
+          } else {
+            html += '<button class="btn btn-sm btn-primary" data-vmrec="' + esc(l.id) + '">Record</button>';
+          }
+        }
+        html += "</div>";
+        if (mineRow) {
+          if (vmR.phase === "asking") {
+            html += '<div class="bdp-vm-panel"><span style="font:400 12.5px var(--font);color:var(--text-dim)">Waiting for microphone access.</span></div>';
+          } else if (vmR.phase === "rec") {
+            html += '<div class="bdp-vm-panel"><span class="bdp-vm-dot"></span>' +
+              '<span style="font:500 13px var(--mono);color:var(--text)" id="bdpVmTimer">0:00 / ' + bdpFmtDur(VM_MAX_SEC) + "</span>" +
+              '<button class="btn btn-sm btn-primary" id="bdpVmStop" style="margin-left:auto">Stop</button></div>';
+          } else if (vmR.phase === "preview" || vmR.phase === "saving") {
+            html += '<div class="bdp-vm-panel" style="flex-wrap:wrap">' +
+              '<audio controls src="' + vmR.url + '" style="width:100%;height:32px"></audio>' +
+              '<span style="font:400 12px var(--font);color:var(--text-dim)">' + vmR.sec + 's recorded. Listen back, then save it.</span>' +
+              '<span style="margin-left:auto;display:inline-flex;gap:8px">' +
+              '<button class="btn btn-sm" id="bdpVmDiscard"' + (vmR.phase === "saving" ? " disabled" : "") + ">Discard</button>" +
+              '<button class="btn btn-sm btn-primary" id="bdpVmSave"' + (vmR.phase === "saving" ? " disabled" : "") + ">" + (vmR.phase === "saving" ? "Saving" : "Save greeting") + "</button></span></div>";
+          } else if (vmR.phase === "error") {
+            html += '<div class="bdp-vm-panel"><span style="font:400 12.5px var(--font);color:var(--danger)">' + esc(vmR.err) + "</span>" +
+              '<button class="btn btn-sm" id="bdpVmDismiss" style="margin-left:auto">Dismiss</button></div>';
+          }
+        }
+      });
+      host.innerHTML = html;
+      Array.prototype.forEach.call(host.querySelectorAll("[data-vmrec]"), function (b) {
+        b.addEventListener("click", function () { vmStartRec(b.getAttribute("data-vmrec")); });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-vmdel]"), function (b) {
+        b.addEventListener("click", function () { vmRemove(b.getAttribute("data-vmdel")); });
+      });
+      Array.prototype.forEach.call(host.querySelectorAll("[data-vmplay]"), function (b) {
+        b.addEventListener("click", function () {
+          try { if (vmPlayer) { vmPlayer.pause(); vmPlayer = null; } } catch (e) {}
+          vmPlayer = new Audio(API + "/phone/voicemail/audio/" + encodeURIComponent(b.getAttribute("data-vmplay")));
+          vmPlayer.play().catch(function () { toast("Could not play the greeting"); });
+        });
+      });
+      var vs = $("#bdpVmStop"); if (vs) vs.addEventListener("click", vmStopRec);
+      var sv = $("#bdpVmSave"); if (sv) sv.addEventListener("click", vmSave);
+      var dc = $("#bdpVmDiscard"); if (dc) dc.addEventListener("click", function () { vmReset(); paintVmail(P.getState(), true); });
+      var dm = $("#bdpVmDismiss"); if (dm) dm.addEventListener("click", function () { vmReset(); paintVmail(P.getState(), true); });
+    }
+
     var lastPhase = null;
     var unsub = P.subscribe(function (st) {
-      if (!document.body.contains(el)) { unsub(); return; }
+      if (!document.body.contains(el)) { unsub(); vmReset(); return; }
       banner(st);
       // Full repaint of the dialer only when the phase changes (typing must not
       // be clobbered); live-call panel repaints on every tick for the timer.
@@ -22992,10 +23198,11 @@
       paintKpis(st);
       paintQueue(st);
       paintRecents(st);
+      paintVmail(st);
     });
 
     var st0 = P.getState();
-    banner(st0); paintDialer(st0); paintKpis(st0); paintQueue(st0); paintRecents(st0);
+    banner(st0); paintDialer(st0); paintKpis(st0); paintQueue(st0); paintRecents(st0); paintVmail(st0);
     P.refreshSummary().catch(function () {});
     P.refreshDevices();
     // Adaptive refresh: tighten to 6s while any recent call is still moving
@@ -23078,7 +23285,7 @@
     function bdpHistRow(c) {
       var opp = bdpEff(c, "opportunity").value;
       var missed = c.status === "missed" || c.status === "declined";
-      var statusTxt = missed ? (c.status === "declined" ? "Declined" : "Missed") :
+      var statusTxt = missed ? (c.voicemail ? "Voicemail" : c.status === "declined" ? "Declined" : "Missed") :
         c.status === "failed" ? "Failed" : c.status === "canceled" ? "Canceled" :
         c.durationSec ? bdpFmtDur(c.durationSec) : "";
       return '<div class="list-row clickable" data-call="' + esc(c.id) + '" style="display:flex;align-items:center;gap:12px;padding:10px 4px">' +
@@ -23234,7 +23441,9 @@
                : '<div style="font:400 12.5px var(--font);color:var(--text-dim)">None agreed</div>') + "</div>";
       } else if (!pipeHtml) {
         left += '<div class="empty">' + (missed
-          ? "No conversation to analyze: the call was never answered."
+          ? (call.voicemail
+              ? "This call went to voicemail. The caller's message and transcript are on this page."
+              : "No conversation to analyze: the call was never answered.")
           : call.recording && call.recording.enabled === false
             ? "This call was not recorded, so there is no transcript or AI analysis. Recording settings control this."
             : "No AI analysis for this call.") + "</div>";
@@ -23279,7 +23488,7 @@
         '<dl class="bdp-kv" style="margin:12px 0 0">' +
           "<dt>Number</dt><dd>" + esc(bdpFmtNum(call.externalNumber)) + "</dd>" +
           "<dt>Direction</dt><dd>" + (call.direction === "inbound" ? "Inbound" : "Outbound") + "</dd>" +
-          "<dt>Status</dt><dd>" + esc(call.status) + (call.hangupCause && call.status === "failed" ? " (" + esc(call.hangupCause) + ")" : "") + "</dd>" +
+          "<dt>Status</dt><dd>" + esc(call.status) + (call.voicemail ? " · voicemail" : "") + (call.hangupCause && call.status === "failed" ? " (" + esc(call.hangupCause) + ")" : "") + "</dd>" +
           "<dt>When</dt><dd>" + bdpFmtWhen(call.startedAt) + "</dd>" +
           (call.durationSec ? "<dt>Duration</dt><dd>" + bdpFmtDur(call.durationSec) + "</dd>" : "") +
           (call.lineNumber ? "<dt>Line</dt><dd>" + esc(bdpFmtNum(call.lineNumber)) + "</dd>" : "") +
@@ -23291,7 +23500,7 @@
         "</div>";
 
       if (call.recording && (call.recording.recordingId || call.recording.url)) {
-        right += '<div class="card" style="padding:16px;margin-top:16px"><h4 style="margin:0 0 8px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recording</h4>' +
+        right += '<div class="card" style="padding:16px;margin-top:16px"><h4 style="margin:0 0 8px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">' + (call.voicemail ? "Voicemail message" : "Recording") + "</h4>" +
           '<audio class="bdp-audio" controls preload="none" src="' + API + "/phone/calls/" + esc(call.id) + '/recording"></audio></div>';
       }
 

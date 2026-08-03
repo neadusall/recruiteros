@@ -355,14 +355,31 @@ export class TelnyxClient extends ProviderClient {
    * (speaker separation); the transcription flags produce a post-call
    * `call.recording.transcription.saved` webhook so nothing polls.
    */
-  recordStart(callControlId: string, opts?: { transcription?: boolean; transcriptionEngine?: string }) {
+  recordStart(
+    callControlId: string,
+    opts?: {
+      transcription?: boolean;
+      transcriptionEngine?: string;
+      /** Voicemail: beep before recording so the caller knows when to talk. */
+      playBeep?: boolean;
+      /** Hard stop after N seconds (Telnyx max_length). */
+      maxLengthSecs?: number;
+      /** Stop after N seconds of silence (Telnyx timeout_secs). */
+      timeoutSecs?: number;
+      /** Voicemail messages are one-sided; "single" halves the audio. */
+      channels?: "single" | "dual";
+    },
+  ) {
     return this.request({
       method: "POST",
       path: `/calls/${encodeURIComponent(callControlId)}/actions/record_start`,
       body: {
         format: "mp3",
-        channels: "dual",
+        channels: opts?.channels ?? "dual",
         recording_track: "both",
+        ...(opts?.playBeep ? { play_beep: true } : {}),
+        ...(opts?.maxLengthSecs ? { max_length: opts.maxLengthSecs } : {}),
+        ...(opts?.timeoutSecs ? { timeout_secs: opts.timeoutSecs } : {}),
         ...(opts?.transcription
           ? {
               transcription: true,
