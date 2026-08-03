@@ -258,6 +258,15 @@
   .meter i{display:block;height:100%;background:var(--accent);border-radius:999px}
   .kv{display:flex;gap:8px;font-size:12.5px;margin:4px 0;color:var(--mut)}
   .kv b{color:var(--ink);min-width:130px;font-weight:600}
+  .setup{margin-bottom:14px}
+  .su-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .su-head b{font-size:13.5px}
+  .su-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
+  .su-row .su-t{flex:1;color:var(--ink)}
+  .su-row.done .su-t{color:var(--faint);text-decoration:line-through}
+  .su-check{width:18px;height:18px;color:var(--faint);flex:none;display:inline-flex}
+  .su-row.done .su-check{color:var(--ok)}
+  .su-check svg{width:18px;height:18px}
 
   #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(8px);background:var(--ink);color:var(--bg);
     font-size:13px;padding:9px 16px;border-radius:var(--rad);opacity:0;pointer-events:none;transition:.18s;z-index:50;max-width:80vw}
@@ -378,7 +387,12 @@
           <label>Card byline</label>
           <input type="text" id="setHeadline" placeholder="Recruiter · placing sales talent in the Midwest" />
           <label>Voice profile</label>
-          <textarea id="setVoice" rows="6" placeholder="How you sound: direct, warm, short sentences. What you care about. What you would never say."></textarea>
+          <div class="btnrow" style="margin:0 0 6px">
+            <button class="btn small" data-voice="direct">Direct operator</button>
+            <button class="btn small" data-voice="warm">Warm storyteller</button>
+            <button class="btn small" data-voice="analyst">Market analyst</button>
+          </div>
+          <textarea id="setVoice" rows="6" placeholder="How you sound: direct, warm, short sentences. What you care about. What you would never say. Or tap a starter above and edit it."></textarea>
           <label>Real story bank</label>
           <textarea id="setStories" rows="7" placeholder="True anecdotes the rewriter may use, one per line. It never invents stories; it only draws from these."></textarea>
           <label>Brand</label>
@@ -437,6 +451,8 @@
   var pvOpen = false;       // preview fold expanded
   var pickOpen = false;     // media picker open for selected draft
   var hooksOpen = false;
+  var regenOpen = false;    // inline "direction" row for Regenerate
+  var cardOpen = false;     // inline headline row for Quote card
 
   /* ------------------------------ utils ------------------------------ */
   function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -601,7 +617,9 @@
     var today = new Date().toDateString();
     var postedToday = S.drafts.some(function (d) { return d.status === "posted" && d.postedAt && new Date(d.postedAt).toDateString() === today; });
     var slot = nextFreeSlot();
+    var open = setupSteps().filter(function (s) { return !s.done; }).length;
     el.innerHTML =
+      (open ? '<span class="tp" data-go="studio"><span class="d warn"></span>Finish setup&nbsp;<b>' + (4 - open) + " of 4</b></span>" : "") +
       '<span class="tp" data-go="studio"><span class="d ' + (waiting ? "acc" : "ok") + '"></span>' + (waiting ? "<b>" + waiting + "</b>&nbsp;waiting for your approve" : "Nothing waiting on you") + "</span>" +
       '<span class="tp" data-go="calendar"><span class="d ' + (postedToday ? "ok" : "warn") + '"></span>' + (postedToday ? "Posted today" : "Nothing published yet today") + "</span>" +
       '<span class="tp" data-go="calendar"><b>' + queued + "</b>&nbsp;scheduled</span>" +
@@ -614,17 +632,49 @@
   /* ---------- Studio: rail + workspace ---------- */
   function studioList() { return S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; }); }
 
+  function setupSteps() {
+    var st = S.settings || {};
+    return [
+      { done: !!(String(st.voiceProfile || "").trim() && String(st.brandLine || "").trim()), t: "Teach it your voice and brand", go: "settings", cta: "Open Settings" },
+      { done: !!(String(st.postingDays || "").trim() && String(st.postingTimes || "").trim()), t: "Save a posting schedule", go: "settings", cta: "Pick slots" },
+      { done: !!((S.watchlist || []).length || S.inbox.length || S.drafts.length), t: "Follow a creator or save a post you like", go: "create", cta: "Open Sources" },
+      { done: !!((S.engine && S.engine.ready) || S.publishVia === "ayrshare"), t: "Connect your LinkedIn account in the LinkedIn tool", go: null, cta: "" },
+    ];
+  }
+  function checkSvg(on) {
+    return on
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/></svg>';
+  }
+  function setupChecklistHtml() {
+    var steps = setupSteps();
+    var open = steps.filter(function (s) { return !s.done; }).length;
+    if (!open) return "";
+    return '<div class="card setup"><div class="su-head"><b>Set up once, then it runs itself</b>' +
+      '<span class="statchip">' + (steps.length - open) + " of " + steps.length + " done</span></div>" +
+      steps.map(function (s) {
+        return '<div class="su-row' + (s.done ? " done" : "") + '"><span class="su-check">' + checkSvg(s.done) + "</span>" +
+          '<span class="su-t">' + esc(s.t) + "</span>" +
+          (!s.done && s.go ? '<button class="btn small" data-go="' + s.go + '">' + esc(s.cta) + "</button>" : "") +
+          "</div>";
+      }).join("") + "</div>";
+  }
+
   function renderStudio() {
     var list = studioList();
     var n = document.getElementById("studioNotices");
-    n.innerHTML = !S.anthropicConfigured ? '<div class="notice">AI is not enabled on the server yet, so the rewriter is offline. You can still write and publish posts manually.</div>' : "";
+    n.innerHTML = setupChecklistHtml() +
+      (!S.anthropicConfigured ? '<div class="notice">AI is not enabled on the server yet, so the rewriter is offline. You can still write and publish posts manually.</div>' : "");
     if (!list.length) {
       document.getElementById("draftRail").innerHTML = "";
       document.getElementById("draftWork").innerHTML =
-        '<div class="empty"><b>No drafts waiting</b>Pull ideas in the Sources tab, write an original post, or spotlight an open job. Every draft lands here for a quick approve or discard.</div>';
+        '<div class="empty"><b>No drafts waiting</b>Pull ideas in the Sources tab, or create something right now.' +
+        '<div class="btnrow" style="justify-content:center;margin-top:14px">' +
+        '<button class="btn primary" data-act="quick-original">Write an original post</button>' +
+        '<button class="btn" data-act="quick-job">Spotlight an open job</button></div></div>';
       return;
     }
-    if (!sel || !list.some(function (d) { return d.id === sel; })) { sel = list[0].id; pvOpen = false; pickOpen = false; hooksOpen = false; }
+    if (!sel || !list.some(function (d) { return d.id === sel; })) { sel = list[0].id; pvOpen = false; pickOpen = false; hooksOpen = false; regenOpen = false; cardOpen = false; }
     var rail = list.map(function (d) {
       var img = d.imageId ? imgById(d.imageId) : null;
       var chip = d.status === "failed" ? '<span class="badge failed">failed</span>'
@@ -721,22 +771,32 @@
       (d.error ? '<div class="errbox">Publish failed: ' + esc(d.error) + "</div>" : "") +
       '<div class="imgrow">' +
       '<button class="btn small" data-act="choose-img" data-id="' + d.id + '">' + (img ? "Change media" : "Attach media") + "</button>" +
-      '<button class="btn small" data-act="make-card" data-id="' + d.id + '">Quote card</button>' +
+      '<button class="btn small" data-act="open-card" data-id="' + d.id + '">Quote card</button>' +
       '<button class="btn small" data-act="make-carousel" data-id="' + d.id + '">Carousel</button>' +
       (img ? '<span class="sub">' + esc(img.name) + "</span>" : '<span class="sub">No media attached.</span>') +
-      "</div>" + chooser + slides +
+      "</div>" + chooser +
+      '<div class="schedrow' + (cardOpen ? " open" : "") + '"><input type="text" id="card-headline" style="flex:1;min-width:200px" maxlength="140" value="' + esc(firstLine(d.text).slice(0, 140)) + '" />' +
+      '<button class="btn primary small" data-act="card-confirm" data-id="' + d.id + '">Render card</button>' +
+      '<button class="btn small" data-act="card-cancel" data-id="' + d.id + '">Cancel</button></div>' + slides +
       '<label>First comment (links belong here, not in the post)</label>' +
       '<textarea rows="2" maxlength="1200" data-act="edit-fc" data-id="' + d.id + '" placeholder="Optional. Posts by itself right after the post publishes.">' + esc(d.firstComment || "") + "</textarea>" +
       (d.sourceText ? '<details class="cmp"><summary>Compare with the original post</summary><div class="src">' + esc(d.sourceText) + "</div></details>" : "") +
       '<div class="btnrow">' +
       (d.status === "failed"
         ? '<button class="btn primary" data-act="retry" data-id="' + d.id + '">Retry publish</button>'
-        : '<button class="btn primary" data-act="post-now" data-id="' + d.id + '">Approve + post now</button>' +
-          '<button class="btn" data-act="post-slot" data-id="' + d.id + '">Approve + next slot</button>' +
-          '<button class="btn" data-act="open-sched" data-id="' + d.id + '">Approve + schedule</button>') +
-      '<button class="btn" data-act="regen" data-id="' + d.id + '">Regenerate</button>' +
+        : (function () {
+            var slot = nextFreeSlot();
+            return '<button class="btn primary" data-act="post-now" data-id="' + d.id + '">Approve + post now</button>' +
+              '<button class="btn" data-act="post-slot" data-id="' + d.id + '">' +
+              (slot ? "Approve + " + slot.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) : "Approve + next slot") + "</button>" +
+              '<button class="btn" data-act="open-sched" data-id="' + d.id + '">Pick a time</button>';
+          })()) +
+      '<button class="btn" data-act="open-regen" data-id="' + d.id + '">Regenerate</button>' +
       '<button class="btn danger" data-act="discard" data-id="' + d.id + '">Discard</button>' +
       "</div>" +
+      '<div class="schedrow' + (regenOpen ? " open" : "") + '"><input type="text" id="regen-dir" style="flex:1;min-width:200px" placeholder="Optional direction, e.g. shorter and punchier, lead with the question" />' +
+      '<button class="btn primary small" data-act="regen-confirm" data-id="' + d.id + '">Rewrite</button>' +
+      '<button class="btn small" data-act="regen-cancel" data-id="' + d.id + '">Cancel</button></div>' +
       '<div class="schedrow" id="sched-' + d.id + '"><input type="datetime-local" id="when-' + d.id + '" />' +
       '<button class="btn primary small" data-act="sched-confirm" data-id="' + d.id + '">Schedule</button>' +
       '<button class="btn small" data-act="sched-cancel" data-id="' + d.id + '">Cancel</button></div>' +
@@ -1012,10 +1072,9 @@
   }
 
   document.getElementById("btnOriginal").addEventListener("click", function () {
-    var topic = prompt("Topic or angle? (optional, blank lets the writer pick)") || "";
     var btn = this; busy(btn, true, "Writing…");
-    api("make_original", { guidance: topic })
-      .then(function () { showView("studio"); toast("Original draft ready for your review."); return load(); })
+    api("make_original", {})
+      .then(function () { showView("studio"); toast("Original draft ready. Want it steered? Use Regenerate with direction."); return load(); })
       .catch(function (e) { toast(e.message); })
       .then(function () { busy(btn, false); });
   });
@@ -1105,10 +1164,31 @@
 
   // Delegated clicks for everything else.
   document.body.addEventListener("click", function (e) {
+    var g = e.target.closest("[data-go]");
+    if (g && !g.closest("#todayBar")) { showView(g.dataset.go); return; }
+    var vt = e.target.closest("[data-voice]");
+    if (vt) {
+      var TPL = {
+        direct: "Direct and plainspoken. Short sentences. I say the quiet part out loud, kindly. I care about candidates being treated like adults and clients moving fast. No corporate filler, no buzzwords, no hype.",
+        warm: "Warm and story-first. I write like I talk on the phone: personal, specific, a little wry. Every post starts with a person or a moment, not a claim. Encouraging, never preachy.",
+        analyst: "Calm market watcher. I connect what I see across searches into patterns. Measured claims, concrete observations, no drama. I would rather be useful than viral."
+      };
+      document.getElementById("setVoice").value = TPL[vt.dataset.voice] || "";
+      toast("Starting voice dropped in. Edit it to fit, then Save settings.");
+      return;
+    }
     var b = e.target.closest("[data-act]"); if (!b) return;
     var act = b.dataset.act, id = b.dataset.id;
+    if (act === "quick-original" || act === "quick-job") {
+      busy(b, true, "Writing…");
+      api(act === "quick-original" ? "make_original" : "make_job_post", {})
+        .then(function () { toast(act === "quick-original" ? "Original draft ready for your review." : "Job spotlight ready. The client is never named."); return load(); })
+        .catch(function (err) { toast(/^no_open_jobs/.test(err.message || "") ? "No open jobs in the Job Library yet." : err.message); })
+        .then(function () { busy(b, false); });
+      return;
+    }
     if (act === "sel-draft") {
-      sel = id; pvOpen = false; pickOpen = false; hooksOpen = false; renderStudio();
+      sel = id; pvOpen = false; pickOpen = false; hooksOpen = false; regenOpen = false; cardOpen = false; renderStudio();
     } else if (act === "fold") {
       pvOpen = !pvOpen; var dd = draftById(sel); if (dd) document.getElementById("pvHost").innerHTML = liPreview(dd);
     } else if (act === "fmt-bold" || act === "fmt-italic") {
@@ -1139,11 +1219,18 @@
         .catch(function (err) { toast(err.message); busy(b, false); });
     } else if (act === "del-insp") {
       api("delete_inspiration", { id: id }).then(load).catch(function (err) { toast(err.message); });
-    } else if (act === "regen") {
-      var guidance = prompt("Any direction for the rewrite? (optional)") || "";
+    } else if (act === "open-regen") {
+      regenOpen = !regenOpen; cardOpen = false;
+      var dr = draftById(sel); if (dr) document.getElementById("draftWork").innerHTML = workspaceHtml(dr);
+      var ri = document.getElementById("regen-dir"); if (ri && regenOpen) ri.focus();
+    } else if (act === "regen-cancel") {
+      regenOpen = false; var dr2 = draftById(sel); if (dr2) document.getElementById("draftWork").innerHTML = workspaceHtml(dr2);
+    } else if (act === "regen-confirm") {
+      var dirEl = document.getElementById("regen-dir");
       busy(b, true, "Rewriting…");
-      api("regenerate", { draftId: id, guidance: guidance })
-        .then(load).catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
+      api("regenerate", { draftId: id, guidance: dirEl ? dirEl.value : "" })
+        .then(function () { regenOpen = false; return load(); })
+        .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "discard") {
       api("discard_draft", { draftId: id }).then(function () { toast("Discarded."); return load(); }).catch(function (err) { toast(err.message); });
     } else if (act === "post-now") {
@@ -1156,11 +1243,14 @@
     } else if (act === "post-slot") {
       var slot = nextFreeSlot();
       if (!slot) { toast("Set your posting schedule in Settings first."); showView("settings"); return; }
-      if (!confirm("Schedule this post for " + slot.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "?")) return;
       flushDraftText(id);
+      busy(b, true, "Scheduling…");
       api("approve", { draftId: id, when: slot.toISOString() })
-        .then(function () { toast("Scheduled."); showView("calendar"); return load(); })
-        .catch(function (err) { toast(err.message); });
+        .then(function () {
+          toast("Scheduled for " + slot.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) + ". Change it anytime in Calendar.");
+          return load();
+        })
+        .catch(function (err) { toast(err.message); busy(b, false); });
     } else if (act === "open-sched") {
       var row = document.getElementById("sched-" + id); if (row) row.classList.add("open");
     } else if (act === "sched-cancel") {
@@ -1188,14 +1278,20 @@
     } else if (act === "clear-img") {
       api("update_draft", { draftId: id, imageId: null })
         .then(function () { pickOpen = false; return load(); }).catch(function (err) { toast(err.message); });
-    } else if (act === "make-card") {
-      var d6 = draftById(id);
-      var headline = prompt("Card headline:", (d6 ? firstLine(d6.text) : "").slice(0, 140));
-      if (!headline) return;
+    } else if (act === "open-card") {
+      cardOpen = !cardOpen; regenOpen = false; pickOpen = false;
+      var dc = draftById(sel); if (dc) document.getElementById("draftWork").innerHTML = workspaceHtml(dc);
+      var ci = document.getElementById("card-headline"); if (ci && cardOpen) ci.focus();
+    } else if (act === "card-cancel") {
+      cardOpen = false; var dc2 = draftById(sel); if (dc2) document.getElementById("draftWork").innerHTML = workspaceHtml(dc2);
+    } else if (act === "card-confirm") {
+      var hEl = document.getElementById("card-headline");
+      var headline = (hEl ? hEl.value : "").trim();
+      if (!headline) { toast("Give the card a headline."); return; }
       busy(b, true, "Rendering…");
       api("make_card", { headline: headline })
         .then(function (r) { return api("update_draft", { draftId: id, imageId: r.image.id }); })
-        .then(function () { toast("Quote card attached."); return load(); })
+        .then(function () { cardOpen = false; toast("Quote card attached."); return load(); })
         .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "make-carousel") {
       flushDraftText(id);

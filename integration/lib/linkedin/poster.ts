@@ -278,6 +278,19 @@ function parseLinkedInIdentifier(input: string): string | null {
   return null;
 }
 
+/** "-catherinejohnson" / "max-hansen-1a2b3c" -> "Catherinejohnson" / "Max Hansen".
+ *  Best-effort display name when the recruiter leaves the name blank; the raw
+ *  slug stays the identifier. */
+function slugToName(slug: string): string {
+  const words = slug
+    .replace(/%[0-9a-f]{2}/gi, " ")
+    .split(/[-_.\s]+/)
+    .filter((w) => w && !/^\d+$/.test(w) && !/^[0-9a-f]{6,}$/i.test(w));
+  if (!words.length) return slug;
+  const name = words.map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+  return /^[A-Za-z .']{2,60}$/.test(name) ? name : slug;
+}
+
 export async function addWatchedProfile(ws: string, opts: { name?: string; url: string }): Promise<WatchedProfile> {
   await ensureLoaded();
   const s = wsState(ws);
@@ -291,7 +304,7 @@ export async function addWatchedProfile(ws: string, opts: { name?: string; url: 
   }
   const w: WatchedProfile = {
     id: rid(),
-    name: (opts.name ?? "").trim() || identifier,
+    name: (opts.name ?? "").trim() || slugToName(identifier),
     identifier,
     addedAt: nowIso(),
     seenPostIds: [],
