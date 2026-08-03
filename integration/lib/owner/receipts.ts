@@ -1507,6 +1507,51 @@ export async function addManualReceipt(input: {
 }
 
 /**
+ * Give an existing receipt the document it never had.
+ *
+ * The vault is full of charges that are real and proven by the figure but carry no
+ * picture: a vendor that emails a plain-text confirmation, one whose invoice sits behind
+ * a login, a month pulled from a billing API where no document was ever issued. Until now
+ * the only way to put a document against one of those was to attach a NEW receipt beside
+ * it, which left the books showing the same charge twice and made the coverage figure
+ * lie in the other direction.
+ *
+ * So this replaces the artifact on a row that already exists: same id, same figures, same
+ * line item, same place in the grid. The row keeps whatever the owner has already
+ * corrected; only the document and the picture drawn from it change.
+ *
+ * A failed render is not a failed attach. The vendor's own file is written to disk BEFORE
+ * the render is attempted, so a PDF that Chromium chokes on still leaves the real document
+ * downloadable and reports the reason, rather than losing the upload entirely.
+ */
+export async function attachDocument(
+  id: string,
+  file: { bytes: Buffer; mime: string; name: string },
+): Promise<{ ok: boolean; receipt?: Receipt; error?: string }> {
+  await ensureReceiptsReady();
+  const r = store.receipts.find((x) => x.id === id);
+  if (!r) return { ok: false, error: "not_found" };
+
+  /* Replacing a document means the old picture is wrong. Clear it first so a failed
+     render can never leave the previous invoice's image sitting under the new file. */
+  await removeArtifacts(id).catch(() => {});
+  await saveArtifact(id, `src.${extFromMime(file.mime, file.name)}`, file.bytes).catch(() => {});
+  const shot = await renderShot(id, shotInputFor(file));
+
+  r.fileName = file.name;
+  r.fileMime = file.mime;
+  r.fileBytes = file.bytes.length;
+  r.hasShot = shot.ok;
+  r.shotError = shot.error;
+  r.shotVersion = shot.ok ? SHOT_VERSION : undefined;
+  /* An owner who went and fetched the invoice by hand has reviewed this row by doing it. */
+  r.reviewed = true;
+  r.updatedAt = nowIso();
+  persist();
+  return { ok: true, receipt: r };
+}
+
+/**
  * File (or refresh) a figure pulled straight from a vendor's billing API. Keyed on
  * vendor + period + reference so re-running a puller corrects the month in place instead
  * of stacking duplicates: a mid-month pull is a running figure that the next pull

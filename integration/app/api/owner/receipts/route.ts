@@ -33,7 +33,7 @@ import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
   pullerStates, lastPullerReportAt, renderMissingShots, repairVault, vaultHealth,
-  collapseToOnePerCell, collapseToOnePerCellOnce, purgeJunkEmail, purgeJunkEmailOnce,
+  collapseToOnePerCell, collapseToOnePerCellOnce, purgeJunkEmail, purgeJunkEmailOnce, attachDocument,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
@@ -161,6 +161,26 @@ export async function POST(req: Request) {
     const form = await req.formData().catch(() => null);
     if (!form) return fail("bad_form", 400);
     const file = form.get("file");
+
+    /* ATTACHING TO A ROW THAT ALREADY EXISTS, rather than filing a new one beside it.
+       Plenty of real charges are proven by their figure and have no picture: a plain-text
+       confirmation, an invoice behind a login, a month pulled from a billing API that
+       issues no document. Adding a second receipt for those made the same charge appear
+       twice and pushed the coverage figure wrong in the other direction. */
+    const attachTo = String(form.get("receiptId") || "").trim();
+    if (attachTo) {
+      if (!file || typeof file !== "object" || !("arrayBuffer" in file)) return fail("file_required", 400);
+      const f = file as File;
+      const bytes = Buffer.from(await f.arrayBuffer());
+      if (!bytes.length) return fail("file_required", 400);
+      if (bytes.length > 20 * 1024 * 1024) return fail("file_too_large", 413);
+      const r = await attachDocument(attachTo, {
+        bytes, mime: f.type || "application/octet-stream", name: f.name || "receipt",
+      });
+      if (!r.ok) return fail(r.error || "not_found", r.error === "not_found" ? 404 : 400);
+      return ok({ receipt: publicReceipt(r.receipt as Receipt) });
+    }
+
     const vendor = String(form.get("vendor") || "").trim();
     const period = String(form.get("period") || "").trim();
     const amount = Number(form.get("amountUsd"));

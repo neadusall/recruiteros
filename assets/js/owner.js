@@ -3040,6 +3040,27 @@
     if (v.hasFile) {
       html += '<div class="btn-row"><a class="btn btn-sm" href="' + API + '/owner/receipts/file/' + esc(v.id) + '?v=file" target="_blank" rel="noopener">Open the original ' + esc((v.fileMime || "").indexOf("pdf") >= 0 ? "PDF" : "file") + '</a></div>';
     }
+    /* PUT A DOCUMENT ON A CHARGE THAT HAS NONE. Plenty of real charges are proven by
+       their figure and have no picture: a plain-text confirmation, an invoice that lives
+       behind a login, a month pulled from a billing API that issues no document at all.
+       Until this, the only way to get an image onto one was to attach a NEW receipt beside
+       it, which showed the same charge twice and pushed the coverage figure wrong the
+       other way. This replaces the document on the row that is already there. */
+    /* THREE STATES, AND THEY ARE NOT THE SAME THING. A row can hold the vendor's own file
+       (the real invoice), or only a PICTURE drawn from the body of an email, or nothing at
+       all. Telling the middle one it has "no document" is wrong and would read as a bug to
+       anyone looking at the image right above this line. */
+    html += '<h3 style="margin-top:18px">' + (v.hasFile ? "Replace the invoice" : "Attach the invoice") + '</h3>' +
+      '<p class="note" style="margin-top:0">' +
+      (v.hasFile
+        ? "The vendor's own file is on record. A new upload replaces it and redraws the picture."
+        : v.hasShot
+          ? "The picture here was drawn from the email, not from an invoice the vendor issued. Upload their PDF and it replaces both."
+          : "This charge has no document behind it. Upload the vendor's invoice (PDF, PNG or JPG) and it becomes the picture on the grid.") +
+      '</p>' +
+      '<div class="btn-row"><input type="file" id="rcFile" accept="application/pdf,image/png,image/jpeg,image/webp" />' +
+      '<button class="btn btn-sm" id="rcUpload">' + (v.hasFile ? "Replace" : "Attach") + '</button></div>';
+
     if (v.excerptPreview) html += '<h3 style="margin-top:16px">What the parser read</h3><pre class="rc-excerpt">' + esc(v.excerptPreview) + '</pre>';
 
     html += '<h3 style="margin-top:18px">Correct it</h3><div class="burn-form">' +
@@ -3056,6 +3077,32 @@
     $("#drawerBody").innerHTML = html;
     $("#scrim").classList.add("show"); $("#drawer").classList.add("show");
     $("#dwClose").addEventListener("click", closeDrawer);
+    $("#rcUpload").addEventListener("click", function () {
+      var inp = $("#rcFile");
+      var f = inp && inp.files && inp.files[0];
+      if (!f) { toast("Choose a file first"); return; }
+      if (f.size > 20 * 1024 * 1024) { toast("That file is over 20MB"); return; }
+      var btn = $("#rcUpload");
+      btn.disabled = true; btn.textContent = "Uploading…";
+      var fd = new FormData();
+      /* receiptId is what tells the endpoint to attach to THIS row rather than file a
+         second receipt for the same charge. */
+      fd.append("receiptId", v.id);
+      fd.append("file", f);
+      fetch(API + "/owner/receipts", { method: "POST", credentials: "include", body: fd })
+        .then(function (r) { return r.json().catch(function () { return null; }); })
+        .then(function (res) {
+          btn.disabled = false; btn.textContent = "Attach";
+          var rec = res && (res.receipt || (res.data && res.data.receipt));
+          if (!rec) { toast("Could not attach that file"); return; }
+          /* A render can fail long after the file itself is safely stored, and those are
+             different outcomes: the document IS on file and downloadable either way. */
+          toast(rec.hasShot ? "Invoice attached" : "File saved, but the picture could not be drawn");
+          closeDrawer();
+          viewBurn();
+        })
+        .catch(function () { btn.disabled = false; btn.textContent = "Attach"; toast("Could not reach the server"); });
+    });
     $("#rcSave").addEventListener("click", function () {
       send("/owner/receipts", "PATCH", {
         id: v.id, vendor: $("#rcVendor").value.trim(), amountUsd: Number($("#rcAmount").value),
