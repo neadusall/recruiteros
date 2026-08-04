@@ -14,7 +14,9 @@ export class UnipileClient extends ProviderClient {
   // defaults to the configured instance and can be overridden by UNIPILE_DSN.
   protected envKeys = ["UNIPILE_API_KEY"];
   protected get baseUrl() {
-    const dsn = process.env.UNIPILE_DSN || "api48.unipile.com:17846";
+    // Workspace-first (cred context), like the API key: a tenant whose DSN is
+    // portal-saved must not silently fall through to the house instance.
+    const dsn = this.env("UNIPILE_DSN") || "api48.unipile.com:17846";
     return dsn.startsWith("http") ? dsn : `https://${dsn}`;
   }
 
