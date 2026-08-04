@@ -19,9 +19,9 @@
  */
 
 import { hostname } from "os";
-import { composeRoleVideo, primeClipCache } from "../lib/inmarket/roleVideo";
+import { composeRoleVideo, primeClipCache, mirrorComposite } from "../lib/inmarket/roleVideo";
 
-interface Job { company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }
+interface Job { company: string; role: string; jobUrl?: string; domain?: string; force?: boolean; targetKey?: string }
 
 const MAIN = (process.env.WORKER_MAIN_URL || "").replace(/\/$/, "");
 const TOKEN = process.env.WORKER_TOKEN || "";
@@ -65,7 +65,18 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
           { company: j.company, roleTitle: j.role, roleUrl: j.jobUrl, domain: j.domain },
           clipId, undefined, { durationSec, force: j.force === true },
         );
-        if (res.ok && res.status === "ready" && res.key) out.push({ company: j.company, role: j.role, videoKey: res.key });
+        if (res.ok && res.status === "ready" && res.key) {
+          // Rebuild jobs carry the OLD videoKey (what the emailed links point at): mirror the
+          // fresh render onto it so every link in the wild starts serving the smooth video, and
+          // report the old key so the main's map entry leaves the rebuild sweep.
+          let reportKey = res.key;
+          if (j.targetKey && j.targetKey !== res.key) {
+            const mirrored = await mirrorComposite(res.key, j.targetKey).catch(() => false);
+            if (mirrored) reportKey = j.targetKey;
+            else console.error(`[video-worker] ${ts()} ${j.company} / ${j.role}: rendered ${res.key} but mirror onto ${j.targetKey} failed`);
+          }
+          out.push({ company: j.company, role: j.role, videoKey: reportKey });
+        }
         else console.error(`[video-worker] ${ts()} ${j.company} / ${j.role}: ${res.status}${res.reason ? ` (${res.reason})` : ""}`);
       } catch (e) {
         console.error(`[video-worker] ${ts()} compose ${j.company} / ${j.role}: ${(e as Error).message}`);

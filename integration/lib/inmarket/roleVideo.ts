@@ -338,6 +338,30 @@ async function publishComposite(key: string, files: VideoResult["files"]): Promi
   }
 }
 
+/**
+ * Copy a composite's served assets under ANOTHER key. The rebuild sweep uses this to overwrite
+ * the assets behind links already in the wild: a re-render can land under a different videoKey
+ * (clip re-recorded, layout tweaked), but the old key is what prospects' emails point at, so the
+ * fresh render is mirrored onto it. Returns true when at least one asset was copied.
+ */
+export async function mirrorComposite(fromKey: string, toKey: string): Promise<boolean> {
+  if (!fromKey || !toKey || fromKey === toKey) return fromKey === toKey;
+  let ok = false;
+  for (const fmt of ["mp4", "gif", "jpg"] as const) {
+    let buf: Buffer | null = null;
+    const local = compositePath(fromKey, fmt);
+    if (await fileExists(local)) buf = await readFile(local).catch(() => null);
+    if (!buf && s3Enabled()) buf = await s3Get(compositeS3Key(fromKey, fmt)).catch(() => null);
+    if (!buf) continue;
+    try {
+      if (s3Enabled()) await s3Put(compositeS3Key(toKey, fmt), buf, MIME_BY_FMT[fmt]);
+      else await writeFile(compositePath(toKey, fmt), buf);
+      ok = true;
+    } catch { /* keep going; a partial mirror still improves the old link */ }
+  }
+  return ok;
+}
+
 /** Ensure the source clip is on local disk so ffmpeg (which can't read S3) can consume it. */
 async function materializeClip(clip: ClipMeta): Promise<void> {
   const local = clipPath(clip.id, clip.ext);

@@ -68,7 +68,7 @@ export async function autoVideoMapByCompany(): Promise<Record<string, { videoKey
  * Requires shared object storage (ROS_S3_*) so a worker's video is servable by the main — otherwise
  * the composite would live only on the worker's disk.
  */
-export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }>; clipId: string | null; clip?: import("./roleVideo").ClipMeta | null; durationSec: number; shared: boolean }> {
+export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean; targetKey?: string }>; clipId: string | null; clip?: import("./roleVideo").ClipMeta | null; durationSec: number; shared: boolean }> {
   const dur = videoSeconds();
   const clipId = await resolveClipId();
   let shared = false;
@@ -85,8 +85,9 @@ export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ com
   const { shotKey } = await import("./roleShot");
   const map = await loadMap();
   const rows = await listCurated({ status: "contactable", contactableOnly: true, limit: 6000 });
-  const pending: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }> = [];
-  const rebuilds: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }> = [];
+  const pending: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean; targetKey?: string }> = [];
+  const rebuilds: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean; targetKey?: string }> = [];
+  const rowByKey = new Map<string, (typeof rows)[number]>();
   const seen = new Set<string>();
   for (const r of rows) {
     const company = r.company;
@@ -95,15 +96,23 @@ export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ com
     const key = shotKey(company, role);
     if (seen.has(key)) continue;
     seen.add(key);
-    const done = map[key];
-    if (!done) { pending.push({ company, role, jobUrl: r.jobUrl, domain: r.domain }); continue; }
-    // ONE-TIME rebuild sweep: composites made before the smooth-PiP compose fix shipped were
-    // encoded at the scroll background's sparse VFR timing (~3fps average), so the webcam PiP is
-    // choppy. Re-render them once with force; recordVideoResults refreshes `at`, so each entry
-    // leaves the sweep after its rebuild. Rebuilds go FIRST: the set is small and finite (links
-    // already in prospects' inboxes play choppy until re-rendered), while the new-video backlog
-    // is thousands of rows deep and resumes as soon as the sweep drains.
-    if (done.at < REBUILD_BEFORE) rebuilds.push({ company, role, jobUrl: r.jobUrl, domain: r.domain, force: true });
+    rowByKey.set(key, r);
+    if (!map[key]) pending.push({ company, role, jobUrl: r.jobUrl, domain: r.domain });
+  }
+  // ONE-TIME rebuild sweep: composites made before the smooth-PiP compose fix shipped were
+  // encoded at the scroll background's sparse VFR timing (~3fps average), so the webcam PiP is
+  // choppy. Drive the sweep off the VIDEO MAP itself (every video ever made, regardless of the
+  // prospect row's current status), enrich with the curated row's jobUrl when available, and
+  // carry targetKey so the worker overwrites the OLD link's assets even when the fresh render
+  // lands under a different videoKey (e.g. the clip was re-recorded since). recordVideoResults
+  // refreshes `at`, so each entry leaves the sweep after its rebuild. Rebuilds go FIRST: the set
+  // is small and finite (links already in prospects' inboxes play choppy until re-rendered),
+  // while the new-video backlog is thousands of rows deep and resumes as soon as the sweep drains.
+  for (const [key, done] of Object.entries(map)) {
+    if (!done?.company || !done.role || !done.videoKey) continue;
+    if (done.at >= REBUILD_BEFORE) continue;
+    const row = rowByKey.get(key);
+    rebuilds.push({ company: done.company, role: done.role, jobUrl: row?.jobUrl, domain: row?.domain, force: true, targetKey: done.videoKey });
   }
   const n = Math.max(1, Math.min(limit, 100));
   const batch = rebuilds.slice(0, n);
