@@ -45,6 +45,13 @@ function token(brandName: string): string {
   return (brandName.split(/\s+/)[0] || "").toLowerCase();
 }
 
+/** A brand owns a domain when its token appears ANYWHERE in the name:
+ *  "lume" claims lumesp.com and artlumesearchgroup.com alike. Prefix-only
+ *  matching left art/best/la...lumesearchgroup.com on the house portal. */
+function brandOwnsDomain(domain: string, brandToken: string): boolean {
+  return !!brandToken && domain.toLowerCase().includes(brandToken);
+}
+
 function domainOf(email: string): string {
   return (email.split("@")[1] || "").toLowerCase();
 }
@@ -314,7 +321,7 @@ export async function GET(req: Request) {
     const tWs = tenantWorkspaceForHost(h);
     const tToken = tWs ? token(presetForHost(h)?.brandName || "") : "";
     const excluded = allBrandPresets().map((p) => token(p.brandName)).filter(Boolean);
-    const allowed = tWs ? (!!tToken && statsDomain.startsWith(tToken)) : !excluded.some((t) => statsDomain.startsWith(t));
+    const allowed = tWs ? brandOwnsDomain(statsDomain, tToken) : !excluded.some((t) => brandOwnsDomain(statsDomain, t));
     if (!allowed) return ok({ domain: statsDomain, accounts: [], rollup: null });
     const { getWarmupStatsMany } = await import("../../../../lib/sending/smartlead");
     const mine = accounts.filter((a) => domainOf(a.email) === statsDomain && a.smartleadId);
@@ -350,8 +357,8 @@ export async function GET(req: Request) {
 
   let domains = buildDomains(accounts, now);
   domains = tenantWs
-    ? (tenantToken ? domains.filter((d) => d.domain.startsWith(tenantToken)) : [])
-    : domains.filter((d) => !houseExcluded.some((t) => d.domain.startsWith(t)));
+    ? (tenantToken ? domains.filter((d) => brandOwnsDomain(d.domain, tenantToken)) : [])
+    : domains.filter((d) => !houseExcluded.some((t) => brandOwnsDomain(d.domain, t)));
 
   // Live DNS posture, timeboxed: whatever resolves in time ships now, the
   // probe keeps filling its cache in the background for the next poll.
