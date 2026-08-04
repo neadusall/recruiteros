@@ -181,7 +181,7 @@ export async function extractMustHaves(jobDescription: string, openRole: string)
     const func = classifyTitle(openRole || "").function;
     const lex = lexiconFor(func);
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const model = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
+    const model = process.env.RECRUITEROS_EMAIL_MODEL ?? "claude-haiku-4-5";
     const resp = await client.messages.create({
       model,
       max_tokens: 300,

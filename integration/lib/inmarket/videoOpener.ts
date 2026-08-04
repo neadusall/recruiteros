@@ -20,10 +20,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { CampaignModel, Motion } from "../core/types";
 import { pickTemplate } from "../bd/mpc/templates";
 
+/** Email/outreach creation is pinned to Haiku for spend control (does NOT follow RECRUITEROS_LLM_MODEL). */
 const MODEL =
   process.env.RECRUITEROS_OPENER_MODEL ??
-  process.env.RECRUITEROS_LLM_MODEL ??
-  "claude-sonnet-4-6";
+  process.env.RECRUITEROS_EMAIL_MODEL ??
+  "claude-haiku-4-5";
 
 export function openerConfigured(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;

@@ -27,7 +27,8 @@ import { HOUSE_VOICE } from "./houseVoice";
 import { GUIDELINES_PROMPT } from "../copy/guidelines";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
+/** Email/outreach creation is pinned to Haiku for spend control (does NOT follow RECRUITEROS_LLM_MODEL). */
+const MODEL = process.env.RECRUITEROS_EMAIL_MODEL ?? "claude-haiku-4-5";
 
 /** MPC leads may carry a REAL, anonymized candidate to lead with. */
 export interface MpcLead extends BdLead {
