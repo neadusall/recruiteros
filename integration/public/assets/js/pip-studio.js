@@ -496,7 +496,7 @@
       var badge = d.source === "ai" ? '<span class="srcbadge ai">AI</span>' : '<span class="srcbadge">template</span>';
       var e1 = d.firstEmail || { subject: d.subject, body: d.body, bodyFilled: d.body };
       var e1html = esc(e1.bodyFilled || e1.body).replace(/\n/g, "<br>");
-      var e2html = d.bodyHtml || esc(d.body).replace(/\n/g, "<br>"); // email 2 carries the video
+      var e2html = d.bodyHtml || esc(d.bodyFilled || d.body).replace(/\n/g, "<br>"); // email 2 carries the video; bodyFilled = rendered preview (no raw spintax)
       showModal(
         '<div class="mh"><b>Email sequence</b> ' + badge + '<span class="muted" style="margin-left:8px;font-size:12px">text intro → video follow-up</span><button class="mx" data-close>✕</button></div>' +
         '<div class="seqstep"><div class="mlbl" data-step="1">Email 1 · text intro <span class="muted">(first touch, no video)</span></div>' +

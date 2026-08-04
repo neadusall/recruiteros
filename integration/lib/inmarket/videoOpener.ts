@@ -18,7 +18,6 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { CampaignModel, Motion } from "../core/types";
-import { pickTemplate } from "../bd/mpc/templates";
 
 /** Email/outreach creation is pinned to Haiku for spend control (does NOT follow RECRUITEROS_LLM_MODEL). */
 const MODEL =
@@ -35,9 +34,9 @@ export interface OpenerInput {
   roleTitle: string;
   signalReason?: string;       // e.g. "reposted the role twice in 30 days"
   motion?: "bd" | "recruiting";
-  /** What recruiter-side MPC data the campaign actually has, so the Day-0 template pick only
-   *  chooses templates whose tokens will resolve (an unknown placement city must never pick a
-   *  {{Near_City}} template — the render guard would hold every send of it). */
+  /** Recruiter-side MPC data flags. Kept for callers (attach route) but no longer steers the
+   *  Day-0 pick: the video sequence's intro pool (VIDEO_INTROS) only uses tokens that always
+   *  resolve, so no send can be held for an unfillable city/competitor claim. */
   mpc?: { hasNearCity?: boolean; hasCompetitor?: boolean };
 }
 export interface EmailDraft { subject: string; body: string; }
@@ -50,9 +49,9 @@ export interface OpenerDraft {
 
 const SYSTEM = `You write a TWO-EMAIL cold outreach SEQUENCE for a recruiting / business-development professional reaching the hiring manager who owns an open role ({{role}} at {{company}}).
 
-EMAIL 1 — TEXT ONLY, no video. A short cold intro anchored on the REAL signal (they are hiring for {{role}}). Specific, honest, human. 40-70 words, 2-4 short sentences. End with a low-friction question. Do NOT mention a video.
+EMAIL 1 — TEXT ONLY, no video. A short cold intro anchored on the REAL signal (they are hiring for {{role}}). Offer to help FILL the search; do NOT claim you already have a specific candidate in hand, and do NOT invent locations, metrics, or candidate details. Specific, honest, human. 40-70 words, 2-4 short sentences. End with a low-friction question. Do NOT mention a video.
 
-EMAIL 2 — the FOLLOW-UP, sent a few days after email 1 (assume no reply yet). Reference the first note lightly ("coming back to my note about {{role}}", "wanted to put a face to it" — NEVER "circling back", "following up", "checking in": those are banned template phrases). Then introduce a short personalized video of their ACTUAL job posting. Put the literal token {{videoembed}} on its OWN line where the video goes. 40-75 words. End with a low-friction question (worth a quick look? open to a short call?).
+EMAIL 2 — the FOLLOW-UP, sent a few days after email 1 (assume no reply yet). Reference the first note lightly ("coming back to my note about {{role}}", "wanted to put a face to it" — NEVER "circling back", "following up", "checking in": those are banned template phrases). Then introduce a short personalized video: the sender ON CAMERA, recorded over the prospect's ACTUAL job posting. Describe the video ONLY as that (a real person, a face to the name, over their real posting); never claim it contains role-specific analysis, sourcing plans, or fill-time estimates it does not have. Put the literal token {{videoembed}} on its OWN line where the video goes. 40-75 words. End with a low-friction question (worth a quick look? open to a short call?).
 
 Rules for BOTH: anchor on the real signal, no hype, no fake familiarity, no "I hope this finds you well", no emojis. Use ONLY these merge fields: {{firstName}}, {{company}}, {{role}}. Do not invent stats or names.
 Return STRICT JSON only, no prose: { "subject1": "...", "body1": "...", "subject2": "...", "body2": "...with {{videoembed}} on its own line..." }`;
@@ -106,7 +105,7 @@ const VIDEO_FOLLOWUPS: EmailDraft[] = [
   {
     subject: "{a 30-second video for your {{Open_Role}} search|30 seconds on your {{Open_Role}} search}",
     body:
-      "Hi {{First_Name}}, {coming back to my note about|one more thought on} your {{Open_Role}}. {i'd rather not be just another name in your inbox|rather than send another email you'll skim past}, so i recorded a quick video, {it's 30 seconds of me|just me, about 30 seconds}, {putting a face to the name|so you can see there's a real person here} and how i'd actually help you fill the seat.\n\n{{videoembed}}\n\n{if the seat's still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a quick look?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {coming back to my note about|one more thought on} your {{Open_Role}}. {i'd rather not be just another name in your inbox|rather than send another email you'll skim past}, so i recorded a quick video, {it's 30 seconds of me|just me, about 30 seconds}, {putting a face to the name|so you can see there's a real person here}, recorded {over your actual {{Open_Role}} posting|right on top of your {{Open_Role}} posting}.\n\n{{videoembed}}\n\n{if the seat's still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a quick look?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
     subject: "{put a face to my note about {{Open_Role}}|a face to go with my {{Open_Role}} note}",
@@ -116,27 +115,27 @@ const VIDEO_FOLLOWUPS: EmailDraft[] = [
   {
     subject: "{recorded this for you, {{First_Name}}|made you a quick video, {{First_Name}}}",
     body:
-      "Hi {{First_Name}}, {i made you a short video instead of writing another note|i'd rather show you than write another email}. {it's 30 seconds over your {{Open_Role}} posting|half a minute, recorded over your actual {{Open_Role}} page}, on how i'd run the search.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the role's still open}, {i'd love to help|i think i can help}. {worth a look?|worth comparing notes?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {i made you a short video instead of writing another note|i'd rather show you than write another email}. {it's 30 seconds over your {{Open_Role}} posting|half a minute, recorded over your actual {{Open_Role}} page}, so you can {put a face to the name|see who's actually offering to help}.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the role's still open}, {i'd love to help|i think i can help}. {worth a look?|worth comparing notes?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
     subject: "{30 seconds on your {{Open_Role}} posting|your {{Open_Role}} posting, in 30 seconds}",
     body:
-      "Hi {{First_Name}}, {coming back to my note from the other day|one quick add to my note} about your {{Open_Role}}. {i pulled up your posting and recorded a short video over it|i recorded a quick clip right over your job page}, {so you can see exactly what i mean|so it's concrete, not another pitch}.\n\n{{videoembed}}\n\n{if it's still a live search|if the seat still needs filling}, {i'd genuinely like to take it on|i'd love to help}. {worth a quick watch?|open to a short call?}\n{Best|Thanks}, {{Your_Name}}",
+      "Hi {{First_Name}}, {coming back to my note from the other day|one quick add to my note} about your {{Open_Role}}. {i pulled up your posting and recorded a short video over it|i recorded a quick clip right over your job page}, {so you can see it's really your posting, not a blast|so it's concrete, not another pitch}.\n\n{{videoembed}}\n\n{if it's still a live search|if the seat still needs filling}, {i'd genuinely like to take it on|i'd love to help}. {worth a quick watch?|open to a short call?}\n{Best|Thanks}, {{Your_Name}}",
   },
   {
     subject: "{a real person behind that last email|proof there's a person behind my last email}",
     body:
-      "Hi {{First_Name}}, {emails are easy to ignore, so here's my face instead|figured you should see who's actually writing you}. {i recorded 30 seconds over your {{Open_Role}} posting|a short clip on your {{Open_Role}}, nothing scripted}, with how i'd approach the search.\n\n{{videoembed}}\n\n{if the role's still open|if this is still on your list}, {i'd like to help you fill it|i can genuinely move it}. {worth 30 seconds?|worth a quick look?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {emails are easy to ignore, so here's my face instead|figured you should see who's actually writing you}. {i recorded 30 seconds over your {{Open_Role}} posting|a short clip on your {{Open_Role}}, short and to the point}, so you know {who you'd actually be dealing with|there's a real person on this end}.\n\n{{videoembed}}\n\n{if the role's still open|if this is still on your list}, {i'd like to help you fill it|i can genuinely move it}. {worth 30 seconds?|worth a quick look?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
     subject: "{would rather show you than tell you|show, not tell, on {{Open_Role}}}",
     body:
-      "Hi {{First_Name}}, {rather than write you a wall of text|instead of one more paragraph in your inbox}, i recorded a quick video {over your {{Open_Role}} posting|in front of your actual job page}: {who i am and how i'd fill the seat|the person behind the note and my read on the search}.\n\n{{videoembed}}\n\n{if it's still open|if you're still looking}, {i'd love to help|i'd like to take a real swing at it}. {worth a watch?|worth 10 minutes this week?}\n{Best|Thanks}, {{Your_Name}}",
+      "Hi {{First_Name}}, {rather than write you a wall of text|instead of one more paragraph in your inbox}, i recorded a quick video {over your {{Open_Role}} posting|in front of your actual job page}: {who i am and why i think i can help|the person behind the note, on camera}.\n\n{{videoembed}}\n\n{if it's still open|if you're still looking}, {i'd love to help|i'd like to take a real swing at it}. {worth a watch?|worth 10 minutes this week?}\n{Best|Thanks}, {{Your_Name}}",
   },
   {
-    subject: "{my read on your {{Open_Role}} search, on video|your {{Open_Role}} search, my take in 30 seconds}",
+    subject: "{a quick video on your {{Open_Role}} posting|your {{Open_Role}} posting, with a face attached}",
     body:
-      "Hi {{First_Name}}, {i went through your {{Open_Role}} posting and recorded my honest read|i recorded a short take on your {{Open_Role}} posting}: {where i'd source and how fast it could fill|what i'd do first and why it fills}.\n\n{{videoembed}}\n\n{if you want it filled sooner than later|if the timeline matters}, {i'm happy to walk you through it live|i'd love to compare notes}. {worth a quick call?|worth a look first?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {i recorded a short video right over your actual {{Open_Role}} posting|i put a quick video together on top of your {{Open_Role}} posting}: {me, on camera, offering to help you fill it|a real person, not another automated email}.\n\n{{videoembed}}\n\n{if you want it filled sooner than later|if the timeline matters}, {i'm happy to talk it through live|i'd love to compare notes}. {worth a quick call?|worth a look first?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
     subject: "{quick video, no pitch deck|a video instead of a pitch, {{First_Name}}}",
@@ -146,12 +145,12 @@ const VIDEO_FOLLOWUPS: EmailDraft[] = [
   {
     subject: "{the video version of my last note|my last note, as a video}",
     body:
-      "Hi {{First_Name}}, {my last note was words, this one's a face|here's the human version of my last email}. {i recorded a short clip over your {{Open_Role}} posting|30 seconds on your {{Open_Role}}, recorded over the posting itself}, with {how i'd actually fill it|the way i'd run the search}.\n\n{{videoembed}}\n\n{if it's still a priority|if the role's still open}, {i'd genuinely like to help|i can help you close it out}. {worth a quick look?|worth a conversation?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {my last note was words, this one's a face|here's the human version of my last email}. {i recorded a short clip over your {{Open_Role}} posting|30 seconds on your {{Open_Role}}, recorded over the posting itself}, so you can {see who you're dealing with|put a person to the words}.\n\n{{videoembed}}\n\n{if it's still a priority|if the role's still open}, {i'd genuinely like to help|i can help you close it out}. {worth a quick look?|worth a conversation?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
     subject: "{before you archive this, {{First_Name}}|one video before you archive me}",
     body:
-      "Hi {{First_Name}}, {before this thread goes quiet|before you file me under later}, {i recorded you a short video|here's 30 seconds of me} over your {{Open_Role}} posting, {a real person with a real plan for the seat|who i am and how i'd fill it}.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the search is still live}, {i'd love to help|i'd like to take it on}. {worth 30 seconds?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
+      "Hi {{First_Name}}, {before this thread goes quiet|before you file me under later}, {i recorded you a short video|here's 30 seconds of me} over your {{Open_Role}} posting, {a real person you can actually size up|who i am and why i'm writing}.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the search is still live}, {i'd love to help|i'd like to take it on}. {worth 30 seconds?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
   },
 ];
 
@@ -168,21 +167,69 @@ export function pickVideoFollowup(seed: string): EmailDraft {
 export { VIDEO_FOLLOWUPS };
 
 /**
- * THE cold-email BD sequence. Day-0 is one of the 50 MPC templates (bd/mpc/templates), selected
- * deterministically per campaign from the universally-safe pool (no proximity/competitor assumptions
- * unless the flow supplies them). Day-1 is the real-person PiP video follow-up above. Every token is
- * resolved per prospect (bd/mpc/resolve) and spintax diversifies each send (copy/spintax) at render.
+ * Day-0 TEXT INTRO pool for the video sequence. These are SEARCH-anchored, not candidate-anchored:
+ * the only signal we truly hold is "this company is hiring {{Open_Role}}", and the video that
+ * follows is the sender offering to help fill that search, so email 1 must set up exactly that
+ * story, never "i already have a strong one" (an MPC candidate claim whose tokens, like the
+ * candidate's target city, this flow can't honestly fill; that combination once rendered
+ * "wants . no pressure"). Tokens are limited to ones that ALWAYS resolve here:
+ * {{First_Name}} {{Company}} {{Open_Role}} {{A_Open_Role}} {{Your_Name}}.
+ */
+const VIDEO_INTROS: EmailDraft[] = [
+  {
+    subject: "{your {{Open_Role}} search|the {{Open_Role}} seat you're filling}",
+    body:
+      "Hi {{First_Name}}, {saw {{Company}} is hiring {{A_Open_Role}}|noticed the {{Open_Role}} opening at {{Company}}}. {these are exactly the searches i run|this is the seat i work}, and {i can likely put strong people in front of you quickly|i think i can fill it faster than the posting will}. {worth a conversation?|open to comparing notes?}\n{Thanks|Best}, {{Your_Name}}",
+  },
+  {
+    subject: "{here if your {{Open_Role}} search is a priority|if the {{Open_Role}} search is a priority}",
+    body:
+      "Hi {{First_Name}}, {if filling the {{Open_Role}} seat is on your plate this quarter|if the {{Open_Role}} opening is a priority right now}, {that's the exact search i run|this is the work i do all day}. {no pitch deck, just help|no pressure at all}. {worth a conversation?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
+  },
+  {
+    subject: "{one question about your {{Open_Role}}|quick question on the {{Open_Role}} opening}",
+    body:
+      "Hi {{First_Name}}, quick one: {do you have the {{Open_Role}} search fully covered|is the {{Open_Role}} seat fully covered}, or {could you use one more set of eyes on it|is there room for real help on it}? {this is the profile i place|i place this profile regularly}, and {i move fast when a seat matters|i'm happy to prove it quickly}. {worth a conversation?|open to a quick call?}\n{Thanks|Best}, {{Your_Name}}",
+  },
+  {
+    subject: "{about the {{Open_Role}} you posted|your {{Open_Role}} posting at {{Company}}}",
+    body:
+      "Hi {{First_Name}}, {your {{Open_Role}} posting came across my desk|the {{Open_Role}} opening at {{Company}} came across my desk}, {and this isn't a blast|so this is a real note, not a mass email}. {seats like this are my lane|this is squarely the work i do}, and {i'd like a shot at filling it|i'd like to help you close it}. {worth a conversation?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
+  },
+  {
+    subject: "{before the {{Open_Role}} applicant pile grows|the applicants you won't get for {{Open_Role}}}",
+    body:
+      "Hi {{First_Name}}, {job boards will bury you in near misses for a seat like {{Open_Role}}|the applicant pile rarely holds the {{Open_Role}} you actually need}. {i work the other side of that|my work starts where the postings stop}: {the people who aren't applying|the ones already doing the job well somewhere else}. {want them in front of you?|worth a conversation?}\n{Thanks|Best}, {{Your_Name}}",
+  },
+  {
+    subject: "{a hand with the {{Open_Role}} seat|help on the {{Open_Role}} seat, if useful}",
+    body:
+      "Hi {{First_Name}}, {i'll keep this short|short and honest}: {{Company}} is hiring {{A_Open_Role}}, {and that's a search i know well|and i know that search well}. {if it's moving slower than you'd like|if you want it filled sooner than later}, {i can help|i'd like to help}. {worth a conversation?|open to a quick call?}\n{Best|Thanks}, {{Your_Name}}",
+  },
+];
+
+/** Deterministic intro pick (same FNV-1a family), offset-seeded so the intro and follow-up
+ *  variants rotate independently across campaigns. */
+export function pickVideoIntro(seed: string): EmailDraft {
+  let h = 2166136261;
+  const s = `intro|${seed}`;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return VIDEO_INTROS[(h >>> 0) % VIDEO_INTROS.length] ?? VIDEO_INTROS[0];
+}
+
+/** The intro pool, exported for the copy-hygiene test. */
+export { VIDEO_INTROS };
+
+/**
+ * THE video-sequence pair. Day-0 is a search-anchored text intro from VIDEO_INTROS (one consistent
+ * story with the video: "you're hiring this seat, i can help fill it"). Day-1 is the real-person
+ * PiP video follow-up above. Every token is resolved per prospect (bd/mpc/resolve) and spintax
+ * diversifies each send (copy/spintax) at render. `input.mpc` is kept for callers but no longer
+ * steers the pick: the intro pool only uses tokens this flow can always honestly fill.
  */
 export function templateOpener(input: OpenerInput): OpenerDraft {
   const seed = `${input.company}|${input.roleTitle}|${input.motion || "bd"}`;
-  // Conservative defaults: no proximity/competitor/city claims unless the campaign's MPC
-  // context says the data exists — so the picked template always renders complete.
-  const t = pickTemplate(seed, {
-    proximityOk: false,
-    hasCompetitor: !!input.mpc?.hasCompetitor,
-    hasNearCity: input.mpc?.hasNearCity ?? false,
-  });
-  return { first: { subject: t.subject, body: t.body }, second: pickVideoFollowup(seed), source: "template" };
+  return { first: pickVideoIntro(seed), second: pickVideoFollowup(seed), source: "template" };
 }
 
 /**

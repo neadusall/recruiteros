@@ -10,7 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { MPC_TEMPLATES } from "../lib/bd/mpc/templates";
-import { VIDEO_FOLLOWUPS } from "../lib/inmarket/videoOpener";
+import { VIDEO_FOLLOWUPS, VIDEO_INTROS } from "../lib/inmarket/videoOpener";
 import { BANNED_PHRASES } from "../lib/bd/mpc/humanizer";
 import { expandSpintax } from "../lib/copy/spintax";
 
@@ -31,7 +31,29 @@ function surfaces(text: string): string[] {
 const ALL: Array<{ id: string; subject: string; body: string; video: boolean }> = [
   ...MPC_TEMPLATES.map((t) => ({ id: `mpc:${t.id}`, subject: t.subject, body: t.body, video: false })),
   ...VIDEO_FOLLOWUPS.map((t, i) => ({ id: `video:${i + 1}`, subject: t.subject, body: t.body, video: true })),
+  ...VIDEO_INTROS.map((t, i) => ({ id: `intro:${i + 1}`, subject: t.subject, body: t.body, video: false })),
 ];
+
+// The video-sequence intro pool must stay token-safe: only merge fields this flow can ALWAYS
+// resolve (no candidate cities, no competitors, no proof clauses), so no send is ever held and
+// nothing can render as a broken clause like "wants .".
+const INTRO_SAFE_TOKENS = new Set(["first_name", "company", "open_role", "a_open_role", "your_name"]);
+for (const [i, t] of VIDEO_INTROS.entries()) {
+  test(`intro:${i + 1}: uses only always-resolvable tokens`, () => {
+    for (const m of (t.subject + " " + t.body).matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)) {
+      assert.ok(INTRO_SAFE_TOKENS.has(m[1].toLowerCase()), `unsafe token {{${m[1]}}} in intro pool`);
+    }
+  });
+  test(`intro:${i + 1}: no candidate-in-hand claim (story must match the video)`, () => {
+    for (const s of [...surfaces(t.subject), ...surfaces(t.body)]) {
+      assert.ok(!/i'?ve got a strong|met (a|an) strong|one candidate|wants x/i.test(s), `candidate claim in: ${s.slice(0, 120)}`);
+    }
+  });
+}
+
+test("video intro pool has >= 6 variants", () => {
+  assert.ok(VIDEO_INTROS.length >= 6, `only ${VIDEO_INTROS.length}`);
+});
 
 for (const t of ALL) {
   test(`${t.id}: no banned phrase in any rendered surface`, () => {
