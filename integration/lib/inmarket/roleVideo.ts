@@ -296,16 +296,63 @@ export function videoKey(company: string, roleTitle: string, clipId: string, pip
   return `${rk}__${h}`;
 }
 
-/** Read one composite asset for the serve route. Returns null when absent. */
+/**
+ * Read one composite asset for the serve route. Returns null when absent.
+ *
+ * STREAMING FIX: browsers play the MP4 through MANY small Range requests, and the app (Ashburn)
+ * fetching the WHOLE object from S3 (Helsinki) on every one of them starved the video stream:
+ * 0.5-1.7s per 64KB chunk measured, so the picture froze while the audio kept playing. S3 reads
+ * are now cached on local disk for a short TTL (dedup'd in-flight), so a playback session's
+ * range storm is served from disk at disk speed. The TTL keeps the cache honest after the
+ * rebuild sweep overwrites an object in place, and cached files older than a day are pruned so
+ * the small app disk stays flat.
+ */
+const STREAM_CACHE_TTL_MS = 10 * 60 * 1000;
+const assetInflight = new Map<string, Promise<Buffer | null>>();
+function streamCacheDir(): string { return join(videosDir(), "cache"); }
+
+async function pruneStreamCache(): Promise<void> {
+  try {
+    const { readdir } = await import("node:fs/promises");
+    const dir = streamCacheDir();
+    for (const f of await readdir(dir)) {
+      const p = join(dir, f);
+      try { if (Date.now() - (await stat(p)).mtimeMs > 86_400_000) await unlink(p); } catch { /* races are fine */ }
+    }
+  } catch { /* no cache dir yet */ }
+}
+
 export async function readCompositeAsset(key: string, fmt: CompositeFmt): Promise<Buffer | null> {
   if (!/^[a-z0-9_-]{3,120}$/.test(key)) return null;
+  // A real local render (kept only when the S3 offload failed) is authoritative.
   try {
     return await readFile(compositePath(key, fmt));
-  } catch {
-    // Local copy evicted after S3 offload — serve from object storage.
-    if (s3Enabled()) return s3Get(compositeS3Key(key, fmt));
-    return null;
+  } catch { /* offloaded — try the stream cache, then S3 */ }
+  if (!s3Enabled()) return null;
+
+  const cachePath = join(streamCacheDir(), `${key}.${fmt}`);
+  try {
+    const st = await stat(cachePath);
+    if (Date.now() - st.mtimeMs < STREAM_CACHE_TTL_MS) return await readFile(cachePath);
+  } catch { /* not cached */ }
+
+  const ck = `${key}.${fmt}`;
+  let p = assetInflight.get(ck);
+  if (!p) {
+    p = (async () => {
+      const buf = await s3Get(compositeS3Key(key, fmt));
+      if (buf) {
+        try {
+          await mkdir(streamCacheDir(), { recursive: true });
+          await writeFile(cachePath, buf);
+        } catch { /* serving still works without the cache */ }
+        void pruneStreamCache();
+      }
+      return buf;
+    })().finally(() => assetInflight.delete(ck));
+    assetInflight.set(ck, p);
   }
+  return p;
 }
 
 /* ------------------------------------------------------------------ */
