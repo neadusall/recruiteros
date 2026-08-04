@@ -19,7 +19,7 @@
  */
 
 import { hostname } from "os";
-import { composeRoleVideo } from "../lib/inmarket/roleVideo";
+import { composeRoleVideo, primeClipCache } from "../lib/inmarket/roleVideo";
 
 interface Job { company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }
 
@@ -66,6 +66,7 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
           clipId, undefined, { durationSec, force: j.force === true },
         );
         if (res.ok && res.status === "ready" && res.key) out.push({ company: j.company, role: j.role, videoKey: res.key });
+        else console.error(`[video-worker] ${ts()} ${j.company} / ${j.role}: ${res.status}${res.reason ? ` (${res.reason})` : ""}`);
       } catch (e) {
         console.error(`[video-worker] ${ts()} compose ${j.company} / ${j.role}: ${(e as Error).message}`);
       }
@@ -95,9 +96,15 @@ async function loop(): Promise<void> {
       }
       if (!jobs.length) { await sleep(IDLE_SLEEP_MS); continue; }
 
+      // The clip registry lives on the main (Postgres snapshot KV) which this box cannot reach;
+      // the claim payload carries the clip's metadata, so prime the local registry with it.
+      if (claim.clip && typeof claim.clip === "object") {
+        await primeClipCache(claim.clip as Parameters<typeof primeClipCache>[0]).catch(() => {});
+      }
+
       const results = await compose(jobs, clipId, durationSec);
       if (results.length) await callMain("submit_video", { results });
-      console.log(`[video-worker] ${ts()} claimed ${jobs.length} → composed ${results.length}`);
+      console.log(`[video-worker] ${ts()} claimed ${jobs.length} -> composed ${results.length}`);
     } catch (e) {
       consecutiveFails++;
       const backoff = Math.min(60_000, 2_000 * 2 ** Math.min(consecutiveFails, 5));

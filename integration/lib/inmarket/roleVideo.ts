@@ -190,6 +190,17 @@ export async function saveClip(
   return meta;
 }
 
+/**
+ * Seed the clip registry with a record received out-of-band (a fleet worker gets the clip meta
+ * in its claim payload because it has no database access). Never overwrites an existing record
+ * and never persists: on a worker the snapshot saver is a no-op anyway.
+ */
+export async function primeClipCache(meta: ClipMeta): Promise<void> {
+  if (!meta?.id || !meta.ext) return;
+  const clips = await ensureClips();
+  if (!clips.has(meta.id)) clips.set(meta.id, meta);
+}
+
 export async function getClip(id: string): Promise<ClipMeta | null> {
   if (!/^[a-f0-9-]{8,40}$/i.test(id)) return null;
   const clips = await ensureClips();

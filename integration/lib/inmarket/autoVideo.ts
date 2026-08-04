@@ -68,12 +68,18 @@ export async function autoVideoMapByCompany(): Promise<Record<string, { videoKey
  * Requires shared object storage (ROS_S3_*) so a worker's video is servable by the main — otherwise
  * the composite would live only on the worker's disk.
  */
-export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }>; clipId: string | null; durationSec: number; shared: boolean }> {
+export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }>; clipId: string | null; clip?: import("./roleVideo").ClipMeta | null; durationSec: number; shared: boolean }> {
   const dur = videoSeconds();
   const clipId = await resolveClipId();
   let shared = false;
   try { shared = (await import("./assetStore")).s3Enabled(); } catch { /* no s3 module */ }
   if (!clipId) return { jobs: [], clipId: null, durationSec: dur, shared };
+
+  // Ship the clip METADATA with the claim: the registry lives in the main's Postgres snapshot
+  // KV, which worker boxes deliberately cannot reach (they only get the token + S3). Without
+  // this a worker resolves the clip bytes from S3 but getClip() returns null and every job
+  // fails "no_clip". The worker primes its local registry from this record.
+  const clip = await (await import("./roleVideo")).getClip(clipId).catch(() => null);
 
   const { listCurated } = await import("./curation");
   const { shotKey } = await import("./roleShot");
@@ -101,7 +107,7 @@ export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ com
   const start = pending.length > n ? Math.floor(Math.random() * (pending.length - n)) : 0;
   const batch = pending.slice(start, start + n);
   if (batch.length < n && rebuilds.length) batch.push(...rebuilds.slice(0, n - batch.length));
-  return { jobs: batch, clipId, durationSec: dur, shared };
+  return { jobs: batch, clipId, clip, durationSec: dur, shared };
 }
 
 /** Composites recorded before this instant get re-rendered once (smooth-PiP compose fix). */
