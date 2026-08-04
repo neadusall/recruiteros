@@ -100,13 +100,18 @@ export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ com
     // ONE-TIME rebuild sweep: composites made before the smooth-PiP compose fix shipped were
     // encoded at the scroll background's sparse VFR timing (~3fps average), so the webcam PiP is
     // choppy. Re-render them once with force; recordVideoResults refreshes `at`, so each entry
-    // leaves the sweep after its rebuild. New videos always take priority over rebuilds.
+    // leaves the sweep after its rebuild. Rebuilds go FIRST: the set is small and finite (links
+    // already in prospects' inboxes play choppy until re-rendered), while the new-video backlog
+    // is thousands of rows deep and resumes as soon as the sweep drains.
     if (done.at < REBUILD_BEFORE) rebuilds.push({ company, role, jobUrl: r.jobUrl, domain: r.domain, force: true });
   }
   const n = Math.max(1, Math.min(limit, 100));
-  const start = pending.length > n ? Math.floor(Math.random() * (pending.length - n)) : 0;
-  const batch = pending.slice(start, start + n);
-  if (batch.length < n && rebuilds.length) batch.push(...rebuilds.slice(0, n - batch.length));
+  const batch = rebuilds.slice(0, n);
+  if (batch.length < n && pending.length) {
+    const room = n - batch.length;
+    const start = pending.length > room ? Math.floor(Math.random() * (pending.length - room)) : 0;
+    batch.push(...pending.slice(start, start + room));
+  }
   return { jobs: batch, clipId, clip, durationSec: dur, shared };
 }
 
