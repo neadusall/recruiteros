@@ -21,12 +21,13 @@
   .stage{width:100%;max-width:1140px}
   .stage.wide{}
   .cols{display:block}
+  .cols:not(.has-cal) .maincol{max-width:860px;margin:0 auto}
   .cols.has-cal{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;align-items:start}
   @media (max-width:920px){ .cols.has-cal{grid-template-columns:1fr} }
   .maincol{min-width:0;display:flex;flex-direction:column}
   .ctx{flex:none;margin:0 0 10px}
   .ctx h1{font-size:21px;margin:0;font-weight:600;letter-spacing:-.4px;line-height:1.25}
-  .player{flex:none;height:380px;min-height:280px;position:relative;border-radius:12px;overflow:hidden;
+  .player{flex:none;aspect-ratio:1000/620;position:relative;border-radius:12px;overflow:hidden;
     background:#0b1220;box-shadow:0 4px 16px rgba(16,24,40,.10);display:flex;align-items:center;justify-content:center}
   video{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:contain;background:#0b1220}
   .player .label{position:absolute;bottom:14px;left:18px;color:#8a93a5;font-size:12px;z-index:1}
@@ -47,6 +48,9 @@
   .cal{flex:none;height:680px;min-height:480px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;transition:outline .15s}
   .cal iframe{width:100%;height:100%;border:0;display:block}
   .cal.flash{outline:3px solid var(--book);outline-offset:3px}
+  .side-f{flex:none;margin-top:8px;font-size:12px}
+  .side-f a{color:var(--mut);text-decoration:none}
+  .side-f a:hover{color:var(--ink);text-decoration:underline}
   /* Reply modal */
   .mov{position:fixed;inset:0;background:rgba(16,24,40,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
   .mov.open{display:flex}
@@ -61,20 +65,20 @@
   .macts .send{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   .mok{text-align:center;padding:30px 12px;color:var(--book);font-weight:500;font-size:16px}
   .err{text-align:center;color:var(--mut);padding:60px 20px}
-  @media (max-width:920px){ body{height:auto;overflow:auto} .player{height:auto;aspect-ratio:16/10} .cal{height:560px} }
+  @media (max-width:920px){ body{height:auto;overflow:auto} .cal{height:560px} }
 </style>
 </head>
 <body>
 <div class="top"><span class="brand">RecruitersOS</span><span class="from" id="fromLine"></span></div>
 <main>
-  <div class="stage" id="stage"><div class="err" id="loading">Loadingâ€¦</div></div>
+  <div class="stage" id="stage"><div class="err" id="loading">Loading…</div></div>
 </main>
 
 <div class="mov" id="replyModal">
   <div class="modal" id="replyCard">
     <h3 id="replyTitle">Reply</h3>
     <p class="msub">Send a quick message, it goes straight to their inbox.</p>
-    <textarea id="rMsg" placeholder="Type your replyâ€¦"></textarea>
+    <textarea id="rMsg" placeholder="Type your reply…"></textarea>
     <input id="rEmail" type="email" placeholder="Your email (so they can reply back)" />
     <div class="macts">
       <button class="ghost" id="rCancel" type="button">Cancel</button>
@@ -109,19 +113,37 @@
   function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]; }); }
   function $(id){ return document.getElementById(id); }
 
+  function applyBrand(d){
+    company = d.company || company; role = d.role || role;
+    var br = d.brand || {};
+    logo = br.logoUrl || logo; accent = br.accent || accent; brandName = (br.brandName || brandName || "").trim();
+    ctaText = (br.ctaText || ctaText || "").trim(); ctaUrl = br.ctaUrl || ctaUrl;
+    calLink = br.calendarUrl || calLink; replyTo = br.replyEmail || replyTo;
+  }
+
   if (s && !key) {
     fetch(API + "/api/in-market/resolve?s=" + encodeURIComponent(s))
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
         if (!d || d.error || !d.key) { stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>'; return; }
-        RESOLVED = d; company = d.company || company; role = d.role || role;
-        var br = d.brand || {};
-        logo = br.logoUrl || logo; accent = br.accent || accent; brandName = (br.brandName || brandName || "").trim();
-        ctaText = (br.ctaText || ctaText || "").trim(); ctaUrl = br.ctaUrl || ctaUrl;
-        calLink = br.calendarUrl || calLink; replyTo = br.replyEmail || replyTo;
+        RESOLVED = d;
+        applyBrand(d);
         go();
       })
       .catch(function(){ stage.innerHTML = '<div class="err">This video isn\'t available right now.</div>'; });
+    return;
+  }
+
+  // Raw-key links: resolve the owning workspace's brand kit (logo, accent, CTA, booking
+  // calendar) so every link in the wild renders the fully branded landing page. Best-effort:
+  // the page still renders on any failure, just with the URL-provided styling.
+  var kExp = qs.get("exp"), kSig = qs.get("sig");
+  if (key && kExp && kSig) {
+    fetch(API + "/api/in-market/resolve?k=" + encodeURIComponent(key) + "&exp=" + encodeURIComponent(kExp) + "&sig=" + encodeURIComponent(kSig))
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){ if (d && !d.error) applyBrand(d); })
+      .catch(function(){})
+      .then(go, go);
     return;
   }
   go();
@@ -129,12 +151,13 @@
   function go(){
   if (/\{\{|\}\}/.test(name)) name = "";
   if (/\{\{|\}\}/.test(brandName)) brandName = "";
-  if (/^#[0-9a-f]{6}$/i.test(accent)) document.documentElement.style.setProperty("--accent", accent);
+  if (/^#[0-9a-f]{6}$/i.test(accent)) { document.documentElement.style.setProperty("--accent", accent); document.documentElement.style.setProperty("--book", accent); }
   brandLabel = brandName || "RecruitersOS";
   var topEl = document.querySelector(".top .brand");
-  if (topEl) { if (isHttp(logo)) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:30px;max-width:200px;display:block" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
+  var logoOk = isHttp(logo) || logo.charAt(0) === "/";   // same-origin asset paths are fine
+  if (topEl) { if (logoOk) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:30px;max-width:200px;display:block" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
   var fromEl = $("fromLine");
-  if (fromEl) fromEl.textContent = (name ? "A note for " + name : "A quick note") + (company ? " Â· " + company : "");
+  if (fromEl) fromEl.textContent = (name ? "A note for " + name : "A quick note") + (company ? " · " + company : "");
   var rt = $("replyTitle"); if (rt) rt.textContent = "Reply to " + brandLabel.replace(/[<>&]/g, "");
   document.title = company ? ("A quick note about " + company) : ("A message from " + brandLabel);
 
@@ -165,7 +188,7 @@
     } catch (e) {}
   }
 
-  var title = (name ? esc(name) + ", " : "") + "a quick note about " + esc(company || "your team");
+  var title = name ? esc(name) + ", a quick note about " + esc(company || "your team") : "A quick note about " + esc(company || "your team");
   var hasCal = isHttp(calLink);
   var bookUrl = isHttp(ctaUrl) ? ctaUrl : (isHttp(calLink) ? calLink : "");
   var bookLabel = ctaText || "Book a call";
@@ -174,7 +197,7 @@
   if (hasCal) cta += '<a class="primary" id="bookBtn" href="#">' + esc(bookLabel) + '</a>';
   else if (bookUrl) cta += '<a class="primary" href="' + esc(bookUrl) + '" target="_blank" rel="noopener">' + esc(bookLabel) + '</a>';
   cta += '<a id="replyBtn" href="#">Reply</a>';
-  if (hasCal) cta += '<span class="hint">or grab a time on the right â†’</span>';
+  if (hasCal) cta += '<span class="hint">or grab a time on the right →</span>';
 
   var leftCol =
     '<div class="ctx"><h1>' + title + '</h1></div>' +
@@ -187,12 +210,13 @@
     '<div class="cta">' + cta + '</div>';
   var rightCol = hasCal
     ? '<aside class="side"><div class="side-h"><svg class="ico" viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 6v11H5V8h14z"/></svg>Book a call</div>' +
-        '<div class="cal" id="cal"><iframe src="' + esc(calLink) + '" title="Book a time" loading="eager"></iframe></div></aside>'
+        '<div class="cal" id="cal"><iframe src="' + esc(calLink) + '" title="Book a time" loading="eager"></iframe></div>' +
+        '<div class="side-f"><a href="' + esc(calLink) + '" target="_blank" rel="noopener">Open the calendar in a new tab</a></div></aside>'
     : '';
   if (hasCal) stage.className = "stage wide";
   stage.innerHTML = '<div class="cols' + (hasCal ? ' has-cal' : '') + '"><div class="maincol">' + leftCol + '</div>' + rightCol + '</div>';
 
-  // Book a call â†’ scroll to + highlight the embedded calendar.
+  // Book a call: scroll to + highlight the embedded calendar.
   var book = $("bookBtn");
   if (book) book.addEventListener("click", function(e){
     e.preventDefault();
@@ -201,7 +225,7 @@
     if (cal){ cal.classList.add("flash"); setTimeout(function(){ cal.classList.remove("flash"); }, 1300); }
   });
 
-  // Reply â†’ pop-up that posts to the lead endpoint (emails the sender).
+  // Reply: pop-up that posts to the lead endpoint (emails the sender).
   var modal = $("replyModal");
   function openM(){ modal.classList.add("open"); var t=$("rMsg"); if(t) t.focus(); }
   function closeM(){ modal.classList.remove("open"); }
@@ -221,7 +245,7 @@
       if (navigator.sendBeacon) navigator.sendBeacon(API + "/api/in-market/lead", new Blob([payload], { type: "text/plain" }));
       else fetch(API + "/api/in-market/lead", { method: "POST", body: payload, keepalive: true });
     } catch (e2) {}
-    $("replyCard").innerHTML = '<div class="mok">âœ“ Sent' + (name ? ", " + esc(name) : "") + ", thanks! They'll get back to you shortly.</div>";
+    $("replyCard").innerHTML = '<div class="mok">✓ Sent' + (name ? ", " + esc(name) : "") + ", thanks! They'll get back to you shortly.</div>";
     setTimeout(closeM, 1900);
   });
 

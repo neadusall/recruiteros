@@ -72,8 +72,12 @@ export async function POST(req: Request) {
 
   // SIGN the share URLs server-side (don't trust client URLs) — the recipient surface requires
   // a valid signature; this also makes the attached links expire per the share TTL.
+  // The link BASE is the workspace's own portal (app.lumesp.com for a white-label tenant), so a
+  // prospect never lands on the house domain when the sender is a branded workspace.
   const { compositeShareUrls } = await import("../../../../lib/inmarket/shareSign");
-  const share = compositeShareUrls(videoKey, { company, roleTitle });
+  const { notifyBrand } = await import("../../../../lib/outbound/brand");
+  const base = (await notifyBrand(ws).catch(() => null))?.appUrl;
+  const share = compositeShareUrls(videoKey, { company, roleTitle, base });
 
   // Generate the TWO-EMAIL SEQUENCE once (text intro → video follow-up) and attach to every
   // prospect, so outreach runs the right cadence — the video is ALWAYS the second touch.
@@ -111,7 +115,7 @@ export async function POST(req: Request) {
     if (clean) personalizedNames.add(nm);
     return r.key!;
   }
-  const shareFor = (vk: string) => (vk === videoKey ? share : compositeShareUrls(vk, { company, roleTitle }));
+  const shareFor = (vk: string) => (vk === videoKey ? share : compositeShareUrls(vk, { company, roleTitle, base }));
 
   // Re-enroll only OUTREACHABLE prospects (never re-touch someone who replied/booked/won/closed/DNC).
   const ENROLLABLE = new Set(["queued", "in_sequence", "nurture"]);
@@ -148,6 +152,14 @@ export async function POST(req: Request) {
     }).catch(() => {});
     attached++;
   }
+
+  // Record key -> workspace so the public watch page can resolve THIS workspace's brand kit
+  // (logo / accent / CTA / booking calendar) from the raw video key. Best-effort.
+  try {
+    const { makeShortLinks } = await import("../../../../lib/inmarket/shortLinks");
+    const keys = new Set<string>([videoKey, ...keyByName.values()]);
+    await makeShortLinks([...keys].map((vk) => ({ videoKey: vk, company, role: roleTitle, workspaceId: ws })));
+  } catch { /* short links are best-effort */ }
 
   // ARM the campaign(s): set the approved 2-touch video model + activate autopilot so the cadence
   // engine sends email 1 (day 0) → email 2 video follow-up (day N). Gated globally by AUTOMATION_ENABLED.

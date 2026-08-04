@@ -1,38 +1,56 @@
 /**
- * Resolve a short watch code -> the video + the brand + the booking calendar.
+ * Resolve a watch link -> the video + the brand + the booking calendar.
  *
- * GET /api/in-market/resolve?s=<code>   (PUBLIC — the code is the capability)
+ * GET /api/in-market/resolve?s=<code>                  (PUBLIC - the code is the capability)
+ * GET /api/in-market/resolve?k=<videoKey>&exp&sig      (PUBLIC - signed share link required)
  *
- * Powers `vid.<yourdomain>/v/<code>` landing pages: the watch page calls this, gets the signed
- * MP4/GIF URLs plus the owning workspace's brand (logo / accent / name) and its TidyCal booking
- * URL, and renders the branded video + calendar. No auth, no per-request secrets exposed — just
- * the public, expiring asset links.
+ * Powers the branded video landing pages: the watch page calls this, gets the signed MP4/GIF
+ * URLs plus the owning workspace's brand (logo / accent / name / CTA) and its booking calendar,
+ * and renders the branded video + calendar. The `k` form serves every link already in the wild:
+ * it must carry a VALID exp+sig (the same share signature the asset stream checks), and the
+ * owning workspace is recovered through the deterministic short-code record.
  */
 
-import { resolveShortLink } from "../../../../lib/inmarket/shortLinks";
-import { compositeShareUrls } from "../../../../lib/inmarket/shareSign";
+import { resolveShortLink, shortCodeFor } from "../../../../lib/inmarket/shortLinks";
+import { compositeShareUrls, verifyShare } from "../../../../lib/inmarket/shareSign";
 
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const s = (url.searchParams.get("s") || "").trim();
-  if (!s) return Response.json({ error: "missing_code" }, { status: 400 });
+  const k = (url.searchParams.get("k") || "").trim();
+  if (!s && !k) return Response.json({ error: "missing_code" }, { status: 400 });
 
-  const rec = await resolveShortLink(s);
-  if (!rec) return Response.json({ error: "not_found" }, { status: 404 });
-
-  const share = compositeShareUrls(rec.videoKey, { company: rec.company, roleTitle: rec.role });
+  let rec = null;
+  if (s) {
+    rec = await resolveShortLink(s);
+    if (!rec) return Response.json({ error: "not_found" }, { status: 404 });
+  } else {
+    // Raw-key form: only for holders of a validly signed link (never an enumeration surface).
+    if (!verifyShare(k, url.searchParams.get("exp"), url.searchParams.get("sig"))) {
+      return Response.json({ error: "invalid_sig" }, { status: 403 });
+    }
+    rec = await resolveShortLink(shortCodeFor(k));
+    if (!rec) rec = { videoKey: k, company: "", role: "", workspaceId: undefined, at: "" };
+  }
 
   // Brand + calendar from the owning workspace (the domain IS the brand).
   let brand: Record<string, unknown> = {};
+  let whiteLabel = false;
+  let base: string | undefined;
   if (rec.workspaceId) {
     try {
       const { getBranding } = await import("../../../../lib/branding");
       const { getSettings } = await import("../../../../lib/inmarket/videoSettings");
-      const [b, vs] = await Promise.all([getBranding(rec.workspaceId), getSettings(rec.workspaceId)]);
+      const { notifyBrand } = await import("../../../../lib/outbound/brand");
+      const [b, vs, nb] = await Promise.all([
+        getBranding(rec.workspaceId), getSettings(rec.workspaceId), notifyBrand(rec.workspaceId),
+      ]);
+      whiteLabel = nb.whiteLabel;
+      base = nb.appUrl;
       brand = {
         logoUrl: vs.logoUrl || b.logoUrl,
         accent: vs.accent || b.accentColor,
-        brandName: vs.brandName || b.brandName,
+        brandName: vs.brandName || b.brandName || (nb.whiteLabel ? nb.name : undefined),
         ctaText: vs.ctaText,
         ctaUrl: vs.ctaUrl,
         calendarUrl: vs.calendarUrl,   // TidyCal / Calendly / Cal.com booking URL
@@ -40,9 +58,18 @@ export async function GET(req: Request): Promise<Response> {
       };
     } catch { /* brand is best-effort */ }
   }
-  // Default booking calendar (e.g. your TidyCal) when a workspace hasn't set its own — so every
-  // video has a calendar on the landing page out of the box.
-  if (!brand.calendarUrl && process.env.RECRUITEROS_DEFAULT_CALENDAR_URL) brand.calendarUrl = process.env.RECRUITEROS_DEFAULT_CALENDAR_URL;
+  // Default booking calendar when a workspace hasn't set its own, so every video has a calendar
+  // on the landing page out of the box. HOUSE ONLY: a white-label tenant's prospects must never
+  // see the house calendar, so tenants get one only from their own brand kit.
+  if (!brand.calendarUrl && !whiteLabel) {
+    let fallback = (process.env.RECRUITEROS_DEFAULT_CALENDAR_URL || "").trim();
+    if (!fallback) {
+      try { fallback = (await import("../../../../lib/bd/booking")).bookingUrl("consultative"); } catch { /* none */ }
+    }
+    if (fallback) brand.calendarUrl = fallback;
+  }
+
+  const share = compositeShareUrls(rec.videoKey, { company: rec.company, roleTitle: rec.role, base });
 
   return Response.json(
     { key: rec.videoKey, company: rec.company, role: rec.role, mp4: share.mp4, gif: share.gif, brand },

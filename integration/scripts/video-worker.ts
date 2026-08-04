@@ -21,7 +21,7 @@
 import { hostname } from "os";
 import { composeRoleVideo } from "../lib/inmarket/roleVideo";
 
-interface Job { company: string; role: string; jobUrl?: string; domain?: string }
+interface Job { company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }
 
 const MAIN = (process.env.WORKER_MAIN_URL || "").replace(/\/$/, "");
 const TOKEN = process.env.WORKER_TOKEN || "";
@@ -63,7 +63,7 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
       try {
         const res = await composeRoleVideo(
           { company: j.company, roleTitle: j.role, roleUrl: j.jobUrl, domain: j.domain },
-          clipId, undefined, { durationSec },
+          clipId, undefined, { durationSec, force: j.force === true },
         );
         if (res.ok && res.status === "ready" && res.key) out.push({ company: j.company, role: j.role, videoKey: res.key });
       } catch (e) {

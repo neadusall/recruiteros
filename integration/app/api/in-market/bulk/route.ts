@@ -56,11 +56,14 @@ export async function POST(req: Request) {
   const { startBulk, bulkQueueStats } = await import("../../../../lib/inmarket/bulkVideo");
   const results = startBulk(reqShot, clipId, b?.pip, voiceId, recipients);
 
-  // Attach signed share links to the ones that are ready to send.
+  // Attach signed share links to the ones that are ready to send. The link base is the
+  // workspace's own portal (white-label tenants send links on their own domain).
   const { compositeShareUrls } = await import("../../../../lib/inmarket/shareSign");
+  const { notifyBrand } = await import("../../../../lib/outbound/brand");
+  const base = (await notifyBrand(ws).catch(() => null))?.appUrl;
   const enriched = results.map((r) => {
     if (r.status !== "ready") return r;
-    const share = compositeShareUrls(r.key, { company, roleTitle });
+    const share = compositeShareUrls(r.key, { company, roleTitle, base });
     // Personalize the watch page greeting by name (the page reads &n= and greets "Hi {name}").
     const watch = r.spokenName ? `${share.watch}&n=${encodeURIComponent(r.spokenName)}` : share.watch;
     return { ...r, share: { ...share, watch } };
@@ -70,6 +73,13 @@ export async function POST(req: Request) {
     (s, r) => { s[r.status] = (s[r.status] ?? 0) + 1; return s; },
     {} as Record<string, number>,
   );
+
+  // Record key -> workspace so the public watch page resolves this workspace's brand kit.
+  try {
+    const { makeShortLinks } = await import("../../../../lib/inmarket/shortLinks");
+    await makeShortLinks(enriched.filter((r) => r.status === "ready" && r.key)
+      .map((r) => ({ videoKey: r.key, company, role: roleTitle, workspaceId: ws })));
+  } catch { /* best-effort */ }
 
   return ok({ total: enriched.length, summary, queue: bulkQueueStats(), results: enriched });
 }

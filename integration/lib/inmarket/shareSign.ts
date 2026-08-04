@@ -63,14 +63,16 @@ export interface CompositeShare {
   exp: number;
 }
 
-/** Build signed, production-ready share URLs for a composite (PiP) video. */
+/** Build signed, production-ready share URLs for a composite (PiP) video.
+ *  Pass `base` (e.g. the workspace's white-label portal, https://app.lumesp.com) so a tenant's
+ *  prospects land on the tenant's own domain, never the house domain. */
 export function compositeShareUrls(
   key: string,
-  meta: { company?: string; roleTitle?: string; ttlDays?: number },
+  meta: { company?: string; roleTitle?: string; ttlDays?: number; base?: string },
 ): CompositeShare {
   const { exp, sig } = shareToken(key, meta.ttlDays);
   const auth = `exp=${exp}&sig=${encodeURIComponent(sig)}`;
-  const b = appBaseUrl();
+  const b = (meta.base || appBaseUrl()).replace(/\/+$/, "");
   const k = encodeURIComponent(key);
   return {
     watch: `${b}/watch?k=${k}&c=${encodeURIComponent(meta.company || "")}&r=${encodeURIComponent(meta.roleTitle || "")}&${auth}`,

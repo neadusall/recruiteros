@@ -90,7 +90,14 @@ export async function POST(req: Request) {
   let share;
   if (result.status === "ready" && result.key) {
     const { compositeShareUrls } = await import("../../../../lib/inmarket/shareSign");
-    share = compositeShareUrls(result.key, { company, roleTitle });
+    const { notifyBrand } = await import("../../../../lib/outbound/brand");
+    const base = (await notifyBrand(ws).catch(() => null))?.appUrl;
+    share = compositeShareUrls(result.key, { company, roleTitle, base });
+    // Record key -> workspace so the public watch page resolves this workspace's brand kit.
+    try {
+      const { makeShortLinks } = await import("../../../../lib/inmarket/shortLinks");
+      await makeShortLinks([{ videoKey: result.key, company, role: roleTitle, workspaceId: ws }]);
+    } catch { /* best-effort */ }
   }
   return ok({ ...result, share });
 }

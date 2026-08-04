@@ -555,7 +555,10 @@ function buildFilter(
   const borderIdx = hasMask ? 3 : 2;
 
   const parts: string[] = [];
-  parts.push(`[0:v]scale=${bgW}:${bgH}:force_original_aspect_ratio=decrease,pad=${bgW}:${bgH}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[bg]`);
+  // fps=30 FIRST: overlay emits a frame only when the MAIN input does, and the scroll bg is VFR
+  // (long multi-second holds between flicks). Without normalizing the bg to CFR, the webcam PiP
+  // gets decimated to the bg's ~3fps average and plays visibly choppy.
+  parts.push(`[0:v]fps=30,scale=${bgW}:${bgH}:force_original_aspect_ratio=decrease,pad=${bgW}:${bgH}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[bg]`);
   parts.push(`[1:v]scale=${pipW}:${pipH}:force_original_aspect_ratio=increase,crop=${pipW}:${pipH},setsar=1[fg0]`);
 
   let fg = "fg0";
@@ -919,6 +922,9 @@ export async function composeRoleVideo(
         const shot = await captureRoleShot(req, { force: opts?.force });
         pageUrl = shot.pageUrl;
         haveShot = shot.ok && shot.status === "company_site" && (await fileExists(bgPath));
+        // Forced REBUILDS must not strand an existing video when the posting has since gone
+        // offline: fall back to the capture already on disk so the re-render still lands.
+        if (!haveShot && opts?.force && (await fileExists(bgPath))) haveShot = true;
         if (!haveShot) {
           result = { ok: false, status: "no_shot", key, reason: shot.reason || "no verified page-scroll video for this role", at: now() };
         }

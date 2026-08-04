@@ -68,7 +68,7 @@ export async function autoVideoMapByCompany(): Promise<Record<string, { videoKey
  * Requires shared object storage (ROS_S3_*) so a worker's video is servable by the main — otherwise
  * the composite would live only on the worker's disk.
  */
-export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ company: string; role: string; jobUrl?: string; domain?: string }>; clipId: string | null; durationSec: number; shared: boolean }> {
+export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }>; clipId: string | null; durationSec: number; shared: boolean }> {
   const dur = videoSeconds();
   const clipId = await resolveClipId();
   let shared = false;
@@ -79,21 +79,33 @@ export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ com
   const { shotKey } = await import("./roleShot");
   const map = await loadMap();
   const rows = await listCurated({ status: "contactable", contactableOnly: true, limit: 6000 });
-  const pending: Array<{ company: string; role: string; jobUrl?: string; domain?: string }> = [];
+  const pending: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }> = [];
+  const rebuilds: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean }> = [];
   const seen = new Set<string>();
   for (const r of rows) {
     const company = r.company;
     const role = r.role || r.managerTitle;
     if (!company || !role) continue;
     const key = shotKey(company, role);
-    if (map[key] || seen.has(key)) continue;
+    if (seen.has(key)) continue;
     seen.add(key);
-    pending.push({ company, role, jobUrl: r.jobUrl, domain: r.domain });
+    const done = map[key];
+    if (!done) { pending.push({ company, role, jobUrl: r.jobUrl, domain: r.domain }); continue; }
+    // ONE-TIME rebuild sweep: composites made before the smooth-PiP compose fix shipped were
+    // encoded at the scroll background's sparse VFR timing (~3fps average), so the webcam PiP is
+    // choppy. Re-render them once with force; recordVideoResults refreshes `at`, so each entry
+    // leaves the sweep after its rebuild. New videos always take priority over rebuilds.
+    if (done.at < REBUILD_BEFORE) rebuilds.push({ company, role, jobUrl: r.jobUrl, domain: r.domain, force: true });
   }
   const n = Math.max(1, Math.min(limit, 100));
   const start = pending.length > n ? Math.floor(Math.random() * (pending.length - n)) : 0;
-  return { jobs: pending.slice(start, start + n), clipId, durationSec: dur, shared };
+  const batch = pending.slice(start, start + n);
+  if (batch.length < n && rebuilds.length) batch.push(...rebuilds.slice(0, n - batch.length));
+  return { jobs: batch, clipId, durationSec: dur, shared };
 }
+
+/** Composites recorded before this instant get re-rendered once (smooth-PiP compose fix). */
+const REBUILD_BEFORE = (process.env.INMARKET_VIDEO_REBUILD_BEFORE || "2026-08-04T14:00:00.000Z").trim();
 
 /** A worker reports the videos it composited (keyed by company+role) → record them so the Clients tab shows them. */
 export async function recordVideoResults(results: Array<{ company: string; role: string; videoKey: string }>): Promise<number> {
