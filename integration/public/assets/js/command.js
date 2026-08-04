@@ -7789,8 +7789,11 @@
       var av = co ? videosByCompany[co] : null;
       if (av && av.videoKey) {
         var vk = encodeURIComponent(av.videoKey);
-        var gif = API + "/in-market/video?key=" + vk + "&fmt=gif";
-        var mp4 = API + "/in-market/video?key=" + vk + "&fmt=mp4";
+        // cb= busts the browser cache hourly: composites can be re-rendered in place, and a
+        // pinned preview replays the stale render while the public link is already fixed.
+        var vcb = "&cb=" + Math.floor(Date.now() / 3600000);
+        var gif = API + "/in-market/video?key=" + vk + "&fmt=gif" + vcb;
+        var mp4 = API + "/in-market/video?key=" + vk + "&fmt=mp4" + vcb;
         return { gif: gif, watch: mp4, mp4: mp4, role: null, kind: "video" };
       }
       var s = co ? shotsByCompany[co] : null;

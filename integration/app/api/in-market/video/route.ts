@@ -37,14 +37,34 @@ export async function GET(req: Request) {
   const buf = await readCompositeAsset(key, fmt);
   if (!buf) return new Response("not found", { status: 404 });
 
+  // Short cache + REAL Range support (this route used to advertise Accept-Ranges but ignore the
+  // header and pin a 24h private cache, so the in-app preview kept replaying a stale render and
+  // could not stream/seek properly - the operator saw a broken video while the public link was
+  // fine). Mirrors the public watch route.
+  const total = buf.length;
+  const baseHeaders: Record<string, string> = {
+    "Content-Type": MIME[fmt],
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "private, max-age=300",
+  };
+  const range = req.headers.get("range");
+  const m = range && /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (m) {
+    const start = m[1] ? parseInt(m[1], 10) : 0;
+    const end = m[2] ? Math.min(parseInt(m[2], 10), total - 1) : total - 1;
+    if (isNaN(start) || start > end || start >= total) {
+      return new Response("range not satisfiable", { status: 416, headers: { "Content-Range": `bytes */${total}` } });
+    }
+    const chunk = buf.subarray(start, end + 1);
+    return new Response(chunk as any, {
+      status: 206,
+      headers: { ...baseHeaders, "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": String(chunk.length) },
+    });
+  }
+
   return new Response(buf as any, {
     status: 200,
-    headers: {
-      "Content-Type": MIME[fmt],
-      "Content-Length": String(buf.length),
-      "Accept-Ranges": "bytes",
-      "Cache-Control": "private, max-age=86400",
-    },
+    headers: { ...baseHeaders, "Content-Length": String(total) },
   });
 }
 
