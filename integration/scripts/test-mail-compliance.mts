@@ -33,7 +33,7 @@ async function main() {
 
   await test("house footer carries brand, postal address and unsubscribe link", () => {
     const f = complianceFooter("ws_house", "prospect@example.com", HOUSE);
-    assert.match(f.text, /RecruitersOS, 100 Main St Suite 4, Springdale, AR 72762/);
+    assert.match(f.text, /RecruitersOS · 100 Main St Suite 4, Springdale, AR 72762/);
     assert.match(f.text, /Unsubscribe/);
     assert.match(f.text, /\/api\/unsubscribe\?w=ws_house&e=/);
     assert.match(f.html, /Unsubscribe<\/a>/);
@@ -56,7 +56,7 @@ async function main() {
   await test("white-label footer uses its own configured address (brand token key)", () => {
     process.env.OUTREACH_POSTAL_ADDRESSES = JSON.stringify({ lume: "1 Harbor Way, Boston, MA 02110" });
     const f = complianceFooter("ws_lume", "prospect@example.com", LUME);
-    assert.match(f.text, /Lume Search Partners, 1 Harbor Way, Boston, MA 02110/);
+    assert.match(f.text, /Lume Search Partners · 1 Harbor Way, Boston, MA 02110/);
     assert.equal(footerAddressMissing("ws_lume", LUME), false);
     delete process.env.OUTREACH_POSTAL_ADDRESSES;
   });

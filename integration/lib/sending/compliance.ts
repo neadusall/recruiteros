@@ -69,15 +69,14 @@ export interface ComplianceFooter {
 export function complianceFooter(workspaceId: string, recipientEmail: string, brand: FooterBrand): ComplianceFooter {
   const url = unsubUrl(workspaceId, recipientEmail);
   const address = postalAddressFor(workspaceId, brand);
-  const identity = address ? `${brand.name}, ${address}` : brand.name;
+  const identity = address ? `${brand.name} · ${address}` : brand.name;
   const html =
     `<div style="margin-top:28px;padding-top:12px;border-top:1px solid #e6e6e6;` +
     `font-family:Helvetica,Arial,sans-serif;font-size:11px;line-height:1.6;color:#8a8a8a">` +
     escapeHtml(identity) +
     `<br><a href="${url}" style="color:#8a8a8a;text-decoration:underline">Unsubscribe</a>` +
-    ` if you'd rather not hear from us.` +
     `</div>`;
-  const text = `\n\n--\n${identity}\nUnsubscribe if you'd rather not hear from us: ${url}`;
+  const text = `\n\n--\n${identity}\nUnsubscribe: ${url}`;
   return { html, text };
 }
 

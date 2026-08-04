@@ -34,11 +34,11 @@ const SIGN = "\n{Thanks|Best}, {{Your_Name}}";
 
 export const MPC_TEMPLATES: MpcTemplate[] = [
   /* 1. Direct value ------------------------------------------------------------------ */
-  { id: "direct-1", angle: "Direct value", subject: "{one by you last week|found one for your {{Open_Role}}}",
+  { id: "direct-1", angle: "Direct value", subject: "{placed one near you last week|found one for your {{Open_Role}}}",
     body: "Hi {{First_Name}}, i wrapped {{A_Job_Title}} search in {{Near_City}} last week and met someone sharper for your {{Open_Role}} seat. {{MH1}}, {{MH2}}, and {{P_subj}}'s set on {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "direct-2", angle: "Direct value", subject: "{found your next {{Open_Role}}|think i found your next {{Open_Role}}}",
     body: "Hi {{First_Name}}, met {{P_obj}} filling {{A_Job_Title}} role in {{Near_City}} and {{P_subj}} lines up almost exactly with your {{Open_Role}} seat. {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
-  { id: "direct-3", angle: "Direct value", subject: "{sharper than the role i had {{P_obj}} for|met someone sharper than the seat i had}",
+  { id: "direct-3", angle: "Direct value", subject: "{met someone sharper on my last search|too strong for the seat i had open}",
     body: "Hi {{First_Name}}, quick one. just closed {{A_Job_Title}} search and the person i met is a better fit for your {{Open_Role}} than the seat i had {{P_obj}} for. {{MH1}}, {{MH2}}, wants {{Job_Location}}. worth a conversation?" + SIGN },
   { id: "direct-4", angle: "Direct value", subject: "{a strong {{Open_Role}}, already vetted|already-vetted {{Open_Role}}, one person}",
     body: "Hi {{First_Name}}, one candidate, not a list. maps to your {{Open_Role}} almost too well. {{MH1}}, {{MH2}}, and already screened on comp and timing. wants {{Job_Location}}. worth a conversation?" + SIGN },
@@ -140,7 +140,7 @@ export const MPC_TEMPLATES: MpcTemplate[] = [
     body: "Hi {{First_Name}}, {{P_subj}}'s mid process with another firm, but {{P_subj}} wants {{Job_Location}} and fits your {{Open_Role}} better: {{MH1}}, {{MH2}}. worth a conversation before someone moves?" + SIGN },
 
   /* 11. Curiosity / pattern interrupt ------------------------------------------------ */
-  { id: "cur-1", angle: "Curiosity", subject: "{the one that got away (to me)|the one i couldn't place}",
+  { id: "cur-1", angle: "Curiosity", subject: "{the one that got away|the one i couldn't place}",
     body: "Hi {{First_Name}}, i couldn't place this {{Open_Role}} on my last search and {{P_subj}}'s too good to sit on. wants {{Job_Location}}, fits your seat: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
   { id: "cur-2", angle: "Curiosity", subject: "{found your {{Open_Role}} by accident|stumbled onto your {{Open_Role}}}",
     body: "Hi {{First_Name}}, i wasn't even looking for you. met a strong {{Open_Role}} on a {{Near_City}} search who happens to fit your seat and wants {{Job_Location}}: {{MH1}}, {{MH2}}. worth a conversation?" + SIGN },
