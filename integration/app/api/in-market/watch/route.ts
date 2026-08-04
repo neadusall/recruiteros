@@ -47,8 +47,11 @@ export async function GET(req: Request) {
   const baseHeaders: Record<string, string> = {
     "Content-Type": MIME[fmt],
     "Accept-Ranges": "bytes",
-    // Public, immutable-ish: the key changes whenever the clip/layout changes.
-    "Cache-Control": "public, max-age=86400",
+    // Short-lived cache ONLY: assets are now overwritten IN PLACE under a stable key (the
+    // rebuild sweep mirrors fresh renders onto old links), so a long max-age leaves prospects
+    // and the operator watching a stale file after a re-render. 5 minutes keeps replays cheap
+    // without pinning anyone to an old video.
+    "Cache-Control": "public, max-age=300",
   };
 
   // Range support so <video> can seek (browsers send Range on the MP4).

@@ -162,18 +162,22 @@
   document.title = company ? ("A quick note about " + company) : ("A message from " + brandLabel);
 
   // Asset URLs: resolved short code (already signed) or built from the key + signed query.
+  // cb= busts caches hourly: composites can be re-rendered IN PLACE under the same key (the
+  // rebuild sweep overwrites old links), so a viewer who watched an earlier render must not be
+  // pinned to their browser's stale copy.
+  var bust = "&cb=" + Math.floor(Date.now() / 3600000);
   var mp4, gif;
   if (RESOLVED) {
-    trackKey = RESOLVED.key; mp4 = RESOLVED.mp4;
-    gif = RESOLVED.gif + (RESOLVED.gif.indexOf("?") >= 0 ? "&" : "?") + "notrack=1";
+    trackKey = RESOLVED.key; mp4 = RESOLVED.mp4 + (RESOLVED.mp4.indexOf("?") >= 0 ? "" : "?") + bust;
+    gif = RESOLVED.gif + (RESOLVED.gif.indexOf("?") >= 0 ? "&" : "?") + "notrack=1" + bust;
   } else {
     if (!key || !/^[a-z0-9_-]{3,120}$/.test(key)) { stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>'; return; }
     var auth = "";
     var exp = qs.get("exp"), sig = qs.get("sig");
     if (exp && sig) auth = "&exp=" + encodeURIComponent(exp) + "&sig=" + encodeURIComponent(sig);
     trackKey = key;
-    mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4" + auth;
-    gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth;
+    mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4" + auth + bust;
+    gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth + bust;
   }
 
   /* engagement tracking (anonymous session) */
