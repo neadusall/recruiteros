@@ -777,7 +777,8 @@
     var pv = $("bkPreview"); if (!pv) return;
     pv.style.setProperty("--brandac", ac);
     var top = $("bkPvTop");
-    top.innerHTML = /^https?:\/\//i.test(b.logoUrl) ? '<img src="' + esc(b.logoUrl) + '" alt="" />' : '<span class="wpv-brand">' + esc(b.brandName || "RecruitersOS") + "</span>";
+    var logoOk = /^https?:\/\//i.test(b.logoUrl) || b.logoUrl.charAt(0) === "/";   // "/" = same-origin uploaded logo
+    top.innerHTML = logoOk ? '<img src="' + esc(b.logoUrl) + '" alt="" />' : '<span class="wpv-brand">' + esc(b.brandName || "RecruitersOS") + "</span>";
     $("bkPvCta").textContent = b.ctaText || "Book a call";
   }
   // Live preview + persist-on-edit for the brand form.
@@ -791,6 +792,26 @@
         .catch(function (e) { $("bkStatus").textContent = "Save failed: " + e.message; })
         .then(function () { save.disabled = false; });
     };
+    // Logo upload: file -> dataUrl -> the server stores it and points logoUrl at the hosted copy.
+    var lbtn = $("bkLogoUpload"), lfile = $("bkLogoFile"), lst = $("bkLogoStatus");
+    if (lbtn && lfile) {
+      lbtn.onclick = function () { lfile.click(); };
+      lfile.onchange = function () {
+        var f = lfile.files && lfile.files[0]; if (!f) return;
+        if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) { if (lst) lst.textContent = "PNG, JPG, WEBP or GIF only."; return; }
+        if (f.size > 2 * 1024 * 1024) { if (lst) lst.textContent = "Too large (max 2MB)."; return; }
+        if (lst) lst.textContent = "Uploading…";
+        var rd = new FileReader();
+        rd.onload = function () {
+          api("/api/in-market/brand-logo", { method: "POST", body: JSON.stringify({ dataUrl: rd.result }) })
+            .then(function (j) { state.brand = j.settings || {}; fillBrandForm(); brandPreview(); if (lst) lst.textContent = "Logo uploaded ✓"; toast("Logo uploaded, applies to every video you share"); })
+            .catch(function (e) { if (lst) lst.textContent = "Upload failed: " + e.message; });
+          lfile.value = "";
+        };
+        rd.onerror = function () { if (lst) lst.textContent = "Could not read that file."; };
+        rd.readAsDataURL(f);
+      };
+    }
   })();
 
   /* ================= voice clone + lip-sync ================= */

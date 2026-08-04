@@ -408,8 +408,13 @@
       <h2>Watch page</h2>
       <label>Brand name <span class="muted">(header + footer)</span></label>
       <input type="text" id="bkName" placeholder="RecruitersOS" />
-      <label>Logo URL <span class="muted">(https image)</span></label>
-      <input type="text" id="bkLogo" placeholder="https://yourdomain.com/logo.png" />
+      <label>Logo <span class="muted">(PNG, JPG, WEBP or GIF, max 2MB)</span></label>
+      <div class="row" style="margin-bottom:8px">
+        <button class="ghost small" id="bkLogoUpload" type="button">Upload logo</button>
+        <input type="file" id="bkLogoFile" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />
+        <span class="muted" id="bkLogoStatus"></span>
+      </div>
+      <input type="text" id="bkLogo" placeholder="or paste an https image URL" />
       <label>Accent color</label>
       <div class="row"><input type="color" id="bkAccent" value="#2e5bd7" /><span class="muted">play button + buttons</span></div>
       <label>Reply-to email <span class="muted">(the "Reply" button)</span></label>

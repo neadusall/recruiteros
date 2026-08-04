@@ -18,7 +18,7 @@ const KEY = "inmarket_video_settings_v1";
 export interface VideoSettings {
   /** Brand name shown on the watch page header (defaults to the workspace name). */
   brandName?: string;
-  /** HTTPS logo URL shown on the watch page. */
+  /** Logo shown on the watch page: an https URL, or the same-origin path of an uploaded logo. */
   logoUrl?: string;
   /** Accent color "#rrggbb" for the play button + CTA. */
   accent?: string;
@@ -63,6 +63,9 @@ const scheduleSave = debouncedSaver(KEY, () => (mem ? Object.fromEntries(mem) : 
 
 /* ----------------------------- sanitizers ----------------------------- */
 const isHttp = (s: unknown) => typeof s === "string" && /^https?:\/\/[^\s]{4,400}$/i.test(s);
+/** Same-origin path minted by POST /api/in-market/brand-logo (uploaded logo). */
+const isUploadedLogo = (s: unknown) =>
+  typeof s === "string" && /^\/api\/in-market\/brand-logo\?id=[0-9a-f-]{36}\.(?:png|jpg|webp|gif)$/.test(s);
 const isHex = (s: unknown) => typeof s === "string" && /^#[0-9a-f]{6}$/i.test(s);
 const clean = (s: unknown, max: number) => (typeof s === "string" ? s.trim().slice(0, max) : undefined);
 const isEmail = (s: unknown) => typeof s === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
@@ -72,7 +75,7 @@ export function sanitize(input: Partial<VideoSettings> | null | undefined): Part
   const s = input || {};
   const out: Partial<VideoSettings> = {};
   if (s.brandName !== undefined) out.brandName = clean(s.brandName, 80);
-  if (s.logoUrl !== undefined) out.logoUrl = isHttp(s.logoUrl) ? (s.logoUrl as string) : "";
+  if (s.logoUrl !== undefined) out.logoUrl = isHttp(s.logoUrl) || isUploadedLogo(s.logoUrl) ? (s.logoUrl as string) : "";
   if (s.accent !== undefined) out.accent = isHex(s.accent) ? (s.accent as string) : DEFAULTS.accent;
   if (s.ctaText !== undefined) out.ctaText = clean(s.ctaText, 40);
   if (s.ctaUrl !== undefined) out.ctaUrl = isHttp(s.ctaUrl) ? (s.ctaUrl as string) : "";
