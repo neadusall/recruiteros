@@ -32,6 +32,17 @@ export interface VideoSettings {
   replyEmail?: string;
   /** Email the operator when a prospect plays the video. */
   notifyOnView?: boolean;
+  /** Built-in booking page: replaces the third-party calendar embed when on. */
+  bookingEnabled?: boolean;
+  /** Organizer mailbox; every booking emails a calendar invite here. */
+  bookingEmail?: string;
+  /** IANA zone the booking hours are expressed in (default America/Denver). */
+  bookingTz?: string;
+  /** Local booking window, 24h hours (default 9 to 17, Monday to Friday). */
+  bookingStartHour?: number;
+  bookingEndHour?: number;
+  /** Meeting length in minutes (default 30). */
+  bookingSlotMin?: number;
   /** Where to send view notifications (defaults to the owner's email). */
   notifyEmail?: string;
 }
@@ -69,6 +80,7 @@ const isUploadedLogo = (s: unknown) =>
 const isHex = (s: unknown) => typeof s === "string" && /^#[0-9a-f]{6}$/i.test(s);
 const clean = (s: unknown, max: number) => (typeof s === "string" ? s.trim().slice(0, max) : undefined);
 const isEmail = (s: unknown) => typeof s === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+const clampHour = (v: unknown, dflt: number) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= 0 && n <= 24 ? n : dflt; };
 
 /** Coerce arbitrary input into a safe settings patch (drops anything malformed). */
 export function sanitize(input: Partial<VideoSettings> | null | undefined): Partial<VideoSettings> {
@@ -83,6 +95,12 @@ export function sanitize(input: Partial<VideoSettings> | null | undefined): Part
   if (s.replyEmail !== undefined) out.replyEmail = isEmail(s.replyEmail) ? (s.replyEmail as string) : "";
   if (s.notifyOnView !== undefined) out.notifyOnView = !!s.notifyOnView;
   if (s.notifyEmail !== undefined) out.notifyEmail = isEmail(s.notifyEmail) ? (s.notifyEmail as string) : "";
+  if (s.bookingEnabled !== undefined) out.bookingEnabled = !!s.bookingEnabled;
+  if (s.bookingEmail !== undefined) out.bookingEmail = isEmail(s.bookingEmail) ? (s.bookingEmail as string) : "";
+  if (s.bookingTz !== undefined) out.bookingTz = clean(s.bookingTz, 40);
+  if (s.bookingStartHour !== undefined) out.bookingStartHour = clampHour(s.bookingStartHour, 9);
+  if (s.bookingEndHour !== undefined) out.bookingEndHour = clampHour(s.bookingEndHour, 17);
+  if (s.bookingSlotMin !== undefined) out.bookingSlotMin = [15, 20, 30, 45, 60].includes(Number(s.bookingSlotMin)) ? Number(s.bookingSlotMin) : 30;
   return out;
 }
 

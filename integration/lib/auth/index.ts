@@ -742,7 +742,10 @@ async function sendVerificationEmail(user: User): Promise<void> {
  * a verified domain/address in your Resend account (e.g. "RecruitersOS
  * <no-reply@recruitersos.co>").
  */
-async function sendEmail(to: string, subject: string, body: string, fromOverride?: string): Promise<void> {
+/** Optional calendar invite riding along with a send (booking flow). */
+export interface MailIcs { method: string; content: string }
+
+async function sendEmail(to: string, subject: string, body: string, fromOverride?: string, ics?: MailIcs): Promise<void> {
   const key = process.env.RESEND_API_KEY;
   const from = fromOverride || process.env.EMAIL_FROM || "RecruitersOS <onboarding@resend.dev>";
   if (!key) {
@@ -765,6 +768,7 @@ async function sendEmail(to: string, subject: string, body: string, fromOverride
           )
           .join("<br>"),
         text: body,
+        ...(ics ? { attachments: [{ filename: "invite.ics", content: Buffer.from(ics.content).toString("base64") }] } : {}),
       }),
     });
     if (!res.ok) {
@@ -868,20 +872,21 @@ export async function sendWorkspaceEmail(
   subject: string,
   body: string,
   workspaceId?: string,
+  opts?: { ics?: MailIcs },
 ): Promise<void> {
   if (workspaceId) {
     try {
       const { notifyBrand } = await import("../outbound/brand");
       const brand = await notifyBrand(workspaceId);
       if (brand.whiteLabel) {
-        await sendBrandedEmail(workspaceId, brand.name, to, subject, body);
+        await sendBrandedEmail(workspaceId, brand.name, to, subject, body, opts?.ics);
         return;
       }
     } catch (e) {
       console.error("[email] brand resolve failed, using house sender:", (e as Error).message);
     }
   }
-  await sendEmail(to, subject, body);
+  await sendEmail(to, subject, body, undefined, opts?.ics);
 }
 
 /** Map an IMAP host / mailbox address to its SMTP submission host. */
@@ -912,6 +917,7 @@ async function sendBrandedEmail(
   to: string,
   subject: string,
   body: string,
+  ics?: MailIcs,
 ): Promise<void> {
   const { withWorkspaceCreds } = await import("../connected");
   const { cred } = await import("../providers/http");
@@ -948,6 +954,9 @@ async function sendBrandedEmail(
         .split("\n")
         .map((line) => line.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>'))
         .join("<br>"),
+      // A calendar invite (booking flow): nodemailer emits a proper
+      // text/calendar alternative so mail clients render Accept/Decline.
+      ...(ics ? { icalEvent: { method: ics.method, content: ics.content, filename: "invite.ics" } } : {}),
     });
     console.info(`[email] white-label send via ${host} as ${c.user} -> ${to} :: ${subject}`);
   } catch (e) {

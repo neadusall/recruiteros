@@ -17,7 +17,10 @@ export async function GET(req: Request) {
   const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const { getSettings } = await import("../../../../lib/inmarket/videoSettings");
-  return ok({ settings: await getSettings(g.ctx.workspace.id) });
+  const { withBookingCalendar } = await import("../../../../lib/inmarket/booking");
+  // With the built-in booking page on, calendarUrl is OUR /book link, so the
+  // studio bakes it into every share exactly like a third-party calendar.
+  return ok({ settings: await withBookingCalendar(g.ctx.workspace.id, await getSettings(g.ctx.workspace.id)) });
 }
 
 export async function PUT(req: Request) {
@@ -25,5 +28,6 @@ export async function PUT(req: Request) {
   if ("response" in g) return g.response;
   const patch = (await body<any>(req)) || {};
   const { saveSettings } = await import("../../../../lib/inmarket/videoSettings");
-  return ok({ settings: await saveSettings(g.ctx.workspace.id, patch) });
+  const { withBookingCalendar } = await import("../../../../lib/inmarket/booking");
+  return ok({ settings: await withBookingCalendar(g.ctx.workspace.id, await saveSettings(g.ctx.workspace.id, patch)) });
 }

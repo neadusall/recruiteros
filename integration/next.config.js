@@ -4,7 +4,7 @@
 
 // Every static page in public/ (without the .html). Clean URLs map to these.
 const PAGES = [
-  "about", "alfred", "analytics", "app", "business-development-os",
+  "about", "alfred", "analytics", "app", "book", "business-development-os",
   "campaign-builder", "campaign-studio", "command", "conversations",
   "developers", "features", "forgot-password", "helpcenter", "index", "integrations",
   "linkedin", "linkedin-poster", "login", "outreach", "owner-console", "owner-login", "phone-widget", "pip-studio", "platform", "pricing",

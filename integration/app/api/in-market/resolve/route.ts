@@ -42,9 +42,12 @@ export async function GET(req: Request): Promise<Response> {
       const { getBranding } = await import("../../../../lib/branding");
       const { getSettings } = await import("../../../../lib/inmarket/videoSettings");
       const { notifyBrand } = await import("../../../../lib/outbound/brand");
-      const [b, vs, nb] = await Promise.all([
+      const { withBookingCalendar } = await import("../../../../lib/inmarket/booking");
+      const [b, vs0, nb] = await Promise.all([
         getBranding(rec.workspaceId), getSettings(rec.workspaceId), notifyBrand(rec.workspaceId),
       ]);
+      // Built-in booking page (when on) wins over any third-party calendar URL.
+      const vs = await withBookingCalendar(rec.workspaceId, vs0);
       whiteLabel = nb.whiteLabel;
       base = nb.appUrl;
       brand = {
@@ -53,7 +56,7 @@ export async function GET(req: Request): Promise<Response> {
         brandName: vs.brandName || b.brandName || (nb.whiteLabel ? nb.name : undefined),
         ctaText: vs.ctaText,
         ctaUrl: vs.ctaUrl,
-        calendarUrl: vs.calendarUrl,   // TidyCal / Calendly / Cal.com booking URL
+        calendarUrl: vs.calendarUrl,   // built-in /book page or TidyCal / Calendly / Cal.com URL
         replyEmail: vs.replyEmail,
       };
     } catch { /* brand is best-effort */ }

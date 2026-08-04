@@ -755,6 +755,40 @@
 
   /* ================= BRAND kit ================= */
   var brandFields = { bkName: "brandName", bkLogo: "logoUrl", bkAccent: "accent", bkReply: "replyEmail", bkCtaText: "ctaText", bkCtaUrl: "ctaUrl" };
+  // Built-in booking page hour pickers (24h values, shown as clock labels).
+  (function () {
+    function hourLabel(h) { var ap = h < 12 ? "AM" : "PM"; var v = h % 12; if (v === 0) v = 12; return v + ":00 " + ap; }
+    var st = $("bkBookStart"), en = $("bkBookEnd");
+    if (st && en) {
+      for (var h = 6; h <= 12; h++) st.appendChild(new Option(hourLabel(h), String(h)));
+      for (var e = 12; e <= 21; e++) en.appendChild(new Option(hourLabel(e), String(e)));
+      st.value = "9"; en.value = "17";
+    }
+  })();
+  function fillBookingForm(b) {
+    var on = $("bkBookOn"); if (!on) return;
+    on.checked = !!b.bookingEnabled;
+    var em = $("bkBookEmail"); if (em) em.value = b.bookingEmail || "";
+    var st = $("bkBookStart"); if (st && b.bookingStartHour != null) st.value = String(b.bookingStartHour);
+    var en = $("bkBookEnd"); if (en && b.bookingEndHour != null) en.value = String(b.bookingEndHour);
+    var tz = $("bkBookTz"); if (tz) tz.value = b.bookingTz || "America/Denver";
+    // The server returns calendarUrl as the live /book link when booking is on.
+    var row = $("bkBookLinkRow"), a = $("bkBookLink");
+    if (row && a) {
+      var live = !!(b.bookingEnabled && b.bookingEmail && /^https?:\/\//i.test(b.calendarUrl || ""));
+      row.style.display = live ? "" : "none";
+      if (live) a.href = b.calendarUrl;
+    }
+  }
+  function readBookingForm(out) {
+    var on = $("bkBookOn"); if (!on) return out;
+    out.bookingEnabled = on.checked;
+    out.bookingEmail = ($("bkBookEmail") ? $("bkBookEmail").value.trim() : "");
+    out.bookingStartHour = +($("bkBookStart") ? $("bkBookStart").value : 9);
+    out.bookingEndHour = +($("bkBookEnd") ? $("bkBookEnd").value : 17);
+    out.bookingTz = $("bkBookTz") ? $("bkBookTz").value : "America/Denver";
+    return out;
+  }
   function loadBrand() {
     api("/api/in-market/settings").then(function (j) {
       state.brand = j.settings || {};
@@ -765,11 +799,12 @@
   function fillBrandForm() {
     var b = state.brand || {};
     Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.value = b[brandFields[id]] || (id === "bkAccent" ? "#2e5bd7" : ""); });
+    fillBookingForm(b);
   }
   function readBrandForm() {
     var out = {};
     Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) out[brandFields[id]] = el.value.trim(); });
-    return out;
+    return readBookingForm(out);
   }
   function brandPreview() {
     var b = readBrandForm();
@@ -784,6 +819,13 @@
   // Live preview + persist-on-edit for the brand form.
   (function () {
     Object.keys(brandFields).forEach(function (id) { var el = $(id); if (el) el.addEventListener("input", brandPreview); });
+    // Turning the built-in calendar on with no organizer email yet: start from
+    // the reply-to address, the mailbox the operator already owns.
+    var bon = $("bkBookOn");
+    if (bon) bon.addEventListener("change", function () {
+      var em = $("bkBookEmail");
+      if (bon.checked && em && !em.value.trim() && $("bkReply")) em.value = $("bkReply").value.trim();
+    });
     var save = $("bkSave");
     if (save) save.onclick = function () {
       save.disabled = true; $("bkStatus").textContent = "Saving…";
