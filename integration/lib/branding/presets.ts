@@ -53,3 +53,23 @@ export function presetForHost(host: string): BrandPreset | null {
 export function allBrandPresets(): BrandPreset[] {
   return [LUME];
 }
+
+/* ------------------------------------------------------------------ */
+/* THE portal-split rule: which sending domains (and therefore which   */
+/* mailboxes) belong to which portal. Every panel that lists shared    */
+/* sending infrastructure (warm-up fleet, DNS health, drill-downs)     */
+/* must route through these two functions, never a local copy.         */
+/* ------------------------------------------------------------------ */
+
+/** Brand token a domain is matched on: "Lume Search Partners" -> "lume". */
+export function brandToken(brandName: string): string {
+  return (brandName.split(/\s+/)[0] || "").toLowerCase();
+}
+
+/** A brand owns a sending domain when its token appears ANYWHERE in the
+ *  name: "lume" claims lumesp.com and artlumesearchgroup.com alike. A
+ *  domain a brand owns shows ONLY on that brand's portal; everything
+ *  unclaimed shows only on the house portal. Mailboxes follow their domain. */
+export function brandOwnsDomain(domain: string, token: string): boolean {
+  return !!token && (domain || "").toLowerCase().includes(token);
+}

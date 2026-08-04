@@ -17,7 +17,7 @@ import { requireSession, ok } from "../../../../lib/api";
 import { listSmartleadAccounts, smartleadConfigured, type SmartleadAccount } from "../../../../lib/sending/smartlead";
 import { ensureConfig } from "../../../../lib/sending/config";
 import { requestHost, tenantWorkspaceForHost } from "../../../../lib/branding/portal";
-import { presetForHost, allBrandPresets } from "../../../../lib/branding/presets";
+import { presetForHost, allBrandPresets, brandToken, brandOwnsDomain } from "../../../../lib/branding/presets";
 import { probeDnsMany, cachedDns, type DnsPosture } from "../../../../lib/sending/dnsProbe";
 import { listInboxes, SENDING_AC_PER_INBOX, coldMaxPerInbox } from "../../../../lib/senders";
 
@@ -40,17 +40,9 @@ async function fleet(fresh: boolean): Promise<{ accounts: SmartleadAccount[]; pu
   return { accounts: cache.accounts, pulledAt: cache.at };
 }
 
-/** Brand token a domain is matched on: "Lume Search Partners" -> "lume". */
-function token(brandName: string): string {
-  return (brandName.split(/\s+/)[0] || "").toLowerCase();
-}
-
-/** A brand owns a domain when its token appears ANYWHERE in the name:
- *  "lume" claims lumesp.com and artlumesearchgroup.com alike. Prefix-only
- *  matching left art/best/la...lumesearchgroup.com on the house portal. */
-function brandOwnsDomain(domain: string, brandToken: string): boolean {
-  return !!brandToken && domain.toLowerCase().includes(brandToken);
-}
+/** The portal-split rule itself lives in lib/branding/presets.ts
+ *  (brandToken/brandOwnsDomain); this route only applies it. */
+const token = brandToken;
 
 function domainOf(email: string): string {
   return (email.split("@")[1] || "").toLowerCase();
@@ -360,6 +352,13 @@ export async function GET(req: Request) {
     ? (tenantToken ? domains.filter((d) => brandOwnsDomain(d.domain, tenantToken)) : [])
     : domains.filter((d) => !houseExcluded.some((t) => brandOwnsDomain(d.domain, t)));
 
+  // The split, in plain words, rendered as a caption line on the panel so an
+  // operator can always see which domains (and mailboxes) live on which portal.
+  const brandName = tenantWs ? (presetForHost(host)?.brandName || "this portal") : "";
+  const portalNote = tenantWs
+    ? `Showing ${brandName} sending domains only: every domain with "${tenantToken}" in its name, and every mailbox on those domains, lives on this portal.`
+    : `House view: domains named after a white-label brand (${houseExcluded.map((t) => `"${t}"`).join(", ")}), and the mailboxes on them, appear only on that brand's own portal.`;
+
   // Live DNS posture, timeboxed: whatever resolves in time ships now, the
   // probe keeps filling its cache in the background for the next poll.
   const domainNames = domains.map((d) => d.domain);
@@ -431,5 +430,5 @@ export async function GET(req: Request) {
       };
     }),
   };
-  return ok({ configured: true, updatedAt: new Date(pulledAt).toISOString(), domains, totals });
+  return ok({ configured: true, updatedAt: new Date(pulledAt).toISOString(), portalNote, domains, totals });
 }
