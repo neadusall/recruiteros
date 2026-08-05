@@ -74,6 +74,30 @@ check("the client remembers the run the server saved",
 check("and adopts it in the save step instead of saving a duplicate",
   /state\.serverRun && state\.serverRun\.id[\s\S]{0,200}savedId = state\.serverRun\.id/.test(client));
 
+/* --- behavioral: parking really converts the checkpoint -------------------
+ * Not just source shape: run the real module (memory-only store when no DB is
+ * configured) and prove the whole lifecycle of a refusal parked while nobody
+ * was watching. */
+const nq = await import("../lib/sourcing/nightQueue");
+const ws = "ws_serversave_test";
+const item = await nq.addNightItem(ws, { kind: "search", name: "Refused search", recoveryToken: "rcv_behavioral" });
+check("a freshly armed checkpoint counts as a live search (the deploy gate holds for it)",
+  (await nq.searchesInFlight()).busy === true);
+const parked = await nq.failNightItem(ws, item.id, "The search came back with nobody.");
+const after = (await nq.listNightItems(ws)).find((i) => i.id === item.id);
+check("failNightItem converts it to a stopped item the queue card can show",
+  parked === true && after?.stage === "error");
+check("the recruiter-facing reason rides on it",
+  after?.error === "The search came back with nobody.");
+check("the recovery marker is cleared (the queue can never re-run an answered search)",
+  after?.recovery === undefined);
+check("a parked item releases the deploy gate",
+  (await nq.searchesInFlight()).busy === false);
+check("stopped items are never pruned (they stay until the recruiter removes them)",
+  after !== undefined && nq.pruneDecision(after, true, Date.now() + 48 * 3600_000) === "keep");
+check("parking an unknown item reports false instead of inventing one",
+  (await nq.failNightItem(ws, "nq_missing", "x")) === false);
+
 if (failed) {
   console.log(`\n${failed} FAILED`);
   process.exit(1);
