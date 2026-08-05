@@ -66,8 +66,10 @@ export class UnipileClient extends ProviderClient {
 
   /**
    * Publish a feed post as the linked account (the LinkedIn Poster publish hop).
-   * Text-only goes as JSON; with images we send multipart form-data, which is
-   * how Unipile accepts post attachments. Returns the provider's post reference
+   * Unipile validates this endpoint as multipart/form-data even for text-only
+   * posts: a JSON body reaches its validator as zero form fields and 400s with
+   * "Expected object". So every post goes as a form; ProviderClient.request is
+   * JSON-only, hence the hand-built fetch. Returns the provider's post reference
    * when it gives one.
    */
   async createPost(
@@ -75,23 +77,14 @@ export class UnipileClient extends ProviderClient {
     text: string,
     attachments?: Array<{ bytes: Buffer; mime: string; name: string }>,
   ): Promise<{ id?: string; dryRun?: boolean }> {
-    if (!attachments?.length) {
-      const r = await this.request<{ post_id?: string; id?: string }>({
-        method: "POST",
-        path: "/api/v1/posts",
-        body: { account_id: accountId, text },
-      });
-      return { id: r.post_id ?? r.id, dryRun: r.dryRun };
-    }
-    // Multipart path: ProviderClient.request is JSON-only, so build the form here.
     if (!this.configured()) {
-      console.info(`[${this.id}:dry] POST /api/v1/posts (multipart, ${attachments.length} attachment(s))`);
+      console.info(`[${this.id}:dry] POST /api/v1/posts (multipart, ${attachments?.length ?? 0} attachment(s))`);
       return { dryRun: true };
     }
     const form = new FormData();
     form.append("account_id", accountId);
     form.append("text", text);
-    for (const a of attachments) {
+    for (const a of attachments ?? []) {
       form.append("attachments", new Blob([new Uint8Array(a.bytes)], { type: a.mime }), a.name);
     }
     const base = (this.baseUrl || "").replace(/\/$/, "");
