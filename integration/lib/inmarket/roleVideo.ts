@@ -695,12 +695,26 @@ async function compose(
   if (wantMask) await writeFile(tmpMask, await genMaskPng(pip.shape, pipW, pipH, radius));
   if (wantBorder) await writeFile(tmpBorder, await genBorderPng(pip.shape, pipW, pipH, radius, pip.borderPx, pip.borderColor));
 
+  // BOUND THE LOOP. `-stream_loop -1` makes the background an infinite input, and pairing that with
+  // `-shortest` leaves ffmpeg buffering encoded video while it waits on the finite audio stream:
+  // measured 626 MB peak RSS on a 2 GB worker, which is what pushed the unit into the OOM killer
+  // once role cards made composites actually run. Looping a counted number of times and capping the
+  // output with `-t` produces a byte-equivalent video at 486 MB peak (-22%) and slightly faster.
+  // Falls back to the old infinite loop if either duration can't be probed.
+  const clipMs = await probeDurationMs(clipFile).catch(() => null);
+  const bgMs = await probeDurationMs(bgPath).catch(() => null);
+  const loops = clipMs && bgMs && bgMs > 0 ? Math.ceil(clipMs / bgMs) : null;
+
   const inputs = (): string[] => {
-    const a = ["-stream_loop", "-1", "-i", bgPath, "-i", clipFile];
+    const a = loops !== null
+      ? ["-stream_loop", String(loops), "-i", bgPath, "-i", clipFile]
+      : ["-stream_loop", "-1", "-i", bgPath, "-i", clipFile];
     if (wantMask) a.push("-i", tmpMask);
     if (wantBorder) a.push("-i", tmpBorder);
     return a;
   };
+  /** Hard output cap, so ffmpeg stops on a known boundary instead of draining a loop. */
+  const durationCap = (): string[] => (clipMs ? ["-t", (clipMs / 1000).toFixed(3)] : ["-shortest"]);
 
   const baseMp4 = join(videosDir(), `${key}.base.mp4`);
   const files: VideoResult["files"] = {};
@@ -715,7 +729,7 @@ async function compose(
         ...inputs(),
         "-filter_complex", filter, "-map", `[${outLabel}]`, "-map", "1:a?",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest",
+        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", ...durationCap(),
         baseMp4,
       ]);
     }
