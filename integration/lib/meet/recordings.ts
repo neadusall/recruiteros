@@ -148,11 +148,27 @@ ${JSON_SHAPE}`;
 
 interface SummaryShape { summary?: string; action_items?: string[]; role_brief?: string; objections_and_notes?: string[] }
 
+/** Coerce model output into a safe shape and reject write-ups with no substance. */
 function parseSummaryJson(out: string): SummaryShape {
   const a = out.indexOf("{"), z = out.lastIndexOf("}");
   if (a < 0 || z <= a) throw new Error("summary_parse");
-  return JSON.parse(out.slice(a, z + 1)) as SummaryShape;
+  const raw = JSON.parse(out.slice(a, z + 1)) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const list = (v: unknown) =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x.trim()) : [];
+  const s: SummaryShape = {
+    summary: str(raw.summary).trim(),
+    action_items: list(raw.action_items),
+    role_brief: str(raw.role_brief).trim(),
+    objections_and_notes: list(raw.objections_and_notes),
+  };
+  if (!s.summary) throw new Error("summary_empty");
+  return s;
 }
+
+/** ~150K tokens of transcript, comfortably inside Haiku's 200K window. */
+const MAX_TRANSCRIPT_CHARS = 600_000;
+const GEMINI_TIMEOUT_MS = 180_000;
 
 async function geminiGenerate(parts: Array<Record<string, unknown>>): Promise<string> {
   const res = await fetch(
@@ -161,6 +177,7 @@ async function geminiGenerate(parts: Array<Record<string, unknown>>): Promise<st
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey() },
       body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0 } }),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     },
   );
   if (!res.ok) throw new Error(`gemini_${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -174,7 +191,7 @@ async function transcribeAudio(bytes: Buffer, mime: string): Promise<string> {
     { inlineData: { mimeType: mime, data: bytes.toString("base64") } },
     { text: TRANSCRIBE_PROMPT },
   ])).trim();
-  if (!out) throw new Error("transcript_empty");
+  if (out.length < 10) throw new Error("transcript_empty");
   return out;
 }
 
@@ -183,13 +200,15 @@ async function summarizeTranscript(transcript: string): Promise<SummaryShape> {
   const { anthropicClient } = await import("../sourcing/anthropic");
   const msg = await anthropicClient().messages.create({
     model: CLAUDE_MODEL(),
-    max_tokens: 4000,
+    max_tokens: 8000,
     temperature: 0,
     messages: [{
       role: "user",
-      content: `${TRANSCRIPT_SUMMARY_PROMPT}\n\nTranscript:\n${transcript}`,
+      content: `${TRANSCRIPT_SUMMARY_PROMPT}\n\nTranscript:\n${transcript.slice(0, MAX_TRANSCRIPT_CHARS)}`,
     }],
   });
+  // A truncated reply cannot be trusted to be complete JSON.
+  if (msg.stop_reason === "max_tokens") throw new Error("summary_truncated");
   const out = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
   return parseSummaryJson(out);
 }
@@ -207,10 +226,43 @@ function block(title: string, items?: string[]): string {
   return `\n${title}\n${items.map((x) => `- ${x}`).join("\n")}\n`;
 }
 
+/**
+ * Get a transcript for the recording, paying for transcription at most once:
+ * a transcript already on disk from an earlier attempt is reused as-is.
+ */
+async function ensureTranscript(r: MeetRecording, bytes: Buffer): Promise<string> {
+  if (r.transcriptFile) {
+    try {
+      const prev = (await fs.readFile(path.join(dir(), r.transcriptFile), "utf8")).trim();
+      if (prev.length >= 10) return prev;
+    } catch { /* transcript file lost: transcribe again below */ }
+  }
+  const transcript = await transcribeAudio(bytes, r.mime);
+  const tFile = r.file.replace(/\.[^.]+$/, "") + ".txt";
+  try {
+    await fs.writeFile(path.join(dir(), tFile), transcript, "utf8");
+    r.transcriptFile = tFile;
+  } catch { /* a failed disk write must not block the summary */ }
+  return transcript;
+}
+
+/** One tick at a time: a slow model call must never overlap the next tick. */
+let ticking = false;
+
 /** The 5-minute tick: process pending recordings once a Gemini key exists. */
 export async function processRecordingQueue(): Promise<number> {
   await ensureLoaded();
   if (!geminiKey()) return 0;
+  if (ticking) return 0;
+  ticking = true;
+  try {
+    return await runQueuePass();
+  } finally {
+    ticking = false;
+  }
+}
+
+async function runQueuePass(): Promise<number> {
   let done = 0;
   const targets = store.items.filter((r) => r.status === "pending" && r.attempts < 3).slice(0, 3);
   for (const r of targets) {
@@ -220,15 +272,19 @@ export async function processRecordingQueue(): Promise<number> {
       if (bytes.length > 19 * 1024 * 1024) throw new Error("audio_too_large_for_inline");
 
       // Two-stage when the Anthropic key is present (Gemini transcribes, Haiku
-      // writes); single Gemini listen-and-summarize call otherwise.
+      // writes); single Gemini listen-and-summarize call otherwise. A Haiku
+      // failure after a good transcript falls back to the one-shot Gemini call
+      // in the same attempt, so a write-up still ships.
       let s: SummaryShape;
       if (anthropicKey()) {
-        const transcript = await transcribeAudio(bytes, r.mime);
-        const tFile = r.file.replace(/\.[^.]+$/, "") + ".txt";
-        await fs.writeFile(path.join(dir(), tFile), transcript, "utf8");
-        r.transcriptFile = tFile;
-        s = await summarizeTranscript(transcript);
-        r.summaryModel = CLAUDE_MODEL();
+        const transcript = await ensureTranscript(r, bytes);
+        try {
+          s = await summarizeTranscript(transcript);
+          r.summaryModel = CLAUDE_MODEL();
+        } catch (claudeErr) {
+          s = await summarizeAudio(bytes, r.mime);
+          r.summaryModel = `${GEMINI_MODEL()} (haiku_failed: ${String((claudeErr as Error)?.message || claudeErr).slice(0, 80)})`;
+        }
       } else {
         s = await summarizeAudio(bytes, r.mime);
         r.summaryModel = GEMINI_MODEL();
