@@ -92,6 +92,27 @@ async function brandedMeetingUrl(workspaceId: string, room: string, startIso: st
   }
 }
 
+/**
+ * Ad-hoc branded meeting (the /meet page): same base + same-root-domain rule
+ * as booked calls, but TTL-anchored instead of booking-anchored. Null means
+ * the caller should fall back to the neutral public bridge.
+ */
+export async function adhocMeetJoin(workspaceId: string, room: string, ttlHours = 12): Promise<{ base: string; jwt: string } | null> {
+  const base = (process.env.RECRUITEROS_MEET_BASE || "").trim().replace(/\/+$/, "");
+  const secret = (process.env.RECRUITEROS_MEET_JWT_SECRET || "").trim();
+  if (!base || !secret) return null;
+  try {
+    const { notifyBrand } = await import("../outbound/brand");
+    const appHost = new URL((await notifyBrand(workspaceId)).appUrl).hostname;
+    if (rootDomain(new URL(base).hostname) !== rootDomain(appHost)) return null;
+    const exp = Math.floor(Date.now() / 1000) + ttlHours * 3600;
+    const appId = (process.env.RECRUITEROS_MEET_JWT_APP_ID || "recruiteros").trim();
+    return { base, jwt: meetJwt(room, appId, secret, exp) };
+  } catch {
+    return null;
+  }
+}
+
 let mem: Map<string, Booking[]> | null = null;
 let loading: Promise<void> | null = null;
 

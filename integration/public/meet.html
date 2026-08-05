@@ -135,44 +135,75 @@
   var copyBtn = document.getElementById("btnCopy");
   copyBtn.style.display = "inline-flex";
   document.getElementById("btnNew").style.display = "inline-flex";
+  var inviteUrl = location.origin + "/meet?room=" + encodeURIComponent(room);
   copyBtn.addEventListener("click", function () {
-    var url = location.origin + "/meet?room=" + encodeURIComponent(room);
-    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+    (navigator.clipboard ? navigator.clipboard.writeText(inviteUrl) : Promise.reject())
       .then(function () { toast("Invite link copied."); })
-      .catch(function () { window.prompt("Copy the invite link:", url); });
+      .catch(function () { window.prompt("Copy the invite link:", inviteUrl); });
   });
 
-  // The brand mark over the corner where the vendor watermark lives.
-  var ov = document.getElementById("brandOverlay");
-  ov.innerHTML = BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
-  ov.style.display = "flex";
+  var rootDomain = function (h) { return String(h || "").split(".").slice(-2).join("."); };
 
-  var s = document.createElement("script");
-  s.src = "https://meet.jit.si/external_api.js";
-  s.onload = function () {
-    /* global JitsiMeetExternalAPI */
-    new JitsiMeetExternalAPI("meet.jit.si", {
-      roomName: room,
-      parentNode: document.getElementById("jitsi"),
-      configOverwrite: {
-        prejoinConfig: { enabled: true },
-        disableDeepLinking: true,
-      },
-      interfaceConfigOverwrite: {
-        SHOW_JITSI_WATERMARK: false,
-        SHOW_WATERMARK_FOR_GUESTS: false,
-        SHOW_BRAND_WATERMARK: false,
-        SHOW_POWERED_BY: false,
-        JITSI_WATERMARK_LINK: "",
-        DEFAULT_LOGO_URL: "",
-        DEFAULT_WELCOME_PAGE_LOGO_URL: "",
-        APP_NAME: BRAND.name + " Meeting",
-        NATIVE_APP_NAME: BRAND.name + " Meeting",
-      },
-    });
-  };
-  s.onerror = function () { toast("Could not reach the meeting service. Check your connection and reload."); };
-  document.head.appendChild(s);
+  function startMeeting(domain, jwt) {
+    // Our own meet server carries the brand natively; the overlay badge only
+    // covers the vendor watermark on the public-bridge fallback.
+    if (domain === "meet.jit.si") {
+      var ov = document.getElementById("brandOverlay");
+      ov.innerHTML = BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
+      ov.style.display = "flex";
+    }
+    var s = document.createElement("script");
+    s.src = "https://" + domain + "/external_api.js";
+    s.onload = function () {
+      /* global JitsiMeetExternalAPI */
+      var opts = {
+        roomName: room,
+        parentNode: document.getElementById("jitsi"),
+        configOverwrite: {
+          prejoinConfig: { enabled: true },
+          disableDeepLinking: true,
+        },
+        interfaceConfigOverwrite: {
+          SHOW_JITSI_WATERMARK: false,
+          SHOW_WATERMARK_FOR_GUESTS: false,
+          SHOW_BRAND_WATERMARK: false,
+          SHOW_POWERED_BY: false,
+          JITSI_WATERMARK_LINK: "",
+          APP_NAME: BRAND.name + " Meeting",
+          NATIVE_APP_NAME: BRAND.name + " Meeting",
+        },
+      };
+      if (jwt) opts.jwt = jwt;
+      new JitsiMeetExternalAPI(domain, opts);
+    };
+    s.onerror = function () { toast("Could not reach the meeting service. Check your connection and reload."); };
+    document.head.appendChild(s);
+  }
+
+  // Backend pick: a token in the link wins (guests), then the portal session
+  // mints one for our own meet server, then the neutral public bridge.
+  var linkJwt = (params.get("j") || "").trim();
+  var linkHost = (params.get("b") || "").trim();
+  if (linkJwt && linkHost && rootDomain(linkHost) === rootDomain(location.hostname)) {
+    inviteUrl += "&j=" + encodeURIComponent(linkJwt) + "&b=" + encodeURIComponent(linkHost);
+    startMeeting(linkHost, linkJwt);
+    return;
+  }
+  fetch("/api/meet?room=" + encodeURIComponent(room), { credentials: "same-origin" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) {
+      var join = j && j.join;
+      if (join && join.base && join.jwt) {
+        var h = new URL(join.base).hostname;
+        if (rootDomain(h) === rootDomain(location.hostname)) {
+          inviteUrl += "&j=" + encodeURIComponent(join.jwt) + "&b=" + encodeURIComponent(h);
+          startMeeting(h, join.jwt);
+          return;
+        }
+      }
+      startMeeting("meet.jit.si", null);
+    })
+    .catch(function () { startMeeting("meet.jit.si", null); });
 })();
 </script>
 </body>
