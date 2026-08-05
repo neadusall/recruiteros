@@ -268,6 +268,61 @@
   .su-row.done .su-check{color:var(--ok)}
   .su-check svg{width:18px;height:18px}
 
+  /* ── Today: the guided daily playbook ── */
+  .weekstrip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:0 0 16px}
+  @media (max-width:760px){.weekstrip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .wd{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:10px 12px}
+  .wd.now{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .wd .wd-day{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+  .wd .wd-p{font-size:13px;font-weight:600;margin-top:2px}
+  .wd .wd-f{font-size:11.5px;color:var(--mut);margin-top:2px}
+  .wd.now .wd-day{color:var(--accent)}
+  .todaygrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,360px);gap:18px;align-items:start}
+  @media (max-width:1080px){.todaygrid{grid-template-columns:minmax(0,1fr)}}
+  .stepcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:16px;margin-bottom:14px}
+  .stepcard .st-head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .stepcard .st-n{width:26px;height:26px;border-radius:8px;background:var(--accent-soft);color:var(--accent);
+    font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+  .stepcard .st-n.done{background:var(--ok-soft);color:var(--ok)}
+  .stepcard .st-t{font-size:14px;font-weight:600;flex:1}
+  .stepcard .st-time{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+  .stepcard .hint{color:var(--mut);font-size:12.5px;margin:2px 0 10px 36px}
+  .stepcard .st-body{margin-left:36px}
+  @media (max-width:600px){.stepcard .st-body,.stepcard .hint{margin-left:0}}
+  .topicpick{display:flex;flex-direction:column;gap:8px}
+  .topic{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line-2);border-radius:var(--rad-sm);
+    padding:10px 12px;cursor:pointer;background:var(--field)}
+  .topic:hover{border-color:var(--faint)}
+  .topic.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .topic .tk{width:16px;height:16px;border-radius:50%;border:2px solid var(--line-2);flex:none;margin-top:2px}
+  .topic.sel .tk{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px var(--field)}
+  .topic .tt{min-width:0}
+  .topic .tt b{font-size:13px;display:block}
+  .topic .tt span{font-size:12px;color:var(--mut)}
+  .notes-list{margin-top:10px}
+  .noterow{display:flex;gap:10px;align-items:flex-start;border-top:1px solid var(--line);padding:8px 0;font-size:12.5px;color:var(--mut)}
+  .noterow .nx{flex:1;min-width:0;overflow-wrap:break-word}
+  .noterow .nd{color:var(--faint);font-size:11px;flex:none}
+  .checkrow{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
+  .checkrow:first-of-type{border-top:0}
+  .checkrow .ck{width:18px;height:18px;flex:none;color:var(--faint);display:inline-flex;margin-top:1px}
+  .checkrow .ck svg{width:18px;height:18px}
+  .checkrow.on .ck{color:var(--ok)}
+  .checkrow .cx b{display:block;font-size:13px}
+  .checkrow .cx span{font-size:12px;color:var(--mut)}
+
+  /* ── Pre-flight linter ── */
+  .lint{border:1px solid var(--line);border-radius:var(--rad);background:var(--panel-2);padding:12px 14px;margin-top:12px}
+  .lint .lt{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+  .lint .lt .statchip{margin-left:auto}
+  .lintrow{display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:12.5px;color:var(--mut)}
+  .lintrow .li{width:15px;height:15px;flex:none;display:inline-flex;margin-top:2px}
+  .lintrow .li svg{width:15px;height:15px}
+  .lintrow.ok .li{color:var(--ok)}
+  .lintrow.warn .li{color:var(--warn)}
+  .lintrow.bad .li{color:var(--bad)}
+  .lintrow.bad{color:var(--ink)}
+
   #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(8px);background:var(--ink);color:var(--bg);
     font-size:13px;padding:9px 16px;border-radius:var(--rad);opacity:0;pointer-events:none;transition:.18s;z-index:50;max-width:80vw}
   #toast.show{opacity:1;transform:translateX(-50%)}
@@ -283,7 +338,8 @@
   <div><div class="ttl">LinkedIn Poster</div><div class="sub">Inspiration in, your story out. Nothing posts without your approval. <a href="/admin#playbooks/linkedin-poster" target="_top" style="color:var(--accent);font-weight:600;text-decoration:none">How it works</a></div></div>
   <div class="spacer"></div>
   <div class="viewtabs" id="tabs">
-    <button data-view="studio" class="active">Studio<span class="n" id="nDrafts">0</span></button>
+    <button data-view="today" class="active">Today</button>
+    <button data-view="studio">Studio<span class="n" id="nDrafts">0</span></button>
     <button data-view="create">Sources<span class="n" id="nInbox">0</span></button>
     <button data-view="calendar">Calendar<span class="n" id="nQueue">0</span></button>
     <button data-view="media">Media</button>
@@ -296,8 +352,13 @@
 <div class="todaybar" id="todayBar"></div>
 
 <main>
+  <!-- ============================ TODAY ============================ -->
+  <section class="view active" id="view-today">
+    <div id="todayWrap"></div>
+  </section>
+
   <!-- ============================ STUDIO =========================== -->
-  <section class="view active" id="view-studio">
+  <section class="view" id="view-studio">
     <div id="studioNotices"></div>
     <div class="studio">
       <div class="rail" id="draftRail"></div>
@@ -445,7 +506,7 @@
 <script>
 (function () {
   "use strict";
-  var S = { inbox: [], drafts: [], images: [], settings: {}, ayrshare: {}, automation: {}, anthropicConfigured: false, watchlist: [] };
+  var S = { inbox: [], drafts: [], images: [], settings: {}, ayrshare: {}, automation: {}, anthropicConfigured: false, watchlist: [], deskNotes: [] };
   var sel = null;           // selected draft id in the Studio
   var device = "desktop";   // preview device
   var pvOpen = false;       // preview fold expanded
@@ -453,6 +514,10 @@
   var hooksOpen = false;
   var regenOpen = false;    // inline "direction" row for Regenerate
   var cardOpen = false;     // inline headline row for Quote card
+  var pbSel = 0;            // Today tab: selected topic index (-1 = my own)
+  var pbCustom = "";        // Today tab: the "my own topic" text (survives re-renders)
+  var pbDirVal = "";        // Today tab: optional direction for the writer
+  var pbNoteVal = "";       // Today tab: unsaved raw-material note text
 
   /* ------------------------------ utils ------------------------------ */
   function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -558,8 +623,127 @@
       "What made you take your current job?",
       "What is the one interview question that actually works?",
       "Would you take a title cut for a better manager?"
+    ]],
+    ["Confession", [
+      "I lost a placement last month. Entirely my fault.",
+      "I almost talked a client out of their best hire.",
+      "Day 47 of a search that should've taken 20."
     ]]
   ];
+
+  /* ─────────────────── 2026 playbook: the daily system ─────────────────── */
+  // Five weekday pillars; the spotlight vertical rotates weekly. Anchor:
+  // Monday 2026-08-03 = an Accounting week (Accounting, Legal, Healthcare,
+  // Cross-market, repeat). Computed in the browser so YOUR timezone decides.
+  var PILLARS = {
+    1: { key: "market_data", name: "Market data", fmt: "Text + one number", tip: "One stat from the spotlight vertical, then what it means for the person trying to hire. 500-1000 characters." },
+    2: { key: "desk_story", name: "Desk story", fmt: "Short text", tip: "An anonymized story from a real search this week. One specific detail, no neat moral at the end. Under 600 characters." },
+    3: { key: "playbook", name: "Playbook", fmt: "How-to, then make it a carousel", tip: "A how-to the buyer can run: fixing a slow interview process, a JD seniors answer, a counteroffer-proof close. PDF carousels are the top save-magnet (6.6% engagement); build one from this draft once it reads right." },
+    4: { key: "opinion", name: "Opinion", fmt: "Contrarian text", tip: "A defensible take against common practice. Thursday gets your best engagement, so spend the spicy take here. 500-1000 characters." },
+    5: { key: "human", name: "Human / build-in-public", fmt: "Text, one photo optional", tip: "The week in numbers from your desk, a lesson learned, or what you got wrong. This pillar is what makes the other four trusted. 400-900 characters." }
+  };
+  var VERTICALS = ["Accounting", "Legal", "Healthcare", "Cross-market"];
+  var WEEK_ANCHOR = new Date(2026, 7, 3).getTime();
+  function weekIndex() { var w = Math.floor((Date.now() - WEEK_ANCHOR) / 604800000); return ((w % 4) + 4) % 4; }
+  function weekRound() { var w = Math.floor((Date.now() - WEEK_ANCHOR) / 604800000); return Math.max(0, Math.floor(w / 4)); }
+
+  // Topic banks anchored to current 2026 market data. t = what you see,
+  // s = the research detail handed to the writer (the only numbers it may cite).
+  var TOPICS = {
+    Accounting: [
+      { t: "The CPA pipeline crunch", s: "CPA exam participation is down more than 30% since 2016; roughly 124,200 annual openings chase about 55,000 accounting degrees. Angle: what that does to your next controller search." },
+      { t: "73 days to fill a CPA seat", s: "CPA-required roles average 73 days to fill, 41% longer than non-CPA roles, and the gap widens 5-8% a year. Angle: the cost of an empty senior accountant seat per month." },
+      { t: "The best candidates never hit the market", s: "61% of finance leaders report talent shortages. Angle: why the best candidates never reach the open market, and what that means for firms that wait for applications." },
+      { t: "The post-busy-season window", s: "Burnout turnover in public accounting runs 15-25% a year. Angle: the exact month, right after busy season, to talk to unhappy seniors; firms that wait for applications lose." },
+      { t: "Enrollment is turning, too late for 2026", s: "Accounting enrollment rose 8.9% in spring 2026, the third straight year of growth. Contrarian angle: the pipeline is finally turning, but not in time for anyone's 2026 hires." },
+      { t: "The real shortage is a skills gap", s: "The shortage is technical accounting plus analytics, AI fluency, and advisory skills. Angle: why '5 years in audit' is no longer a hiring spec." },
+      { t: "Counteroffer season on the controller desk", s: "What controllers are actually being offered to stay, drawn only from the recruiter's desk notes. No invented numbers." },
+      { t: "Offshore vs building a domestic team", s: "Offshore and outsourced accounting vs building a domestic team. Angle: what the firms doing both at once get wrong." }
+    ],
+    Legal: [
+      { t: "Lateral hiring just passed entry-level", s: "Lateral hiring now exceeds entry-level hiring for the first time; lateral associate moves rose about 25%. Angle: what that means for firms trying to grow a practice group." },
+      { t: "The disappearing bottom rung", s: "Senior lawyers are leading the 2026 hiring boom while junior hiring shrinks. Angle: what a hollowed-out bottom rung does to a firm's bench in 5 years." },
+      { t: "AI ate the training work", s: "70% of attorneys now use AI weekly. When AI does the work that used to train juniors, firms hire for judgment instead. Angle: how hiring specs have to change." },
+      { t: "What makes an associate lateral-worthy", s: "Firms want laterals with portable niche expertise and demonstrable client demand. Angle: what actually makes an associate lateral-worthy in this market." },
+      { t: "Anatomy of a failed lateral search", s: "A real search that died in partner sign-off, drawn only from the recruiter's desk notes. Angle: slow sign-off chains cost firms their candidate." },
+      { t: "Comp wars in your practice areas", s: "What candidates are actually being offered, drawn only from the recruiter's desk notes. No invented numbers." },
+      { t: "The AmLaw 50 filter is shrinking your pool", s: "Restricting hiring to AmLaw 50 alumni can shrink the candidate pool by around 80% with no measurable quality gain. Angle: pedigree filters vs performance." },
+      { t: "The business-development test", s: "Laterals who bring relationships are getting two-round processes while everyone else gets five. Angle: what that says about how firms really decide." }
+    ],
+    Healthcare: [
+      { t: "The scheduled retirement wave", s: "100,000 nurses left the workforce in the past two years, and nearly 1 million RNs are over 50. Angle: the retirement wave is scheduled; most facilities are not." },
+      { t: "1.9 million openings a year", s: "BLS projects 1.9 million healthcare openings a year through 2034. Angle: recruiting is now a permanent operating function, not a fill-a-vacancy event." },
+      { t: "What retention money can't fix", s: "Staff RN pay is up 4.5% year over year. Angle: what retention money buys, and what it cannot fix." },
+      { t: "Allied health is the quiet crisis", s: "Allied health roles (therapists, techs, imaging) now often take longer to fill than nursing as demand outruns the training pipeline. Angle: the shortage nobody budgets for." },
+      { t: "Float pools vs agency spend", s: "Float pools and per-diem gig models are cutting agency spend at some facilities and breaking at others. Angle: which is which, and why." },
+      { t: "Critical care, ER, and rural", s: "Three markets where the shortage is a different animal, colored only by the recruiter's desk notes. No invented local numbers." },
+      { t: "Why clinicians ghost", s: "What candidates tell a recruiter that they will never tell an employer's HR team. Drawn from the desk, anonymized." },
+      { t: "The 30-day credentialing leak", s: "Credentialing delays of about 30 days routinely lose hospitals their best candidates. Angle: the two-step fix that keeps them." }
+    ]
+  };
+
+  function todayTopics() {
+    var v = VERTICALS[weekIndex()];
+    var rot = weekRound();
+    if (v === "Cross-market") {
+      return ["Accounting", "Legal", "Healthcare"].map(function (k) {
+        var bank = TOPICS[k]; var e = bank[rot % bank.length];
+        return { t: e.t, s: e.s, v: k };
+      });
+    }
+    var bank = TOPICS[v], out = [], start = (rot * 3) % bank.length;
+    for (var i = 0; i < 3; i++) { var e = bank[(start + i) % bank.length]; out.push({ t: e.t, s: e.s, v: v }); }
+    return out;
+  }
+
+  /* ── Pre-flight linter: the playbook kill list, run on every draft ── */
+  var KILL_WORDS = ["leverage", "delve", "landscape", "foster", "tapestry", "unlock", "elevate", "game-changer", "game changer", "in today's market"];
+  var KILL_OPENERS = ["i'm thrilled to announce", "i am thrilled to announce", "let me tell you a story", "here's the thing", "let's dive in"];
+  function lintPost(t) {
+    t = String(t || "");
+    var low = t.toLowerCase().replace(/’/g, "'"), rows = [];
+    function row(s, m) { rows.push({ s: s, m: m }); }
+    var hook = (t.split("\n")[0] || "").trim();
+    var hw = hook ? hook.split(/\s+/).length : 0;
+    if (!hook) row("bad", "No hook yet. 92% of scroll-past decisions happen on the first line alone.");
+    else if (hw > 10) row("warn", "Hook is " + hw + " words. Under 10 words gets a 2.3x lift; cut it down.");
+    else row("ok", "Hook is " + hw + " words.");
+    if (/https?:\/\/|www\./i.test(t)) row("bad", "Link in the body costs about 19% of reach. Move it to the first comment.");
+    else row("ok", "No links in the body.");
+    var tags = (t.match(/#[A-Za-z0-9_]+/g) || []).length;
+    if (tags) row("bad", tags + " hashtag" + (tags > 1 ? "s" : "") + " found. Zero hashtags gains 5-10% reach; delete them.");
+    else row("ok", "No hashtags.");
+    var hits = [];
+    for (var i = 0; i < KILL_WORDS.length; i++) if (low.indexOf(KILL_WORDS[i]) >= 0 && hits.indexOf(KILL_WORDS[i]) < 0) hits.push(KILL_WORDS[i]);
+    if (hits.length) row("bad", "AI-tell words: " + hits.join(", ") + ". Say it the way you would on a call.");
+    else row("ok", "No AI-tell words.");
+    for (var j = 0; j < KILL_OPENERS.length; j++) if (low.indexOf(KILL_OPENERS[j]) >= 0) { row("bad", 'AI-tell phrase: "' + KILL_OPENERS[j] + '". Cut it and start with the point.'); break; }
+    if (/it'?s not [^.\n]{2,60}[,;] it'?s /.test(low)) row("warn", "The \"It's not X, it's Y\" construction reads as AI. Rephrase one side.");
+    if (/[—–]/.test(t)) row("warn", "Em or en dash found. It becomes a comma when saved; a period usually reads better.");
+    var emo = 0; try { emo = (t.match(new RegExp("\\p{Extended_Pictographic}", "gu")) || []).length; } catch (e2) { }
+    if (emo > 1) row("warn", emo + " emoji. One at most; zero is safer since the Authenticity Update.");
+    if (t.length > 1300) row("warn", t.length + " characters. Most winners run under 1,300; desk stories under 600.");
+    else if (t.length) row("ok", t.length + " characters.");
+    return rows;
+  }
+  function lintIcon(s) {
+    if (s === "ok") return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+    if (s === "warn") return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".5" fill="currentColor"/><path d="M10.3 3.9 2.6 17.1a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>';
+  }
+  function lintHtml(text) {
+    var rows = lintPost(text);
+    var bad = rows.filter(function (r) { return r.s === "bad"; }).length;
+    var warn = rows.filter(function (r) { return r.s === "warn"; }).length;
+    var chip = bad ? '<span class="badge failed">' + bad + " to fix</span>"
+      : warn ? '<span class="badge approved">' + warn + " to check</span>"
+      : '<span class="badge posted">clean</span>';
+    return '<div class="lint"><div class="lt">Pre-flight' + '<span style="flex:1"></span>' + chip + "</div>" +
+      rows.map(function (r) { return '<div class="lintrow ' + r.s + '"><span class="li">' + lintIcon(r.s) + "</span><span>" + esc(r.m) + "</span></div>"; }).join("") +
+      '<div class="lintrow" style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px"><span class="li" style="color:var(--accent)">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span>' +
+      "<span>Before you approve: read it out loud once, rewrite two or three lines into words you'd say on a call, and keep one detail only your desk knows.</span></div></div>";
+  }
 
   function api(action, payload) {
     var b = Object.assign({ action: action }, payload || {});
@@ -588,7 +772,7 @@
   }
 
   /* ---------------------------- rendering ---------------------------- */
-  function renderAll() { renderHeader(); renderToday(); renderStudio(); renderCreate(); renderWatchlist(); renderCalendar(); renderMedia(); renderPerformance(); renderSettings(); }
+  function renderAll() { renderHeader(); renderToday(); renderTodayTab(); renderStudio(); renderCreate(); renderWatchlist(); renderCalendar(); renderMedia(); renderPerformance(); renderSettings(); }
 
   function renderHeader() {
     var drafts = S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; }).length;
@@ -628,6 +812,116 @@
   document.getElementById("todayBar").addEventListener("click", function (e) {
     var p = e.target.closest("[data-go]"); if (p) showView(p.dataset.go);
   });
+
+  /* ---------- Today: the guided daily playbook ---------- */
+  function renderTodayTab() {
+    var el = document.getElementById("todayWrap");
+    var now = new Date();
+    var day = now.getDay();
+    var P = PILLARS[day];
+    var vertical = VERTICALS[weekIndex()];
+    var todayStr = now.toDateString();
+    var postedToday = S.drafts.some(function (d) { return d.status === "posted" && d.postedAt && new Date(d.postedAt).toDateString() === todayStr; });
+    var queuedToday = S.drafts.some(function (d) { return d.status === "approved" && d.scheduledAt && new Date(d.scheduledAt).toDateString() === todayStr; });
+    var draftToday = S.drafts.some(function (d) { return (d.status === "draft" || d.status === "failed") && d.pillar && d.createdAt.slice(0, 10) === now.toISOString().slice(0, 10); });
+    var notes = S.deskNotes || [];
+    var notedToday = notes.some(function (n) { return new Date(n.at).toDateString() === todayStr; });
+    var names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    var st = S.settings || {};
+    var hasSched = String(st.postingDays || "").trim() && String(st.postingTimes || "").trim();
+
+    var strip = '<div class="weekstrip">' + [1, 2, 3, 4, 5].map(function (d) {
+      var p = PILLARS[d];
+      return '<div class="wd' + (d === day ? " now" : "") + '"><div class="wd-day">' + names[d] + (d === day ? " · today" : "") + '</div><div class="wd-p">' + esc(p.name) + '</div><div class="wd-f">' + esc(p.fmt) + "</div></div>";
+    }).join("") + "</div>";
+
+    var head = '<div class="card" style="margin-bottom:14px"><h3>' +
+      (P ? esc(names[day] + " · " + P.name + " · " + vertical + " week") : "Weekend · no post on the calendar") + "</h3>" +
+      '<p class="hint" style="margin-bottom:0">' + (P
+        ? esc(P.tip) + " Publish in the 7:30-8:30 am window; the first 60 minutes decide the post's total reach."
+        : "The calendar runs Monday to Friday. Bank raw material below so Monday writes itself, or look back at the week: sort posts by saves, sends, and DM threads started. Ignore likes.") + "</p></div>";
+
+    function ck(on) {
+      return on
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/></svg>';
+    }
+
+    // Step 1: raw material.
+    var noteRows = notes.slice(0, 5).map(function (n) {
+      return '<div class="noterow"><span class="nd">' + esc(new Date(n.at).toLocaleDateString([], { month: "short", day: "numeric" })) + '</span><span class="nx">' + esc(n.text) + '</span>' +
+        '<button class="btn small danger" data-act="pb-note-del" data-id="' + n.id + '">Delete</button></div>';
+    }).join("");
+    var step1 = '<div class="stepcard"><div class="st-head"><span class="st-n' + (notedToday ? " done" : "") + '" style="font-size:10px">' + (notedToday ? "&#10003;" : "PM") + '</span>' +
+      '<span class="st-t">Capture raw material for tomorrow</span><span class="st-time">2 min, end of day · the most important step</span></div>' +
+      '<p class="hint">The most surprising thing a candidate or client said, one number from your desk, one thing that annoyed you about how a company hires. This is what makes tomorrow\'s post impossible to mistake for AI. Talk-to-text works great.</p>' +
+      '<div class="st-body"><textarea id="pbNote" rows="3" placeholder="e.g. A controller turned down $12K more to stay put. The CFO who counteroffered hadn\'t done a one-on-one in seven months.">' + esc(pbNoteVal) + '</textarea>' +
+      '<div class="btnrow"><button class="btn primary small" data-act="pb-note-add">Save note</button>' +
+      (notes.length ? '<span class="sub">' + notes.length + ' note' + (notes.length === 1 ? "" : "s") + ' banked. The writer pulls from the latest five.</span>' : '<span class="sub">Nothing banked yet.</span>') + "</div>" +
+      (noteRows ? '<div class="notes-list">' + noteRows + "</div>" : "") + "</div></div>";
+
+    // Step 2 + 3 exist only on weekdays.
+    var step2 = "", step3 = "", step4 = "";
+    if (P) {
+      var tps = todayTopics();
+      var topicRows = tps.map(function (tp, i) {
+        return '<div class="topic' + (pbSel === i ? " sel" : "") + '" data-act="pb-topic" data-idx="' + i + '"><span class="tk"></span>' +
+          '<span class="tt"><b>' + esc(tp.t) + (vertical === "Cross-market" ? " · " + esc(tp.v) : "") + '</b><span>' + esc(tp.s) + "</span></span></div>";
+      }).join("") +
+        '<div class="topic' + (pbSel === -1 ? " sel" : "") + '" data-act="pb-topic" data-idx="-1"><span class="tk"></span>' +
+        '<span class="tt" style="flex:1"><b>My own topic</b>' +
+        '<input type="text" id="pbMyTopic" placeholder="What today\'s post should be about" value="' + esc(pbCustom) + '" style="margin-top:6px" /></span></div>';
+      step2 = '<div class="stepcard"><div class="st-head"><span class="st-n">1</span><span class="st-t">Pick today\'s topic</span>' +
+        '<span class="st-time">30 sec</span></div>' +
+        '<p class="hint">Suggestions rotate weekly and are anchored to current ' + esc(vertical === "Cross-market" ? "2026" : vertical + " 2026") + ' market data, so the numbers are real. Your saved notes get woven in automatically.</p>' +
+        '<div class="st-body"><div class="topicpick">' + topicRows + "</div></div></div>";
+
+      step3 = '<div class="stepcard"><div class="st-head"><span class="st-n' + ((draftToday || postedToday || queuedToday) ? " done" : "") + '">' + ((draftToday || postedToday || queuedToday) ? "&#10003;" : "2") + '</span>' +
+        '<span class="st-t">Write the draft, then make it yours</span><span class="st-time">5 min</span></div>' +
+        '<p class="hint">The writer follows the full 2026 structure: hook under 10 words, no hashtags, no links, kill-list scrubbed, one real detail from your notes. It lands in the Studio for your read-aloud pass; nothing ever posts without your approval.</p>' +
+        '<div class="st-body">' +
+        (!S.anthropicConfigured ? '<div class="notice">AI is not enabled on the server yet, so the writer is offline.</div>' : "") +
+        '<input type="text" id="pbDir" placeholder="Optional direction, e.g. angle it at CFOs, mention the Friday call" value="' + esc(pbDirVal) + '" />' +
+        '<div class="btnrow"><button class="btn primary" data-act="pb-generate"' + (!S.anthropicConfigured ? " disabled" : "") + '>Write today\'s post</button>' +
+        (draftToday ? '<button class="btn" data-go="studio">Open the waiting draft</button>' : "") + "</div></div></div>";
+
+      step4 = '<div class="stepcard"><div class="st-head"><span class="st-n' + (postedToday ? " done" : "") + '">' + (postedToday ? "&#10003;" : "3") + '</span>' +
+        '<span class="st-t">Publish in the morning window</span><span class="st-time">7:30-8:30 am</span></div>' +
+        '<p class="hint">Approve + next slot drops it into your schedule. Tuesday to Thursday are the strongest days; consistency beats timing.</p>' +
+        '<div class="st-body"><div class="btnrow" style="margin-top:0">' +
+        (hasSched ? '<span class="sub">Schedule saved: your next slot shows on every draft\'s approve button.</span>'
+          : '<button class="btn primary small" data-act="pb-sched">Use the playbook schedule (Mon-Fri, 7:45 am)</button>') +
+        "</div></div></div>";
+    }
+
+    // Right column: what happens after the post, and the scoreboard rules.
+    var after = '<div class="card" style="margin-bottom:14px"><h3>After you post</h3>' +
+      '<p class="hint">This half of the system does more for pipeline than the posts in the first 90 days.</p>' +
+      '<div class="checkrow' + (postedToday ? " on" : "") + '"><span class="ck">' + ck(postedToday) + '</span><span class="cx"><b>Post published</b><span>' + (postedToday ? "Done today." : "Steps 1-3 on the left.") + "</span></span></div>" +
+      '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>Work the first 60 minutes</b><span>Reply to every comment with 15+ words (2.5x weight, doubles the thread). Keyword commenters get a DM while they\'re still online.</span></span></div>' +
+      '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>10 substantive comments on buyer posts</b><span>Managing partners, CFOs, controllers, clinical directors, trade press. A real observation from your desk, never "Great post!". Worth +40% profile views in a month.</span></span></div>' +
+      '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>Work the DMs</b><span>Every keyword commenter, ICP follower, and profile viewer from a target firm gets a short, non-pitchy DM. Goal is a conversation, not a meeting ask.</span></span></div>' +
+      '<div class="checkrow' + (notedToday ? " on" : "") + '"><span class="ck">' + ck(notedToday) + '</span><span class="cx"><b>2-minute voice memo</b><span>Save it as a note in step 1. Tomorrow\'s post is already half written.</span></span></div>' +
+      '<p class="hint" style="margin:10px 0 0">Your Daily Ops checklist in the portal tracks the publish, comment, and touch ticks.</p></div>';
+
+    var friday = day === 5 ? '<div class="card" style="margin-bottom:14px"><h3>Friday review · 20 minutes</h3>' +
+      '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>Sort the week by saves + sends + DM threads</b><span>Ignore likes. Saves and sends weigh about 5x a like now.</span></span></div>' +
+      '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>Note which vertical and format won</b><span>The Performance tab has the counters.</span></span></div>' +
+      '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>Jot one desk note per next-week topic</b><span>That is the entire content planning.</span></span></div></div>' : "";
+
+    var rules = '<div class="card"><h3>What the algorithm pays for in 2026</h3>' +
+      '<div class="kv"><b>Saves + sends</b>about 5x the weight of a like</div>' +
+      '<div class="kv"><b>PDF carousels</b>6.6% engagement, the top format</div>' +
+      '<div class="kv"><b>Short text</b>34% of top posts are under 600 characters</div>' +
+      '<div class="kv"><b>Links in body</b>cost about 19% of reach: first comment instead</div>' +
+      '<div class="kv"><b>Hashtags</b>zero hashtags gains 5-10% reach</div>' +
+      '<div class="kv"><b>Topic authority</b>stay in your lane; it takes 3-4 weeks to build</div>' +
+      '<div class="kv"><b>Warm DM threads</b>typically start weeks 6-8. Outlast week 5.</div></div>';
+
+    el.innerHTML = strip + head +
+      '<div class="todaygrid"><div>' + (P ? step2 + step3 + step4 + step1 : step1) + "</div>" +
+      "<div>" + after + friday + rules + "</div></div>";
+  }
 
   /* ---------- Studio: rail + workspace ---------- */
   function studioList() { return S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; }); }
@@ -678,6 +972,7 @@
     var rail = list.map(function (d) {
       var img = d.imageId ? imgById(d.imageId) : null;
       var chip = d.status === "failed" ? '<span class="badge failed">failed</span>'
+        : d.pillar ? '<span class="statchip">' + esc(d.pillar) + '</span>'
         : d.jobSpotlight ? '<span class="statchip">job spotlight</span>'
         : d.aiOriginal ? '<span class="statchip">original</span>'
         : d.sourceAuthor ? '<span class="badge draft">rewrite</span>' : '<span class="badge draft">draft</span>';
@@ -754,6 +1049,7 @@
         '<div class="btnrow" style="margin-top:4px"><button class="btn small primary" data-act="rerender-carousel" data-id="' + d.id + '">Re-render carousel</button></div></div>';
     }
     var srcChip = d.sourceAuthor ? "idea from <b>" + esc(d.sourceAuthor) + "</b> (attribution only, never posted)"
+      : d.pillar ? '<span class="statchip">' + esc(d.pillar) + (d.vertical ? " · " + esc(d.vertical) : "") + "</span> <span>today's playbook post</span>"
       : d.jobSpotlight ? '<span class="statchip">job spotlight' + (d.jobTitle ? ": " + esc(d.jobTitle) : "") + "</span> <span>client never named</span>"
       : d.aiOriginal ? '<span class="statchip">original, written for your brand</span>' : "original";
     return '<div class="workgrid"><div>' +
@@ -768,6 +1064,7 @@
       "</div>" + hooks +
       '<textarea rows="10" maxlength="3000" data-act="edit" data-id="' + d.id + '">' + esc(d.text) + "</textarea>" +
       '<div class="count">' + d.text.length + " / 3000</div>" +
+      '<div id="lintHost">' + lintHtml(d.text) + "</div>" +
       (d.error ? '<div class="errbox">Publish failed: ' + esc(d.error) + "</div>" : "") +
       '<div class="imgrow">' +
       '<button class="btn small" data-act="choose-img" data-id="' + d.id + '">' + (img ? "Change media" : "Attach media") + "</button>" +
@@ -1187,6 +1484,65 @@
         .then(function () { busy(b, false); });
       return;
     }
+    if (act === "pb-topic") {
+      var nIdx = parseInt(b.dataset.idx, 10);
+      if (nIdx === pbSel) return; // don't re-render (and steal the caret) on a repeat click
+      pbSel = nIdx;
+      var mt = document.getElementById("pbMyTopic"); if (mt) pbCustom = mt.value;
+      renderTodayTab();
+      if (pbSel === -1) { var mt2 = document.getElementById("pbMyTopic"); if (mt2) mt2.focus(); }
+      return;
+    }
+    if (act === "pb-note-add") {
+      var na = document.getElementById("pbNote");
+      if (!na || !na.value.trim()) { toast("Write the note first: one number, one quote, one annoyance."); return; }
+      busy(b, true, "Saving…");
+      api("note_add", { text: na.value })
+        .then(function () { pbNoteVal = ""; toast("Banked. The writer pulls from your latest five notes."); return load(); })
+        .catch(function (err) { toast(err.message); })
+        .then(function () { busy(b, false); });
+      return;
+    }
+    if (act === "pb-note-del") {
+      api("note_delete", { id: id }).then(load).catch(function (err) { toast(err.message); });
+      return;
+    }
+    if (act === "pb-sched") {
+      busy(b, true, "Saving…");
+      api("save_settings", { settings: { postingDays: "1,2,3,4,5", postingTimes: "07:45" } })
+        .then(function () { toast("Schedule saved: Mon-Fri at 7:45 am. Approve + next slot now lands there."); return load(); })
+        .catch(function (err) { toast(err.message); })
+        .then(function () { busy(b, false); });
+      return;
+    }
+    if (act === "pb-generate") {
+      var Pn = PILLARS[new Date().getDay()];
+      if (!Pn) { toast("No pillar today: the calendar runs Monday to Friday."); return; }
+      var topic, vert;
+      if (pbSel === -1) {
+        var mt3 = document.getElementById("pbMyTopic"); if (mt3) pbCustom = mt3.value;
+        if (!pbCustom.trim()) { toast("Pick a suggested topic or write your own first."); return; }
+        topic = pbCustom.trim();
+        vert = VERTICALS[weekIndex()] === "Cross-market" ? "professional services" : VERTICALS[weekIndex()];
+      } else {
+        var tps2 = todayTopics();
+        var tp2 = tps2[pbSel] || tps2[0];
+        topic = tp2.t + ". " + tp2.s;
+        vert = tp2.v;
+      }
+      var dEl = document.getElementById("pbDir"); if (dEl) pbDirVal = dEl.value;
+      busy(b, true, "Writing…");
+      api("make_playbook_post", { pillar: Pn.key, vertical: vert, topic: topic, guidance: pbDirVal })
+        .then(function (r) {
+          sel = r.draft.id; pbDirVal = "";
+          showView("studio");
+          toast("Draft ready. Read it out loud, fix a few lines into your phrasing, clear the pre-flight, then approve.");
+          return load();
+        })
+        .catch(function (err) { toast(err.message); })
+        .then(function () { busy(b, false); });
+      return;
+    }
     if (act === "sel-draft") {
       sel = id; pvOpen = false; pickOpen = false; hooksOpen = false; regenOpen = false; cardOpen = false; renderStudio();
     } else if (act === "fold") {
@@ -1370,11 +1726,15 @@
   // Live character count + LinkedIn preview while typing.
   document.body.addEventListener("input", function (e) {
     var t = e.target;
+    if (t && t.id === "pbMyTopic") { pbCustom = t.value; return; }
+    if (t && t.id === "pbDir") { pbDirVal = t.value; return; }
+    if (t && t.id === "pbNote") { pbNoteVal = t.value; return; }
     if (t && t.matches && t.matches('textarea[data-act="edit"]')) {
       var card = t.closest(".item"); if (!card) return;
       var c = card.querySelector(".count"); if (c) c.textContent = t.value.length + " / 3000";
       var d = draftById(t.dataset.id);
       if (d) { d.text = t.value; var host = document.getElementById("pvHost"); if (host) host.innerHTML = liPreview(d); }
+      var lh = document.getElementById("lintHost"); if (lh) lh.innerHTML = lintHtml(t.value);
     }
     if (t && t.matches && t.matches('textarea[data-act="edit-fc"]')) {
       var d2 = draftById(t.dataset.id);
@@ -1393,6 +1753,9 @@
       tip.style.opacity = "1";
     } else tip.style.opacity = "0";
   });
+
+  // Deep link: #today / #studio / #calendar etc. opens that view directly.
+  try { var hv = location.hash.replace("#", ""); if (hv && document.getElementById("view-" + hv)) showView(hv); } catch (e) { }
 
   load();
 })();

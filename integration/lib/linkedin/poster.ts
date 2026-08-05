@@ -59,6 +59,10 @@ export interface PosterDraft {
   jobSpotlight?: boolean;
   /** The job title behind a spotlight, for the UI chip only. */
   jobTitle?: string;
+  /** 2026 playbook drafts: which weekday pillar and vertical produced this
+   *  (e.g. "Desk story" / "Accounting"), for the UI chips only. */
+  pillar?: string;
+  vertical?: string;
   text: string;
   imageId?: string;
   /** Posted as the post's first comment right after publishing (links belong
@@ -135,12 +139,22 @@ export interface WatchedProfile {
   seenPostIds: string[];
 }
 
+/** End-of-day raw material: the 2-minute voice-memo note that makes tomorrow's
+ *  post impossible to mistake for AI. The playbook generator draws its one
+ *  specific detail from here; it never invents one. */
+export interface DeskNote {
+  id: string;
+  text: string;
+  at: string;
+}
+
 interface WorkspaceState {
   inbox: InspirationItem[];
   drafts: PosterDraft[];
   images: PosterImage[];
   settings: PosterSettings;
   watchlist: WatchedProfile[];
+  deskNotes: DeskNote[];
 }
 
 interface Store {
@@ -175,11 +189,12 @@ function defaultSettings(): PosterSettings {
 function wsState(ws: string): WorkspaceState {
   let s = store.workspaces[ws];
   if (!s) {
-    s = { inbox: [], drafts: [], images: [], settings: defaultSettings(), watchlist: [] };
+    s = { inbox: [], drafts: [], images: [], settings: defaultSettings(), watchlist: [], deskNotes: [] };
     store.workspaces[ws] = s;
   }
   if (!s.settings) s.settings = defaultSettings();
   if (!s.watchlist) s.watchlist = [];
+  if (!s.deskNotes) s.deskNotes = [];
   return s;
 }
 
@@ -262,6 +277,157 @@ export async function deleteInspiration(ws: string, id: string): Promise<void> {
   const s = wsState(ws);
   s.inbox = s.inbox.filter((i) => i.id !== id);
   persist();
+}
+
+/* ----------------------------- desk notes -------------------------------- */
+
+export async function addDeskNote(ws: string, text: string): Promise<DeskNote> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const t = scrubDashes(text.trim()).slice(0, 2000);
+  if (!t) throw Object.assign(new Error("note_text_required"), { status: 400 });
+  const n: DeskNote = { id: rid(), text: t, at: nowIso() };
+  s.deskNotes.unshift(n);
+  if (s.deskNotes.length > 40) s.deskNotes.length = 40;
+  persist();
+  return n;
+}
+
+export async function deleteDeskNote(ws: string, id: string): Promise<void> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  s.deskNotes = s.deskNotes.filter((n) => n.id !== id);
+  persist();
+}
+
+/* --------------------------- 2026 playbook -------------------------------- */
+
+/**
+ * The daily content system from the LinkedIn BD playbook (built on the 2026
+ * algorithm research: topic authority, the March 2026 Authenticity Update,
+ * saves/sends weighing ~5x a like). Five weekday pillars; the client picks
+ * pillar + vertical + topic and sends them here, so the recruiter's browser
+ * timezone, not the server's, decides what day it is.
+ */
+const PLAYBOOK_PILLARS: Record<string, { name: string; length: string; brief: string }> = {
+  market_data: {
+    name: "Market data",
+    length: "500-1000 characters",
+    brief: "Open with the number from today's topic, then spend the post on what it means for the person trying to hire. Concrete, useful, zero fluff. The reader should be able to repeat the stat in a meeting.",
+  },
+  desk_story: {
+    name: "Desk story",
+    length: "under 600 characters",
+    brief: "One anonymized story from a real search: the counteroffer, the candidate who ghosted, the offer accepted in 48 hours. Specific detail from the raw material. No neat moral at the end; let the story sit.",
+  },
+  playbook: {
+    name: "Playbook",
+    length: "800-1300 characters",
+    brief: "A how-to the buyer can run without hiring anyone: fixing a 4-round interview process, writing a JD senior candidates answer, a counteroffer-proof close. Numbered steps are fine when they are genuinely steps, but vary the rhythm so the list does not read machine-parallel.",
+  },
+  opinion: {
+    name: "Opinion",
+    length: "500-1000 characters",
+    brief: "A defensible contrarian take against common hiring practice. Take one side and hold it. Aim it at a specific habit (5-round processes, pedigree filters, slow sign-off chains), not at a strawman.",
+  },
+  human: {
+    name: "Human / build-in-public",
+    length: "400-900 characters",
+    brief: "The week from the desk: a number, a lesson, a placement celebrated in general terms, or what went wrong and what changed. Honest and plain. This post is what makes the other four trusted.",
+  },
+};
+
+/** The instant-AI-tell kill list from the playbook. Shared by every generator
+ *  so no path can produce a post that trips the Authenticity Update. */
+const PLAYBOOK_KILL = `NEVER USE (instant AI tells; any one of these sinks the post):
+- The words: leverage, delve, landscape, foster, tapestry, unlock, elevate, game-changer, "in today's market".
+- The openers: "I'm thrilled to announce", "Let me tell you a story", "Here's the thing", "Let's dive in".
+- The "It's not X, it's Y" construction, and rhetorical triads ("faster, smarter, better").
+- Em-dashes anywhere. Use commas or periods.
+- Perfectly parallel bullet lists where every line has the same rhythm.
+- A tidy moral or bow at the end of a story.
+- Emoji. Hashtags (zero, always). Links in the body.`;
+
+function playbookSystem(settings: PosterSettings, pillarKey: string, vertical: string, topic: string, notes: string): string {
+  const p = PLAYBOOK_PILLARS[pillarKey];
+  return `You ghostwrite ONE LinkedIn post for a recruiter doing business development in the ${vertical} hiring market. The buyers reading it are managing partners, CFOs, controllers, and HR or clinical directors. Today's post is the "${p.name}" pillar of their weekly content system.
+
+PILLAR BRIEF: ${p.brief}
+
+TODAY'S TOPIC (grounded in real, published 2026 market research; you may cite ONLY the figures inside it):
+${topic}
+
+THE RECRUITER'S RAW MATERIAL (real desk notes from the last few days; the best source for the one specific detail that makes the post unmistakably human):
+${notes || "(none today: write from the topic's data angle plus the recruiter's point of view, WITHOUT inventing desk specifics)"}
+${settings.brandLine ? `
+THE BRAND: the recruiter posts on behalf of ${settings.brandLine}. Sound like a senior recruiter there. Never name other companies' brands or tools.` : ""}
+THE RECRUITER'S VOICE PROFILE (follow it exactly):
+${settings.voiceProfile || "Plainspoken, direct, warm. A working recruiter talking to their market, not a content marketer."}
+
+REAL STORY BANK (true anecdotes you may draw from; use at most one per post):
+${settings.storyBank || "(none provided)"}
+
+ABSOLUTE TRUTH RULES (non-negotiable, house rule):
+- Numbers come ONLY from today's topic, the raw material, or the story bank. NEVER invent a placement, client, candidate, name, figure, or outcome.
+- Anonymize everything from the desk: "a controller", "an AmLaw 200 firm", "a 3-hospital system". Never anything identifying.
+- If the raw material has a relevant true detail, use exactly one. If not, stay insight-led.
+
+STRUCTURE:
+- First line is the hook: under 10 words, curiosity-gap or contrarian, works as the ONLY visible line before the fold.
+- One or two lines of context, then the meat, then one takeaway.
+- Line break every one or two sentences. Total length: ${p.length}.
+- End with one genuine question the buyer would actually answer. No hard CTA, no promised downloads or reports.
+
+HUMAN SIGNALS (use them):
+- Contractions. Sentences that start with And or But. Varied sentence length; leave one slightly imperfect sentence alone.
+- One specific, verifiable detail when the raw material provides it (a time, a number, a day of the week, a short quote).
+- A named feeling where honest: annoyed, relieved, embarrassed.
+- An occasional aside in parentheses is fine.
+
+${PLAYBOOK_KILL}
+
+Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
+}
+
+/** One playbook post (pillar + vertical + topic chosen client-side) -> Drafts.
+ *  Pulls the recruiter's latest desk notes in as raw material automatically. */
+export async function createPlaybookDraft(ws: string, opts: { pillar: string; vertical?: string; topic?: string; guidance?: string }): Promise<PosterDraft> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const pillarKey = PLAYBOOK_PILLARS[opts.pillar] ? opts.pillar : "opinion";
+  const vertical = (opts.vertical ?? "").trim().slice(0, 60) || "professional services";
+  const topic = (opts.topic ?? "").trim().slice(0, 700) || "a pattern the recruiter is seeing on their desk right now";
+  const notes = s.deskNotes.slice(0, 5).map((n) => `- (${n.at.slice(0, 10)}) ${n.text}`).join("\n");
+
+  const client = anthropicClient();
+  const user = (opts.guidance?.trim() ? `EXTRA DIRECTION FROM THE RECRUITER: ${opts.guidance.trim().slice(0, 500)}\n\n` : "") + "Write the post now.";
+  const msg = await client.messages.create({
+    model: MODEL(),
+    max_tokens: 1024,
+    system: playbookSystem(s.settings, pillarKey, vertical, topic, notes),
+    messages: [{ role: "user", content: user }],
+  });
+  const out = msg.content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+  if (!out) throw new Error("playbook_empty");
+
+  const draft: PosterDraft = {
+    id: rid(),
+    text: scrubDashes(out).slice(0, 3000),
+    aiOriginal: true,
+    pillar: PLAYBOOK_PILLARS[pillarKey].name,
+    vertical,
+    status: "draft",
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  s.drafts.unshift(draft);
+  if (s.drafts.length > 300) s.drafts.length = 300;
+  persist();
+  return draft;
 }
 
 /* --------------------------- followed creators --------------------------- */
@@ -440,12 +606,13 @@ ABSOLUTE TRUTH RULES (non-negotiable, house rule):
 - Never imply the source post's experiences happened to the recruiter.
 
 FORMAT RULES:
-- First line is the hook: under 60 characters, no clickbait, makes a scroller stop.
+- First line is the hook: under 10 words, no clickbait, makes a scroller stop.
 - Short paragraphs, 1-2 sentences each, blank line between them. 600-1300 characters total.
 - End with one light question or takeaway line, not a hard CTA.
-- NO em-dashes anywhere. Use commas, colons, periods, or parentheses instead.
-- No emoji. No hashtag walls: zero to three relevant hashtags at the very end, or none.
+- Use contractions; vary sentence length; it should read the way the recruiter talks on the phone.
 - No "I saw a post about..." framing. The idea is presented as the recruiter's own thinking.
+
+${PLAYBOOK_KILL}
 
 Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
 }
@@ -560,11 +727,12 @@ ABSOLUTE TRUTH RULES (non-negotiable, house rule):
 - If the story bank has a relevant TRUE story, tell it. Otherwise write insight-led, without inventing specifics.
 
 FORMAT RULES:
-- First line is the hook: under 60 characters, no clickbait, makes a scroller stop.
+- First line is the hook: under 10 words, no clickbait, makes a scroller stop.
 - Short paragraphs, 1-2 sentences each, blank line between them. 600-1300 characters total.
 - End with one light question or takeaway line, not a hard CTA.
-- NO em-dashes anywhere. Use commas, colons, periods, or parentheses instead.
-- No emoji. No hashtag walls: zero to three relevant hashtags at the very end, or none.
+- Use contractions; vary sentence length; it should read the way the recruiter talks on the phone.
+
+${PLAYBOOK_KILL}
 
 Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
 }
@@ -642,11 +810,12 @@ THE RECRUITER'S VOICE PROFILE (follow it exactly):
 ${settings.voiceProfile || "Plainspoken, direct, warm. A working recruiter talking to their market, not a content marketer."}
 
 FORMAT RULES:
-- First line is the hook: under 60 characters, aimed at the person who should want this job.
+- First line is the hook: under 10 words, aimed at the person who should want this job.
 - Short paragraphs, 1-2 sentences each, blank line between them. 500-1100 characters total.
 - Cover: what the role is, where (if stated), what makes it genuinely good (from the JD only).
 - End with a simple next step: DM the recruiter or comment to hear more. No links.
-- NO em-dashes anywhere. No emoji. Zero to three relevant hashtags at the very end, or none.
+
+${PLAYBOOK_KILL}
 
 Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
 }
@@ -1268,6 +1437,7 @@ export interface PosterState {
   images: PosterImage[];
   settings: PosterSettings;
   watchlist: WatchedProfile[];
+  deskNotes: DeskNote[];
 }
 
 export async function getState(ws: string): Promise<PosterState> {
@@ -1279,6 +1449,7 @@ export async function getState(ws: string): Promise<PosterState> {
     images: s.images,
     settings: s.settings,
     watchlist: s.watchlist,
+    deskNotes: s.deskNotes,
   };
 }
 

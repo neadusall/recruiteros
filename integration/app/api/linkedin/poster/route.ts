@@ -20,6 +20,9 @@
  *   delete_image      { id }
  *   make_card         { headline }
  *   make_original     { guidance? }         (AI writes a brand-grounded original)
+ *   make_playbook_post{ pillar, vertical?, topic?, guidance? }  (2026 playbook: today's pillar post)
+ *   note_add          { text }              (end-of-day raw material for the playbook generator)
+ *   note_delete       { id }
  *   make_job_post     {}                    (blind spotlight of an open Job Library job)
  *   make_carousel     { draftId }           (draft -> branded slide PDF, attached)
  *   duplicate         { draftId }           (reuse a post as a fresh draft)
@@ -39,6 +42,7 @@ import {
   uploadImage, deleteImage, generateQuoteCard, saveSettings, getSettings,
   enginePublishStatus, addWatchedProfile, removeWatchedProfile, pullWatchedProfile,
   generateCarousel, duplicateDraft, refreshPostStats, createOriginalDraft, createJobSpotlightDraft,
+  createPlaybookDraft, addDeskNote, deleteDeskNote,
 } from "../../../../lib/linkedin/poster";
 import {
   ayrshareConfigured, ayrshareLinkingConfigured, getAccountStatus, createProfile, generateLinkUrl,
@@ -85,6 +89,9 @@ interface PosterPost {
   dataUrl?: string;
   headline?: string;
   settings?: Record<string, unknown>;
+  pillar?: string;
+  vertical?: string;
+  topic?: string;
 }
 
 export async function POST(req: Request) {
@@ -148,6 +155,19 @@ export async function POST(req: Request) {
       }
       case "make_original":
         return ok({ draft: await createOriginalDraft(ws, { topic: b.guidance }) });
+      case "make_playbook_post": {
+        if (!b.pillar) return fail("pillar_required");
+        return ok({ draft: await createPlaybookDraft(ws, { pillar: b.pillar, vertical: b.vertical, topic: b.topic, guidance: b.guidance }) });
+      }
+      case "note_add": {
+        if (!b.text?.trim()) return fail("text_required");
+        return ok({ note: await addDeskNote(ws, b.text) });
+      }
+      case "note_delete": {
+        if (!b.id) return fail("id_required");
+        await deleteDeskNote(ws, b.id);
+        return ok({ deleted: true });
+      }
       case "make_job_post":
         return ok({ draft: await createJobSpotlightDraft(ws) });
       case "make_carousel": {
