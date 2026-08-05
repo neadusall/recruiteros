@@ -203,6 +203,27 @@ export async function addInbox(workspaceId: string, input: NewInboxInput): Promi
     m.createdAt = prev.createdAt;
     // keep the prior owner if the re-import didn't specify one
     if (!m.ownerId && prev.ownerId) { m.ownerId = prev.ownerId; m.ownerName = prev.ownerName; }
+    // A credential-less re-import must never erase a working login. The fleet
+    // mirror re-adds every mailbox on its tick, and OAuth accounts arrive with no
+    // SMTP password by design; rebuilding the row from that input wiped the
+    // credentials an operator imported from the provider's own export (the
+    // Sending.ac fleet went sendable to skipped within one sync cycle). When the
+    // incoming row carries no password, the WHOLE stored login wins: password and
+    // host/port/user travel together, or a mirror row with a default host would
+    // repoint working credentials at the wrong server.
+    if (!input.smtpPass && prev.smtpPassEnc) {
+      m.smtpPassEnc = prev.smtpPassEnc;
+      m.smtpHost = prev.smtpHost;
+      m.smtpPort = prev.smtpPort;
+      m.smtpSecure = prev.smtpSecure;
+      m.smtpUser = prev.smtpUser;
+    }
+    if (!input.smtpPass && !input.imapPass && prev.imapPassEnc) {
+      m.imapPassEnc = prev.imapPassEnc;
+      m.imapHost = prev.imapHost;
+      m.imapPort = prev.imapPort;
+      m.imapUser = prev.imapUser;
+    }
     // Carry the login-health record across a re-import. The hourly fleet sync
     // re-adds every mailbox, and rebuilding the row from scratch used to drop
     // both fields: the WHY behind a failing Email ID was erased within the hour
