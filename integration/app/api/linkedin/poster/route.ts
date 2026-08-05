@@ -58,7 +58,7 @@ export async function GET(req: Request) {
   const ws = g.ctx.workspace.id;
 
   const state = await getState(ws);
-  const engine = await enginePublishStatus(ws);
+  const engine = await enginePublishStatus(ws, g.ctx.user.id);
   // Ayrshare's status probe is a live HTTP call; skip it entirely when no key is set.
   const ayrshare = await getAccountStatus(state.settings.ayrshareProfileKey || undefined);
   const publishVia = engine.ready ? "engine" : ayrshare.configured && ayrshare.linkedinConnected ? "ayrshare" : "none";
@@ -114,7 +114,7 @@ export async function POST(req: Request) {
         return ok({ deleted: true });
       }
       case "rewrite":
-        return ok({ draft: await rewriteToDraft(ws, { inspirationId: b.inspirationId, text: b.text, author: b.author, guidance: b.guidance }) });
+        return ok({ draft: await rewriteToDraft(ws, { inspirationId: b.inspirationId, text: b.text, author: b.author, guidance: b.guidance, userId: g.ctx.user.id }) });
       case "regenerate": {
         if (!b.draftId) return fail("draftId_required");
         return ok({ draft: await regenerateDraft(ws, b.draftId, b.guidance) });
@@ -130,7 +130,7 @@ export async function POST(req: Request) {
       }
       case "approve": {
         if (!b.draftId) return fail("draftId_required");
-        return ok({ draft: await approveDraft(ws, b.draftId, b.when) });
+        return ok({ draft: await approveDraft(ws, b.draftId, b.when, g.ctx.user.id) });
       }
       case "cancel_schedule": {
         if (!b.draftId) return fail("draftId_required");
@@ -138,7 +138,7 @@ export async function POST(req: Request) {
       }
       case "retry": {
         if (!b.draftId) return fail("draftId_required");
-        return ok({ draft: await retryDraft(ws, b.draftId) });
+        return ok({ draft: await retryDraft(ws, b.draftId, g.ctx.user.id) });
       }
       case "upload_image": {
         if (!b.dataUrl) return fail("dataUrl_required");
@@ -154,10 +154,10 @@ export async function POST(req: Request) {
         return ok({ image: await generateQuoteCard(ws, { headline: b.headline }) });
       }
       case "make_original":
-        return ok({ draft: await createOriginalDraft(ws, { topic: b.guidance }) });
+        return ok({ draft: await createOriginalDraft(ws, { topic: b.guidance, userId: g.ctx.user.id }) });
       case "make_playbook_post": {
         if (!b.pillar) return fail("pillar_required");
-        return ok({ draft: await createPlaybookDraft(ws, { pillar: b.pillar, vertical: b.vertical, topic: b.topic, guidance: b.guidance }) });
+        return ok({ draft: await createPlaybookDraft(ws, { pillar: b.pillar, vertical: b.vertical, topic: b.topic, guidance: b.guidance, userId: g.ctx.user.id }) });
       }
       case "note_add": {
         if (!b.text?.trim()) return fail("text_required");
@@ -169,7 +169,7 @@ export async function POST(req: Request) {
         return ok({ deleted: true });
       }
       case "make_job_post":
-        return ok({ draft: await createJobSpotlightDraft(ws) });
+        return ok({ draft: await createJobSpotlightDraft(ws, g.ctx.user.id) });
       case "make_carousel": {
         if (!b.draftId) return fail("draftId_required");
         const slides = Array.isArray(b.slides) ? b.slides.filter((x): x is string => typeof x === "string") : undefined;
@@ -177,7 +177,7 @@ export async function POST(req: Request) {
       }
       case "duplicate": {
         if (!b.draftId) return fail("draftId_required");
-        return ok({ draft: await duplicateDraft(ws, b.draftId) });
+        return ok({ draft: await duplicateDraft(ws, b.draftId, g.ctx.user.id) });
       }
       case "refresh_stats":
         return ok({ updated: await refreshPostStats(ws, true) });

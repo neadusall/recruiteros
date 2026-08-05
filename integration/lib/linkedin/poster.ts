@@ -63,6 +63,10 @@ export interface PosterDraft {
    *  (e.g. "Desk story" / "Accounting"), for the UI chips only. */
   pillar?: string;
   vertical?: string;
+  /** The portal user this draft belongs to. Publishing goes out from THEIR
+   *  connected LinkedIn seat, never a teammate's. Stamped at creation and,
+   *  as a backstop, at approve/retry time (covers auto-generated drafts). */
+  createdBy?: string;
   text: string;
   imageId?: string;
   /** Posted as the post's first comment right after publishing (links belong
@@ -391,7 +395,7 @@ Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
 
 /** One playbook post (pillar + vertical + topic chosen client-side) -> Drafts.
  *  Pulls the recruiter's latest desk notes in as raw material automatically. */
-export async function createPlaybookDraft(ws: string, opts: { pillar: string; vertical?: string; topic?: string; guidance?: string }): Promise<PosterDraft> {
+export async function createPlaybookDraft(ws: string, opts: { pillar: string; vertical?: string; topic?: string; guidance?: string; userId?: string }): Promise<PosterDraft> {
   await ensureLoaded();
   const s = wsState(ws);
   const pillarKey = PLAYBOOK_PILLARS[opts.pillar] ? opts.pillar : "opinion";
@@ -420,6 +424,7 @@ export async function createPlaybookDraft(ws: string, opts: { pillar: string; ve
     aiOriginal: true,
     pillar: PLAYBOOK_PILLARS[pillarKey].name,
     vertical,
+    createdBy: opts.userId,
     status: "draft",
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -520,17 +525,15 @@ export async function pullWatchedProfile(ws: string, id: string): Promise<{ adde
   const s = wsState(ws);
   const w = s.watchlist.find((x) => x.id === id);
   if (!w) throw Object.assign(new Error("profile_not_found"), { status: 404 });
-  const engine = await enginePublishStatus(ws);
-  if (!engine.ready) {
-    throw Object.assign(new Error("engine_not_ready: connect your LinkedIn account in the LinkedIn tool first"), { status: 409 });
+  const acct = await resolveReadAccount(ws);
+  if (!acct) {
+    throw Object.assign(new Error("engine_not_ready: connect a LinkedIn account first (JD Sourcing tab, Connect my LinkedIn)"), { status: 409 });
   }
   try {
     const { unipile } = await import("../providers");
-    const { listAccounts } = await import("./os/health");
-    const acct = (await listAccounts(ws)).find((a) => a.providerAccountId)!;
     // First pull digs into the archive (about six months back, provider
     // permitting); later pulls just top up with what's new.
-    const posts = parseProviderPosts(await unipile.listPosts(acct.providerAccountId as string, w.identifier, w.lastPulledAt ? 10 : 40));
+    const posts = parseProviderPosts(await unipile.listPosts(acct.providerAccountId, w.identifier, w.lastPulledAt ? 10 : 40));
     const fresh: InspirationItem[] = [];
     for (const p of posts) {
       if (w.seenPostIds.includes(p.id)) continue;
@@ -571,8 +574,7 @@ export async function tickWatchedProfiles(now: Date = new Date()): Promise<numbe
   let pulled = 0;
   for (const [ws, s] of Object.entries(store.workspaces)) {
     if (!s.watchlist?.length) continue;
-    const engine = await enginePublishStatus(ws);
-    if (!engine.ready) continue;
+    if (!(await resolveReadAccount(ws))) continue;
     for (const w of s.watchlist) {
       const last = w.lastPulledAt ? new Date(w.lastPulledAt).getTime() : 0;
       if (now.getTime() - last < WATCH_PULL_EVERY_MS) continue;
@@ -622,6 +624,7 @@ export async function rewriteToDraft(ws: string, opts: {
   text?: string;
   author?: string;
   guidance?: string;
+  userId?: string;
 }): Promise<PosterDraft> {
   await ensureLoaded();
   const s = wsState(ws);
@@ -644,6 +647,7 @@ export async function rewriteToDraft(ws: string, opts: {
     sourceAuthor: sourceAuthor || undefined,
     sourceText: sourceText.slice(0, 6000),
     text,
+    createdBy: opts.userId,
     status: "draft",
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -772,7 +776,7 @@ async function autoAttachCard(ws: string, draftId: string): Promise<void> {
 }
 
 /** One original, brand-grounded post -> Drafts, creative attached. */
-export async function createOriginalDraft(ws: string, opts: { topic?: string }): Promise<PosterDraft> {
+export async function createOriginalDraft(ws: string, opts: { topic?: string; userId?: string }): Promise<PosterDraft> {
   await ensureLoaded();
   const s = wsState(ws);
   const angle = ORIGINAL_ANGLES[s.drafts.filter((d) => d.aiOriginal).length % ORIGINAL_ANGLES.length];
@@ -781,6 +785,7 @@ export async function createOriginalDraft(ws: string, opts: { topic?: string }):
     id: rid(),
     text,
     aiOriginal: true,
+    createdBy: opts.userId,
     status: "draft",
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -822,7 +827,7 @@ Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
 
 /** One open job -> a blind spotlight post in Drafts, creative attached.
  *  Rotates through open jobs so repeated posts cover the whole desk. */
-export async function createJobSpotlightDraft(ws: string): Promise<PosterDraft> {
+export async function createJobSpotlightDraft(ws: string, userId?: string): Promise<PosterDraft> {
   await ensureLoaded();
   const s = wsState(ws);
   const { ensureJobsReady, listJds } = await import("../jobs");
@@ -851,6 +856,7 @@ export async function createJobSpotlightDraft(ws: string): Promise<PosterDraft> 
     aiOriginal: true,
     jobSpotlight: true,
     jobTitle: job.title.slice(0, 80),
+    createdBy: userId,
     status: "draft",
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -928,13 +934,16 @@ export async function discardDraft(ws: string, draftId: string): Promise<void> {
  * THE approval gate. Everything upstream is suggestion; this is the only door
  * to LinkedIn. `when` in the future schedules; absent/past publishes now.
  */
-export async function approveDraft(ws: string, draftId: string, when?: string): Promise<PosterDraft> {
+export async function approveDraft(ws: string, draftId: string, when?: string, userId?: string): Promise<PosterDraft> {
   await ensureLoaded();
   const s = wsState(ws);
   const d = s.drafts.find((x) => x.id === draftId);
   if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
   if (d.status === "posted") throw Object.assign(new Error("already_posted"), { status: 400 });
   if (!d.text.trim()) throw Object.assign(new Error("empty_post"), { status: 400 });
+  // Auto-generated drafts have no author yet: the approver claims them, so the
+  // publish rides the approver's own LinkedIn seat.
+  if (!d.createdBy && userId) d.createdBy = userId;
 
   const at = when ? new Date(when) : null;
   if (at && Number.isFinite(at.getTime()) && at.getTime() > Date.now() + 30_000) {
@@ -963,10 +972,11 @@ export async function cancelSchedule(ws: string, draftId: string): Promise<Poste
 }
 
 /**
- * Can the workspace publish through our own LinkedIn engine (LinkedIn OS ->
- * Unipile)? Ready = the Unipile key is set AND the workspace has a linked
- * LinkedIn account in the engine. This is the PRIMARY publish path; Ayrshare
- * stays as an optional official-API alternative.
+ * Can this RECRUITER publish through our own LinkedIn engine (Unipile)?
+ * Ready = the Unipile key is set AND an account is resolvable for them:
+ * their own per-recruiter seat first ("Connect my LinkedIn" on the JD
+ * Sourcing tab), then the LinkedIn OS engine accounts store as the legacy
+ * workspace fallback. Ayrshare stays as an optional official-API alternative.
  */
 export interface EnginePublishStatus {
   configured: boolean;
@@ -974,15 +984,56 @@ export interface EnginePublishStatus {
   ready: boolean;
 }
 
-export async function enginePublishStatus(ws: string): Promise<EnginePublishStatus> {
+interface PublishAccount {
+  providerAccountId: string;
+  displayName?: string;
+}
+
+/** The account a PUBLISH may use. Per-user: a post goes out from its author's
+ *  own connected LinkedIn, never a teammate's. Null = nothing safe to use. */
+async function resolvePublishAccount(ws: string, userId?: string): Promise<PublishAccount | null> {
+  if (userId) {
+    try {
+      const { seatForUser } = await import("./seats");
+      const seat = await seatForUser(ws, userId);
+      if (seat && seat.status === "ok") return { providerAccountId: seat.accountId, displayName: seat.label };
+    } catch { /* seats store unavailable */ }
+  }
+  try {
+    const { listAccounts } = await import("./os/health");
+    const acct = (await listAccounts(ws)).find((a) => a.providerAccountId);
+    if (acct) return { providerAccountId: acct.providerAccountId as string, displayName: acct.displayName };
+  } catch { /* engine store unavailable */ }
+  return null;
+}
+
+/** Read-only account (watch pulls, stats): any healthy identity in the
+ *  workspace will do; publishing never routes through here. */
+async function resolveReadAccount(ws: string): Promise<PublishAccount | null> {
   try {
     const { unipile } = await import("../providers");
-    const { listAccounts } = await import("./os/health");
+    if (!unipile.configured()) return null;
+  } catch {
+    return null;
+  }
+  const engineAcct = await resolvePublishAccount(ws);
+  if (engineAcct) return engineAcct;
+  try {
+    const { anySeatForWorkspace } = await import("./seats");
+    const seat = await anySeatForWorkspace(ws);
+    if (seat) return { providerAccountId: seat.accountId, displayName: seat.label };
+  } catch { /* seats store unavailable */ }
+  return null;
+}
+
+export async function enginePublishStatus(ws: string, userId?: string): Promise<EnginePublishStatus> {
+  try {
+    const { unipile } = await import("../providers");
     const configured = unipile.configured();
-    const acct = (await listAccounts(ws)).find((a) => a.providerAccountId) ?? null;
+    const acct = await resolvePublishAccount(ws, userId);
     return {
       configured,
-      account: acct ? { accountId: acct.accountId, displayName: acct.displayName } : null,
+      account: acct ? { accountId: acct.providerAccountId, displayName: acct.displayName } : null,
       ready: configured && !!acct,
     };
   } catch {
@@ -993,12 +1044,12 @@ export async function enginePublishStatus(ws: string): Promise<EnginePublishStat
 async function publishDraft(ws: string, d: PosterDraft): Promise<PosterDraft> {
   const s = wsState(ws);
   try {
-    const engine = await enginePublishStatus(ws);
-    if (engine.ready) {
-      // Our own pipe: the LinkedIn OS Unipile connection (tool of record).
+    const engine = await enginePublishStatus(ws, d.createdBy);
+    if (engine.ready && engine.account) {
+      // Our own pipe: the author's connected LinkedIn (their seat), or the
+      // legacy LinkedIn OS engine account as the workspace fallback.
       const { unipile } = await import("../providers");
-      const { listAccounts } = await import("./os/health");
-      const acct = (await listAccounts(ws)).find((a) => a.providerAccountId)!;
+      const providerAccountId = engine.account.accountId;
       let attachments: Array<{ bytes: Buffer; mime: string; name: string }> | undefined;
       if (d.imageId) {
         const media = await readMediaById(d.imageId);
@@ -1011,7 +1062,7 @@ async function publishDraft(ws: string, d: PosterDraft): Promise<PosterDraft> {
           attachments = [{ bytes: media.bytes, mime: media.mime, name: base + ext }];
         }
       }
-      const r = await unipile.createPost(acct.providerAccountId as string, d.text, attachments);
+      const r = await unipile.createPost(providerAccountId, d.text, attachments);
       if (r.dryRun) throw new Error("engine_not_configured: set UNIPILE_API_KEY");
       d.provider = "engine";
       d.providerPostId = r.id;
@@ -1020,7 +1071,7 @@ async function publishDraft(ws: string, d: PosterDraft): Promise<PosterDraft> {
       if (fc && r.id) {
         // Never let a comment hiccup fail an already-published post.
         try {
-          await unipile.commentOnPost(acct.providerAccountId as string, r.id, fc);
+          await unipile.commentOnPost(providerAccountId, r.id, fc);
           d.firstCommentPosted = true;
         } catch {
           d.firstCommentPosted = false;
@@ -1037,7 +1088,7 @@ async function publishDraft(ws: string, d: PosterDraft): Promise<PosterDraft> {
       d.ayrsharePostId = r.id || undefined;
       d.postUrl = r.postUrl;
     } else {
-      throw new Error("no_publisher: connect your LinkedIn account in the LinkedIn tool (our engine), or set AYRSHARE_API_KEY as an alternative");
+      throw new Error("no_publisher: connect YOUR LinkedIn first (JD Sourcing tab, the Connect my LinkedIn button); each person's posts publish from their own account");
     }
     d.status = "posted";
     d.postedAt = nowIso();
@@ -1052,12 +1103,13 @@ async function publishDraft(ws: string, d: PosterDraft): Promise<PosterDraft> {
 }
 
 /** Retry a failed publish immediately. */
-export async function retryDraft(ws: string, draftId: string): Promise<PosterDraft> {
+export async function retryDraft(ws: string, draftId: string, userId?: string): Promise<PosterDraft> {
   await ensureLoaded();
   const s = wsState(ws);
   const d = s.drafts.find((x) => x.id === draftId);
   if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
   if (d.status !== "failed") throw Object.assign(new Error("not_failed"), { status: 400 });
+  if (!d.createdBy && userId) d.createdBy = userId;
   return publishDraft(ws, d);
 }
 
@@ -1321,7 +1373,7 @@ export async function generateCarousel(ws: string, opts: { draftId: string; slid
 /* --------------------------- reuse + performance -------------------------- */
 
 /** Evergreen recycling: copy a posted (or any) draft back into Drafts. */
-export async function duplicateDraft(ws: string, draftId: string): Promise<PosterDraft> {
+export async function duplicateDraft(ws: string, draftId: string, userId?: string): Promise<PosterDraft> {
   await ensureLoaded();
   const s = wsState(ws);
   const d = s.drafts.find((x) => x.id === draftId);
@@ -1332,6 +1384,7 @@ export async function duplicateDraft(ws: string, draftId: string): Promise<Poste
     sourceAuthor: d.sourceAuthor,
     sourceText: d.sourceText,
     text: d.text,
+    createdBy: userId ?? d.createdBy,
     imageId: d.imageId && s.images.some((i) => i.id === d.imageId) ? d.imageId : undefined,
     firstComment: d.firstComment,
     status: "draft",
@@ -1360,13 +1413,11 @@ function num(p: Record<string, unknown>, ...keys: string[]): number | undefined 
 export async function refreshPostStats(ws: string, force = false): Promise<number> {
   await ensureLoaded();
   const s = wsState(ws);
-  const engine = await enginePublishStatus(ws);
-  if (!engine.ready) {
-    throw Object.assign(new Error("engine_not_ready: connect your LinkedIn account in the LinkedIn tool first"), { status: 409 });
+  const acct = await resolveReadAccount(ws);
+  if (!acct) {
+    throw Object.assign(new Error("engine_not_ready: connect a LinkedIn account first (JD Sourcing tab, Connect my LinkedIn)"), { status: 409 });
   }
   const { unipile } = await import("../providers");
-  const { listAccounts } = await import("./os/health");
-  const acct = (await listAccounts(ws)).find((a) => a.providerAccountId)!;
   const now = Date.now();
   const targets = s.drafts.filter((d) =>
     d.status === "posted" && d.provider === "engine" && d.providerPostId &&
@@ -1376,7 +1427,7 @@ export async function refreshPostStats(ws: string, force = false): Promise<numbe
   let updated = 0;
   for (const d of targets) {
     try {
-      const p = (await unipile.getPost(acct.providerAccountId as string, d.providerPostId as string)) as Record<string, unknown>;
+      const p = (await unipile.getPost(acct.providerAccountId, d.providerPostId as string)) as Record<string, unknown>;
       const reactions = num(p, "reaction_counter", "reactions_count", "like_count", "num_likes");
       const comments = num(p, "comment_counter", "comments_count", "num_comments");
       const impressions = num(p, "impression_counter", "impressions_count", "view_count");

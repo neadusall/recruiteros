@@ -89,6 +89,14 @@ export async function seatForUser(workspaceId: string, userId: string): Promise<
   return store.seats[keyOf(workspaceId, userId)] ?? null;
 }
 
+/** Any healthy seat in the workspace. For READ-ONLY fallbacks only (e.g. the
+ *  Poster's watchlist pulls and stats refresh). Publishing must NEVER use
+ *  this: a post belongs to its author's own login. */
+export async function anySeatForWorkspace(workspaceId: string): Promise<RecruiterSeat | null> {
+  await ensureSeatsReady();
+  return Object.values(store.seats).find((s) => s.workspaceId === workspaceId && s.status === "ok") ?? null;
+}
+
 export async function upsertSeat(
   workspaceId: string,
   userId: string,

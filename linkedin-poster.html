@@ -476,7 +476,7 @@
       <div>
         <div class="card" style="margin-bottom:16px">
           <h3>Publishing connection</h3>
-          <p class="hint">Posts publish through your own RecruitersOS LinkedIn engine: the same connection the LinkedIn tool uses. Connect your LinkedIn account there once and the Poster rides it. Posting keeps a light footprint (a post or two a day), well inside the engine's safety pacing.</p>
+          <p class="hint">Posts publish through your own connected LinkedIn: press Connect my LinkedIn on the JD Sourcing tab once and the Poster rides it. Each person's posts go out from their own account, never a teammate's. Posting keeps a light footprint (a post or two a day).</p>
           <div id="engineInfo"></div>
           <div class="btnrow"><button class="btn" id="btnAyrRefresh">Refresh status</button></div>
         </div>
@@ -788,7 +788,7 @@
     } else if (S.publishVia === "ayrshare") {
       conn.className = "conn on"; txt.textContent = "Backup publisher connected";
     } else if (eng.configured && !eng.account) {
-      conn.className = "conn off"; txt.textContent = "Link LinkedIn in the LinkedIn tool";
+      conn.className = "conn off"; txt.textContent = "Connect your LinkedIn (JD Sourcing tab)";
     } else {
       conn.className = "conn off"; txt.textContent = "Publishing not connected";
     }
@@ -932,7 +932,7 @@
       { done: !!(String(st.voiceProfile || "").trim() && String(st.brandLine || "").trim()), t: "Teach it your voice and brand", go: "settings", cta: "Open Settings" },
       { done: !!(String(st.postingDays || "").trim() && String(st.postingTimes || "").trim()), t: "Save a posting schedule", go: "settings", cta: "Pick slots" },
       { done: !!((S.watchlist || []).length || S.inbox.length || S.drafts.length), t: "Follow a creator or save a post you like", go: "create", cta: "Open Sources" },
-      { done: !!((S.engine && S.engine.ready) || S.publishVia === "ayrshare"), t: "Connect your LinkedIn account in the LinkedIn tool", go: null, cta: "" },
+      { done: !!((S.engine && S.engine.ready) || S.publishVia === "ayrshare"), t: "Connect YOUR LinkedIn: JD Sourcing tab, the Connect my LinkedIn button. Posts publish from your own account.", href: "/admin#jdsourcing", cta: "Open JD Sourcing" },
     ];
   }
   function checkSvg(on) {
@@ -950,6 +950,7 @@
         return '<div class="su-row' + (s.done ? " done" : "") + '"><span class="su-check">' + checkSvg(s.done) + "</span>" +
           '<span class="su-t">' + esc(s.t) + "</span>" +
           (!s.done && s.go ? '<button class="btn small" data-go="' + s.go + '">' + esc(s.cta) + "</button>" : "") +
+          (!s.done && s.href ? '<a class="btn small" href="' + esc(s.href) + '" target="_top" style="text-decoration:none">' + esc(s.cta) + "</a>" : "") +
           "</div>";
       }).join("") + "</div>";
   }
@@ -1130,7 +1131,7 @@
     var note = document.getElementById("watchNote");
     var eng = S.engine || {};
     note.innerHTML = (list.length && !eng.ready)
-      ? '<div class="notice" style="margin-top:12px;margin-bottom:0">Automatic pulls start once your LinkedIn account is connected in the LinkedIn tool.</div>' : "";
+      ? '<div class="notice" style="margin-top:12px;margin-bottom:0">Automatic pulls start once a LinkedIn account is connected (JD Sourcing tab, Connect my LinkedIn).</div>' : "";
     document.getElementById("watchList").innerHTML = list.map(function (w) {
       var status = w.lastError ? "last pull did not go through, it will retry"
         : w.lastPulledAt ? "last pulled " + fmtTime(w.lastPulledAt)
@@ -1332,7 +1333,7 @@
     var eng = S.engine || {};
     var erows = "";
     erows += '<div class="kv"><b>Engine</b>' + (eng.configured ? "configured" : "not connected yet") + "</div>";
-    erows += '<div class="kv"><b>LinkedIn account</b>' + (eng.account ? "linked" + (eng.account.displayName ? " (" + esc(eng.account.displayName) + ")" : "") : "not linked: connect it in the LinkedIn tool") + "</div>";
+    erows += '<div class="kv"><b>Your LinkedIn</b>' + (eng.account ? "connected" + (eng.account.displayName ? " (" + esc(eng.account.displayName) + ")" : "") : 'not connected: <a href="/admin#jdsourcing" target="_top" style="color:var(--accent)">Connect my LinkedIn in JD Sourcing</a>') + "</div>";
     erows += '<div class="kv"><b>Active publish path</b>' + (S.publishVia === "engine" ? "internal engine" : S.publishVia === "ayrshare" ? "backup publisher" : "none yet") + "</div>";
     document.getElementById("engineInfo").innerHTML = erows;
     var a = S.ayrshare || {};
@@ -1677,7 +1678,7 @@
         })
         .catch(function (err) {
           toast(/^engine_not_ready/.test(err.message || "")
-            ? "Connect your LinkedIn account in the LinkedIn tool first."
+            ? "Connect a LinkedIn account first: JD Sourcing tab, Connect my LinkedIn."
             : "Could not pull posts right now. It will retry on its own.");
         }).then(function () { busy(b, false); load(); });
     } else if (act === "watch-del") {
@@ -1692,7 +1693,7 @@
         .then(function (r) { toast(r.updated ? "Performance updated for " + r.updated + " post" + (r.updated === 1 ? "" : "s") + "." : "No new numbers yet."); return load(); })
         .catch(function (err) {
           toast(/^engine_not_ready/.test(err.message || "")
-            ? "Connect your LinkedIn account in the LinkedIn tool first."
+            ? "Connect a LinkedIn account first: JD Sourcing tab, Connect my LinkedIn."
             : "Could not check performance right now.");
         }).then(function () { busy(b, false); });
     }
