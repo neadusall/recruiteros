@@ -17,49 +17,80 @@
   body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column;
     font:15px/1.55 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-tap-highlight-color:transparent}
+  /* Brand-tinted wash behind the content; the plain --bg above is the fallback. */
+  body{background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, #fafbfc) 0%, var(--bg) 340px)}
   .top{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;
-    padding:18px 44px;background:var(--card);border-bottom:1px solid var(--line)}
+    padding:18px 44px;background:rgba(255,255,255,.85);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line)}
+  .top::before{content:"";position:fixed;top:0;left:0;right:0;height:3px;z-index:10;background:var(--accent);
+    background:linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #ffffff))}
   .brand{font-weight:600;letter-spacing:-.3px;font-size:19px;color:var(--ink)}
-  main{flex:1;display:flex;justify-content:center;padding:38px 44px 64px}
+  .priv{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:600;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--faint);border:1px solid var(--line);background:rgba(255,255,255,.7);
+    border-radius:999px;padding:7px 13px;white-space:nowrap}
+  .priv svg{width:12px;height:12px;fill:var(--faint);flex:none}
+  main{flex:1;display:flex;justify-content:center;padding:38px 44px 30px}
+  @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  .ctx{animation:rise .55s cubic-bezier(.2,.7,.3,1) both}
+  .player{animation:rise .55s .08s cubic-bezier(.2,.7,.3,1) both}
+  .cta{animation:rise .55s .16s cubic-bezier(.2,.7,.3,1) both}
+  .side{animation:rise .55s .24s cubic-bezier(.2,.7,.3,1) both}
+  @media (prefers-reduced-motion:reduce){ .ctx,.player,.cta,.side{animation:none} }
   .stage{width:100%;max-width:1160px}
   .cols{display:block}
   .cols:not(.has-cal) .maincol{max-width:860px;margin:0 auto}
   .cols.has-cal{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:34px;align-items:start}
   .maincol{min-width:0;display:flex;flex-direction:column}
-  .ctx{margin:0 0 20px}
-  .eyebrow{display:block;font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);margin:0 0 9px}
-  .ctx h1{font-size:27px;margin:0;font-weight:600;letter-spacing:-.5px;line-height:1.22}
-  .player{flex:none;aspect-ratio:1000/620;position:relative;border-radius:14px;overflow:hidden;
-    background:#0b1220;border:1px solid rgba(16,24,40,.08);box-shadow:var(--shadow);
+  .ctx{margin:0 0 22px}
+  .eyebrow{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+  .eyebrow::before{content:"";width:22px;height:2px;border-radius:2px;background:var(--accent);flex:none}
+  .ctx h1{font-size:29px;margin:0;font-weight:650;letter-spacing:-.6px;line-height:1.2}
+  .player{flex:none;aspect-ratio:1000/620;position:relative;border-radius:16px;overflow:hidden;
+    background:#0b1220;border:1px solid rgba(16,24,40,.1);
+    box-shadow:0 1px 2px rgba(16,24,40,.06), 0 24px 56px -22px rgba(16,24,40,.28);
+    box-shadow:0 1px 2px rgba(16,24,40,.06), 0 24px 56px -22px rgba(16,24,40,.28),
+      0 0 0 6px color-mix(in srgb, var(--accent) 6%, transparent);
     display:flex;align-items:center;justify-content:center}
   video{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:contain;background:#0b1220}
-  .player .label{position:absolute;bottom:14px;left:18px;color:#aab3c2;font-size:12px;font-weight:500;z-index:1;
-    text-shadow:0 1px 3px rgba(2,8,20,.6)}
+  .player .label{position:absolute;bottom:12px;left:14px;z-index:1;color:#e6eaf1;font-size:11.5px;font-weight:500;
+    background:rgba(2,8,20,.55);border:1px solid rgba(255,255,255,.12);border-radius:99px;padding:5px 12px;
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .player .dur{position:absolute;top:14px;right:16px;background:rgba(2,8,20,.62);border:1px solid rgba(255,255,255,.14);
     -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:#fff;font-size:11px;font-weight:600;
     letter-spacing:.02em;padding:4px 10px;border-radius:99px;z-index:1}
   .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2}
-  .play .btn{width:82px;height:82px;border-radius:50%;background:rgba(255,255,255,.96);
-    box-shadow:0 8px 28px rgba(2,8,20,.4);display:flex;align-items:center;justify-content:center;
+  .play .ring{position:absolute;width:82px;height:82px;border-radius:50%;border:1.5px solid rgba(255,255,255,.55);
+    animation:pulse 2.6s cubic-bezier(.25,.6,.35,1) infinite}
+  @keyframes pulse{0%{transform:scale(1);opacity:.7}70%{transform:scale(1.55);opacity:0}100%{opacity:0}}
+  @media (prefers-reduced-motion:reduce){ .play .ring{animation:none;opacity:0} }
+  .play .btn{width:82px;height:82px;border-radius:50%;background:rgba(255,255,255,.97);
+    box-shadow:0 8px 28px rgba(2,8,20,.4), inset 0 -1px 0 rgba(16,24,40,.08);
+    display:flex;align-items:center;justify-content:center;
     transition:transform .18s ease,box-shadow .18s ease}
   .play:hover .btn{transform:scale(1.06);box-shadow:0 10px 34px rgba(2,8,20,.48)}
   .play svg{width:30px;height:30px;margin-left:5px;fill:var(--accent)}
   .cta{flex:none;display:flex;gap:12px;margin-top:22px;align-items:center;flex-wrap:wrap}
   .cta a,.cta button{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);
-    text-decoration:none;padding:12px 24px;border-radius:9px;font:inherit;font-size:14px;font-weight:600;
-    letter-spacing:.005em;cursor:pointer;transition:all .14s ease;box-shadow:0 1px 2px rgba(16,24,40,.04)}
-  .cta a:hover{border-color:#c9d0db;box-shadow:0 2px 6px rgba(16,24,40,.08)}
-  .cta a.primary{background:var(--book);border-color:var(--book);color:var(--on-accent);
-    box-shadow:0 1px 2px rgba(16,24,40,.14)}
-  .cta a.primary:hover{filter:brightness(1.07);box-shadow:0 3px 10px rgba(16,24,40,.2)}
+    text-decoration:none;padding:13px 26px;border-radius:10px;font:inherit;font-size:14px;font-weight:600;
+    letter-spacing:.005em;cursor:pointer;transition:all .16s ease;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .cta a:hover{border-color:#c9d0db;box-shadow:0 3px 8px rgba(16,24,40,.09);transform:translateY(-1px)}
+  .cta a.primary{color:var(--on-accent);border-color:transparent;background:var(--book);
+    background:linear-gradient(180deg, color-mix(in srgb, var(--book) 88%, #ffffff), var(--book));
+    box-shadow:0 1px 2px rgba(16,24,40,.18), inset 0 1px 0 rgba(255,255,255,.18)}
+  .cta a.primary:hover{filter:brightness(1.05);transform:translateY(-1px);box-shadow:0 5px 14px -3px rgba(16,24,40,.3);
+    box-shadow:0 5px 14px -3px color-mix(in srgb, var(--book) 55%, transparent)}
   .cta .hint{color:var(--faint);font-size:12.5px;margin-left:2px;border:0;background:none;box-shadow:none;padding:0}
   .side{display:flex;flex-direction:column;min-height:0}
   .sidecard{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
     overflow:hidden;display:flex;flex-direction:column;transition:outline .15s}
   .sidecard.flash{outline:3px solid var(--book);outline-offset:3px}
-  .side-h{flex:none;display:flex;align-items:center;gap:9px;padding:16px 22px;border-bottom:1px solid var(--line);
-    font-size:14px;font-weight:600;letter-spacing:-.1px;color:var(--ink)}
-  .side-h .ico{width:16px;height:16px;fill:var(--accent);flex:none}
+  .side-h{flex:none;display:flex;align-items:center;gap:12px;padding:15px 20px;border-bottom:1px solid var(--line)}
+  .side-h .icobox{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;
+    background:#eef1f6;background:color-mix(in srgb, var(--accent) 10%, #ffffff)}
+  .side-h .ico{width:16px;height:16px;fill:var(--accent)}
+  .side-h .tt{min-width:0}
+  .side-h .tt b{display:block;font-size:14px;font-weight:600;letter-spacing:-.1px;color:var(--ink);line-height:1.3}
+  .side-h .tt span{display:block;font-size:11.5px;color:var(--faint);line-height:1.35;margin-top:1px}
   .cal{flex:none;height:556px;min-height:440px;background:#fff}
   .cal iframe{width:100%;height:100%;border:0;display:block}
   .side-f{flex:none;margin-top:10px;font-size:12px;text-align:center}
@@ -83,6 +114,8 @@
   .macts .send:hover{filter:brightness(1.07)}
   .mok{text-align:center;padding:30px 12px;color:var(--book);font-weight:500;font-size:16px}
   .err{text-align:center;color:var(--mut);padding:60px 20px}
+  .pagefoot{flex:none;text-align:center;padding:26px 20px 30px;font-size:12px;color:var(--faint)}
+  .pagefoot .rule{width:34px;height:1px;background:var(--line);margin:0 auto 12px}
   @media (max-width:980px){
     .cols.has-cal{display:block}
     .side{margin-top:30px}
@@ -93,11 +126,14 @@
   /* Phones: edge-to-edge rhythm, thumb-size targets, no iOS focus zoom. */
   @media (max-width:640px){
     .top{padding:12px 16px}
-    main{padding:16px 14px 40px}
+    .priv{display:none}
+    main{padding:16px 14px 28px}
+    .pagefoot{padding:18px 20px 26px}
     .ctx{margin:0 0 13px}
     .eyebrow{font-size:10px;letter-spacing:.12em;margin-bottom:6px}
     .ctx h1{font-size:21px;letter-spacing:-.4px}
     .player{border-radius:12px}
+    .play .ring{width:68px;height:68px}
     .play .btn{width:68px;height:68px}
     .play svg{width:26px;height:26px}
     .player .label{bottom:10px;left:12px;font-size:11px}
@@ -118,10 +154,11 @@
 </style>
 </head>
 <body>
-<div class="top"><span class="brand">RecruitersOS</span></div>
+<div class="top"><span class="brand">RecruitersOS</span><span class="priv"><svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9z"/></svg>Private message</span></div>
 <main>
   <div class="stage" id="stage"><div class="err" id="loading">Loading&hellip;</div></div>
 </main>
+<div class="pagefoot" id="pagefoot" style="display:none"><div class="rule"></div><span id="footText"></span></div>
 
 <div class="mov" id="replyModal">
   <div class="modal" id="replyCard">
@@ -260,7 +297,7 @@
     '<div class="player" id="player">' +
       '<span class="dur" id="dur" style="display:none"></span>' +
       '<video id="vid" playsinline preload="metadata" poster="' + gif + '"></video>' +
-      '<div class="play" id="overlay"><div class="btn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>' +
+      '<div class="play" id="overlay"><span class="ring"></span><div class="btn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>' +
       (role ? '<span class="label">' + esc(role) + '</span>' : '') +
     '</div>' +
     '<div class="cta">' + cta + '</div>';
@@ -269,12 +306,26 @@
   var calSrc = calLink + (calLink.indexOf("?") >= 0 ? "&" : "?") + "embed=1";
   var rightCol = hasCal
     ? '<aside class="side"><div class="sidecard" id="cal">' +
-        '<div class="side-h"><svg class="ico" viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 6v11H5V8h14z"/></svg>Book a call</div>' +
+        '<div class="side-h"><span class="icobox"><svg class="ico" viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 6v11H5V8h14z"/></svg></span><span class="tt"><b>Book a call</b><span>Pick a time, the invite arrives instantly</span></span></div>' +
         '<div class="cal"><iframe src="' + esc(calSrc) + '" title="Book a time" loading="eager"></iframe></div></div>' +
         '<div class="side-f"><a href="' + esc(calLink) + '" target="_blank" rel="noopener">Open the calendar in a new tab</a></div></aside>'
     : '';
   if (hasCal) stage.className = "stage wide";
   stage.innerHTML = '<div class="cols' + (hasCal ? ' has-cal' : '') + '"><div class="maincol">' + leftCol + '</div>' + rightCol + '</div>';
+
+  // Letterhead-style closing line, only once the page has real content.
+  var pf = $("pagefoot"), pft = $("footText");
+  if (pf && pft) { pft.textContent = "A personal video message from " + brandLabel.replace(/[<>&]/g, ""); pf.style.display = "block"; }
+
+  // Built-in booking pages report their content height (rosBookH) so the card
+  // hugs the slot grid instead of showing dead space. Third-party calendars
+  // never send it and keep the fixed CSS height. Value is clamped, so an
+  // arbitrary sender can at worst resize the card.
+  window.addEventListener("message", function(e){
+    var h = e && e.data && e.data.rosBookH;
+    var box = document.querySelector(".cal");
+    if (box && typeof h === "number" && isFinite(h)) box.style.height = Math.max(340, Math.min(700, Math.ceil(h) + 2)) + "px";
+  });
 
   // Book a call: scroll to + highlight the embedded calendar.
   var book = $("bookBtn");
