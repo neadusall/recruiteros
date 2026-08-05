@@ -93,6 +93,13 @@ EOF
 systemctl daemon-reload
 systemctl enable --now recruiteros-video-worker.service >/dev/null 2>&1 || true
 sleep 2
+
+# 6) Auto-update: keep this box on origin/main so the fleet can never drift
+#    behind a fix that already shipped (the Aug 2026 branch-drift incident).
+if [ -f "$DIR/setup-video-worker-autoupdate.sh" ]; then
+  bash "$DIR/setup-video-worker-autoupdate.sh"
+fi
+
 echo "[video-worker-setup] DONE. Worker is live and composing video from $MAIN_URL"
 echo "[video-worker-setup] follow it with:  journalctl -u recruiteros-video-worker -f"
 systemctl --no-pager status recruiteros-video-worker.service 2>/dev/null | head -6 || true
