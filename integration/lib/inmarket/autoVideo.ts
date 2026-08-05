@@ -24,6 +24,7 @@
 import { loadSnapshot, saveSnapshot } from "../db";
 
 const MAP_KEY = "inmarket_autovideo_map_v1";   // shotKey -> { videoKey, company, role, at }
+const FAIL_KEY = "inmarket_autovideo_fails_v1"; // shotKey -> { tries, at, reason, benched }
 
 const TICK_MS = () => Math.max(60, Number(process.env.INMARKET_AUTOVIDEO_INTERVAL_SEC) || 180) * 1000;
 const FIRST_DELAY_MS = 120_000;     // let captures get a head start (a video needs a capture first)
@@ -42,6 +43,85 @@ type VideoMap = Record<string, MapEntry>;
 
 async function loadMap(): Promise<VideoMap> { return (await loadSnapshot<VideoMap>(MAP_KEY).catch(() => null)) || {}; }
 
+/* ------------------------------------------------------------------ */
+/* FAILURE MEMO — the reason the fleet ever made progress at all        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A job that fails capture used to be recorded NOWHERE: `pending` was simply "every contactable row
+ * with no entry in the video map", so a role whose posting can't be captured came back in the very
+ * next claim, forever. Measured on one worker box: 315,592 claims in 24h produced 54 videos, with a
+ * single dead role re-attempted 161 times in 6 hours. The fleet was spending ~100% of its CPU
+ * re-failing the same roles and never reaching fresh work.
+ *
+ * So every failure is now recorded with an attempt count. A failed key is skipped until its backoff
+ * expires (exponential: 30m, 1h, 2h, 4h... capped at 24h), and after MAX_TRIES it is benched
+ * permanently. Terminal reasons (an aggregator-only URL, a staffing intermediary) bench on the FIRST
+ * failure — retrying those can never produce a different answer.
+ */
+interface FailEntry { tries: number; at: string; reason?: string; benched?: boolean; company?: string; role?: string }
+type FailMap = Record<string, FailEntry>;
+
+const MAX_TRIES = Math.max(1, Number(process.env.INMARKET_VIDEO_MAX_TRIES) || 4);
+const BASE_BACKOFF_MS = Math.max(60_000, (Number(process.env.INMARKET_VIDEO_BACKOFF_MIN) || 30) * 60_000);
+const MAX_BACKOFF_MS = 24 * 60 * 60 * 1000;
+
+/** Reasons that can never change on a retry — bench immediately instead of burning 4 attempts. */
+const TERMINAL = /staffing|recruiting intermediary|aggregator|no verified company domain|no job url/i;
+
+async function loadFails(): Promise<FailMap> { return (await loadSnapshot<FailMap>(FAIL_KEY).catch(() => null)) || {}; }
+
+/** True when this key should be skipped right now (benched, or still inside its backoff window). */
+function isBenched(f: FailEntry | undefined, nowMs: number): boolean {
+  if (!f) return false;
+  if (f.benched || f.tries >= MAX_TRIES) return true;
+  const waited = nowMs - Date.parse(f.at || "");
+  if (!Number.isFinite(waited)) return false;
+  const backoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** Math.max(0, f.tries - 1));
+  return waited < backoff;
+}
+
+/**
+ * A worker reports the jobs it could NOT compose. Without this the same dead roles are re-claimed
+ * every couple of minutes and starve the queue. Returns how many were recorded.
+ */
+export async function recordVideoFailures(
+  failures: Array<{ company: string; role: string; reason?: string }>,
+): Promise<number> {
+  if (!failures.length) return 0;
+  const { shotKey } = await import("./roleShot");
+  const fails = await loadFails();
+  const nowIso = new Date().toISOString();
+  let n = 0;
+  for (const f of failures) {
+    if (!f.company || !f.role) continue;
+    const key = shotKey(f.company, f.role);
+    const prev = fails[key];
+    const tries = (prev?.tries || 0) + 1;
+    const terminal = TERMINAL.test(f.reason || "");
+    fails[key] = { tries, at: nowIso, reason: (f.reason || "").slice(0, 200), benched: terminal || tries >= MAX_TRIES, company: f.company, role: f.role };
+    n++;
+  }
+  if (n) await saveSnapshot(FAIL_KEY, fails);
+  return n;
+}
+
+/** Counts for the diagnostics surface: how much of the book is permanently un-videoable. */
+export async function videoFailureStats(): Promise<{ tracked: number; benched: number; retrying: number; topReasons: Array<{ reason: string; n: number }> }> {
+  const fails = await loadFails();
+  const now = Date.now();
+  let benched = 0, retrying = 0;
+  const reasons = new Map<string, number>();
+  for (const f of Object.values(fails)) {
+    if (f.benched || f.tries >= MAX_TRIES) benched++;
+    else if (isBenched(f, now)) retrying++;
+    const r = (f.reason || "unknown").slice(0, 60);
+    reasons.set(r, (reasons.get(r) || 0) + 1);
+  }
+  const topReasons = [...reasons.entries()].map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n).slice(0, 8);
+  return { tracked: Object.keys(fails).length, benched, retrying, topReasons };
+}
+
 /** company (lowercased) -> latest composite videoKey — for the Clients tab to show finished videos. */
 export async function autoVideoMapByCompany(): Promise<Record<string, { videoKey: string; at: string }>> {
   const map = await loadMap();
@@ -59,6 +139,24 @@ export async function autoVideoMapByCompany(): Promise<Record<string, { videoKey
 /* ------------------------------------------------------------------ */
 
 /**
+ * What a worker needs to render one video. The card fields carry the role's real signal data so a
+ * box that cannot capture the live posting can still typeset an honest background from it.
+ */
+export interface VideoJob {
+  company: string;
+  role: string;
+  jobUrl?: string;
+  domain?: string;
+  force?: boolean;
+  targetKey?: string;
+  location?: string;
+  postedAt?: string;
+  industry?: string;
+  signalReason?: string;
+  relatedRoles?: string[];
+}
+
+/**
  * Hand a batch of "make a video" jobs to a worker box: contactable rows that don't have a video yet,
  * plus the clip to overlay and the fixed length. The worker runs the whole pipeline locally
  * (capture → composite → upload to shared S3) and reports the key back via recordVideoResults. A
@@ -68,7 +166,7 @@ export async function autoVideoMapByCompany(): Promise<Record<string, { videoKey
  * Requires shared object storage (ROS_S3_*) so a worker's video is servable by the main — otherwise
  * the composite would live only on the worker's disk.
  */
-export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean; targetKey?: string }>; clipId: string | null; clip?: import("./roleVideo").ClipMeta | null; durationSec: number; shared: boolean }> {
+export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<VideoJob>; clipId: string | null; clip?: import("./roleVideo").ClipMeta | null; durationSec: number; shared: boolean }> {
   const dur = videoSeconds();
   const clipId = await resolveClipId();
   let shared = false;
@@ -84,11 +182,24 @@ export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ com
   const { listCurated } = await import("./curation");
   const { shotKey } = await import("./roleShot");
   const map = await loadMap();
+  const fails = await loadFails();
+  const nowMs = Date.now();
   const rows = await listCurated({ status: "contactable", contactableOnly: true, limit: 6000 });
-  const pending: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean; targetKey?: string }> = [];
-  const rebuilds: Array<{ company: string; role: string; jobUrl?: string; domain?: string; force?: boolean; targetKey?: string }> = [];
+  const pending: Array<VideoJob> = [];
+  const rebuilds: Array<VideoJob> = [];
   const rowByKey = new Map<string, (typeof rows)[number]>();
   const seen = new Set<string>();
+  // Every open role per company, so a worker that must fall back to a typeset card can show the
+  // company's full hiring surge instead of a single lonely title.
+  const rolesByCompany = new Map<string, string[]>();
+  for (const r of rows) {
+    const c = (r.company || "").toLowerCase().trim();
+    const t = (r.role || "").trim();
+    if (!c || !t) continue;
+    const list = rolesByCompany.get(c) || [];
+    if (!list.includes(t)) list.push(t);
+    rolesByCompany.set(c, list);
+  }
   for (const r of rows) {
     const company = r.company;
     const role = r.role || r.managerTitle;
@@ -97,7 +208,15 @@ export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<{ com
     if (seen.has(key)) continue;
     seen.add(key);
     rowByKey.set(key, r);
-    if (!map[key]) pending.push({ company, role, jobUrl: r.jobUrl, domain: r.domain });
+    // Skip anything already done, benched, or still inside its retry backoff — otherwise the
+    // batch fills with roles that just failed and the fleet never reaches new work.
+    if (map[key]) continue;
+    if (isBenched(fails[key], nowMs)) continue;
+    pending.push({
+      company, role, jobUrl: r.jobUrl, domain: r.domain,
+      location: r.jobLocation, postedAt: r.jobPostedAt, industry: r.industry,
+      signalReason: r.signalReason, relatedRoles: rolesByCompany.get(company.toLowerCase().trim()),
+    });
   }
   // ONE-TIME rebuild sweep: composites made before the smooth-PiP compose fix shipped were
   // encoded at the scroll background's sparse VFR timing (~3fps average), so the webcam PiP is

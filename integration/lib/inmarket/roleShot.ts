@@ -45,10 +45,23 @@ export interface ShotRequest {
   roleUrl?: string;
   /** A known company domain hint, when the lead already carries one. */
   domain?: string;
+  /** JD text when the feed carries it, used by the fallback role card. */
+  description?: string;
+  /** Job location from the feed, shown on the fallback role card. */
+  location?: string;
+  /** ISO date the role was posted, shown on the fallback role card. */
+  postedAt?: string;
+  /** The company's industry, shown on the fallback role card. */
+  industry?: string;
+  /** Why this company is a signal (e.g. "Posted 310 open roles") — the recruiter's actual hook. */
+  signalReason?: string;
+  /** Other roles open at the same company right now. This IS the hiring signal, so it earns its space. */
+  relatedRoles?: string[];
 }
 
 export type ShotStatus =
   | "company_site"     // captured a verified page on the company's own careers site
+  | "role_card"        // capture impossible; rendered a typeset card from the role's own JD text
   | "no_company_page"  // couldn't confirm the company's own page — nothing captured
   | "staffing_blocked" // the "company" is a staffing/recruiting intermediary — skipped
   | "capturing"        // a background capture is in progress; re-request shortly
@@ -182,7 +195,7 @@ export async function listShots(): Promise<ShotListItem[]> {
       { company?: string; roleTitle?: string; pageUrl?: string; status?: string; files?: { gif?: boolean }; at?: string }
     >;
     for (const [key, m] of Object.entries(manifest)) {
-      if (m.status === "company_site" && m.files?.gif) {
+      if (isCaptured(m.status as ShotStatus) && m.files?.gif) {
         items.set(key, { key, company: m.company || labelFromKey(key), roleTitle: m.roleTitle || "", pageUrl: m.pageUrl, at: m.at });
       }
     }
@@ -191,7 +204,7 @@ export async function listShots(): Promise<ShotListItem[]> {
   // (b) Verdict cache: on-demand captures made this process (now carry company/roleTitle labels).
   const cache = await ensureCache();
   for (const [key, row] of cache.entries()) {
-    if (row.status === "company_site" && row.files?.gif) {
+    if (isCaptured(row.status) && row.files?.gif) {
       const prev = items.get(key);
       items.set(key, {
         key,
@@ -226,7 +239,7 @@ export async function capturedKeySet(): Promise<Set<string>> {
   try {
     const cache = await ensureCache();
     for (const [key, row] of cache.entries()) {
-      if (row.status === "company_site" && row.files?.png) set.add(key);
+      if (isCaptured(row.status) && row.files?.png) set.add(key);
     }
   } catch { /* degrade to empty — no badges rather than wrong ones */ }
   _keySet = { at: Date.now(), set };
@@ -268,7 +281,7 @@ const scheduleSave = debouncedSaver(SHOTS_CACHE_KEY, () => (mem ? Object.fromEnt
 
 function freshEnough(row: ShotRow): boolean {
   const age = Date.now() - Date.parse(row.at || "");
-  const ttl = row.status === "company_site" ? POS_TTL_MS : NEG_TTL_MS;
+  const ttl = isCaptured(row.status) ? POS_TTL_MS : NEG_TTL_MS;
   return !isNaN(age) && age < ttl;
 }
 
@@ -1266,31 +1279,244 @@ export async function getOrStartShot(req: ShotRequest, opts?: { force?: boolean 
  * full render — use getOrStartShot() from request handlers; call this directly only when you
  * intend to block (e.g. a CLI/batch job).
  */
+/* ------------------------------------------------------------------ */
+/* ROLE CARD — the guaranteed fallback background                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Capture-or-nothing was the second reason the fleet under-produced: ~23% of contactable roles ship
+ * only an aggregator link (LinkedIn/Indeed bot-wall every headless browser), and the "must be the
+ * company's own careers site" gate rejected most of the rest, so ~80% of the book could never get a
+ * video at all.
+ *
+ * When no page can be captured we now typeset the role's OWN data — company, exact title, location,
+ * and the job description text already carried on the curated row — into a clean scrolling card. It
+ * is the same information a viewer would read on the posting, so the outreach claim ("a quick video
+ * about your <role> opening") stays literally true; it just isn't a screenshot of their site. That
+ * keeps [[feedback_video_copy_alignment]] satisfied: we never imply we recorded over their page.
+ *
+ * Rendered with the Playwright Chromium the worker already has, from a local data: document, so it
+ * needs no network and cannot fail on a bot wall, a 404, or a slow site.
+ */
+const CARD_ACCENT = (process.env.INMARKET_CARD_ACCENT || "#2e5bd7").trim();
+
+/**
+ * Minimum card height. It has to clear the ${FRAME_H}px capture window with room to pan, or the
+ * synthesized scroll drops under the content-frame floor and fails the job empty. Kept modest and
+ * paired with vertical centering: a company with one open role should read as a composed title
+ * card, not as a tall page with a hole in the middle. Rich cards outgrow it naturally.
+ */
+const MIN_CARD_H = 1000;
+
+/** The fallback is ON by default: no video at all is strictly worse than a typeset one. */
+export function roleCardEnabled(): boolean {
+  return !["0", "false", "no", "off"].includes((process.env.INMARKET_ROLE_CARD || "").toLowerCase());
+}
+
+/** True for statuses that mean "there are real assets on disk under this key". */
+export function isCaptured(status: ShotStatus): boolean {
+  return status === "company_site" || status === "role_card";
+}
+
+function esc(s: string): string {
+  return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
+
+/** Split JD text into readable paragraphs/bullets, dropping boilerplate noise. */
+function cardBody(description?: string): string {
+  const raw = (description || "").replace(/\r/g, "").replace(/[ \t]+/g, " ").trim();
+  if (!raw) return "";
+  const lines = raw.split(/\n+/).map((l) => l.trim()).filter(Boolean).slice(0, 60);
+  const out: string[] = [];
+  for (const l of lines) {
+    const bullet = /^[-•*·]\s+/.test(l);
+    const text = esc(l.replace(/^[-•*·]\s+/, "")).slice(0, 400);
+    if (!text) continue;
+    if (bullet) out.push(`<li>${text}</li>`);
+    else if (text.length < 60 && !/[.!?]$/.test(text)) out.push(`<h2>${text}</h2>`);
+    else out.push(`<p>${text}</p>`);
+  }
+  // Wrap runs of <li> in a <ul> so they indent properly.
+  return out.join("\n").replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, (m) => (m.startsWith("<li>") ? `<ul>${m}</ul>` : m));
+}
+
+function roleCardHtml(req: ShotRequest): string {
+  // The job feed does not persist JD prose, so the card is built from the facts we actually hold:
+  // the exact role, where it sits, when it went up, and the rest of the company's open reqs. That
+  // last list IS the hiring signal the outreach is about, so it is the most relevant thing we could
+  // show anyway — and it gives the card enough height for a natural scroll.
+  const body = cardBody(req.description);
+  const posted = req.postedAt ? new Date(req.postedAt) : null;
+  const postedTxt = posted && !isNaN(posted.getTime())
+    ? posted.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+    : "";
+  const meta = [req.location, postedTxt && `Posted ${postedTxt}`, req.industry]
+    .filter(Boolean).map((s) => esc(String(s))).join(" &nbsp;·&nbsp; ");
+  const others = (req.relatedRoles || [])
+    .map((r) => String(r || "").trim())
+    .filter((r) => r && r.toLowerCase() !== req.roleTitle.toLowerCase())
+    .slice(0, 40);
+  const otherBlock = others.length
+    ? `<h2>Also hiring at ${esc(req.company)}</h2><div class="roles">${others.map((r) => `<div class="role">${esc(r)}</div>`).join("")}</div>`
+    : "";
+  const signal = req.signalReason ? `<div class="sig">${esc(req.signalReason)}</div>` : "";
+  return `<!doctype html><meta charset="utf-8"><style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:${FRAME_W}px;background:#fff;color:#12161f;
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .bar{height:8px;background:${esc(CARD_ACCENT)}}
+  /* Centering (not a bottom-anchored footer) is what keeps a sparse card presentable: leftover
+     height splits evenly above and below instead of opening a gap in the middle. */
+  .wrap{padding:56px 72px 64px;min-height:${MIN_CARD_H}px;display:flex;flex-direction:column;justify-content:center}
+  .roles{margin:0 0 8px}
+  .role{padding:13px 0;border-bottom:1px solid #eef1f6;color:#28303c;font-size:17px}
+  .role:last-child{border-bottom:0}
+  .co{font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:${esc(CARD_ACCENT)};font-weight:700}
+  h1{font-size:40px;line-height:1.2;margin:14px 0 12px;font-weight:700;letter-spacing:-.015em}
+  .meta{font-size:15px;color:#5b6472;margin-bottom:28px}
+  .rule{height:1px;background:#e4e8ef;margin:0 0 30px}
+  h2{font-size:19px;font-weight:700;margin:30px 0 10px;letter-spacing:-.005em}
+  p{margin:0 0 14px;color:#28303c;max-width:78ch}
+  ul{margin:0 0 18px 22px}
+  li{margin:0 0 9px;color:#28303c;max-width:76ch}
+  .sig{display:inline-block;background:#eef3fe;color:${esc(CARD_ACCENT)};font-weight:600;font-size:14px;
+    padding:7px 14px;border-radius:999px;margin-bottom:26px}
+  .tail{margin-top:44px;padding-top:22px;border-top:1px solid #e4e8ef;font-size:14px;color:#7a828f}
+  </style><div class="bar"></div><div class="wrap">
+  <div class="co">${esc(req.company)}</div>
+  <h1>${esc(req.roleTitle)}</h1>
+  ${meta ? `<div class="meta">${meta}</div>` : ""}
+  ${signal}
+  ${body || otherBlock ? `<div class="rule"></div>${body}${otherBlock}` : ""}
+  <div class="tail">Open role at ${esc(req.company)}</div>
+  </div>`;
+}
+
+/**
+ * Render the role card to a tall still and build the full asset set from it. Returns a ShotResult
+ * with status "role_card" so callers can tell a typeset card from a real page capture.
+ */
+async function captureRoleCard(req: ShotRequest, key: string, reason: string): Promise<ShotResult> {
+  const browser = await getBrowser();
+  const ctx = await browser.newContext({ viewport: { width: FRAME_W, height: FRAME_H }, deviceScaleFactor: 1 });
+  try {
+    const page = await ctx.newPage();
+    await page.setContent(roleCardHtml(req), { waitUntil: "load" });
+    const h = await page.evaluate(() => document.body.scrollHeight);
+    const capH = Math.max(FRAME_H, Math.min(Math.ceil(h), MAX_CAPTURE_H));
+    await page.setViewportSize({ width: FRAME_W, height: capH });
+    const tall = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: FRAME_W, height: capH } });
+    await mkdir(shotsDir(), { recursive: true });
+    await writeFile(assetPath(key, "png"), tall);
+    const files = await buildShotAssets(key, tall, req);
+    if (!files) return { ok: false, status: "error", key, reason: "role card rendered empty", at: new Date().toISOString() };
+    return { ok: true, status: "role_card", key, files, reason, at: new Date().toISOString() };
+  } finally {
+    await ctx.close().catch(() => {});
+  }
+}
+
+/**
+ * Turn ONE tall still into the whole asset set (scroll MP4 + email teaser GIF + WebP + watch page).
+ * Shared by the live page capture and the role-card fallback so both produce byte-identical
+ * downstream artifacts — composeRoleVideo only ever sees "there is a <key>.png and a <key>.mp4".
+ * Returns null when the still is too empty to be worth shipping.
+ */
+async function buildShotAssets(
+  key: string,
+  tall: Buffer,
+  req: ShotRequest,
+  pageUrl?: string,
+): Promise<ShotResult["files"] | null> {
+  // SYNTHESIZE the natural-scroll animation by panning a window down the captured image
+  // (5s top hold → human flick-and-read scroll → settle within the JD). Deterministic — always scrolls.
+  const { frames, delays, contentFrames } = await synthesizeAnim(tall);
+  if (contentFrames < 5) return null;
+  const files: ShotResult["files"] = { png: true };
+
+  // FULL VIDEO (MP4) — the watch-page asset (needs ffmpeg; auto-skips if absent).
+  try {
+    if (await haveFfmpeg()) { await renderMp4(frames, delays, assetPath(key, "mp4")); files.mp4 = true; }
+    else console.warn("[roleShot] ffmpeg not found — skipping MP4 (install ffmpeg on the server)");
+  } catch (e) {
+    console.error(`[roleShot] MP4 encode failed for ${key}:`, (e as Error).message);
+  }
+
+  // EMAIL TEASER (short looping GIF w/ play button) — the asset that goes IN the email and
+  // links to the watch page. ffmpeg makes a small clean one; pure-JS gifenc is the fallback.
+  try {
+    if (await renderTeaserGif(tall, assetPath(key, "gif"))) files.gif = true;
+  } catch (e) {
+    console.error(`[roleShot] teaser GIF failed for ${key}:`, (e as Error).message);
+  }
+
+  // Optional full-quality animated WebP (server-only via sharp).
+  try {
+    const webp = await encodeWebp(frames, delays);
+    if (webp) { await writeFile(assetPath(key, "webp"), webp); files.webp = true; }
+  } catch { /* optional */ }
+
+  // WATCH PAGE — self-contained HTML that plays the MP4 (what the teaser links to).
+  try {
+    await writeFile(assetPath(key, "html"), watchPageHtml({ key, company: req.company, roleTitle: req.roleTitle, pageUrl }));
+    files.watch = true;
+  } catch { /* best-effort */ }
+
+  return files;
+}
+
 export async function captureRoleShot(req: ShotRequest, opts?: { force?: boolean }): Promise<ShotResult> {
   const key = shotKey(req.company, req.roleTitle);
   const cache = await ensureCache();
 
+  // A CACHED NEGATIVE still deserves a card. Returning it verbatim was skipping the fallback for
+  // exactly the roles that need it most: the verdict cache is warm for the whole book, so every
+  // uncapturable role short-circuited here and shipped no video at all. Reuse the cached verdict as
+  // proof the live page is a dead end (so we skip the pointless re-capture), then typeset the card.
+  let cachedNegative: ShotResult | null = null;
   if (!opts?.force) {
     const hit = cache.get(key);
     if (hit && freshEnough(hit)) {
       // Confirm the PNG still exists on disk before trusting a positive verdict.
-      if (hit.status !== "company_site" || (await fileExists(assetPath(key, "png")))) {
+      if (isCaptured(hit.status)) {
+        if (await fileExists(assetPath(key, "png"))) return stripRow(hit);
+      } else if (hit.status === "staffing_blocked" || !roleCardEnabled()) {
         return stripRow(hit);
+      } else {
+        cachedNegative = stripRow(hit);
       }
     }
   }
 
   let result: ShotResult;
-  try {
-    const browser = await getBrowser();
-    const target = await resolveTarget(req, browser);
-    if ("status" in target) {
-      result = { ok: false, status: target.status, key, reason: target.reason, at: new Date().toISOString() };
-    } else {
-      result = await doCapture(browser, key, target, req);
+  if (cachedNegative) {
+    result = cachedNegative;
+  } else {
+    try {
+      const browser = await getBrowser();
+      const target = await resolveTarget(req, browser);
+      if ("status" in target) {
+        result = { ok: false, status: target.status, key, reason: target.reason, at: new Date().toISOString() };
+      } else {
+        result = await doCapture(browser, key, target, req);
+      }
+    } catch (e) {
+      result = { ok: false, status: "error", key, reason: (e as Error).message, at: new Date().toISOString() };
     }
-  } catch (e) {
-    result = { ok: false, status: "error", key, reason: (e as Error).message, at: new Date().toISOString() };
+  }
+
+  // GUARANTEED BACKGROUND: a live capture is best-effort, but a prospect with no video is a lost
+  // send. When the page can't be captured for ANY reason, typeset the role's own JD instead so the
+  // job still ships. Staffing intermediaries stay blocked — that rule is about who we contact, not
+  // about rendering. Disable with INMARKET_ROLE_CARD=0.
+  if (!result.ok && result.status !== "staffing_blocked" && roleCardEnabled()) {
+    try {
+      const card = await captureRoleCard(req, key, result.reason || result.status);
+      if (card.ok) result = card;
+    } catch (e) {
+      console.error(`[roleShot] role card failed for ${key}:`, (e as Error).message);
+    }
   }
 
   try {
@@ -1378,46 +1604,11 @@ async function doCapture(
     const tall = await captureTall(page);
     await writeFile(assetPath(key, "png"), tall);
 
-    // (2) SYNTHESIZE the natural-scroll animation by panning a window down the captured image
-    // (5s top hold → human flick-and-read scroll → settle within the JD). Deterministic — always scrolls.
-    const { frames, delays, contentFrames } = await synthesizeAnim(tall);
-
-    // Guarantee the asset actually SHOWS the posting: a near-empty capture (page never rendered)
-    // is skipped rather than saved.
-    if (contentFrames < 5) {
+    const built = await buildShotAssets(key, tall, req, target.url);
+    if (!built) {
       return { ok: false, status: "no_company_page", key, reason: "job description didn't render visually", at: new Date().toISOString() };
     }
-    const files: ShotResult["files"] = { png: true };
-
-    // (3) FULL VIDEO (MP4) — the watch-page asset (needs ffmpeg; auto-skips if absent).
-    try {
-      if (await haveFfmpeg()) { await renderMp4(frames, delays, assetPath(key, "mp4")); files.mp4 = true; }
-      else console.warn("[roleShot] ffmpeg not found — skipping MP4 (install ffmpeg on the server)");
-    } catch (e) {
-      console.error(`[roleShot] MP4 encode failed for ${key}:`, (e as Error).message);
-    }
-
-    // (4) EMAIL TEASER (short looping GIF w/ play button) — the asset that goes IN the email and
-    // links to the watch page. ffmpeg makes a small clean one; pure-JS gifenc is the fallback.
-    try {
-      if (await renderTeaserGif(tall, assetPath(key, "gif"))) files.gif = true;
-    } catch (e) {
-      console.error(`[roleShot] teaser GIF failed for ${key}:`, (e as Error).message);
-    }
-
-    // (5) Optional full-quality animated WebP (server-only via sharp).
-    try {
-      const webp = await encodeWebp(frames, delays);
-      if (webp) { await writeFile(assetPath(key, "webp"), webp); files.webp = true; }
-    } catch { /* optional */ }
-
-    // (6) WATCH PAGE — self-contained HTML that plays the MP4 (what the teaser links to).
-    try {
-      await writeFile(assetPath(key, "html"), watchPageHtml({ key, company: req.company, roleTitle: req.roleTitle, pageUrl: target.url }));
-      files.watch = true;
-    } catch { /* best-effort */ }
-
-    return { ok: true, status: "company_site", key, pageUrl: target.url, files, at: new Date().toISOString() };
+    return { ok: true, status: "company_site", key, pageUrl: target.url, files: built, at: new Date().toISOString() };
   } finally {
     await ctx.close().catch(() => {});
   }
