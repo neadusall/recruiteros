@@ -1300,6 +1300,9 @@ export async function getOrStartShot(req: ShotRequest, opts?: { force?: boolean 
  */
 const CARD_ACCENT = (process.env.INMARKET_CARD_ACCENT || "#2e5bd7").trim();
 
+/** Minimum card height, so even a one-role company yields a real top-to-bottom scroll. */
+const MIN_CARD_H = 1500;
+
 /** The fallback is ON by default: no video at all is strictly worse than a typeset one. */
 export function roleCardEnabled(): boolean {
   return !["0", "false", "no", "off"].includes((process.env.INMARKET_ROLE_CARD || "").toLowerCase());
@@ -1347,9 +1350,9 @@ function roleCardHtml(req: ShotRequest): string {
   const others = (req.relatedRoles || [])
     .map((r) => String(r || "").trim())
     .filter((r) => r && r.toLowerCase() !== req.roleTitle.toLowerCase())
-    .slice(0, 24);
+    .slice(0, 40);
   const otherBlock = others.length
-    ? `<h2>Also hiring at ${esc(req.company)}</h2><ul>${others.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`
+    ? `<h2>Also hiring at ${esc(req.company)}</h2><div class="roles">${others.map((r) => `<div class="role">${esc(r)}</div>`).join("")}</div>`
     : "";
   const signal = req.signalReason ? `<div class="sig">${esc(req.signalReason)}</div>` : "";
   return `<!doctype html><meta charset="utf-8"><style>
@@ -1358,7 +1361,14 @@ function roleCardHtml(req: ShotRequest): string {
     font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased}
   .bar{height:8px;background:${esc(CARD_ACCENT)}}
-  .wrap{padding:56px 72px 80px}
+  /* The card must always be TALLER than the ${FRAME_H}px capture window, or the synthesized pan has
+     no distance to travel, falls under the content-frame floor, and the whole job fails empty. The
+     flex column pushes the footer to the bottom so the extra height reads as layout, not padding. */
+  .wrap{padding:56px 72px 64px;min-height:${MIN_CARD_H}px;display:flex;flex-direction:column}
+  .roles{margin:0 0 8px}
+  .role{padding:13px 0;border-bottom:1px solid #eef1f6;color:#28303c;font-size:17px}
+  .role:last-child{border-bottom:0}
+  .spacer{flex:1 1 auto;min-height:24px}
   .co{font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:${esc(CARD_ACCENT)};font-weight:700}
   h1{font-size:40px;line-height:1.2;margin:14px 0 12px;font-weight:700;letter-spacing:-.015em}
   .meta{font-size:15px;color:#5b6472;margin-bottom:28px}
@@ -1378,6 +1388,7 @@ function roleCardHtml(req: ShotRequest): string {
   <div class="rule"></div>
   ${body}
   ${otherBlock}
+  <div class="spacer"></div>
   <div class="tail">Open role at ${esc(req.company)}</div>
   </div>`;
 }
