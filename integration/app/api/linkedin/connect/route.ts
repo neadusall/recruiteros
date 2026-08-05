@@ -171,6 +171,13 @@ export async function POST(req: Request) {
     return fail("unknown_action", 400, { detail: String(action) });
   } catch (err) {
     console.error("[linkedin:connect]", (err as Error).message);
+    // The provider rejecting our key (401/403) is a workspace-config problem, not
+    // a blip: retrying can never succeed, so say what actually unblocks it.
+    if (err instanceof UnipileError && (err.status === 401 || err.status === 403)) {
+      return fail("linkedin_connect_auth", 502, {
+        detail: "The LinkedIn connection service rejected this workspace's access key. Nothing changed on your end; an admin needs to re-save the LinkedIn Automation key under Connected, then you can connect normally.",
+      });
+    }
     return fail("linkedin_connect_failed", 502, {
       detail: "Could not reach the LinkedIn connection service. Nothing changed; try again in a minute.",
     });
