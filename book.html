@@ -15,7 +15,7 @@
   html{-webkit-text-size-adjust:100%}
   body{margin:0;background:var(--bg);color:var(--ink);
     font:14.5px/1.55 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased}
+    -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
   .wrap{max-width:620px;margin:36px auto;padding:32px 32px 36px;background:var(--card);
     border:1px solid var(--line);border-radius:16px;
     box-shadow:0 1px 2px rgba(16,24,40,.05), 0 20px 44px -20px rgba(16,24,40,.14)}
@@ -61,7 +61,24 @@
   .done h2{font-size:17px;font-weight:600;margin:0 0 6px}
   .done p{color:var(--mut);font-size:13px;margin:0}
   .empty{text-align:center;color:var(--mut);padding:44px 16px;font-size:13.5px}
-  @media (max-width:660px){ .wrap{margin:12px;padding:22px 18px 26px} }
+  /* Phones: thumb-size targets and 16px inputs so iOS doesn't zoom the form. */
+  @media (max-width:660px){
+    .wrap{margin:10px;padding:20px 16px 24px}
+    body.embed .wrap{margin:0;padding:10px 14px 20px}
+    .head img{max-height:48px}
+    .sub{font-size:13px}
+    .days{gap:7px}
+    .day{padding:10px 16px;font-size:13px}
+    .slots{grid-template-columns:repeat(auto-fill,minmax(92px,1fr))}
+    .slot{padding:14px 4px;font-size:14px}
+    .panel{padding:16px 14px}
+    input,textarea{font-size:16px;padding:12px}
+    label{font-size:12.5px}
+    .acts{flex-wrap:wrap}
+    .acts .btn{padding:14px 18px;font-size:15px}
+    .acts .btn.primary{flex:1 1 auto;text-align:center}
+    .msg{flex-basis:100%}
+  }
 </style>
 </head>
 <body>

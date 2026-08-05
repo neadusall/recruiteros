@@ -16,7 +16,7 @@
   html{-webkit-text-size-adjust:100%}
   body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column;
     font:15px/1.55 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-tap-highlight-color:transparent}
   .top{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;
     padding:18px 44px;background:var(--card);border-bottom:1px solid var(--line)}
   .brand{font-weight:600;letter-spacing:-.3px;font-size:19px;color:var(--ink)}
@@ -89,6 +89,31 @@
     .top{padding:14px 20px}
     main{padding:24px 20px 44px}
     .cal{height:540px}
+  }
+  /* Phones: edge-to-edge rhythm, thumb-size targets, no iOS focus zoom. */
+  @media (max-width:640px){
+    .top{padding:12px 16px}
+    main{padding:16px 14px 40px}
+    .ctx{margin:0 0 13px}
+    .eyebrow{font-size:10px;letter-spacing:.12em;margin-bottom:6px}
+    .ctx h1{font-size:21px;letter-spacing:-.4px}
+    .player{border-radius:12px}
+    .play .btn{width:68px;height:68px}
+    .play svg{width:26px;height:26px}
+    .player .label{bottom:10px;left:12px;font-size:11px}
+    .player .dur{top:10px;right:12px}
+    .cta{gap:9px;margin-top:16px}
+    .cta a{flex:1 1 0;min-width:120px;text-align:center;padding:14px 10px;font-size:15px}
+    .cta .hint{flex-basis:100%;margin:3px 0 0;text-align:center}
+    .side{margin-top:24px}
+    .side-h{padding:13px 16px}
+    .side-f{margin-top:12px;font-size:13px}
+    .side-f a{display:inline-block;padding:8px 10px}
+    .cal{height:468px;min-height:380px}
+    .mov{padding:12px;align-items:flex-end}
+    .modal{max-width:none;padding:22px 18px calc(18px + env(safe-area-inset-bottom));border-radius:16px 16px 0 0}
+    .modal textarea,.modal input{font-size:16px}
+    .macts button{flex:1 1 0;padding:14px 10px;font-size:15px}
   }
 </style>
 </head>
