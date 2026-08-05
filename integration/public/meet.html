@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Meeting</title>
+<link rel="icon" href="/assets/img/lume-favicon.svg" />
+<script>(function(){try{var t=localStorage.getItem('ros_theme');if(!t)t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<style>
+  /* Meridian tokens (docs/DESIGN-SYSTEM.md): solid surfaces, one accent. */
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --line:#e5e8ee; --line-2:#cfd5df;
+    --ink:#14181f; --mut:#4b5364; --faint:#8a93a5;
+    --accent:#2e5bd7; --accent-hover:#2448ad; --accent-soft:rgba(46,91,215,.09);
+    --rad:8px; --rad-sm:6px;
+  }
+  html[data-theme="dark"]{
+    --bg:#0f1216; --panel:#171b22; --line:#262c36; --line-2:#3a4250;
+    --ink:#f2f4f8; --mut:#aab2c0; --faint:#737d8d;
+    --accent:#567fe4; --accent-hover:#7d9ff0; --accent-soft:rgba(86,127,228,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14.5px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+  .wm{display:flex;align-items:center;gap:10px;min-width:0}
+  .wm img{height:22px;display:block}
+  .wm .txt{font-weight:700;font-size:16px;letter-spacing:-.015em;white-space:nowrap}
+  .room{color:var(--mut);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .spacer{flex:1}
+  .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line-2);background:var(--panel);
+    color:var(--ink);font:inherit;font-size:13px;font-weight:500;padding:6px 13px;border-radius:var(--rad-sm);cursor:pointer;text-decoration:none}
+  .btn:hover{border-color:var(--faint)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+  main{flex:1;position:relative;min-height:0}
+  #jitsi{position:absolute;inset:0}
+  #jitsi iframe{width:100%;height:100%;border:0}
+  /* The brand mark that sits where Jitsi's watermark would be: above the
+     iframe, click-through, so the meeting always wears the house logo. */
+  #brandOverlay{position:absolute;top:14px;left:16px;z-index:5;pointer-events:none;
+    background:rgba(255,255,255,.92);border-radius:8px;padding:7px 12px;display:none;align-items:center;box-shadow:0 1px 6px rgba(10,14,20,.18)}
+  #brandOverlay img{height:20px;display:block}
+  #brandOverlay .txt{font-weight:700;font-size:14px;color:#14181f;white-space:nowrap}
+  /* Lobby (no room yet) */
+  .lobby{max-width:460px;margin:8vh auto 0;padding:0 20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:22px}
+  .card h1{margin:0 0 6px;font-size:19px;letter-spacing:-.015em}
+  .card p{color:var(--mut);font-size:13.5px;margin:0 0 16px}
+  label{display:block;font-size:12px;font-weight:600;color:var(--mut);margin:12px 0 5px}
+  input[type=text]{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line-2);border-radius:var(--rad-sm);padding:9px 11px;font:inherit;font-size:14px}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .row{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+  .note{color:var(--faint);font-size:12px;margin-top:14px}
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+    font-size:13px;padding:9px 16px;border-radius:8px;opacity:0;pointer-events:none;transition:.18s;z-index:50}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <span class="wm" id="wm"></span>
+  <span class="room" id="roomLabel"></span>
+  <span class="spacer"></span>
+  <button class="btn" id="btnCopy" style="display:none">Copy invite link</button>
+  <a class="btn" id="btnNew" href="/meet" style="display:none">New meeting</a>
+</header>
+<main id="main">
+  <div class="lobby" id="lobby">
+    <div class="card">
+      <h1 id="lobbyTitle">Start a meeting</h1>
+      <p>A private video room on your own page, your brand on it, nothing to install. Share the link and anyone can join from a browser.</p>
+      <label>Meeting name</label>
+      <input type="text" id="roomInput" placeholder="Call with Acme, Thursday intro, anything" />
+      <div class="row">
+        <button class="btn primary" id="btnStart">Start meeting</button>
+      </div>
+      <div class="note">Joiners see this page with your logo, never a vendor's. Mic and camera permissions are asked by the browser once you join.</div>
+    </div>
+  </div>
+  <div id="jitsi" style="display:none"></div>
+  <div id="brandOverlay"></div>
+</main>
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  // Host decides the brand (tenant isolation rule): customer domains never
+  // show the house brand.
+  var isHouse = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.hostname || "");
+  var BRAND = isHouse
+    ? { name: "RecruitersOS", logo: null }
+    : { name: "Lume Search Partners", logo: "/assets/img/lume-wordmark-navy.svg", logoLight: "/assets/img/lume-wordmark-white.svg" };
+  document.title = BRAND.name + " Meeting";
+
+  function brandHtml(forOverlay) {
+    if (BRAND.logo) return '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />';
+    return '<span class="txt">' + BRAND.name + "</span>";
+  }
+  document.getElementById("wm").innerHTML = brandHtml(false);
+
+  function toast(m) { var t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(function () { t.classList.remove("show"); }, 2600); }
+
+  var params = new URLSearchParams(location.search);
+  var room = (params.get("room") || "").trim();
+
+  function slugify(name) {
+    var s = name.trim().replace(/['"]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!s) s = "Meeting";
+    // A short random tail keeps rooms private-by-obscurity on the public bridge.
+    return s + "-" + Math.random().toString(36).slice(2, 8);
+  }
+
+  document.getElementById("btnStart").addEventListener("click", function () {
+    var name = document.getElementById("roomInput").value || "Meeting";
+    location.search = "?room=" + encodeURIComponent(slugify(name));
+  });
+  document.getElementById("roomInput").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") document.getElementById("btnStart").click();
+  });
+
+  if (!room) {
+    document.getElementById("lobbyTitle").textContent = "Start a " + BRAND.name + " meeting";
+    return;
+  }
+
+  // ---- In-meeting mode ----
+  document.getElementById("lobby").style.display = "none";
+  document.getElementById("jitsi").style.display = "block";
+  var pretty = room.replace(/-[a-z0-9]{6}$/i, "").replace(/-/g, " ");
+  document.getElementById("roomLabel").textContent = pretty;
+  var copyBtn = document.getElementById("btnCopy");
+  copyBtn.style.display = "inline-flex";
+  document.getElementById("btnNew").style.display = "inline-flex";
+  copyBtn.addEventListener("click", function () {
+    var url = location.origin + "/meet?room=" + encodeURIComponent(room);
+    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+      .then(function () { toast("Invite link copied."); })
+      .catch(function () { window.prompt("Copy the invite link:", url); });
+  });
+
+  // The brand mark over the corner where the vendor watermark lives.
+  var ov = document.getElementById("brandOverlay");
+  ov.innerHTML = BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
+  ov.style.display = "flex";
+
+  var s = document.createElement("script");
+  s.src = "https://meet.jit.si/external_api.js";
+  s.onload = function () {
+    /* global JitsiMeetExternalAPI */
+    new JitsiMeetExternalAPI("meet.jit.si", {
+      roomName: room,
+      parentNode: document.getElementById("jitsi"),
+      configOverwrite: {
+        prejoinConfig: { enabled: true },
+        disableDeepLinking: true,
+      },
+      interfaceConfigOverwrite: {
+        SHOW_JITSI_WATERMARK: false,
+        SHOW_WATERMARK_FOR_GUESTS: false,
+        SHOW_BRAND_WATERMARK: false,
+        SHOW_POWERED_BY: false,
+        JITSI_WATERMARK_LINK: "",
+        DEFAULT_LOGO_URL: "",
+        DEFAULT_WELCOME_PAGE_LOGO_URL: "",
+        APP_NAME: BRAND.name + " Meeting",
+        NATIVE_APP_NAME: BRAND.name + " Meeting",
+      },
+    });
+  };
+  s.onerror = function () { toast("Could not reach the meeting service. Check your connection and reload."); };
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
