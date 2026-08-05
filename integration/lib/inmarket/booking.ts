@@ -36,9 +36,22 @@ export interface Booking {
   name: string;
   email: string;
   note?: string;
+  /** Video-call join link carried in the invite and both confirmation emails. */
+  meetingUrl?: string;
   createdAt: string;
   organizerEmailed: boolean;
   guestEmailed: boolean;
+}
+
+/**
+ * A unique, no-account video room for one booking. Jitsi Meet rooms exist the
+ * moment someone opens the link (both sides just click to join in the browser),
+ * so there is nothing to provision and no vendor account to hold. A workspace
+ * that prefers its own room (Teams/Zoom/Meet) sets bookingMeetingUrl instead.
+ */
+export function mintMeetingUrl(brandName: string, bookingId: string): string {
+  const slug = (brandName || "").replace(/[^a-zA-Z0-9]+/g, "").slice(0, 24) || "RecruitersOS";
+  return `https://meet.jit.si/${slug}Call-${bookingId.slice(0, 8)}`;
 }
 
 let mem: Map<string, Booking[]> | null = null;
@@ -237,6 +250,7 @@ export function buildInviteIcs(b: Booking, organizerEmail: string, organizerName
     `DTEND:${icsStamp(b.end)}`,
     `SUMMARY:${icsEscape(summary)}`,
     `DESCRIPTION:${icsEscape(description)}`,
+    ...(b.meetingUrl ? [`LOCATION:${icsEscape(b.meetingUrl)}`, `URL:${icsEscape(b.meetingUrl)}`] : []),
     `ORGANIZER;CN=${icsEscape(organizerName)}:mailto:${organizerEmail}`,
     `ATTENDEE;CN=${icsEscape(b.name)};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${b.email}`,
     "STATUS:CONFIRMED",
@@ -276,12 +290,15 @@ async function bookOne(
     return { ok: false, error: "slot_taken" };
   }
 
+  const brandName = (s.brandName || "").trim() || "our team";
+  const id = randomUUID();
   const booking: Booking = {
-    id: randomUUID(),
+    id,
     start: startIso,
     end: new Date(Date.parse(startIso) + cfg.slotMin * 60 * 1000).toISOString(),
     name: guest.name, email: guest.email,
     note: guest.note || undefined,
+    meetingUrl: (s.bookingMeetingUrl || "").trim() || mintMeetingUrl(s.brandName || "", id),
     createdAt: new Date().toISOString(),
     organizerEmailed: false, guestEmailed: false,
   };
@@ -290,10 +307,10 @@ async function bookOne(
   scheduleSave();
 
   const when = speakSlot(startIso, cfg);
-  const brandName = (s.brandName || "").trim() || "our team";
   const summary = `${guest.name} + ${brandName} (${cfg.slotMin} min call)`;
   const description =
     `Booked from the video page.\n` +
+    `Join the call: ${booking.meetingUrl}\n` +
     `Guest: ${guest.name} (${guest.email})` +
     (guest.note ? `\nNote from the guest: ${guest.note}` : "");
   const ics = buildInviteIcs(booking, s.bookingEmail as string, brandName, summary, description);
@@ -308,6 +325,7 @@ async function bookOne(
       `${guest.name} just booked a ${cfg.slotMin} minute call with you for ${when}.\n\n` +
       `Guest: ${guest.name}\nEmail: ${guest.email}\n` +
       (guest.note ? `Note: ${guest.note}\n` : "") +
+      `Join the call: ${booking.meetingUrl}\n` +
       `\nThe attached invite adds it to your calendar.`,
       workspaceId, { ics: { method: "REQUEST", content: ics } },
     );
@@ -320,7 +338,9 @@ async function bookOne(
       guest.email,
       `You're booked: ${when}`,
       `Hi ${guest.name},\n\nYou're confirmed for a ${cfg.slotMin} minute call with ${brandName} on ${when}.\n\n` +
-      `The attached invite adds it to your calendar. If the time stops working, just reply to this email.\n\n${brandName}`,
+      `Join the call here when it's time: ${booking.meetingUrl}\n\n` +
+      `The attached invite adds it to your calendar (the join link is inside too). ` +
+      `If the time stops working, just reply to this email.\n\n${brandName}`,
       workspaceId, { ics: { method: "REQUEST", content: ics } },
     );
     booking.guestEmailed = true;

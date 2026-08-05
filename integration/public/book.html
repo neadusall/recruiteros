@@ -138,7 +138,7 @@
       body: JSON.stringify({ w: w, sig: sig, start: picked.iso, name: name, email: email, note: $("fNote").value.trim() }),
     }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
-        if (res.ok && res.j && res.j.ok) { renderDone(res.j.when); return; }
+        if (res.ok && res.j && res.j.ok) { renderDone(res.j.when, res.j.meetingUrl); return; }
         go.disabled = false;
         msg.className = "msg err";
         if (res.j && res.j.error === "slot_taken") {
@@ -151,12 +151,14 @@
       .catch(function () { go.disabled = false; msg.className = "msg err"; msg.textContent = "Could not book that time. Please try again."; });
   }
 
-  function renderDone(when) {
+  function renderDone(when, meetingUrl) {
+    var joinOk = /^https:\/\//i.test(meetingUrl || "");
     view.innerHTML =
       '<div class="done">' +
         '<span class="ring"><svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg></span>' +
         "<h2>You're booked</h2>" +
-        "<p>" + esc(when || "") + ". A calendar invite is on its way to your inbox.</p>" +
+        "<p>" + esc(when || "") + ". A calendar invite is on its way to your inbox with the video call link inside.</p>" +
+        (joinOk ? '<p style="margin-top:10px"><a class="btn primary" style="text-decoration:none;display:inline-block" href="' + esc(meetingUrl) + '" target="_blank" rel="noopener">Video call link</a></p>' : "") +
       "</div>";
   }
 

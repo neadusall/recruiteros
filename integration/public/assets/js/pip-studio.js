@@ -772,6 +772,7 @@
     var st = $("bkBookStart"); if (st && b.bookingStartHour != null) st.value = String(b.bookingStartHour);
     var en = $("bkBookEnd"); if (en && b.bookingEndHour != null) en.value = String(b.bookingEndHour);
     var tz = $("bkBookTz"); if (tz) tz.value = b.bookingTz || "America/Denver";
+    var mu = $("bkBookMeet"); if (mu) mu.value = b.bookingMeetingUrl || "";
     // The server returns calendarUrl as the live /book link when booking is on.
     var row = $("bkBookLinkRow"), a = $("bkBookLink");
     if (row && a) {
@@ -787,6 +788,7 @@
     out.bookingStartHour = +($("bkBookStart") ? $("bkBookStart").value : 9);
     out.bookingEndHour = +($("bkBookEnd") ? $("bkBookEnd").value : 17);
     out.bookingTz = $("bkBookTz") ? $("bkBookTz").value : "America/Denver";
+    out.bookingMeetingUrl = ($("bkBookMeet") ? $("bkBookMeet").value.trim() : "");
     return out;
   }
   function loadBrand() {

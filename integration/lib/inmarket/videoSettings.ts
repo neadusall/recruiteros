@@ -41,6 +41,8 @@ export interface VideoSettings {
   /** Local booking window, 24h hours (default 9 to 17, Monday to Friday). */
   bookingStartHour?: number;
   bookingEndHour?: number;
+  /** Optional permanent meeting room (Teams/Zoom/Meet). Empty = a unique video room is minted per booking. */
+  bookingMeetingUrl?: string;
   /** Meeting length in minutes (default 30). */
   bookingSlotMin?: number;
   /** Where to send view notifications (defaults to the owner's email). */
@@ -101,6 +103,7 @@ export function sanitize(input: Partial<VideoSettings> | null | undefined): Part
   if (s.bookingStartHour !== undefined) out.bookingStartHour = clampHour(s.bookingStartHour, 9);
   if (s.bookingEndHour !== undefined) out.bookingEndHour = clampHour(s.bookingEndHour, 17);
   if (s.bookingSlotMin !== undefined) out.bookingSlotMin = [15, 20, 30, 45, 60].includes(Number(s.bookingSlotMin)) ? Number(s.bookingSlotMin) : 30;
+  if (s.bookingMeetingUrl !== undefined) out.bookingMeetingUrl = isHttp(s.bookingMeetingUrl) ? (s.bookingMeetingUrl as string) : "";
   return out;
 }
 

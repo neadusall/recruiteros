@@ -82,5 +82,5 @@ export async function POST(req: Request) {
   const { book } = await import("../../../lib/inmarket/booking");
   const res = await book(w, s, start, { name, email, note: note || undefined });
   if (!res.ok) return fail(res.error || "slot_taken", 409);
-  return ok({ ok: true, when: res.when });
+  return ok({ ok: true, when: res.when, meetingUrl: res.booking?.meetingUrl || "" });
 }
