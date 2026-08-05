@@ -38,8 +38,12 @@ check("the checkpoint carries the pasted URL, so a recovery can re-run the same 
   /salesNav:\s*\{[\s\S]{0,200}url,/.test(snavBranch));
 check("the checkpoint carries the destination list, so a recovery cannot fork a second one",
   /typedName:/.test(snavBranch) && /targetRunId:/.test(snavBranch));
-check("the net stands down in a finally (an answered request never leaves a checkpoint)",
-  /\}\s*finally\s*\{[\s\S]{0,300}removeNightItem\(ws,\s*snRecoveryId\)/.test(snavBranch));
+check("the net stands down in a finally (a SAVED search's checkpoint is removed)",
+  /\}\s*finally\s*\{[\s\S]{0,700}removeNightItem\(ws,\s*snRecoveryId\)/.test(snavBranch));
+check("a refusal PARKS the checkpoint as a visible stopped item instead of deleting it (2026-08-05: a recruiter who navigated away mid-search got no list, no row, no error)",
+  /snPark\(detail\)[\s\S]{0,200}empty_salesnav_run/.test(snavBranch) && /failNightItem/.test(snavBranch));
+check("a crash parks it too, and parking clears the recovery marker so the queue never re-runs a search the server answered on purpose",
+  /catch \(err\)[\s\S]{0,300}snPark\(/.test(snavBranch) && /recovery = undefined/.test(queue));
 
 /* --- one shared lander, so a recovery never spawns a duplicate list ------- */
 

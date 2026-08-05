@@ -313,6 +313,28 @@ export async function removeNightItem(workspaceId: string, id: string): Promise<
   return true;
 }
 
+/**
+ * Convert a held crash-net checkpoint into a visible stopped item.
+ *
+ * A live search that ends in a refusal (nobody found, destination list gone) or
+ * an exception used to remove its checkpoint on the way out, which is correct when the
+ * recruiter's tab is showing the answer, invisible when they navigated away
+ * mid-search: no list, no queue row, no error anywhere (Ariel, 2026-08-05, a
+ * pasted-URL search that came back empty with nobody looking). Parking the
+ * checkpoint as a stopped item instead puts the reason on the queue card, where
+ * error items stay until the recruiter removes them. The recovery marker is
+ * cleared so the queue never "recovers" a search the server answered on purpose.
+ */
+export async function failNightItem(workspaceId: string, id: string, error: string): Promise<boolean> {
+  await hydrate();
+  const item = store.find((x) => x.id === id && x.workspaceId === workspaceId);
+  if (!item) return false;
+  item.recovery = undefined;
+  finish(item, "error", error);
+  await save();
+  return true;
+}
+
 /* ------------------------------------------------------------------------- */
 /* processor                                                                  */
 /* ------------------------------------------------------------------------- */

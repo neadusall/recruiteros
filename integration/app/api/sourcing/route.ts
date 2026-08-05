@@ -42,7 +42,7 @@ import {
   startBulkList, stepBulkList, bulkListStatus,
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
   mergeSourcingRuns, getRapidQuota, runSalesNavSourcing, searchKindOf, applySalesNavResult,
-  gapFillContacts, listNightItems, addNightItem, removeNightItem, attachNightIcp,
+  gapFillContacts, listNightItems, addNightItem, removeNightItem, failNightItem, attachNightIcp,
   landlineDbReady,
   premiumPhoneQuote, runPremiumPhoneBoost,
 } from "../../../lib/sourcing";
@@ -364,6 +364,19 @@ export async function POST(req: Request) {
           console.warn("[sourcing] salesNav recovery checkpoint not armed:", (err as Error).message);
         }
       }
+      // A refusal or a crash must stay VISIBLE even when nobody is looking: the
+      // recruiter may have navigated away mid-search (the whole point of the crash
+      // net), and a refusal whose 422 went back to a dead tab used to leave no
+      // list, no queue row, and no error anywhere: the search simply vanished
+      // (Ariel, 2026-08-05). Parking the checkpoint as a stopped queue item keeps
+      // the reason on the card until the recruiter removes it; the tab that IS
+      // watching additionally shows the same reason live from the response.
+      const snPark = async (reason: string) => {
+        if (!snRecoveryId) return;
+        const id = snRecoveryId;
+        snRecoveryId = ""; // the finally must not remove what we just made visible
+        await failNightItem(ws, id, reason).catch(() => {});
+      };
       try {
         const result = await withWorkspaceCreds(ws, () => runSalesNavSourcing(ws, g.ctx.user.id, {
           url,
@@ -382,6 +395,7 @@ export async function POST(req: Request) {
           const detail = criteriaEmpty
             ? "This link doesn't include the search's filters (saved searches, recent-search links, and lead lists keep them on LinkedIn's side), and the search's members couldn't be pulled directly. On LinkedIn, open the search so the filters are applied, then copy the full URL from the address bar (it will contain \"query=\") and paste that here. Connecting your LinkedIn with the button on this card also lets the search's own members be pulled."
             : "The search's members couldn't be pulled from LinkedIn, and the expanded search found nobody for these filters. Add a title or keyword filter to the search and try again, or connect your LinkedIn with the button on this card so the search's own members can be pulled.";
+          await snPark(detail);
           return fail("empty_salesnav_run", 422, { detail, warnings: result.warnings });
         }
 
@@ -391,17 +405,25 @@ export async function POST(req: Request) {
         const applied = await applySalesNavResult(ws, result, {
           url, name: snTypedName, targetRunId: snTargetId || undefined, createdBy: actor,
         });
-        if ("missingTarget" in applied) return fail("run_not_found", 404, { detail: applied.missingTarget });
+        if ("missingTarget" in applied) {
+          await snPark("The list picked under Add results to no longer exists, so the pull had nowhere to land and nothing was saved. Run the search again and pick a list that is still there (or type a new name).");
+          return fail("run_not_found", 404, { detail: applied.missingTarget });
+        }
         return ok({
           run: applied.run, mode: applied.mode, name: applied.name,
           linkedinFound: result.linkedinFound, expanded: result.expanded,
           added: applied.added, overlap: applied.overlap, total: applied.total,
           warnings: result.warnings, account: result.account,
         });
+      } catch (err) {
+        await snPark("The search stopped unexpectedly (" + ((err as Error).message || "no reason given") + "). Nothing was saved, so running it again is safe.");
+        throw err;
       } finally {
         // A real answer went back to the tab (a list, or a reasoned refusal), so
         // the crash net stands down. A killed process never reaches this line —
-        // exactly the case the checkpoint exists for.
+        // exactly the case the checkpoint exists for. Refusals and crashes were
+        // parked as visible stopped items above and cleared snRecoveryId, so this
+        // only removes the checkpoint of a search that SAVED.
         if (snRecoveryId) await removeNightItem(ws, snRecoveryId).catch(() => {});
       }
     }
