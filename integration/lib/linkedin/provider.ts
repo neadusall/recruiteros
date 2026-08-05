@@ -16,7 +16,7 @@ import type {
   ActionResult,
 } from "./types";
 import { backendBridgeProvider } from "./inbridge";
-import { cred } from "../providers/http";
+import { cred, isIsolatedContext } from "../providers/http";
 
 export interface SendConnectionOpts {
   account: LinkedInAccount;
@@ -457,6 +457,9 @@ export function getProvider(): LinkedInProvider {
   // overridden), so wiring up Unipile is just setting UNIPILE_DSN + UNIPILE_API_KEY.
   const explicit = (process.env.RECRUITEROS_OUTREACH_PROVIDER ?? "").toLowerCase();
   const hasUnipile = !!(cred("UNIPILE_DSN") && cred("UNIPILE_API_KEY"));
+  // A white-label workspace running with its OWN portal-saved Unipile always
+  // uses it: tenant credentials outrank the house-level provider default.
+  if (hasUnipile && isIsolatedContext()) return unipileProvider;
   switch (explicit || (hasUnipile ? "unipile" : "self")) {
     case "unipile":
       return unipileProvider;

@@ -122,6 +122,10 @@ export async function GET(req: Request) {
         return ok({ queue: await liveQueue(ws, 200) });
       case "activation":
         return ok(await listActivation(ws));
+      case "watch_connect": {
+        const { watchConnectStats } = await import("../../../../lib/linkedin/os/watchConnect");
+        return ok(await watchConnectStats(ws));
+      }
       default:
         return fail("unknown_view", 404);
     }

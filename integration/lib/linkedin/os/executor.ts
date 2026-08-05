@@ -18,6 +18,7 @@ import { nowIso } from "../../core/ids";
 import { rid } from "../../core/ids";
 import { getCore } from "../../core/repository";
 import { getProvider } from "../provider";
+import { withWorkspaceCreds } from "../../connected";
 import type { LinkedInAccount as EngineAccount, Prospect as EngineProspect } from "../types";
 import { ledger, withEngineLock } from "./store";
 import { categoryCounts, policyDay, releaseReservation, saveLedger, setStatus } from "./ledger";
@@ -207,6 +208,13 @@ async function markResult(
 
 /** Execute one claimed action against the provider. */
 async function executeOne(r: LiActionRecord): Promise<void> {
+  // The whole execution runs inside the action's workspace credential context,
+  // so getProvider() and every provider call resolve tenant-first (a customer's
+  // portal-saved Unipile, never the house default).
+  return withWorkspaceCreds(r.workspaceId, () => executeOneInner(r));
+}
+
+async function executeOneInner(r: LiActionRecord): Promise<void> {
   const policy = await getPolicy(r.workspaceId, r.accountId);
   const accountState = await getAccount(r.workspaceId, r.accountId);
   const block = executionBlock(accountState);
@@ -434,6 +442,10 @@ export async function tickLinkedInOs(batch = 25): Promise<{
 
 /** Health sweep used by the accounts UI (best-effort provider probe). */
 export async function refreshAccountStatuses(workspaceId: string): Promise<void> {
+  return withWorkspaceCreds(workspaceId, () => refreshAccountStatusesInner(workspaceId));
+}
+
+async function refreshAccountStatusesInner(workspaceId: string): Promise<void> {
   const accountsList = await listAccounts(workspaceId);
   const provider = getProvider();
   for (const a of accountsList) {

@@ -591,3 +591,24 @@ export interface AllocationSlice {
   allocated: number;
   usedToday: number;
 }
+
+/* ---------------- watch-to-connect ---------------- */
+
+/** One prospect's video-watch -> connection-request record (watchConnect.ts). */
+export interface WatchConnectRecord {
+  id: string;
+  workspaceId: string;
+  prospectId: string;
+  videoKey: string;
+  watchedAt: string;
+  recruiterUserId?: string;
+  recruiterName?: string;
+  osAccountId?: string;
+  /** Ledger row id of the queued connection request. */
+  actionId?: string;
+  personIdentityId?: string;
+  status: "queued" | "skipped";
+  skipReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}

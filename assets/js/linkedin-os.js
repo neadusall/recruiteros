@@ -221,13 +221,57 @@
       }).join("") || '<div class="empty">No recent LinkedIn activity.</div>';
 
       body.innerHTML = kpis + bars +
+        '<div id="lioVwc"></div>' +
         '<div class="lio-cols">' +
         '<div class="card lio-card"><div class="lio-card-t">Active campaigns</div>' + camps + "</div>" +
         '<div class="card lio-card"><div class="lio-card-t">Live LinkedIn queue <a class="lio-link" href="#linkedin/utilization">View queue</a></div>' + queue + "</div>" +
         "</div>" +
         '<div class="card lio-card"><div class="lio-card-t">Recent activity</div>' + feed + "</div>";
+      renderWatchConnect(body.querySelector("#lioVwc"));
     }).catch(function (e) { fail(body, e); });
   }
+  /* Watch-to-connect funnel: prospects who watched their personalized video
+     get an automatic note-less connection request from their own recruiter.
+     This card is the correlation readout: watched -> requested -> sent ->
+     accepted -> meetings, plus why anything was skipped. */
+  function renderWatchConnect(host) {
+    if (!host) return;
+    apiGet("?view=watch_connect").then(function (s) {
+      var intro = "When a prospect watches their video (second email), their recruiter's LinkedIn seat automatically queues a connection request. No note, no blast, engine-paced.";
+      if (!s || !s.watched) {
+        host.innerHTML = '<div class="card lio-card"><div class="lio-card-t">Video-watch connects</div>' +
+          '<div class="lio-dim">' + intro + " The funnel appears here after the first watch.</div></div>";
+        return;
+      }
+      var skips = "";
+      if (s.skipped) {
+        var parts = Object.keys(s.skipReasons || {}).map(function (k) {
+          return esc(SKIP_LABEL[k] || k) + " (" + s.skipReasons[k] + ")";
+        });
+        skips = '<div class="lio-dim" style="margin-top:6px">Skipped ' + s.skipped + ": " + parts.join(" · ") + "</div>";
+      }
+      var rows = (s.recent || []).map(function (r) {
+        return '<div class="lio-row lio-row-sm"><div>' + esc(r.prospectName || "Prospect") +
+          (r.recruiterName ? '<span class="lio-dim"> · ' + esc(r.recruiterName) + "</span>" : "") + "</div>" +
+          '<div class="lio-dim">' + esc(r.status) + " · " + ago(r.watchedAt) + "</div></div>";
+      }).join("");
+      host.innerHTML = '<div class="card lio-card"><div class="lio-card-t">Video-watch connects</div>' +
+        '<div class="lio-dim" style="margin-bottom:8px">' + intro + "</div>" +
+        '<div class="lio-kpis">' +
+        kpi("Watched", String(s.watched), "prospects who played their video") +
+        kpi("Requested", String(s.requested), "connection requests queued") +
+        kpi("Sent", String(s.sent), "delivered by the engine") +
+        kpi("Accepted", String(s.accepted), "connections made") +
+        kpi("Meetings", String(s.meetings), "booked after watching") +
+        "</div>" + skips + rows + "</div>";
+    }).catch(function () { host.innerHTML = ""; });
+  }
+  var SKIP_LABEL = {
+    no_linkedin_url: "no LinkedIn profile on file",
+    no_recruiter_attribution: "sender unknown",
+    no_linkedin_seat: "recruiter's LinkedIn not connected",
+    seat_needs_reconnect: "recruiter needs to reconnect LinkedIn",
+  };
   function kpi(label, value, sub, tone) {
     return '<div class="lio-kpi"><div class="lio-kpi-l">' + esc(label) + "</div>" +
       '<div class="lio-kpi-v">' + (tone ? pill(value, tone) : esc(value)) + "</div>" +

@@ -52,6 +52,14 @@ export async function POST(req: Request) {
       sessionId: b?.sid ? String(b.sid).slice(0, 64) : undefined,
     });
   } catch { /* best-effort tracking never breaks the viewer */ }
+  // Watch-to-connect: a real play with a real recipient queues the sending
+  // recruiter's LinkedIn connection request. Fire-and-forget so the beacon
+  // stays instant; the handler owns all dedupe and safety gates.
+  if (t === "play" && b?.rcpt) {
+    import("../../../../lib/linkedin/os/watchConnect")
+      .then((m) => m.handleVideoWatch(String(b.rcpt).slice(0, 120), k))
+      .catch(() => { /* never surfaces to the viewer */ });
+  }
   return new Response(null, { status: 204, headers: CORS });
 }
 

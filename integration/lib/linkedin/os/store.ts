@@ -16,6 +16,7 @@ import type {
   AccountPolicy, ActivationBatch, ActivationEntry, LiAccountState,
   LiActionRecord, LiCampaign, LiConversation, LiEnrollment, LiRawEvent,
   PersonIdentity, PersonOutreachState, VoiceApprovalItem, VoiceAsset,
+  WatchConnectRecord,
 } from "./types";
 
 /** One snapshot-backed collection: hydrate once, mutate in memory, save debounced. */
@@ -63,6 +64,7 @@ export const voiceApprovals = collection<VoiceApprovalItem>("linkedin_os_voice_a
 export const activationEntries = collection<ActivationEntry>("linkedin_os_activation_v1", 10_000);
 export const activationBatches = collection<ActivationBatch>("linkedin_os_activation_batches_v1");
 export const rawEvents = collection<LiRawEvent>("linkedin_os_raw_events_v1", 2_000);
+export const watchConnects = collection<WatchConnectRecord>("linkedin_os_watch_connect_v1");
 
 /* ------------------------------------------------------------------ */
 /* The engine lock                                                      */
