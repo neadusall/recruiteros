@@ -16,6 +16,7 @@ export {
   runDiscovery, rapidApiSearchConfigured, verifySourcingSearch,
   googleSearchConfigured, verifyGoogleSearch, searxSearchConfigured,
   serperSearchConfigured, verifySerperSearch,
+  dataforseoSearchConfigured, verifyDataForSeoSearch, dataforseoAccountBalance,
   candidateKey, locationFromSnippet, type DiscoveryResult,
 } from "./discovery";
 export {

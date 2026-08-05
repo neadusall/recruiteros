@@ -178,7 +178,7 @@ export interface SourcingRun {
   candidates: CandidateRow[];
   /** Quota'd search-API requests the discovery run spent building this list, by
    *  engine (rapidapi = the paid people-search listing's monthly credits). */
-  apiUsage?: { rapidapi?: number; serper?: number; google?: number };
+  apiUsage?: { rapidapi?: number; serper?: number; google?: number; dataforseo?: number };
   /** Set once promoted into Candidates, with the created campaign + list ids.
    *  promotedCount = everyone delivered (new + already-in-pipeline), not net-new. */
   promotedCampaignId?: string;
@@ -368,7 +368,7 @@ export interface DiscoveryOptions {
   /** Which engines to use, in cheapest-first order. Defaults to whatever is configured.
    *  "koldinfo" is the free contact-database sweep (title + geo over the Business Email
    *  DB via the browser worker) — a candidate SOURCE that arrives with emails/phones. */
-  engines?: Array<"koldinfo" | "google" | "searx" | "serper" | "rapidapi" | "scraper">;
+  engines?: Array<"koldinfo" | "google" | "searx" | "dataforseo" | "serper" | "rapidapi" | "scraper">;
   /** Candidate keys (see candidateKey) to skip — the cross-run "seen" set for fresh-only runs. */
   excludeKeys?: Set<string>;
   /**

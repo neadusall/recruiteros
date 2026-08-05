@@ -757,6 +757,7 @@ async function step(item: NightItem): Promise<void> {
         rapidapi: Number(result.usage.rapidapi) || 0,
         serper: Number(result.usage.serper) || 0,
         google: Number(result.usage.google) || 0,
+        dataforseo: Number(result.usage.dataforseo) || 0,
       } : undefined,
     });
     item.runId = run.id;

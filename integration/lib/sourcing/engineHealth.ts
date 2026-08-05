@@ -28,7 +28,10 @@ import { nowIso } from "../core/ids";
 import { withWorkspaceCreds } from "../connected";
 import { adminListAccounts, workspaceOwner, ensureAuthReady } from "../auth";
 import { pushNotification } from "../outbound/notify";
-import { verifySerperSearch, serperSearchConfigured, rapidApiSearchConfigured } from "./discovery";
+import {
+  verifySerperSearch, serperSearchConfigured, rapidApiSearchConfigured,
+  dataforseoSearchConfigured, dataforseoAccountBalance,
+} from "./discovery";
 
 const KEY = "sourcing_engine_health_v1";
 
@@ -40,7 +43,7 @@ const STALE_MS = 7 * 24 * 3600_000;
 export type EngineState = "ok" | "low" | "down" | "unconfigured" | "stale";
 
 export interface EngineStatus {
-  engine: "serper" | "rapidapi";
+  engine: "serper" | "rapidapi" | "dataforseo";
   state: EngineState;
   detail: string;
   remaining?: number;
@@ -95,6 +98,26 @@ async function checkSerper(): Promise<EngineStatus> {
   return { engine: "serper", state: "down", detail: err, checkedAt };
 }
 
+/** Warn when the DataForSEO balance drops under this many dollars (roughly a
+ *  thousand wide-web searches of headroom at its live-task pricing). */
+const DFS_LOW_USD = 2;
+
+/** DataForSEO: FREE balance endpoint, so this check spends nothing. */
+async function checkDataForSeo(): Promise<EngineStatus> {
+  const checkedAt = nowIso();
+  if (!dataforseoSearchConfigured()) {
+    return { engine: "dataforseo", state: "unconfigured", detail: "No DataForSEO API login set for this workspace.", checkedAt };
+  }
+  const { balance, error } = await dataforseoAccountBalance();
+  if (balance === null) {
+    return { engine: "dataforseo", state: "down", detail: error || "balance check failed", checkedAt };
+  }
+  const usd = `$${balance.toFixed(2)}`;
+  if (balance <= 0.05) return { engine: "dataforseo", state: "down", detail: `Balance empty (${usd}). Top up at app.dataforseo.com.`, remaining: balance, checkedAt };
+  if (balance < DFS_LOW_USD) return { engine: "dataforseo", state: "low", detail: `Balance running low: ${usd} left.`, remaining: balance, checkedAt };
+  return { engine: "dataforseo", state: "ok", detail: `Balance: ${usd}.`, remaining: balance, checkedAt };
+}
+
 interface QuotaRow { host: string; limit?: number; remaining?: number; used?: number; updatedAt?: string }
 
 /** RapidAPI: free — read the quota the app already records on every real search. */
@@ -134,7 +157,10 @@ function worstOf(engines: EngineStatus[]): EngineState {
 
 /** Human sentence for the notification body. */
 function alertBody(wsName: string, e: EngineStatus): string {
-  const who = e.engine === "serper" ? "Serper (the wide web-search pass)" : "the RapidAPI people-search engine";
+  const who =
+    e.engine === "serper" ? "Serper (the wide web-search pass)"
+    : e.engine === "dataforseo" ? "DataForSEO (the cheapest wide web-search pass)"
+    : "the RapidAPI people-search engine";
   if (e.engine === "serper" && e.state === "down") {
     return `${who} is not answering for ${wsName}: ${e.detail} Serper supplies most of JD Sourcing's candidates, so searches will return far fewer people until this is restored. Top up at serper.dev.`;
   }
@@ -164,8 +190,9 @@ export async function checkEngineHealth(opts: { notify?: boolean } = {}): Promis
         // Sequential on purpose: two cheap calls, and it keeps the credential
         // context unambiguous for the duration of each check.
         const s = await checkSerper();
+        const d = await checkDataForSeo();
         const r = await checkRapidApi();
-        return [s, r];
+        return [s, d, r];
       });
     } catch (e: any) {
       console.error("[engine-health] check failed for", acct.workspaceId, e?.message || e);

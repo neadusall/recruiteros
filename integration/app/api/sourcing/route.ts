@@ -30,7 +30,7 @@
 import { body, ok, fail, requireCapability } from "../../../lib/api";
 import {
   planSourcing, pinIcpLocation, parseJobDescription, generateQueries, runDiscovery, parseRadiusMi,
-  googleSearchConfigured, searxSearchConfigured, serperSearchConfigured, rapidApiSearchConfigured,
+  googleSearchConfigured, searxSearchConfigured, serperSearchConfigured, dataforseoSearchConfigured, rapidApiSearchConfigured,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
   profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
@@ -156,7 +156,9 @@ export async function POST(req: Request) {
       return ok(await withWorkspaceCreds(ws, async () => ({
         engines: {
           database: await koldinfoWorkerReady(),
-          wideWeb: serperSearchConfigured(),
+          // Either paid wide-web engine lights the pill: they serve the same pass
+          // and the run survives on one when the other's balance is empty.
+          wideWeb: serperSearchConfigured() || dataforseoSearchConfigured(),
           freeWeb: googleSearchConfigured() || searxSearchConfigured(),
           peopleApi: rapidApiSearchConfigured(),
         },
@@ -602,6 +604,7 @@ export async function POST(req: Request) {
           rapidapi: Number(b.apiUsage.rapidapi) || 0,
           serper: Number(b.apiUsage.serper) || 0,
           google: Number(b.apiUsage.google) || 0,
+          dataforseo: Number(b.apiUsage.dataforseo) || 0,
         } : undefined,
       });
       return ok({ run });

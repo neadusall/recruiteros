@@ -488,6 +488,107 @@ export async function verifySerperSearch(): Promise<{ ok: boolean; error?: strin
 }
 
 /* ------------------------------------------------------------------ */
+/* DataForSEO x-ray provider (cheapest paid Google results)            */
+/* ------------------------------------------------------------------ */
+
+// DataForSEO serves real Google results, pay-as-you-go with no expiring credit
+// bundle. One live "regular" task returns up to 100 organic results for a fraction
+// of a cent, where a Serper query returns 10 for a tenth of a cent, so per RESULT
+// this is several times cheaper. It runs BEFORE Serper for exactly that reason, and
+// having two paid wide-web engines means a drained balance on one can no longer
+// stall discovery (Serper hit zero on 2026-07-30 and took two thirds of sourcing
+// output with it).
+const DFS_LOGIN = () => cred("DATAFORSEO_LOGIN");
+const DFS_PASS = () => cred("DATAFORSEO_PASSWORD");
+// Soft per-RUN cap, same shape as the Serper guard. Each task is up to 100 results,
+// so even the default cap is a few dollars' worth of results at most.
+const DFS_MAX_QUERIES = (fallback = 100) => {
+  const n = parseInt(cred("DATAFORSEO_MAX_QUERIES") || "", 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+export function dataforseoSearchConfigured(): boolean {
+  return Boolean(DFS_LOGIN() && DFS_PASS());
+}
+
+const dfsAuth = () =>
+  "Basic " + Buffer.from(`${DFS_LOGIN()}:${DFS_PASS()}`).toString("base64");
+
+/**
+ * One DataForSEO live task: up to `depth` organic results in a single synchronous
+ * call (no paging; depth replaces it). Items carry title/url/description, which map
+ * onto the CSE title/link/snippet shape, so the Google mapper does the parsing.
+ */
+async function dataforseoXraySearch(xray: string, depth = 100): Promise<CandidateRow[]> {
+  const res = await fetch("https://api.dataforseo.com/v3/serp/google/organic/live/regular", {
+    method: "POST",
+    headers: { Authorization: dfsAuth(), "Content-Type": "application/json" },
+    body: JSON.stringify([{ keyword: xray.slice(0, 700), location_code: 2840, language_code: "en", depth }]),
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    const out = res.status === 402 || res.status === 429 || /balance|payment|money/i.test(txt);
+    const bad = res.status === 401 || res.status === 403;
+    // `quota` stops the DataForSEO pass for the rest of the run (an empty balance or
+    // rejected login never self-heals mid-run).
+    throw Object.assign(
+      new Error(`dataforseo ${res.status}${out ? " (balance empty or rate-limited)" : bad ? " (login rejected)" : ""}`),
+      { quota: out || bad },
+    );
+  }
+  const data: any = await res.json().catch(() => ({}));
+  // DataForSEO answers HTTP 200 with per-payload status codes: 20000 = ok, 402xx =
+  // payment problems. Surface those as real errors, not as an empty page.
+  const task = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+  const code = Number(data?.status_code || 0);
+  const taskCode = Number(task?.status_code || 0);
+  if (code !== 20000 || (taskCode && taskCode !== 20000)) {
+    const msg = String(task?.status_message || data?.status_message || "unexpected answer");
+    const out = /money|balance|payment/i.test(msg) || String(taskCode).startsWith("402");
+    throw Object.assign(new Error(`dataforseo ${taskCode || code} (${msg})`), { quota: out });
+  }
+  const items = Array.isArray(task?.result?.[0]?.items) ? task.result[0].items : [];
+  return items
+    .filter((it: any) => it && it.type === "organic")
+    .map((it: any) => mapGoogleItem({ title: it.title, link: it.url, snippet: it.description }))
+    .filter((r: CandidateRow | null): r is CandidateRow => Boolean(r))
+    .map((r: CandidateRow) => ({ ...r, provider: "dataforseo" }));
+}
+
+/** Live health check for the Connected → JD Sourcing "Test connection" on the DataForSEO engine. */
+export async function verifyDataForSeoSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
+  if (!dataforseoSearchConfigured()) return { ok: false, error: "Add your DataForSEO API login and password first." };
+  try {
+    const rows = await dataforseoXraySearch('site:linkedin.com/in recruiter', 10);
+    return { ok: true, found: rows.length };
+  } catch (e: any) {
+    return { ok: false, error: (e && e.message) || "search request failed" };
+  }
+}
+
+/**
+ * Account balance in USD via DataForSEO's FREE user-data endpoint; unlike Serper,
+ * the health watch can check this vendor without spending anything. Returns null
+ * when the call fails (callers treat that as "down", with the error attached).
+ */
+export async function dataforseoAccountBalance(): Promise<{ balance: number | null; error?: string }> {
+  try {
+    const res = await fetch("https://api.dataforseo.com/v3/appendix/user_data", {
+      headers: { Authorization: dfsAuth() },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) return { balance: null, error: `dataforseo ${res.status}${res.status === 401 || res.status === 403 ? " (login rejected)" : ""}` };
+    const data: any = await res.json().catch(() => ({}));
+    const money = data?.tasks?.[0]?.result?.[0]?.money;
+    const bal = Number(money?.balance);
+    return Number.isFinite(bal) ? { balance: bal } : { balance: null, error: "no balance in the answer" };
+  } catch (e: any) {
+    return { balance: null, error: (e && e.message) || "request failed" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* SearXNG x-ray provider (free, self-hosted, always-on)               */
 /* ------------------------------------------------------------------ */
 
@@ -601,7 +702,7 @@ export interface DiscoveryResult {
   scanned: number;
   /** Quota'd search-API requests this run spent, by engine: the saved list's credit
    *  stamp (rapidapi = the paid people-search listing's monthly credits). */
-  usage: { rapidapi: number; serper: number; google: number };
+  usage: { rapidapi: number; serper: number; google: number; dataforseo: number };
 }
 
 /**
@@ -679,7 +780,7 @@ export async function runDiscovery(
 ): Promise<DiscoveryResult> {
   const cap = Math.max(1, Math.min(opts.cap ?? 3000, 5000));
   const minFit = opts.minFit ?? 45;
-  const engines = opts.engines ?? (["koldinfo", "google", "searx", "serper", "rapidapi", "scraper"] as const);
+  const engines = opts.engines ?? (["koldinfo", "google", "searx", "dataforseo", "serper", "rapidapi", "scraper"] as const);
   // Breadth deepens per-query paging (query fan-out already happened in generateQueries):
   // wide digs further into each search before giving up on it.
   const breadth: SearchBreadth = opts.breadth ?? "balanced";
@@ -690,6 +791,7 @@ export async function runDiscovery(
   let useGoogle = engines.includes("google") && googleSearchConfigured();
   let useSearx = engines.includes("searx") && searxSearchConfigured();
   let useSerper = engines.includes("serper") && serperSearchConfigured();
+  let useDfs = engines.includes("dataforseo") && dataforseoSearchConfigured();
   const useRapid = engines.includes("rapidapi") && rapidApiSearchConfigured();
   const useScraper = engines.includes("scraper") && scraperConfigured();
   // The free contact-database sweep (title + geo over the Business Email DB). Needs
@@ -698,9 +800,9 @@ export async function runDiscovery(
   if (engines.includes("rapidapi") && !useRapid) {
     warnings.push("rapidapi_not_configured: set RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST to enable scale discovery");
   }
-  if (!useGoogle && !useSearx && !useSerper && !useRapid && !useScraper && !useKold) {
+  if (!useGoogle && !useSearx && !useSerper && !useDfs && !useRapid && !useScraper && !useKold) {
     warnings.push("no_discovery_engine: nothing configured to find profiles, so the list will be empty");
-    return { candidates: [], warnings, scanned: 0, usage: { rapidapi: 0, serper: 0, google: 0 } };
+    return { candidates: [], warnings, scanned: 0, usage: { rapidapi: 0, serper: 0, google: 0, dataforseo: 0 } };
   }
 
   // Submit the database sweep FIRST so the worker browses KoldInfo while the web
@@ -832,6 +934,10 @@ export async function runDiscovery(
   // around a nickel a run); an explicit SERPER_MAX_QUERIES in Setup always wins.
   const serperBudget = SERPER_MAX_QUERIES(breadth === "wide" ? 300 : 100);
   let serperUsed = 0;
+  // DataForSEO: one task per query (depth covers what paging would), so the cap is
+  // effectively "how many queries may use it". Cheaper per result than Serper.
+  const dfsBudget = DFS_MAX_QUERIES(breadth === "wide" ? 300 : 100);
+  let dfsUsed = 0;
   // People-search listing requests attempted this run (its monthly credits are the
   // scarce paid resource, so the count is stamped onto the saved list).
   let rapidUsed = 0;
@@ -847,6 +953,7 @@ export async function runDiscovery(
   const gLimit = makeLimiter(2);
   const sxLimit = makeLimiter(4);
   const spLimit = makeLimiter(4);
+  const dfLimit = makeLimiter(4);
   const raLimit = makeLimiter(1);
   const scLimit = makeLimiter(1);
   let capped = false; // replaces the sequential loop's `break outer`
@@ -889,6 +996,23 @@ export async function runDiscovery(
         if (!rows.length) break; // exhausted this query
         collected += absorb(rows, query.group);
         if (byKey.size >= cap) { capped = true; return; }
+      }
+    }
+
+    // 2.5) CHEAPEST paid: one DataForSEO live task over the same X-ray. Depth 100
+    // makes it a single call per query (no paging), and per result it undercuts
+    // Serper several times over, so it absorbs volume before Serper spends.
+    if (useDfs && collected < perQuery && !capped && dfsUsed < dfsBudget) {
+      dfsUsed++; // reserved before the await, same as the budgets above
+      try {
+        const rows = await dfLimit(() => dataforseoXraySearch(query.xray));
+        if (rows.length) {
+          collected += absorb(rows, query.group);
+          if (byKey.size >= cap) { capped = true; return; }
+        }
+      } catch (err: any) {
+        warnings.push(`dataforseo(${query.group}): ${err.message}`);
+        if (err && err.quota) { useDfs = false; } // balance gone / login bad, stop for the run
       }
     }
 
@@ -1007,6 +1131,9 @@ export async function runDiscovery(
   if (serperUsed >= serperBudget && serperUsed > 0) {
     warnings.push(`serper_budget_reached: the Serper pass stopped after ${serperUsed} searches this run to keep spend bounded (raise SERPER_MAX_QUERIES in Setup to allow more)`);
   }
+  if (dfsUsed >= dfsBudget && dfsUsed > 0) {
+    warnings.push(`dataforseo_budget_reached: the DataForSEO pass stopped after ${dfsUsed} searches this run to keep spend bounded (raise DATAFORSEO_MAX_QUERIES to allow more)`);
+  }
 
   // TWO-BLOCK RESULT: the in-area list is THE list; the out-of-area list is a bounded,
   // clearly labeled appendix after it. They are never interleaved, so "top N" actions
@@ -1071,10 +1198,11 @@ export async function runDiscovery(
     if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
     // The actionable fix for a run with no wide web search is the Serper key: Google
     // closed the CSE API to new signups (gone Jan 1, 2027), so don't send anyone there.
-    if (!useGoogle && !useSerper && engines.includes("serper") && !serperSearchConfigured()) {
+    if (!useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()) {
       reasons.push("the wide web-search pass is off (paste your Serper key in Setup under JD Sourcing, in the Wide pass field, then run again)");
     }
     if (!useSerper && engines.includes("serper") && serperSearchConfigured()) reasons.push("the Serper search pass stopped early (key rejected or out of credits; check your serper.dev balance)");
+    if (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured()) reasons.push("the DataForSEO search pass stopped early (login rejected or balance empty; check your app.dataforseo.com balance)");
     if (!useSearx && engines.includes("searx")) reasons.push("the built-in free search engine did not respond");
     if (engines.includes("koldinfo") && !useKold) reasons.push("the free contact-database sweep is offline (the enrichment worker is unreachable or missing its login)");
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
@@ -1088,9 +1216,10 @@ export async function runDiscovery(
     // without the recruiter ever seeing an engine name, a key or a query.
     // Ordered most-actionable first: the first match wins.
     stopReason =
-      !useSerper && engines.includes("serper") && serperSearchConfigured()
+      (!useSerper && engines.includes("serper") && serperSearchConfigured()) ||
+      (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured())
         ? { code: "SRC-CREDITS", message: "The wide web search stopped early: its account is out of credit, or its key was refused. Nobody could be pulled in. This one needs an admin, re-running it will not help." }
-      : !useGoogle && !useSerper && engines.includes("serper") && !serperSearchConfigured()
+      : !useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()
         ? { code: "SRC-NOKEY", message: "The wide web search is not switched on for this workspace, so the main source never ran. An admin has to turn it on in Setup." }
       : rapid404
         ? { code: "SRC-PEOPLE", message: `The people search refused every request (${rapid404}), because it is pointed at the wrong address in Setup. An admin has to correct it.` }
@@ -1112,7 +1241,7 @@ export async function runDiscovery(
   // candidates came back, collapse them into a single short note; the raw per-query
   // list only matters on an empty run, where the diagnosis above consumes it.
   if (candidates.length) {
-    const perQuery = /^(rapidapi|scraper|google|searx|serper|kolddb)\(/;
+    const perQuery = /^(rapidapi|scraper|google|searx|serper|dataforseo|kolddb)\(/;
     const noisy = warnings.filter((w) => perQuery.test(w));
     if (noisy.length) {
       const kept = warnings.filter((w) => !perQuery.test(w));
@@ -1125,5 +1254,5 @@ export async function runDiscovery(
     }
   }
 
-  return { candidates, warnings, scanned, stopReason, usage: { rapidapi: rapidUsed, serper: serperUsed, google: googleUsed } };
+  return { candidates, warnings, scanned, stopReason, usage: { rapidapi: rapidUsed, serper: serperUsed, google: googleUsed, dataforseo: dfsUsed } };
 }
