@@ -62,7 +62,7 @@ export async function GET(req: Request) {
   );
 }
 
-interface BookBody { w?: string; sig?: string; start?: string; name?: string; email?: string; note?: string }
+interface BookBody { w?: string; sig?: string; start?: string; name?: string; email?: string; note?: string; phone?: string }
 
 export async function POST(req: Request) {
   if (!allow(ipOf(req))) return fail("too_many_requests", 429);
@@ -74,13 +74,17 @@ export async function POST(req: Request) {
   const name = String(b.name || "").trim().slice(0, 80);
   const email = String(b.email || "").trim().slice(0, 120);
   const note = String(b.note || "").trim().slice(0, 500);
+  const phoneRaw = String(b.phone || "").trim().slice(0, 30);
   const start = String(b.start || "").trim();
   if (!name) return fail("name_required");
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail("valid_email_required");
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/.test(start)) return fail("bad_slot");
 
-  const { book } = await import("../../../lib/inmarket/booking");
-  const res = await book(w, s, start, { name, email, note: note || undefined });
+  const { book, normalizePhone } = await import("../../../lib/inmarket/booking");
+  // A phone that doesn't normalize is treated as not provided rather than
+  // failing the booking: the meeting matters more than the reminder.
+  const phone = phoneRaw ? normalizePhone(phoneRaw) || undefined : undefined;
+  const res = await book(w, s, start, { name, email, note: note || undefined, phone });
   if (!res.ok) return fail(res.error || "slot_taken", 409);
   return ok({ ok: true, when: res.when, meetingUrl: res.booking?.meetingUrl || "" });
 }

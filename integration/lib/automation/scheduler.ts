@@ -115,6 +115,18 @@ async function tickSending(): Promise<void> {
   } catch { /* guard is best-effort per tick */ }
 }
 
+/** Send due booking reminder texts (24h and 1h before each booked call). */
+async function tickBookingSms(): Promise<void> {
+  const { tickBookingReminders } = await import("../inmarket/booking");
+  await tickBookingReminders(new Date());
+}
+
+/** Transcribe + summarize finished meeting recordings, then email the brief. */
+async function tickMeetRecordings(): Promise<void> {
+  const { processRecordingQueue } = await import("../meet/recordings");
+  await processRecordingQueue();
+}
+
 /** Publish LinkedIn Poster posts that were approved for a scheduled time. */
 async function tickLinkedinPosts(): Promise<void> {
   const { tickDuePosts } = await import("../linkedin/poster");
@@ -215,6 +227,8 @@ const TICKS: TickSpec[] = [
   { key: "linkedin_os", label: "LinkedIn OS shared engine", env: "RECRUITEROS_LINKEDIN_OS_TICK_MS", defaultMs: 2 * 60_000, firstDelayMs: 40_000, fn: tickLinkedinOs },
   { key: "linkedin_posts", label: "LinkedIn Poster scheduled posts", env: "RECRUITEROS_LINKEDIN_POSTS_TICK_MS", defaultMs: 60_000, firstDelayMs: 35_000, fn: tickLinkedinPosts },
   { key: "linkedin_watch", label: "LinkedIn Poster followed creators", env: "RECRUITEROS_LINKEDIN_WATCH_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 120_000, fn: tickLinkedinWatch },
+  { key: "booking_sms", label: "Booking reminder texts", env: "RECRUITEROS_BOOKING_SMS_TICK_MS", defaultMs: 60_000, firstDelayMs: 55_000, fn: tickBookingSms },
+  { key: "meet_recordings", label: "Meeting recordings -> summary + role brief", env: "RECRUITEROS_MEET_RECORDINGS_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 130_000, fn: tickMeetRecordings },
   { key: "linkedin_engage", label: "LinkedIn BD engagement queue (daily drafts)", env: "RECRUITEROS_LINKEDIN_ENGAGE_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 110_000, fn: tickLinkedinEngage },
   { key: "voice", label: "Voicemail drops", env: "RECRUITEROS_VOICE_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 45_000, fn: tickVoice },
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },

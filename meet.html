@@ -144,13 +144,19 @@
 
   var rootDomain = function (h) { return String(h || "").split(".").slice(-2).join("."); };
 
+  var joinName = (params.get("name") || "").trim().slice(0, 60);
+
   function startMeeting(domain, jwt) {
     // Our own meet server carries the brand natively; the overlay badge only
     // covers the vendor watermark on the public-bridge fallback.
-    if (domain === "meet.jit.si") {
+    var selfHosted = domain !== "meet.jit.si";
+    if (!selfHosted) {
       var ov = document.getElementById("brandOverlay");
       ov.innerHTML = BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
       ov.style.display = "flex";
+    } else {
+      // Recording disclosure: visible before and during the call.
+      document.getElementById("roomLabel").textContent = pretty + " · recorded for meeting notes";
     }
     var s = document.createElement("script");
     s.src = "https://" + domain + "/external_api.js";
@@ -174,7 +180,20 @@
         },
       };
       if (jwt) opts.jwt = jwt;
-      new JitsiMeetExternalAPI(domain, opts);
+      if (joinName) opts.userInfo = { displayName: joinName };
+      var japi = new JitsiMeetExternalAPI(domain, opts);
+      if (selfHosted) {
+        // Every call is recorded for the summary + role brief. First joiner
+        // starts it; recordingStatusChanged stops later joiners re-asking.
+        var recOn = false;
+        japi.addListener("recordingStatusChanged", function (e) { if (e && e.on) recOn = true; });
+        japi.addListener("videoConferenceJoined", function () {
+          setTimeout(function () {
+            if (recOn) return;
+            try { japi.executeCommand("startRecording", { mode: "file" }); } catch (e) { /* recorder absent */ }
+          }, 2500);
+        });
+      }
     };
     s.onerror = function () { toast("Could not reach the meeting service. Check your connection and reload."); };
     document.head.appendChild(s);

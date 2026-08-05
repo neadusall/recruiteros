@@ -28,6 +28,14 @@ import type { VideoSettings } from "./videoSettings";
 
 const KEY = "inmarket_bookings_v1";
 
+export interface BookingReminder {
+  kind: "confirm" | "day" | "hour";
+  /** When to send (ISO). */
+  at: string;
+  sentAt?: string;
+  error?: string;
+}
+
 export interface Booking {
   id: string;
   /** UTC instants (ISO). */
@@ -36,11 +44,29 @@ export interface Booking {
   name: string;
   email: string;
   note?: string;
+  /** E.164 cell, present only when the guest asked for text reminders. */
+  phone?: string;
+  /** Planned reminder texts; the minute tick stamps sentAt / error. */
+  reminders?: BookingReminder[];
   /** Video-call join link carried in the invite and both confirmation emails. */
   meetingUrl?: string;
   createdAt: string;
   organizerEmailed: boolean;
   guestEmailed: boolean;
+}
+
+/** Loose-input phone -> E.164 (US default for bare 10-digit numbers). */
+export function normalizePhone(raw: string): string | null {
+  const t = String(raw || "").trim();
+  if (!t) return null;
+  if (t.startsWith("+")) {
+    const p = "+" + t.slice(1).replace(/\D/g, "");
+    return /^\+\d{8,15}$/.test(p) ? p : null;
+  }
+  const digits = t.replace(/\D/g, "");
+  if (digits.length === 10) return "+1" + digits;
+  if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
+  return null;
 }
 
 /**
@@ -92,6 +118,45 @@ async function brandedMeetingUrl(workspaceId: string, room: string, startIso: st
   }
 }
 
+async function workspaceAppUrl(workspaceId: string): Promise<string | null> {
+  try {
+    const { notifyBrand } = await import("../outbound/brand");
+    return (await notifyBrand(workspaceId)).appUrl.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/** Like brandedMeetingUrl, but returns the parts so the /meet wrapper page can
+ *  carry the token in its own query string. */
+async function bookedMeetJoin(workspaceId: string, room: string, startIso: string): Promise<{ base: string; jwt: string } | null> {
+  const base = (process.env.RECRUITEROS_MEET_BASE || "").trim().replace(/\/+$/, "");
+  const secret = (process.env.RECRUITEROS_MEET_JWT_SECRET || "").trim();
+  if (!base || !secret) return null;
+  try {
+    const appUrl = await workspaceAppUrl(workspaceId);
+    if (!appUrl) return null;
+    if (rootDomain(new URL(base).hostname) !== rootDomain(new URL(appUrl).hostname)) return null;
+    const exp = Math.floor(Date.parse(startIso) / 1000) + 24 * 3600;
+    const appId = (process.env.RECRUITEROS_MEET_JWT_APP_ID || "recruiteros").trim();
+    return { base, jwt: meetJwt(room, appId, secret, exp) };
+  } catch {
+    return null;
+  }
+}
+
+/** The guest-facing join link: our own /meet wrapper (brand, one-tap join,
+ *  name prefilled, auto-recording) carrying the signed room token when the
+ *  self-hosted meet server applies. */
+async function wrappedMeetUrl(workspaceId: string, room: string, startIso: string, guestName: string): Promise<string | null> {
+  const appUrl = await workspaceAppUrl(workspaceId);
+  if (!appUrl) return null;
+  const join = await bookedMeetJoin(workspaceId, room, startIso);
+  return `${appUrl}/meet?room=${encodeURIComponent(room)}` +
+    (join ? `&j=${join.jwt}&b=${encodeURIComponent(new URL(join.base).hostname)}` : "") +
+    (guestName ? `&name=${encodeURIComponent(guestName.slice(0, 60))}` : "");
+}
+
 /**
  * Ad-hoc branded meeting (the /meet page): same base + same-root-domain rule
  * as booked calls, but TTL-anchored instead of booking-anchored. Null means
@@ -111,6 +176,117 @@ export async function adhocMeetJoin(workspaceId: string, room: string, ttlHours 
   } catch {
     return null;
   }
+}
+
+/* ---------------------- text reminders (show-rate lift) ---------------------- */
+/* Best-practice cadence: instant confirmation, T-24h, T-1h, each carrying a
+   short one-tap join link. Sent from the workspace's own Telnyx number
+   (RECRUITEROS_BOOKING_SMS_FROM, else its first vetting-desk line). A send
+   failure is recorded on the reminder and never breaks a booking. */
+
+async function bookingSmsFrom(workspaceId: string): Promise<string | null> {
+  const env = (process.env.RECRUITEROS_BOOKING_SMS_FROM || "").trim();
+  if (env) return env;
+  try {
+    const { listDesks } = await import("../vetting/store");
+    const d = listDesks(workspaceId).find((x: { phoneNumber?: string }) => !!x.phoneNumber);
+    return d?.phoneNumber || null;
+  } catch {
+    return null;
+  }
+}
+
+async function sendBookingSms(workspaceId: string, to: string, text: string): Promise<void> {
+  const from = await bookingSmsFrom(workspaceId);
+  if (!from) throw new Error("no_sms_number");
+  const { withWorkspaceCreds } = await import("../connected");
+  const { telnyx } = await import("../providers");
+  await withWorkspaceCreds(workspaceId, () => telnyx.sendSms(to, text, from));
+}
+
+function planReminders(startIso: string): BookingReminder[] {
+  const start = Date.parse(startIso);
+  const now = Date.now();
+  const out: BookingReminder[] = [{ kind: "confirm", at: new Date(now).toISOString() }];
+  const day = start - 24 * 3600 * 1000;
+  if (day > now + 5 * 60 * 1000) out.push({ kind: "day", at: new Date(day).toISOString() });
+  const hour = start - 3600 * 1000;
+  if (hour > now + 5 * 60 * 1000) out.push({ kind: "hour", at: new Date(hour).toISOString() });
+  return out;
+}
+
+function reminderText(kind: BookingReminder["kind"], brandName: string, when: string, link: string): string {
+  if (kind === "confirm") {
+    return `${brandName}: you're booked for ${when}. Join from any phone or computer: ${link} We'll text you before it starts. Reply STOP to opt out.`;
+  }
+  if (kind === "day") return `${brandName}: reminder, your call is ${when}. One tap to join: ${link}`;
+  return `${brandName}: your call starts soon, ${when}. Join: ${link}`;
+}
+
+/** Resolve a short /j/<code> click to a fresh join link (fresh token, name
+ *  prefilled). Null once the meeting is a day past or the code is unknown. */
+export async function joinUrlForBooking(code: string): Promise<string | null> {
+  const c = String(code || "").trim();
+  if (!/^[0-9a-f][0-9a-f-]{7,35}$/i.test(c)) return null;
+  const m = await ensure();
+  for (const [ws, list] of m.entries()) {
+    const b = list.find((x) => x.id.startsWith(c));
+    if (!b) continue;
+    if (Date.now() > Date.parse(b.end) + 24 * 3600 * 1000) return null;
+    const { getSettings } = await import("./videoSettings");
+    const s = await getSettings(ws);
+    if ((s.bookingMeetingUrl || "").trim()) return (s.bookingMeetingUrl as string).trim();
+    const room = meetRoomName(s.brandName || "", b.id);
+    return (await wrappedMeetUrl(ws, room, b.start, b.name)) || b.meetingUrl || null;
+  }
+  return null;
+}
+
+/** Meeting rooms embed the first 8 chars of the booking id (meetRoomName);
+ *  the recording pipeline uses that to route a finished call back to its
+ *  booking and workspace. */
+export async function findBookingByRoomCode(code8: string): Promise<{ workspaceId: string; booking: Booking } | null> {
+  const c = String(code8 || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}$/.test(c)) return null;
+  const m = await ensure();
+  for (const [ws, list] of m.entries()) {
+    const b = list.find((x) => x.id.toLowerCase().startsWith(c));
+    if (b) return { workspaceId: ws, booking: b };
+  }
+  return null;
+}
+
+/** Minute tick: send every due, unsent reminder. One bad number never stops
+ *  the sweep; a failure is stamped on the reminder and not retried. */
+export async function tickBookingReminders(now: Date = new Date()): Promise<number> {
+  const m = await ensure();
+  let sent = 0;
+  for (const [ws, list] of m.entries()) {
+    let ctx: { brandName: string; cfg: ReturnType<typeof bookingConfig>; appUrl: string | null } | null = null;
+    for (const b of list) {
+      if (!b.phone || !b.reminders) continue;
+      for (const r of b.reminders) {
+        if (r.kind === "confirm" || r.sentAt || r.error) continue;
+        if (Date.parse(r.at) > now.getTime()) continue;
+        if (now.getTime() > Date.parse(b.start) + 15 * 60 * 1000) { r.error = "window_passed"; continue; }
+        try {
+          if (!ctx) {
+            const { getSettings } = await import("./videoSettings");
+            const s = await getSettings(ws);
+            ctx = { brandName: (s.brandName || "").trim() || "our team", cfg: bookingConfig(s), appUrl: await workspaceAppUrl(ws) };
+          }
+          const link = ctx.appUrl ? `${ctx.appUrl}/j/${b.id.slice(0, 12)}` : (b.meetingUrl || "");
+          await sendBookingSms(ws, b.phone, reminderText(r.kind, ctx.brandName, speakSlot(b.start, ctx.cfg), link));
+          r.sentAt = new Date().toISOString();
+          sent += 1;
+        } catch (e) {
+          r.error = String((e as Error)?.message || e).slice(0, 200);
+        }
+      }
+    }
+  }
+  scheduleSave();
+  return sent;
 }
 
 let mem: Map<string, Booking[]> | null = null;
@@ -335,7 +511,7 @@ const bookChain = new Map<string, Promise<void>>();
 
 export function book(
   workspaceId: string, s: VideoSettings,
-  startIso: string, guest: { name: string; email: string; note?: string },
+  startIso: string, guest: { name: string; email: string; note?: string; phone?: string },
 ): Promise<BookResult> {
   const prev = bookChain.get(workspaceId) ?? Promise.resolve();
   const run = prev.catch(() => {}).then(() => bookOne(workspaceId, s, startIso, guest));
@@ -345,7 +521,7 @@ export function book(
 
 async function bookOne(
   workspaceId: string, s: VideoSettings,
-  startIso: string, guest: { name: string; email: string; note?: string },
+  startIso: string, guest: { name: string; email: string; note?: string; phone?: string },
 ): Promise<BookResult> {
   if (!bookingActive(s)) return { ok: false, error: "booking_unavailable" };
   const cfg = bookingConfig(s);
@@ -360,16 +536,22 @@ async function bookOne(
   const brandName = (s.brandName || "").trim() || "our team";
   const id = randomUUID();
   const room = meetRoomName(s.brandName || "", id);
+  // Join through OUR /meet wrapper: brand on the page, name prefilled,
+  // recording auto-starts. Legacy fallbacks keep old configs working.
   const meetingUrl =
     (s.bookingMeetingUrl || "").trim() ||
+    (await wrappedMeetUrl(workspaceId, room, startIso, guest.name)) ||
     (await brandedMeetingUrl(workspaceId, room, startIso)) ||
     `https://meet.jit.si/${room}`;
+  const phone = guest.phone ? normalizePhone(guest.phone) : null;
   const booking: Booking = {
     id,
     start: startIso,
     end: new Date(Date.parse(startIso) + cfg.slotMin * 60 * 1000).toISOString(),
     name: guest.name, email: guest.email,
     note: guest.note || undefined,
+    phone: phone || undefined,
+    reminders: phone ? planReminders(startIso) : undefined,
     meetingUrl,
     createdAt: new Date().toISOString(),
     organizerEmailed: false, guestEmailed: false,
@@ -412,6 +594,7 @@ async function bookOne(
       `Hi ${guest.name},\n\nYou're confirmed for a ${cfg.slotMin} minute call with ${brandName} on ${when}.\n\n` +
       `Join the call here when it's time: ${booking.meetingUrl}\n\n` +
       `The attached invite adds it to your calendar (the join link is inside too). ` +
+      (booking.phone ? `We'll also text you a reminder before the call. ` : "") +
       `If the time stops working, just reply to this email.\n\n${brandName}`,
       workspaceId, { ics: { method: "REQUEST", content: ics } },
     );
@@ -420,6 +603,23 @@ async function bookOne(
     console.error("[booking] guest confirmation failed:", e?.message || e);
   }
   scheduleSave();
+
+  // Instant confirmation text (the 24h and 1h reminders ride the minute tick).
+  if (booking.phone && booking.reminders) {
+    const confirm = booking.reminders.find((r) => r.kind === "confirm");
+    if (confirm) {
+      try {
+        const appUrl = await workspaceAppUrl(workspaceId);
+        const link = appUrl ? `${appUrl}/j/${id.slice(0, 12)}` : (booking.meetingUrl as string);
+        await sendBookingSms(workspaceId, booking.phone, reminderText("confirm", brandName, when, link));
+        confirm.sentAt = new Date().toISOString();
+      } catch (e: any) {
+        confirm.error = String(e?.message || e).slice(0, 200);
+        console.error("[booking] confirmation text failed:", confirm.error);
+      }
+      scheduleSave();
+    }
+  }
 
   return { ok: true, when, booking };
 }

@@ -55,7 +55,7 @@
   <div id="view"><div class="empty" id="loading">Loading open times&hellip;</div></div>
 </div>
 
-<script src="assets/js/config.js"></script>
+<script src="assets/js/config.js?v=ad110cbee0"></script>
 <script>
 (function () {
   "use strict";
@@ -112,6 +112,8 @@
           esc(picked.day) + " at " + esc(picked.label) + " " + esc(DATA.tzLabel) + " Time</p>" +
         "<label>Your name</label><input id=\"fName\" type=\"text\" autocomplete=\"name\" />" +
         "<label>Your email</label><input id=\"fEmail\" type=\"email\" autocomplete=\"email\" />" +
+        "<label>Cell phone (optional)</label><input id=\"fPhone\" type=\"tel\" autocomplete=\"tel\" placeholder=\"(555) 555-0123\" />" +
+        "<div style=\"font-size:12px;color:#8a93a5;margin-top:4px\">We'll text you a confirmation and a reminder before the call so it's one tap to join. Reply STOP anytime to opt out.</div>" +
         "<label>Anything we should know? (optional)</label><textarea id=\"fNote\"></textarea>" +
         '<div class="acts">' +
           '<button type="button" class="btn primary" id="fGo">Confirm booking</button>' +
@@ -135,7 +137,7 @@
     fetch(API + "/api/book", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ w: w, sig: sig, start: picked.iso, name: name, email: email, note: $("fNote").value.trim() }),
+      body: JSON.stringify({ w: w, sig: sig, start: picked.iso, name: name, email: email, note: $("fNote").value.trim(), phone: $("fPhone").value.trim() }),
     }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (res.ok && res.j && res.j.ok) { renderDone(res.j.when, res.j.meetingUrl); return; }
