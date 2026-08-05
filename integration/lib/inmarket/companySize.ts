@@ -70,6 +70,17 @@ export function heuristicBand(lead: Pick<InMarketLead, "roles" | "signalType" | 
   return band;
 }
 
+/** Widen a size selection that includes the sub-200 picks the resolver can't isolate.
+ *  Authoritative counts barely exist for small private companies and the heuristic floor is
+ *  51-200, so a bare 1-10 / 11-50 pick could never match anything. Fold those picks into the
+ *  whole under-200 range so a small-company search returns the small end of the market
+ *  instead of a guaranteed empty result. */
+export function widenSmallBands(bands: string[]): Set<string> {
+  const want = new Set(bands);
+  if (want.has("1-10") || want.has("11-50")) ["1-10", "11-50", "51-200"].forEach((x) => want.add(x));
+  return want;
+}
+
 async function loadCache(): Promise<SizeMap> {
   const s = await loadSnapshot<SizeMap>(CACHE_KEY);
   return s && typeof s === "object" ? s : {};

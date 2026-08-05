@@ -148,9 +148,12 @@ export interface JobFeedOpts {
   offset?: number;                   // page-block offset (in jobs) for deeper pagination
 }
 
-/** Fetch one page-set from the feed and normalize. `limit` is in JOBS; for JSearch we convert to pages. */
-export async function fetchJobFeedLeads(opts: JobFeedOpts): Promise<InMarketLead[]> {
-  if (!jobFeedEnabled()) return [];
+/** Internal fetch that keeps "the feed answered with zero jobs" separate from "the feed call
+ *  FAILED" (quota out, auth revoked, gateway down). Background callers still treat both as
+ *  empty, but the interactive preview path must surface a real error instead of showing the
+ *  recruiter a fake "no companies found". */
+async function fetchJobFeedRaw(opts: JobFeedOpts): Promise<{ leads: InMarketLead[]; error?: string }> {
+  if (!jobFeedEnabled()) return { leads: [] };
   const host = process.env.RAPID_JOBS_HOST!;
   const isJSearch = PROVIDER() === "jsearch";
   // JSearch's search endpoint is `/search-v2` (the legacy `/search` now 404s at the RapidAPI gateway).
@@ -186,7 +189,7 @@ export async function fetchJobFeedLeads(opts: JobFeedOpts): Promise<InMarketLead
     // Credit meter: every response (errors included) carries the JSearch subscription's
     // quota headers; remember the latest reading for the Hire Signals credit chip.
     noteRapidQuota(host, res.headers, "jobs");
-    if (!res.ok) return [];
+    if (!res.ok) return { leads: [], error: `jobfeed_upstream_${res.status}` };
     const data = (await res.json().catch(() => null)) as unknown;
     // Normalize across shapes: flat array, JSearch v2 `{data:{jobs:[…]}}`, legacy
     // `{data:[…]}`, and `{jobs:[…]}`. v2 nests under data.jobs, so check it first.
@@ -196,15 +199,28 @@ export async function fetchJobFeedLeads(opts: JobFeedOpts): Promise<InMarketLead
       : Array.isArray((root as { data?: RawJob[] })?.data) ? (root as { data: RawJob[] }).data
       : Array.isArray((root as { jobs?: RawJob[] })?.jobs) ? (root as { jobs: RawJob[] }).jobs
       : [];
-  } catch { return []; }
-  return mapJobsToLeads(arr, opts.query);
+  } catch { return { leads: [], error: "jobfeed_unreachable" }; }
+  return { leads: mapJobsToLeads(arr, opts.query) };
+}
+
+/** Fetch one page-set from the feed and normalize. `limit` is in JOBS; for JSearch we convert to pages.
+ *  Background-safe: upstream failures come back as [] (no-op), same as always. */
+export async function fetchJobFeedLeads(opts: JobFeedOpts): Promise<InMarketLead[]> {
+  return (await fetchJobFeedRaw(opts)).leads;
 }
 
 /** PREVIEW a targeted search WITHOUT touching the pool — fetch + normalize and report the companies
  *  found (+ total open roles) so the user can pick which to actually scrape. This is the "I decide
- *  which jobs we scrape" step: nothing merges until the user commits the selected leads. */
+ *  which jobs we scrape" step: nothing merges until the user commits the selected leads.
+ *  THROWS (status 502) when the feed call itself failed, so the UI shows "didn't run, try again"
+ *  instead of a false "no companies found". */
 export async function previewJobFeed(opts: JobFeedOpts): Promise<{ leads: InMarketLead[]; companies: number; jobs: number }> {
-  const leads = await fetchJobFeedLeads(opts);
+  const { leads, error } = await fetchJobFeedRaw(opts);
+  if (error) {
+    const e = new Error(error) as Error & { status?: number };
+    e.status = 502;
+    throw e;
+  }
   const jobs = leads.reduce((s, l) => s + (l.roleDetails?.length || l.roles?.length || 1), 0);
   return { leads, companies: leads.length, jobs };
 }

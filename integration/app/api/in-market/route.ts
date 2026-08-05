@@ -420,11 +420,14 @@ export async function POST(req: Request) {
       let { leads } = await previewJobFeed(opts);
       // COMPANY-SIZE narrow: resolve each company's headcount band (free: Wikidata cache +
       // heuristic) and keep only the selected bands. `confirmedSizeOnly` drops heuristic guesses.
+      let sizeFilteredCompanies = 0;
       if (bands.length) {
-        const { loadSizeMap, fillSizes } = await import("../../../lib/inmarket/companySize");
+        const { loadSizeMap, fillSizes, widenSmallBands } = await import("../../../lib/inmarket/companySize");
         fillSizes(leads, await loadSizeMap());
-        const want = new Set(bands);
+        const want = widenSmallBands(bands);
+        const beforeSize = leads.length;
         leads = leads.filter((l) => l.headcountBand && want.has(l.headcountBand) && (!confirmedSizeOnly || l.sizeEstimated === false));
+        sizeFilteredCompanies = beforeSize - leads.length;
       }
       // SUPPRESS ALREADY-EMAILED: drop companies/roles we've already sent >= N (default 2) emails to,
       // BUT keep a company that comes back with a different job title (a fresh hiring signal).
@@ -447,6 +450,9 @@ export async function POST(req: Request) {
         newCompanies, pulledCompanies: companies - newCompanies,
         newPositions, pulledPositions: jobs - newPositions,
         suppressedCompanies: f.suppressedCompanies, suppressedRoles: f.suppressedRoles, suppressThreshold: f.threshold,
+        // How many found companies the size selection removed, so the UI can say "the size
+        // filter did this" instead of a misleading "nothing found" when the list comes back empty.
+        sizeFilteredCompanies,
       });
     } catch (e: any) {
       if (b.id) await markError(String(b.id), e?.message ?? "run_failed");

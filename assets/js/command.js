@@ -4859,8 +4859,11 @@
   // surface for a role can be selected independently.
   function imMgrKey(m) { return (m && m.role ? m.role : "") + "||" + (m && m.managerTitle ? m.managerTitle : ""); }
   // Company size bands (matches the backend headcountBand type) for the size-narrowing chips.
+  // The small end is ONE "Under 200" chip carrying all three sub-200 bands: sizes under 200
+  // can't be told apart reliably for small private firms, so separate 1-10 / 11-50 chips
+  // guaranteed an empty result. The backend widens old saved 1-10/11-50 picks the same way.
   var IM_SIZES = [
-    { v: "1-10", l: "1-10" }, { v: "11-50", l: "11-50" }, { v: "51-200", l: "51-200" },
+    { v: "1-10,11-50,51-200", l: "Under 200" },
     { v: "201-500", l: "201-500" }, { v: "501-1000", l: "501-1K" },
     { v: "1001-5000", l: "1K-5K" }, { v: "5000+", l: "5K+" }
   ];
@@ -5353,7 +5356,8 @@
         limit: 100,
         employmentTypes: [],
         remoteOnly: false,
-        headcountBands: imqSizes.slice(),
+        // Each chip can carry several backend bands ("1-10,11-50,51-200" = Under 200).
+        headcountBands: imqSizes.reduce(function (a, v) { return a.concat(v.split(",")); }, []),
         confirmedSizeOnly: false
       };
     }
@@ -5386,7 +5390,8 @@
           newPositions: d.newPositions || 0, pulledPositions: d.pulledPositions || 0,
           suppressedCompanies: d.suppressedCompanies || 0,
           suppressedRoles: d.suppressedRoles || 0,
-          threshold: d.suppressThreshold || 2
+          threshold: d.suppressThreshold || 2,
+          sizeFiltered: d.sizeFilteredCompanies || 0
         };
         // Default selection = the FRESH list (companies not already pulled). If everything is
         // already in the pool, default to all selected so re-pulling is still one click.
@@ -5419,9 +5424,12 @@
             (supR ? supR + " role" + (supR === 1 ? "" : "s") : "") + " already emailed " + thr + "×</span>"
         : "";
       if (!leads.length) {
+        var szF = imQPreview.sizeFiltered || 0;
         var emptyMsg = (supC + supR) > 0
           ? "Every match for “" + esc(imQPreview.name) + "” was already emailed " + thr + "×+. Nothing new to add. A different job title would still come through."
-          : "No US companies found for “" + esc(imQPreview.name) + "”. Try broader keywords, a wider date range, or a different location.";
+          : szF > 0
+            ? szF + " compan" + (szF === 1 ? "y" : "ies") + " matched “" + esc(imQPreview.name) + "”, but none fit the selected company size. Pick a wider size range or clear the size filter to see them."
+            : "No US companies found for “" + esc(imQPreview.name) + "”. Try broader keywords, a wider date range, or a different location.";
         box.innerHTML = '<div class="imq-pv"><div class="imq-pv-head">' + emptyMsg + '</div><div class="imq-pv-foot"><button type="button" class="im-mini" data-act="pvclose">Close</button></div></div>';
         return;
       }

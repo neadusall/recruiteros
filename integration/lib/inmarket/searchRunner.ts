@@ -81,9 +81,11 @@ async function processOne(s: import("./searchQueue").TargetedSearch): Promise<vo
     await updateRun(s.id, { phase: "filtering", progress: 0.6, found, jobs });
     const bands = Array.isArray(s.headcountBands) ? s.headcountBands : [];
     if (bands.length) {
-      const { loadSizeMap, fillSizes } = await import("./companySize");
+      const { loadSizeMap, fillSizes, widenSmallBands } = await import("./companySize");
       fillSizes(leads, await loadSizeMap());
-      const want = new Set<string>(bands);
+      // Sub-200 picks widen to the whole under-200 range (see widenSmallBands): a watch saved
+      // with a bare 1-10 / 11-50 pick would otherwise merge zero companies on every poll.
+      const want = widenSmallBands(bands);
       leads = leads.filter((l) => l.headcountBand && want.has(l.headcountBand) && (!s.confirmedSizeOnly || l.sizeEstimated === false));
     }
 
