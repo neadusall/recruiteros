@@ -16,7 +16,7 @@
  */
 
 import { pickMailbox, recordSend, serverHasCapacity, recordServerSend } from "../sending/caps";
-import { getServer, getDomain, recordEvent, isSuppressed, saveServer } from "../sending/store";
+import { getServer, recordEvent, isSuppressed, saveServer } from "../sending/store";
 import { sendMessage, postalConfigured } from "../sending/postal";
 import { mtaEnabled } from "../sending/config";
 
