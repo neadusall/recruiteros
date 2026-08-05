@@ -40,6 +40,9 @@ export interface GuardVerdict { ok: boolean; holds: GuardHold[] }
 
 export interface GuardInput {
   channel: string;               // "email" | "linkedin" | "voice"
+  /** LinkedIn action for this touch. Wordless actions (profile_view, a bare
+   *  connect) legitimately carry no copy, so body checks don't apply to them. */
+  action?: string;
   emailStep?: number;            // 1 = first email, 2 = the video email
   subject?: string;
   body: string;
@@ -135,7 +138,10 @@ export function guardRenderedTouch(input: GuardInput): GuardVerdict {
 
   // 6–7. It is a sendable email at all.
   if (input.channel === "email" && !subject.trim()) holds.push({ check: "empty_subject", detail: "email has no subject" });
-  if (text.replace(/\s+/g, " ").trim().length < 25) holds.push({ check: "body_too_short", detail: "body under 25 characters" });
+  const wordless =
+    input.channel === "linkedin" &&
+    (input.action === "profile_view" || (input.action === "connect" && !text.trim()));
+  if (!wordless && text.replace(/\s+/g, " ").trim().length < 25) holds.push({ check: "body_too_short", detail: "body under 25 characters" });
 
   // 8. Debris from a value that vanished ("Hi ,", "in .", "()"). Empty-token holes are already
   //    holds via check 1; these catch the same class arriving from any other direction.

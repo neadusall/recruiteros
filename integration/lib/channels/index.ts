@@ -46,6 +46,28 @@ export interface SendTouch {
   campaignId?: string;
   variant?: string;
   touch?: string;
+  /** LinkedIn action for this touch (connect, connect_note, profile_view, ...).
+   *  Only meaningful when channel === "linkedin"; unknown values fall back to
+   *  message so a bad model draft can never produce an unknown engine action. */
+  action?: string;
+}
+
+/** Sequence-reachable LinkedIn actions. InMail and post interactions stay
+ *  campaign/nurture-only: a cold multichannel drip has no post context, and
+ *  InMail spend should never be triggered by an autopilot model draft. */
+const LI_SEQUENCE_ACTIONS = new Set(["connect", "connect_note", "message", "voice_note", "profile_view"]);
+type LiSequenceAction = "connect" | "connect_note" | "message" | "voice_note" | "profile_view";
+
+/** Engine action for a LinkedIn touch. An explicit, allowlisted `action` on the
+ *  touch wins (a connect_note with no note text downgrades to a bare connect);
+ *  otherwise the legacy inference stands: audio means voice note, else message. */
+function liActionFor(t: SendTouch): LiSequenceAction {
+  const a = (t.action || "").trim();
+  if (LI_SEQUENCE_ACTIONS.has(a)) {
+    if (a === "connect_note" && !t.text.trim()) return "connect";
+    return a as LiSequenceAction;
+  }
+  return t.audioUrl ? "voice_note" : "message";
 }
 
 /** Send one touch on its channel, then log the activity to the ATS. */
@@ -241,7 +263,7 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
           company: t.prospect.company,
           title: t.prospect.title,
         },
-        actionType: t.audioUrl ? "voice_note" : "message",
+        actionType: liActionFor(t),
         payload: { text: t.text, audioUrl: t.audioUrl, linkedinUrl: t.prospect.linkedinUrl },
         businessUnit: t.prospect.motion === "recruiting" ? "recruiting" : "bd",
         sourceType: "multichannel_workflow",

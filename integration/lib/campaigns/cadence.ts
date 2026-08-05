@@ -281,7 +281,7 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         // or reads broken. HOLD the prospect — nothing sends, nothing advances — and record why,
         // so the Send Queue surfaces it. Re-rendered every tick; releases itself once the data is
         // fixed. The optional Haiku critic (AUTOPILOT_CRITIC=1) is the subtler second pass.
-        const guard = guardRenderedTouch({ channel: t.channel, emailStep, subject: r.subject, body: r.body, tokens: r.tokens });
+        const guard = guardRenderedTouch({ channel: t.channel, action: t.action, emailStep, subject: r.subject, body: r.body, tokens: r.tokens });
         const criticHolds = guard.ok && t.channel === "email" ? await critiqueRendered(r.subject, r.body) : null;
         const allHolds = guard.ok ? criticHolds ?? [] : guard.holds;
         if (allHolds.length) {
@@ -318,6 +318,7 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
           campaignId: c.id,
           variant: engine,
           touch: t.label,
+          action: t.action,
         });
         results.push({ campaignId: c.id, prospectId: p.id, channel: t.channel, touch: t.label, ...res });
         if (res.ok) { sent = i + 1; fired = true; }

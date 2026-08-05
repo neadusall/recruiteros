@@ -151,11 +151,12 @@ function systemPrompt(motion: Campaign["motion"]): string {
 function userPrompt(c: Campaign): string {
   return JSON.stringify({
     instruction:
-      "Draft the sequence for this campaign. Choose 4-7 touches across the allowed channels, spread over days. " +
-      "Honor the methodology and voice threshold. Keep LinkedIn 'connect' notes under 300 chars. Voicemail/voice " +
+      "Draft the sequence for this campaign. Choose 5-7 touches across the allowed channels, spread over days. " +
+      "Honor the methodology and voice threshold. Keep LinkedIn 'connect_note' bodies under 300 chars. Engage before " +
+      "you ask: a day-0 'profile_view' before the connect roughly doubles acceptance, so open with one. Voicemail/voice " +
       "scripts must read aloud naturally (terminal punctuation, ~45 words). Output JSON of shape: " +
       '{ "summary": string, "persona": string, "touches": [ { "day": number, "channel": "email"|"linkedin"|"voice", ' +
-      '"action"?: "connect"|"message"|"voice_note", "label": string, "subject"?: string, "body": string } ] }',
+      '"action"?: "profile_view"|"connect"|"connect_note"|"message"|"voice_note", "label": string, "subject"?: string, "body": string } ] }',
     campaign: {
       motion: c.motion,
       name: c.name,
@@ -171,15 +172,23 @@ function userPrompt(c: Campaign): string {
 function coerceTouches(raw: any): CampaignModelTouch[] {
   const arr = Array.isArray(raw?.touches) ? raw.touches : [];
   const out: CampaignModelTouch[] = [];
+  const LI_ACTIONS = new Set(["profile_view", "connect", "connect_note", "message", "voice_note"]);
   arr.forEach((t: any, i: number) => {
     const channel = t?.channel === "linkedin" || t?.channel === "voice" ? t.channel : "email";
+    const rawAction = String(t?.action ?? "").trim();
+    const action =
+      channel === "linkedin" ? (LI_ACTIONS.has(rawAction) ? rawAction : "message")
+      : channel === "voice" ? "voice_note"
+      : undefined;
     const body = String(t?.body ?? "").trim();
-    if (!body) return;
+    // Wordless actions (a profile view, a bare connect) are legitimate touches;
+    // everything else without a body is a broken draft line and is dropped.
+    if (!body && !(action === "profile_view" || action === "connect")) return;
     out.push({
       key: "t" + i,
       day: Number.isFinite(+t?.day) ? Math.max(0, Math.round(+t.day)) : i * 2,
       channel,
-      action: t?.action ? String(t.action) : channel === "linkedin" ? "message" : undefined,
+      action,
       label: String(t?.label ?? `Touch ${i + 1}`).slice(0, 60),
       subject: channel === "email" && t?.subject ? String(t.subject).slice(0, 160) : undefined,
       body: body.slice(0, 2000),
@@ -219,7 +228,9 @@ function fallbackModel(c: Campaign, now: string): CampaignModel {
   const bd = c.motion !== "recruiting";
   const touches: CampaignModelTouch[] = bd
     ? [
-        { key: "t0", day: 0, channel: "linkedin", action: "connect", label: "Connect (signal note)", body: "Hi {{firstName}}, saw {{company}} is {{signal}}. I work with teams hiring for {{role}} and had a couple of ideas. Open to connecting?" },
+        // Engage before the ask: a profile view before the connect roughly doubles acceptance.
+        { key: "t0v", day: 0, channel: "linkedin", action: "profile_view", label: "Profile view (warm-up)", body: "" },
+        { key: "t0", day: 0, channel: "linkedin", action: "connect_note", label: "Connect (signal note)", body: "Hi {{firstName}}, saw {{company}} is {{signal}}. I work with teams hiring for {{role}} and had a couple of ideas. Open to connecting?" },
         { key: "t1", day: 0, channel: "email", label: "Signal opener", subject: "{{company}} + {{role}}", body: "Hi {{firstName}},\n\nNoticed {{company}} is {{signal}}. We help teams fill {{role}} faster without the usual agency drag.\n\nWorth a short call to see if it's a fit?\n\nBest" },
         { key: "t2", day: 3, channel: "email", label: "Value follow-up", subject: "Re: {{company}} + {{role}}", body: "Hi {{firstName}},\n\nQuick follow-up. If filling {{role}} is a priority this quarter, I can share how similar teams cut time-to-hire.\n\nHappy to send a one-pager or grab 15 minutes." },
         { key: "t3", day: 7, channel: "voice", action: "voice_note", label: "Voicemail (hot only)", body: "Hi {{firstName}}, it's a quick note about {{role}} at {{company}}. I sent a short email too. If hiring's on your plate, I'd love to help. No pressure. Talk soon." },
