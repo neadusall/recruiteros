@@ -5,8 +5,18 @@
  * POSTing an audio-only copy to /api/meet/recording (cron-secret guarded).
  * This module stores the audio in the durable data dir, matches the room back
  * to its booking (rooms embed the booking id's first 8 chars), and a 5-minute
- * automation tick transcribes + summarizes each pending recording with Gemini
- * (audio understanding), then emails the workspace's booking mailbox:
+ * automation tick processes each pending recording in two stages:
+ *
+ *   Stage 1 (Gemini flash): audio -> verbatim transcript. Claude models cannot
+ *     ingest audio, so the speech-to-text leg stays on Gemini; flash audio is
+ *     already the cheapest tier for it. The transcript is kept on disk beside
+ *     the audio as a permanent text record of the call.
+ *   Stage 2 (Claude Haiku): transcript -> summary + action items + role brief.
+ *     Cheap and strong at structured writing. If ANTHROPIC_API_KEY is absent,
+ *     the tick falls back to the original single Gemini call that listens and
+ *     summarizes in one shot, so summaries never stop over a missing key.
+ *
+ * The write-up is emailed to the workspace's booking mailbox:
  *
  *   1. a plain-language call summary + action items, and
  *   2. a "role brief": what the client actually wants, in a form a recruiter
@@ -36,6 +46,10 @@ export interface MeetRecording {
   status: "pending" | "done" | "failed";
   attempts: number;
   summaryEmailedTo?: string;
+  /** Transcript file name inside the recordings dir, once stage 1 has run. */
+  transcriptFile?: string;
+  /** Which model wrote the summary (for the audit trail in the store). */
+  summaryModel?: string;
   error?: string;
 }
 
@@ -100,12 +114,17 @@ export async function saveRecording(room: string, mime: string, buf: Buffer): Pr
   return rec;
 }
 
+/* ────────────────────────────── Models ────────────────────────────── */
+
 const GEMINI_MODEL = () => process.env.RECRUITEROS_MEET_SUMMARY_MODEL || "gemini-3-flash-preview";
 const geminiKey = () => (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+/** The cheap summarizer. Haiku cannot hear audio, so it reads the transcript. */
+const CLAUDE_MODEL = () => process.env.RECRUITEROS_MEET_SUMMARY_CLAUDE_MODEL || "claude-haiku-4-5";
+const anthropicKey = () => (process.env.ANTHROPIC_API_KEY || "").trim();
 
-const SUMMARY_PROMPT = `You are a recruiting operations analyst. Listen to this recorded business call between a recruiter and a client or candidate.
+/* ────────────────────────────── Prompts ────────────────────────────── */
 
-Return ONLY strict JSON with these keys:
+const JSON_SHAPE = `Return ONLY strict JSON with these keys:
 {
   "summary": "5-10 sentence plain-language summary of the call",
   "action_items": ["each concrete follow-up that was agreed or implied, with owner if clear"],
@@ -115,29 +134,72 @@ Return ONLY strict JSON with these keys:
 
 Absolute rule: use ONLY what is actually said on the call. Never invent names, numbers, compensation, or claims. No em-dashes in any text.`;
 
+const TRANSCRIBE_PROMPT = `Transcribe this recorded business call verbatim. Label each turn "Speaker 1:", "Speaker 2:" and so on, keeping each speaker's label consistent. Return ONLY the transcript text, no preamble and no commentary.`;
+
+const AUDIO_SUMMARY_PROMPT = `You are a recruiting operations analyst. Listen to this recorded business call between a recruiter and a client or candidate.
+
+${JSON_SHAPE}`;
+
+const TRANSCRIPT_SUMMARY_PROMPT = `You are a recruiting operations analyst. Below is the transcript of a recorded business call between a recruiter and a client or candidate.
+
+${JSON_SHAPE}`;
+
+/* ─────────────────────────── Model calls ─────────────────────────── */
+
 interface SummaryShape { summary?: string; action_items?: string[]; role_brief?: string; objections_and_notes?: string[] }
 
-async function summarizeAudio(bytes: Buffer, mime: string): Promise<SummaryShape> {
+function parseSummaryJson(out: string): SummaryShape {
+  const a = out.indexOf("{"), z = out.lastIndexOf("}");
+  if (a < 0 || z <= a) throw new Error("summary_parse");
+  return JSON.parse(out.slice(a, z + 1)) as SummaryShape;
+}
+
+async function geminiGenerate(parts: Array<Record<string, unknown>>): Promise<string> {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL()}:generateContent`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey() },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { inlineData: { mimeType: mime, data: bytes.toString("base64") } },
-          { text: SUMMARY_PROMPT },
-        ] }],
-        generationConfig: { temperature: 0 },
-      }),
+      body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0 } }),
     },
   );
   if (!res.ok) throw new Error(`gemini_${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-  const out = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
-  const a = out.indexOf("{"), z = out.lastIndexOf("}");
-  if (a < 0 || z <= a) throw new Error("summary_parse");
-  return JSON.parse(out.slice(a, z + 1)) as SummaryShape;
+  return (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+}
+
+/** Stage 1: Gemini flash turns the audio into a verbatim transcript. */
+async function transcribeAudio(bytes: Buffer, mime: string): Promise<string> {
+  const out = (await geminiGenerate([
+    { inlineData: { mimeType: mime, data: bytes.toString("base64") } },
+    { text: TRANSCRIBE_PROMPT },
+  ])).trim();
+  if (!out) throw new Error("transcript_empty");
+  return out;
+}
+
+/** Stage 2: Claude Haiku writes the summary + role brief from the transcript. */
+async function summarizeTranscript(transcript: string): Promise<SummaryShape> {
+  const { anthropicClient } = await import("../sourcing/anthropic");
+  const msg = await anthropicClient().messages.create({
+    model: CLAUDE_MODEL(),
+    max_tokens: 4000,
+    temperature: 0,
+    messages: [{
+      role: "user",
+      content: `${TRANSCRIPT_SUMMARY_PROMPT}\n\nTranscript:\n${transcript}`,
+    }],
+  });
+  const out = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  return parseSummaryJson(out);
+}
+
+/** Fallback: the original single Gemini call that listens and summarizes. */
+async function summarizeAudio(bytes: Buffer, mime: string): Promise<SummaryShape> {
+  return parseSummaryJson(await geminiGenerate([
+    { inlineData: { mimeType: mime, data: bytes.toString("base64") } },
+    { text: AUDIO_SUMMARY_PROMPT },
+  ]));
 }
 
 function block(title: string, items?: string[]): string {
@@ -156,7 +218,21 @@ export async function processRecordingQueue(): Promise<number> {
     try {
       const bytes = await fs.readFile(path.join(dir(), r.file));
       if (bytes.length > 19 * 1024 * 1024) throw new Error("audio_too_large_for_inline");
-      const s = await summarizeAudio(bytes, r.mime);
+
+      // Two-stage when the Anthropic key is present (Gemini transcribes, Haiku
+      // writes); single Gemini listen-and-summarize call otherwise.
+      let s: SummaryShape;
+      if (anthropicKey()) {
+        const transcript = await transcribeAudio(bytes, r.mime);
+        const tFile = r.file.replace(/\.[^.]+$/, "") + ".txt";
+        await fs.writeFile(path.join(dir(), tFile), transcript, "utf8");
+        r.transcriptFile = tFile;
+        s = await summarizeTranscript(transcript);
+        r.summaryModel = CLAUDE_MODEL();
+      } else {
+        s = await summarizeAudio(bytes, r.mime);
+        r.summaryModel = GEMINI_MODEL();
+      }
 
       // Route the write-up: the booking's workspace mailbox first, the global
       // fallback mailbox (env) for ad-hoc rooms.
@@ -180,7 +256,7 @@ export async function processRecordingQueue(): Promise<number> {
           ? `\nRole brief, ready to present to candidates\n${(s.role_brief as string).trim()}\n`
           : "") +
         block("Worth remembering", s.objections_and_notes) +
-        `\nThe full recording is stored on the server (${r.file}).`;
+        `\nThe full recording${r.transcriptFile ? " and transcript are" : " is"} stored on the server (${r.file}${r.transcriptFile ? `, ${r.transcriptFile}` : ""}).`;
 
       if (!ws) throw new Error("adhoc_room_unrouted: only booked-call rooms carry a workspace today");
       const { sendWorkspaceEmail } = await import("../auth");
