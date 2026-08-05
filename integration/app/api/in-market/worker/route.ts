@@ -122,7 +122,7 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
 
 export async function POST(req: Request) {
   if (!authed(req)) return fail("unauthorized", 401);
-  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; leads?: unknown[]; results?: unknown[]; worker?: string; health?: unknown }>(req);
+  const b = await body<{ action?: string; limit?: number; rows?: unknown[]; leads?: unknown[]; results?: unknown[]; failures?: unknown[]; worker?: string; health?: unknown }>(req);
   const workerId = (s(b?.worker, 60) || "").replace(/[^\w.\-]/g, "").slice(0, 60); // sanitize id for telemetry
 
   // Every authenticated call may carry a health digest (workers piggyback it on claim/submit/heartbeat),
@@ -175,14 +175,21 @@ export async function POST(req: Request) {
     return ok(res);
   }
   if (b?.action === "submit_video") {
-    const { recordVideoResults } = await import("../../../../lib/inmarket/autoVideo");
+    const { recordVideoResults, recordVideoFailures } = await import("../../../../lib/inmarket/autoVideo");
     const raw = Array.isArray(b.results) ? b.results.slice(0, 1000) : [];
     const results = raw
       .map((x: { company?: unknown; role?: unknown; videoKey?: unknown }) => ({ company: String(x?.company ?? ""), role: String(x?.role ?? ""), videoKey: String(x?.videoKey ?? "") }))
       .filter((x: { company: string; role: string; videoKey: string }) => x.company && x.role && x.videoKey);
     const recorded = await recordVideoResults(results);
+    // Failures matter as much as successes: an unrecorded failure is re-claimed forever and
+    // starves the queue (see recordVideoFailures). Accept them on the same round trip.
+    const rawFails = Array.isArray(b.failures) ? b.failures.slice(0, 1000) : [];
+    const failures = rawFails
+      .map((x: { company?: unknown; role?: unknown; reason?: unknown }) => ({ company: String(x?.company ?? ""), role: String(x?.role ?? ""), reason: String(x?.reason ?? "") }))
+      .filter((x: { company: string; role: string }) => x.company && x.role);
+    const benched = await recordVideoFailures(failures).catch(() => 0);
     recordSubmit(workerId, results.length, recorded);
-    return ok({ recorded, received: raw.length });
+    return ok({ recorded, received: raw.length, failuresRecorded: benched });
   }
 
   return fail("bad_action", 422, { detail: "action must be claim | submit | source | claim_video | submit_video" });

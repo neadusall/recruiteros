@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { mkdir, writeFile, readFile, stat, unlink, rename } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { captureRoleShot, renderScrollVideoAtDuration, shotKey, shotsDir, type ShotRequest } from "./roleShot";
+import { captureRoleShot, isCaptured, renderScrollVideoAtDuration, shotKey, shotsDir, type ShotRequest } from "./roleShot";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { s3Enabled, s3Put, s3Get, s3Head, s3Del } from "./assetStore";
 
@@ -1013,7 +1013,9 @@ export async function composeRoleVideo(
       if (!haveShot) {
         const shot = await captureRoleShot(req, { force: opts?.force });
         pageUrl = shot.pageUrl;
-        haveShot = shot.ok && shot.status === "company_site" && (await fileExists(bgPath));
+        // A typeset role card ("role_card") is a first-class background: it writes the same
+        // <key>.png / <key>.mp4 assets as a live capture, and shipping it beats shipping nothing.
+        haveShot = shot.ok && isCaptured(shot.status) && (await fileExists(bgPath));
         // Forced REBUILDS must not strand an existing video when the posting has since gone
         // offline: fall back to the capture already on disk so the re-render still lands.
         if (!haveShot && opts?.force && (await fileExists(bgPath))) haveShot = true;
