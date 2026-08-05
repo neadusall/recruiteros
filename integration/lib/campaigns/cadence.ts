@@ -294,15 +294,23 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
           break;
         }
 
-        // AI HUMANIZER (opt-in, fail-safe): rewrite the Day-0 MPC opener into natural, human copy.
-        // Only the 1st email of an MPC lead (p.mpcContext), so the Day-1 video HTML is never touched.
-        // Returns null unless MPC_HUMANIZER is on and the rewrite passes the truth+naturalness gate;
-        // on null the deterministic render (which already passed the guard above) sends unchanged.
+        // PHRASING VARIATION (fail-safe): swap the Day-0 MPC opener body for a pre-generated,
+        // gate-approved variant from the bank (variantBank.ts). Free at send time; the bank
+        // refreshes weekly via /api/sending/cron. Only the 1st email of an MPC lead
+        // (p.mpcContext), so the Day-1 video HTML is never touched. When the bank has nothing
+        // for this template, the per-send Haiku rewrite runs ONLY if explicitly forced
+        // (MPC_HUMANIZER=force); otherwise the deterministic render (which already passed the
+        // guard above) sends unchanged. Either layer can only improve copy, never break a send.
         if (t.channel === "email" && emailStep === 1 && p.mpcContext) {
           try {
-            const { humanizeMpc } = await import("../bd/mpc/humanizer");
-            const h = await humanizeMpc(p, { subject: r.subject, body: r.body }, `${p.id || ""}:${t.label || ""}`);
-            if (h) r = { ...r, subject: h.subject ?? r.subject, body: h.body };
+            const { variantRender } = await import("../bd/mpc/variantBank");
+            const v = await variantRender(touchToRender, p, emailStep);
+            if (v) r = { ...r, body: v.body };
+            else {
+              const { humanizeMpc } = await import("../bd/mpc/humanizer");
+              const h = await humanizeMpc(p, { subject: r.subject, body: r.body }, `${p.id || ""}:${t.label || ""}`);
+              if (h) r = { ...r, subject: h.subject ?? r.subject, body: h.body };
+            }
           } catch { /* deterministic copy stands */ }
         }
 

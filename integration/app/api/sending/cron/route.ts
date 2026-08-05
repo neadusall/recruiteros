@@ -85,6 +85,15 @@ async function run(req: Request) {
     revive = { workspaces: ids.length, checked, revived, stillFailing, cleared };
   } catch (e: any) { revive = { error: e?.message ?? "revive_failed" }; }
 
+  // MPC variant bank: the weekly Haiku refresh of pre-generated Day-0 phrasing variants (the
+  // layer that replaced per-send humanizer spend). Self-gating: a no-op unless the bank is
+  // stale (>7d), incomplete, or a template changed; when it does run it's ~50 small calls.
+  let variants: unknown = null;
+  try {
+    const { refreshVariantBank } = await import("../../../../lib/bd/mpc/variantBank");
+    variants = await refreshVariantBank();
+  } catch (e: any) { variants = { error: e?.message ?? "variant_refresh_failed" }; }
+
   // Reply + bounce sync over the pool's own inboxes (IMAP). The hourly server
   // timer drives this in prod even when the in-process scheduler is off, so
   // replies to pool/MTA cold sends always stop sequences and reach a human.
@@ -94,7 +103,7 @@ async function run(req: Request) {
     replies = await runReplySync();
   } catch (e: any) { replies = { error: e?.message ?? "reply_sync_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, replies });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, variants, replies });
 }
 
 export const GET = run;
