@@ -313,24 +313,60 @@ function closerDelayDays(): number {
  * Follow-up emails thread onto the first (In-Reply-To/References), so touches 2-3 arrive as
  * replies in the same conversation. Auto-approved because the operator attached the sequence.
  */
+/** Multichannel BD default. On unless INMARKET_MULTICHANNEL=0: LinkedIn and
+ *  voice touches ride the LinkedIn OS / dialer with their own policy gates and
+ *  degrade to no-ops when nothing is connected, so email-only setups lose
+ *  nothing by leaving this on. */
+function multichannelEnabled(): boolean {
+  return !["0", "false", "no", "off"].includes((process.env.INMARKET_MULTICHANNEL || "").toLowerCase());
+}
+
+/** LinkedIn connect note (<300 chars) and the hot-tier voicemail script for the
+ *  default belt sequence. Same rule as the intro pools: only tokens this flow
+ *  can ALWAYS honestly fill, so the render guard never holds on missing data. */
+const LI_CONNECT_NOTE =
+  "Hi {{First_Name}}, {saw|noticed} {{Company}} is hiring {{A_Open_Role}}. I {work with|help} teams filling that seat and had {a couple of ideas|a thought} worth sharing. Open to connecting? {Thanks|Best}, {{Your_Name}}";
+const VOICE_HOT_SCRIPT =
+  "Hi {{First_Name}}, it's {{Your_Name}}. Quick note about the {{Open_Role}} opening at {{Company}}. I sent over a short video with a few thoughts on filling it. If hiring's on your plate this quarter, I'd love to help. No pressure at all. Talk soon.";
+const BREAKUP_BODY =
+  "Hi {{First_Name}},\n\n{I'll stop here so I'm not a pest.|Last note from me, promise.} If the {{Open_Role}} search {heats up|becomes a priority}, just reply and I'll {jump in|pick it right back up}.\n\n{All the best|Best}, {{Your_Name}}";
+
 export function videoSequenceModel(draft: OpenerDraft, motion: Motion, videoDelayDays = 1): CampaignModel {
   const nowIso = new Date().toISOString();
   const videoDay = Math.max(1, Math.round(videoDelayDays));
+  const closerDay = videoDay + closerDelayDays();
   const closer = pickVideoCloser(`${draft.first.subject}|${draft.second.subject}|${motion}`);
+  const emailTouches: CampaignModel["touches"] = [
+    { key: "email_intro", day: 0, channel: "email", label: "Text intro", subject: draft.first.subject, body: draft.first.body },
+    { key: "email_video", day: videoDay, channel: "email", label: "Video follow-up", subject: draft.second.subject, body: draft.second.body },
+    {
+      key: "email_close", day: closerDay, channel: "email", label: "Direct-ask closer",
+      subject: closer.subject, body: closer.body,
+      subjectWatched: closer.subjectWatched, bodyWatched: closer.bodyWatched,
+    },
+  ];
+  if (!multichannelEnabled()) {
+    return {
+      generatedAt: nowIso, approvedAt: nowIso, engine: "video_sequence", motion,
+      summary: "Text intro → personalized video follow-up → direct-ask closer (3 touches, threaded)",
+      touches: emailTouches,
+    };
+  }
   return {
     generatedAt: nowIso,
     approvedAt: nowIso,
     engine: "video_sequence",
     motion,
-    summary: "Text intro → personalized video follow-up → direct-ask closer (3 touches, threaded)",
+    summary:
+      "Multichannel belt: profile view + connect → text intro → video follow-up → direct-ask closer → hot-tier voicemail → break-up (7 touches; email thread + LinkedIn OS policy)",
     touches: [
-      { key: "email_intro", day: 0, channel: "email", label: "Text intro", subject: draft.first.subject, body: draft.first.body },
-      { key: "email_video", day: videoDay, channel: "email", label: "Video follow-up", subject: draft.second.subject, body: draft.second.body },
-      {
-        key: "email_close", day: videoDay + closerDelayDays(), channel: "email", label: "Direct-ask closer",
-        subject: closer.subject, body: closer.body,
-        subjectWatched: closer.subjectWatched, bodyWatched: closer.bodyWatched,
-      },
+      // Engage before the ask: the profile view lands first, then the connect.
+      { key: "li_view", day: 0, channel: "linkedin", action: "profile_view", label: "Profile view (warm-up)", body: "" },
+      { key: "li_connect", day: 0, channel: "linkedin", action: "connect_note", label: "Connect (role note)", body: LI_CONNECT_NOTE },
+      ...emailTouches,
+      // Hot-tier only: the cadence auto-skips voice below the warmth threshold.
+      { key: "voice_hot", day: Math.max(closerDay + 2, 7), channel: "voice", action: "voice_note", label: "Voicemail (hot only)", body: VOICE_HOT_SCRIPT },
+      { key: "email_breakup", day: Math.max(closerDay + 7, 12), channel: "email", label: "Break-up", subject: "Closing the loop", body: BREAKUP_BODY },
     ],
   };
 }
