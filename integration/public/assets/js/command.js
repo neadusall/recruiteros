@@ -424,7 +424,13 @@
   window.addEventListener("unhandledrejection", function (e) {
     var r = e && e.reason;
     if (r === 0 || r === undefined) return; // an already-reported request failure
-    reportBreak("ROS-APP", "", { detail: (r && (r.message || String(r))) || "unhandled rejection" });
+    var msg = (r && (r.message || String(r))) || "unhandled rejection";
+    // The softphone library (Telnyx WebRTC) cancels its own superseded internal
+    // requests as it re-registers ("Stale request cancelled"). That is routine
+    // housekeeping inside the vendor bundle, not a screen failure; filing it
+    // painted a scary notice on whatever screen the person happened to be on.
+    if (/stale request cancelled/i.test(msg)) return;
+    reportBreak("ROS-APP", "", { detail: msg });
   });
 
   /** What the person was doing, named the way the app names it on screen. */
@@ -14355,6 +14361,10 @@
   // integrations capability.
   function osTextTelnyxStrip(host) {
     if (!host) return;
+    // The pre-flight endpoint is admin-surface (integrations:manage); asking it
+    // on a recruiter session answers 403, which the break net then shows as a
+    // deny notice for a strip the recruiter was never going to see anyway.
+    if (!can("integrations:manage")) return;
     api("/connected").then(function (d) {
       var t = ((d && d.integrations) || []).filter(function (i) { return i.id === "telnyx"; })[0];
       if (!t || !host.isConnected) return;
