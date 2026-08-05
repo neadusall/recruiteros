@@ -140,9 +140,13 @@ const JSON_SHAPE = `Return ONLY strict JSON with these keys:
 
 Absolute rule: use ONLY what is actually said on the call. Never invent names, numbers, compensation, or claims. No em-dashes in any text.`;
 
-const TRANSCRIBE_PROMPT = `Transcribe this recorded business call verbatim. Label each turn "Speaker 1:", "Speaker 2:" and so on, keeping each speaker's label consistent. Return ONLY the transcript text, no preamble and no commentary.`;
+const TRANSCRIBE_PROMPT = `Transcribe this recorded business call verbatim. Label each turn "Speaker 1:", "Speaker 2:" and so on, keeping each speaker's label consistent. Return ONLY the transcript text, no preamble and no commentary.
+
+If the audio contains no intelligible human speech (silence, tones, music, noise), return exactly NO_SPEECH and nothing else. Never invent dialogue that is not audibly present.`;
 
 const AUDIO_SUMMARY_PROMPT = `You are a recruiting operations analyst. Listen to this recorded business call between a recruiter and a client or candidate.
+
+If the audio contains no intelligible human speech (silence, tones, music, noise), return exactly NO_SPEECH instead of the JSON. Never invent dialogue that is not audibly present.
 
 ${JSON_SHAPE}`;
 
@@ -262,6 +266,9 @@ async function geminiAudioPart(bytes: Buffer, mime: string): Promise<Record<stri
 const TRANSCRIBE_CONTINUE_PROMPT =
   "Continue the transcript exactly where it stopped. Do not repeat lines already transcribed and do not add commentary.";
 
+/** The models' "there is nothing to transcribe" marker, tolerant of punctuation. */
+const NO_SPEECH_RE = /^\W*NO[_ ]?SPEECH\W*$/i;
+
 /** Stage 1: Gemini flash turns the audio into a verbatim transcript, continuing past output caps. */
 async function transcribeAudio(audioPart: Record<string, unknown>): Promise<string> {
   const contents: Array<Record<string, unknown>> = [
@@ -272,6 +279,8 @@ async function transcribeAudio(audioPart: Record<string, unknown>): Promise<stri
     const { text, finishReason } = await geminiGenerate(contents);
     transcript += (transcript && text.trim() ? "\n" : "") + text.trim();
     if (finishReason !== "MAX_TOKENS") {
+      // Silence, tones, or music: fail loudly rather than let a model invent a call.
+      if (NO_SPEECH_RE.test(transcript)) throw new Error("no_speech_detected");
       if (transcript.length < 10) throw new Error("transcript_empty");
       return transcript;
     }
@@ -326,6 +335,7 @@ async function summarizeAudio(audioPart: Record<string, unknown>): Promise<Summa
   const { text } = await geminiGenerate([
     { role: "user", parts: [audioPart, { text: AUDIO_SUMMARY_PROMPT }] },
   ]);
+  if (NO_SPEECH_RE.test(text.trim())) throw new Error("no_speech_detected");
   return parseSummaryJson(text);
 }
 
@@ -436,7 +446,8 @@ async function runQueuePass(): Promise<number> {
       done += 1;
     } catch (e) {
       r.error = String((e as Error)?.message || e).slice(0, 300);
-      if (r.attempts >= 3) r.status = "failed";
+      // Silent audio never becomes speech: fail now instead of burning retries.
+      if (r.attempts >= 3 || r.error.startsWith("no_speech")) r.status = "failed";
     }
   }
   if (targets.length) persist();
