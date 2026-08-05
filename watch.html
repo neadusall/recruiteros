@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -9,100 +9,72 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet" />
 <style>
-  :root{ --bg:#f4f5f8; --card:#ffffff; --line:#e4e7ec; --ink:#101828; --mut:#51596b; --faint:#8a93a5;
-    --brand:#2e5bd7; --accent:#2e5bd7; --book:#157347; --on-accent:#ffffff;
-    --shadow:0 1px 2px rgba(16,24,40,.05), 0 20px 44px -20px rgba(16,24,40,.16); }
+  :root{ --bg:#f7f8fa; --card:#ffffff; --line:#e5e8ee; --ink:#10151d; --mut:#414b5e; --brand:#2e5bd7; --accent:#2e5bd7; --book:#157347; --on-accent:#ffffff; }
   *{box-sizing:border-box}
-  html{-webkit-text-size-adjust:100%}
-  body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column;
-    font:15px/1.55 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-  .top{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;
-    padding:16px 44px;background:var(--card);border-bottom:1px solid var(--line)}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15.5px/1.5 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  .top{flex:none;display:flex;align-items:center;justify-content:space-between;padding:9px 26px}
   .brand{font-weight:600;letter-spacing:-.3px;font-size:19px;color:var(--ink)}
-  main{flex:1;display:flex;justify-content:center;padding:38px 44px 64px}
-  .stage{width:100%;max-width:1160px}
+  .top .from{font-size:12px;color:var(--mut)}
+  main{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:center;padding:2px 26px 10px}
+  .stage{width:100%;max-width:1140px}
+  .stage.wide{}
   .cols{display:block}
-  .cols:not(.has-cal) .maincol{max-width:860px;margin:0 auto}
-  .cols.has-cal{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:34px;align-items:start}
+  .cols.has-cal{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px;align-items:start}
+  @media (max-width:920px){ .cols.has-cal{grid-template-columns:1fr} }
   .maincol{min-width:0;display:flex;flex-direction:column}
-  .ctx{margin:0 0 20px}
-  .eyebrow{display:block;font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);margin:0 0 9px}
-  .ctx h1{font-size:27px;margin:0;font-weight:600;letter-spacing:-.5px;line-height:1.22}
-  .player{flex:none;aspect-ratio:1000/620;position:relative;border-radius:14px;overflow:hidden;
-    background:#0b1220;border:1px solid rgba(16,24,40,.08);box-shadow:var(--shadow);
-    display:flex;align-items:center;justify-content:center}
+  .ctx{flex:none;margin:0 0 10px}
+  .ctx h1{font-size:21px;margin:0;font-weight:600;letter-spacing:-.4px;line-height:1.25}
+  .player{flex:none;height:380px;min-height:280px;position:relative;border-radius:12px;overflow:hidden;
+    background:#0b1220;box-shadow:0 4px 16px rgba(16,24,40,.10);display:flex;align-items:center;justify-content:center}
   video{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:contain;background:#0b1220}
-  .player .label{position:absolute;bottom:14px;left:18px;color:#aab3c2;font-size:12px;font-weight:500;z-index:1;
-    text-shadow:0 1px 3px rgba(2,8,20,.6)}
-  .player .dur{position:absolute;top:14px;right:16px;background:rgba(2,8,20,.62);border:1px solid rgba(255,255,255,.14);
-    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:#fff;font-size:11px;font-weight:600;
-    letter-spacing:.02em;padding:4px 10px;border-radius:99px;z-index:1}
+  .player .label{position:absolute;bottom:14px;left:18px;color:#8a93a5;font-size:12px;z-index:1}
+  .player .dur{position:absolute;top:14px;right:16px;background:rgba(0,0,0,.5);color:#fff;font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;z-index:1}
   .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2}
-  .play .btn{width:82px;height:82px;border-radius:50%;background:rgba(255,255,255,.96);
-    box-shadow:0 8px 28px rgba(2,8,20,.4);display:flex;align-items:center;justify-content:center;
-    transition:transform .18s ease,box-shadow .18s ease}
-  .play:hover .btn{transform:scale(1.06);box-shadow:0 10px 34px rgba(2,8,20,.48)}
-  .play svg{width:30px;height:30px;margin-left:5px;fill:var(--accent)}
-  .cta{flex:none;display:flex;gap:12px;margin-top:22px;align-items:center;flex-wrap:wrap}
+  .play .btn{width:74px;height:74px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;transition:transform .15s}
+  .play:hover .btn{transform:scale(1.05)}
+  .play svg{width:28px;height:28px;margin-left:5px;fill:var(--on-accent)}
+  .cta{flex:none;display:flex;gap:10px;margin-top:14px;align-items:center;flex-wrap:wrap}
   .cta a,.cta button{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);
-    text-decoration:none;padding:12px 24px;border-radius:9px;font:inherit;font-size:14px;font-weight:600;
-    letter-spacing:.005em;cursor:pointer;transition:all .14s ease;box-shadow:0 1px 2px rgba(16,24,40,.04)}
-  .cta a:hover{border-color:#c9d0db;box-shadow:0 2px 6px rgba(16,24,40,.08)}
-  .cta a.primary{background:var(--book);border-color:var(--book);color:var(--on-accent);
-    box-shadow:0 1px 2px rgba(16,24,40,.14)}
-  .cta a.primary:hover{filter:brightness(1.07);box-shadow:0 3px 10px rgba(16,24,40,.2)}
-  .cta .hint{color:var(--faint);font-size:12.5px;margin-left:2px;border:0;background:none;box-shadow:none;padding:0}
+    text-decoration:none;padding:11px 20px;border-radius:6px;font:inherit;font-weight:500;cursor:pointer;transition:all .12s}
+  .cta a:hover{border-color:#cfd5df}
+  .cta a.primary{background:var(--book);border-color:var(--book);color:var(--on-accent)}
+  .cta .hint{color:var(--mut);font-size:12px;margin-left:2px;border:0;background:none;box-shadow:none;padding:0}
   .side{display:flex;flex-direction:column;min-height:0}
-  .sidecard{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
-    overflow:hidden;display:flex;flex-direction:column;transition:outline .15s}
-  .sidecard.flash{outline:3px solid var(--book);outline-offset:3px}
-  .side-h{flex:none;display:flex;align-items:center;gap:9px;padding:16px 22px;border-bottom:1px solid var(--line);
-    font-size:14px;font-weight:600;letter-spacing:-.1px;color:var(--ink)}
-  .side-h .ico{width:16px;height:16px;fill:var(--accent);flex:none}
-  .cal{flex:none;height:556px;min-height:440px;background:#fff}
+  .side-h{flex:none;display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink);margin:0 0 9px}
+  .side-h .ico{width:15px;height:15px;fill:var(--book)}
+  .cal{flex:none;height:680px;min-height:480px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;transition:outline .15s}
   .cal iframe{width:100%;height:100%;border:0;display:block}
-  .side-f{flex:none;margin-top:10px;font-size:12px;text-align:center}
-  .side-f a{color:var(--faint);text-decoration:none}
-  .side-f a:hover{color:var(--ink);text-decoration:underline}
+  .cal.flash{outline:3px solid var(--book);outline-offset:3px}
   /* Reply modal */
-  .mov{position:fixed;inset:0;background:rgba(16,24,40,.52);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .mov{position:fixed;inset:0;background:rgba(16,24,40,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
   .mov.open{display:flex}
-  .modal{width:100%;max-width:460px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;
-    box-shadow:0 24px 56px -12px rgba(16,24,40,.28)}
-  .modal h3{margin:0 0 4px;font-size:18px;font-weight:600;letter-spacing:-.3px}
-  .modal .msub{margin:0 0 16px;color:var(--mut);font-size:13px}
-  .modal textarea{width:100%;background:#fff;border:1px solid #cfd5df;color:var(--ink);border-radius:8px;padding:12px;font:inherit;resize:vertical;min-height:104px}
-  .modal input{width:100%;margin-top:10px;background:#fff;border:1px solid #cfd5df;color:var(--ink);border-radius:8px;padding:12px;font:inherit}
-  .modal textarea:focus,.modal input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
-  .macts{display:flex;justify-content:flex-end;gap:9px;margin-top:16px}
-  .macts button{appearance:none;font:inherit;font-weight:600;font-size:14px;padding:11px 20px;border-radius:9px;cursor:pointer;border:1px solid var(--line);transition:all .14s ease}
+  .modal{width:100%;max-width:460px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:24px;box-shadow:0 12px 32px rgba(16,24,40,.16)}
+  .modal h3{margin:0 0 3px;font-size:18px;font-weight:600}
+  .modal .msub{margin:0 0 15px;color:var(--mut);font-size:13px}
+  .modal textarea{width:100%;background:#fff;border:1px solid #cfd5df;color:var(--ink);border-radius:6px;padding:12px;font:inherit;resize:vertical;min-height:104px}
+  .modal input{width:100%;margin-top:10px;background:#fff;border:1px solid #cfd5df;color:var(--ink);border-radius:6px;padding:12px;font:inherit}
+  .macts{display:flex;justify-content:flex-end;gap:9px;margin-top:15px}
+  .macts button{appearance:none;font:inherit;font-weight:500;padding:11px 20px;border-radius:6px;cursor:pointer;border:1px solid var(--line)}
   .macts .ghost{background:transparent;color:var(--ink)}
-  .macts .ghost:hover{border-color:#c9d0db}
   .macts .send{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-  .macts .send:hover{filter:brightness(1.07)}
   .mok{text-align:center;padding:30px 12px;color:var(--book);font-weight:500;font-size:16px}
   .err{text-align:center;color:var(--mut);padding:60px 20px}
-  @media (max-width:980px){
-    .cols.has-cal{display:block}
-    .side{margin-top:30px}
-    .top{padding:14px 20px}
-    main{padding:24px 20px 44px}
-    .cal{height:540px}
-  }
+  @media (max-width:920px){ body{height:auto;overflow:auto} .player{height:auto;aspect-ratio:16/10} .cal{height:560px} }
 </style>
 </head>
 <body>
-<div class="top"><span class="brand">RecruitersOS</span></div>
+<div class="top"><span class="brand">RecruitersOS</span><span class="from" id="fromLine"></span></div>
 <main>
-  <div class="stage" id="stage"><div class="err" id="loading">Loading&hellip;</div></div>
+  <div class="stage" id="stage"><div class="err" id="loading">Loading…</div></div>
 </main>
 
 <div class="mov" id="replyModal">
   <div class="modal" id="replyCard">
     <h3 id="replyTitle">Reply</h3>
     <p class="msub">Send a quick message, it goes straight to their inbox.</p>
-    <textarea id="rMsg" placeholder="Type your reply&hellip;"></textarea>
+    <textarea id="rMsg" placeholder="Type your reply…"></textarea>
     <input id="rEmail" type="email" placeholder="Your email (so they can reply back)" />
     <div class="macts">
       <button class="ghost" id="rCancel" type="button">Cancel</button>
@@ -111,7 +83,7 @@
   </div>
 </div>
 
-<script src="assets/js/config.js"></script>
+<script src="assets/js/config.js?v=ad110cbee0"></script>
 <script>
 (function(){
   var API = (window.RECRUITEROS_API_BASE || "").replace(/\/$/,"");
@@ -137,37 +109,19 @@
   function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]; }); }
   function $(id){ return document.getElementById(id); }
 
-  function applyBrand(d){
-    company = d.company || company; role = d.role || role;
-    var br = d.brand || {};
-    logo = br.logoUrl || logo; accent = br.accent || accent; brandName = (br.brandName || brandName || "").trim();
-    ctaText = (br.ctaText || ctaText || "").trim(); ctaUrl = br.ctaUrl || ctaUrl;
-    calLink = br.calendarUrl || calLink; replyTo = br.replyEmail || replyTo;
-  }
-
   if (s && !key) {
     fetch(API + "/api/in-market/resolve?s=" + encodeURIComponent(s))
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
         if (!d || d.error || !d.key) { stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>'; return; }
-        RESOLVED = d;
-        applyBrand(d);
+        RESOLVED = d; company = d.company || company; role = d.role || role;
+        var br = d.brand || {};
+        logo = br.logoLightUrl || br.logoUrl || logo; accent = br.accent || accent; brandName = (br.brandName || brandName || "").trim();
+        ctaText = (br.ctaText || ctaText || "").trim(); ctaUrl = br.ctaUrl || ctaUrl;
+        calLink = br.calendarUrl || calLink; replyTo = br.replyEmail || replyTo;
         go();
       })
       .catch(function(){ stage.innerHTML = '<div class="err">This video isn\'t available right now.</div>'; });
-    return;
-  }
-
-  // Raw-key links: resolve the owning workspace's brand kit (logo, accent, CTA, booking
-  // calendar) so every link in the wild renders the fully branded landing page. Best-effort:
-  // the page still renders on any failure, just with the URL-provided styling.
-  var kExp = qs.get("exp"), kSig = qs.get("sig");
-  if (key && kExp && kSig) {
-    fetch(API + "/api/in-market/resolve?k=" + encodeURIComponent(key) + "&exp=" + encodeURIComponent(kExp) + "&sig=" + encodeURIComponent(kSig))
-      .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ if (d && !d.error) applyBrand(d); })
-      .catch(function(){})
-      .then(go, go);
     return;
   }
   go();
@@ -175,31 +129,33 @@
   function go(){
   if (/\{\{|\}\}/.test(name)) name = "";
   if (/\{\{|\}\}/.test(brandName)) brandName = "";
-  if (/^#[0-9a-f]{6}$/i.test(accent)) { document.documentElement.style.setProperty("--accent", accent); document.documentElement.style.setProperty("--book", accent); }
+  if (/^#[0-9a-f]{6}$/i.test(accent)) document.documentElement.style.setProperty("--accent", accent);
+  // Host decides the fallback brand (tenant isolation): a customer domain never
+  // wears the house brand, and this light page gets the navy wordmark.
+  var isHouse = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.hostname || "");
+  var isLogoPath = function (u) { return /^\/(?!\/)[\w\-./]+$/.test(u || ""); };
+  if (!isHouse && !isHttp(logo)) { logo = "/assets/img/lume-wordmark-navy.svg"; if (!brandName) brandName = "Lume Search Partners"; }
   brandLabel = brandName || "RecruitersOS";
   var topEl = document.querySelector(".top .brand");
-  var logoOk = isHttp(logo) || logo.charAt(0) === "/";   // same-origin asset paths are fine
-  if (topEl) { if (logoOk) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:60px;max-width:340px;display:block" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
+  if (topEl) { if (isHttp(logo) || isLogoPath(logo)) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:42px;max-width:280px;display:block" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
+  var fromEl = $("fromLine");
+  if (fromEl) fromEl.textContent = (name ? "A note for " + name : "A quick note") + (company ? " · " + company : "");
   var rt = $("replyTitle"); if (rt) rt.textContent = "Reply to " + brandLabel.replace(/[<>&]/g, "");
   document.title = company ? ("A quick note about " + company) : ("A message from " + brandLabel);
 
   // Asset URLs: resolved short code (already signed) or built from the key + signed query.
-  // cb= busts caches hourly: composites can be re-rendered IN PLACE under the same key (the
-  // rebuild sweep overwrites old links), so a viewer who watched an earlier render must not be
-  // pinned to their browser's stale copy.
-  var bust = "&cb=" + Math.floor(Date.now() / 3600000);
   var mp4, gif;
   if (RESOLVED) {
-    trackKey = RESOLVED.key; mp4 = RESOLVED.mp4 + (RESOLVED.mp4.indexOf("?") >= 0 ? "" : "?") + bust;
-    gif = RESOLVED.gif + (RESOLVED.gif.indexOf("?") >= 0 ? "&" : "?") + "notrack=1" + bust;
+    trackKey = RESOLVED.key; mp4 = RESOLVED.mp4;
+    gif = RESOLVED.gif + (RESOLVED.gif.indexOf("?") >= 0 ? "&" : "?") + "notrack=1";
   } else {
     if (!key || !/^[a-z0-9_-]{3,120}$/.test(key)) { stage.innerHTML = '<div class="err">This link looks incomplete or expired.</div>'; return; }
     var auth = "";
     var exp = qs.get("exp"), sig = qs.get("sig");
     if (exp && sig) auth = "&exp=" + encodeURIComponent(exp) + "&sig=" + encodeURIComponent(sig);
     trackKey = key;
-    mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4" + auth + bust;
-    gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth + bust;
+    mp4 = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=mp4" + auth;
+    gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth;
   }
 
   /* engagement tracking (anonymous session) */
@@ -214,8 +170,7 @@
     } catch (e) {}
   }
 
-  var title = name ? esc(name) + ", a quick note about " + esc(company || "your team") : "A quick note about " + esc(company || "your team");
-  var eyebrow = (name ? "Prepared for " + name : "A personal message") + (company ? " · " + company : "");
+  var title = (name ? esc(name) + ", " : "") + "a quick note about " + esc(company || "your team");
   var hasCal = isHttp(calLink);
   var bookUrl = isHttp(ctaUrl) ? ctaUrl : (isHttp(calLink) ? calLink : "");
   var bookLabel = ctaText || "Book a call";
@@ -224,10 +179,10 @@
   if (hasCal) cta += '<a class="primary" id="bookBtn" href="#">' + esc(bookLabel) + '</a>';
   else if (bookUrl) cta += '<a class="primary" href="' + esc(bookUrl) + '" target="_blank" rel="noopener">' + esc(bookLabel) + '</a>';
   cta += '<a id="replyBtn" href="#">Reply</a>';
-  if (hasCal) cta += '<span class="hint">or pick a time on the calendar</span>';
+  if (hasCal) cta += '<span class="hint">or grab a time on the right →</span>';
 
   var leftCol =
-    '<div class="ctx"><span class="eyebrow">' + esc(eyebrow) + '</span><h1>' + title + '</h1></div>' +
+    '<div class="ctx"><h1>' + title + '</h1></div>' +
     '<div class="player" id="player">' +
       '<span class="dur" id="dur" style="display:none"></span>' +
       '<video id="vid" playsinline preload="metadata" poster="' + gif + '"></video>' +
@@ -235,14 +190,9 @@
       (role ? '<span class="label">' + esc(role) + '</span>' : '') +
     '</div>' +
     '<div class="cta">' + cta + '</div>';
-  // The in-page calendar embeds the booking page in chromeless mode (embed=1: no
-  // duplicate logo/heading inside the card); the new-tab link keeps the full page.
-  var calSrc = calLink + (calLink.indexOf("?") >= 0 ? "&" : "?") + "embed=1";
   var rightCol = hasCal
-    ? '<aside class="side"><div class="sidecard" id="cal">' +
-        '<div class="side-h"><svg class="ico" viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 6v11H5V8h14z"/></svg>Book a call</div>' +
-        '<div class="cal"><iframe src="' + esc(calSrc) + '" title="Book a time" loading="eager"></iframe></div></div>' +
-        '<div class="side-f"><a href="' + esc(calLink) + '" target="_blank" rel="noopener">Open the calendar in a new tab</a></div></aside>'
+    ? '<aside class="side"><div class="side-h"><svg class="ico" viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 6v11H5V8h14z"/></svg>Book a call</div>' +
+        '<div class="cal" id="cal"><iframe src="' + esc(calLink) + '" title="Book a time" loading="eager"></iframe></div></aside>'
     : '';
   if (hasCal) stage.className = "stage wide";
   stage.innerHTML = '<div class="cols' + (hasCal ? ' has-cal' : '') + '"><div class="maincol">' + leftCol + '</div>' + rightCol + '</div>';
