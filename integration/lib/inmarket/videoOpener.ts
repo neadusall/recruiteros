@@ -18,6 +18,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { CampaignModel, Motion } from "../core/types";
+import { eligibleTemplates, pickTemplate } from "../bd/mpc/templates";
 
 /** Email/outreach creation is pinned to Haiku for spend control (does NOT follow RECRUITEROS_LLM_MODEL). */
 const MODEL =
@@ -290,83 +291,51 @@ export { VIDEO_CLOSERS };
  */
 export function templateOpener(input: OpenerInput): OpenerDraft {
   const seed = `${input.company}|${input.roleTitle}|${input.motion || "bd"}`;
-  return { first: pickVideoIntro(seed), second: pickVideoFollowup(seed), source: "template" };
+  // DAY 0 = one of the 50 MPC templates, custom to their post at render time
+  // (the original design, restored by owner decision). Eligibility is strict:
+  // a template claiming a nearby placement or a competitor story is only in
+  // the pool when that data is REALLY present, so the render guard never holds
+  // a send for an unfillable {{Near_City}}/{{Competitor}} and the "wants .
+  // no pressure" class of collapse cannot recur. With no MPC flags at all,
+  // only the always-fillable angles remain, and the search-anchored intro
+  // pool stays as the final fallback if eligibility ever empties the pool.
+  const el = {
+    proximityOk: input.mpc?.hasNearCity === true,
+    hasCompetitor: input.mpc?.hasCompetitor === true,
+    hasNearCity: input.mpc?.hasNearCity === true,
+  };
+  const pool = eligibleTemplates(el);
+  const first: EmailDraft = pool.length
+    ? (({ subject, body }) => ({ subject, body }))(pickTemplate(seed, el))
+    : pickVideoIntro(seed);
+  return { first, second: pickVideoFollowup(seed), source: "template" };
 }
 
-/** Days after the video email before the closer goes out (Day 0 / 1 / 5 by default:
- *  the study-backed shape is intro, fast video bump, then a spaced direct ask). */
-function closerDelayDays(): number {
-  const n = Number(process.env.INMARKET_CLOSER_DELAY_DAYS);
-  return Number.isFinite(n) && n >= 1 && n <= 21 ? Math.round(n) : 4;
-}
 
 /**
- * Turn a drafted sequence into a runnable, APPROVED CampaignModel the autopilot cadence sends,
- * now THREE touches:
- *   touch 1 (day 0)   - the text intro
- *   touch 2 (day N)   - the video follow-up (its body carries {{videoembed}}, filled per
- *                       prospect from personalizedVideo at send time; always the 2nd touch)
- *   touch 3 (day N+4) - the CLOSER: ties signal + intro + video together and makes the direct
- *                       15-minute ask. Watch-aware: prospects whose watch telemetry shows a view
- *                       get the warm variant (subjectWatched/bodyWatched), everyone else the
- *                       standard one. Both variants claim nothing beyond what really happened.
- * Follow-up emails thread onto the first (In-Reply-To/References), so touches 2-3 arrive as
- * replies in the same conversation. Auto-approved because the operator attached the sequence.
+ * Turn a drafted sequence into a runnable, APPROVED CampaignModel the autopilot cadence sends.
+ * EXACTLY TWO EMAILS by owner decision (the original design):
+ *   touch 1 (day 0) - the custom intro from the 50 MPC templates, rendered per prospect
+ *                     against their actual post (templateOpener picks it)
+ *   touch 2 (day N) - the video follow-up (its body carries {{videoembed}}, filled per
+ *                     prospect from personalizedVideo at send time; always the 2nd touch)
+ * The follow-up threads onto the first (In-Reply-To/References) so it arrives as a reply
+ * in the same conversation. The LinkedIn connect is NOT a scheduled touch: it fires from
+ * watch telemetry (lib/inmarket/watchConnect) only after the prospect actually plays the
+ * video. Auto-approved because the operator attached the sequence.
  */
-/** Multichannel BD default. On unless INMARKET_MULTICHANNEL=0: LinkedIn and
- *  voice touches ride the LinkedIn OS / dialer with their own policy gates and
- *  degrade to no-ops when nothing is connected, so email-only setups lose
- *  nothing by leaving this on. */
-function multichannelEnabled(): boolean {
-  return !["0", "false", "no", "off"].includes((process.env.INMARKET_MULTICHANNEL || "").toLowerCase());
-}
-
-/** LinkedIn connect note (<300 chars) and the hot-tier voicemail script for the
- *  default belt sequence. Same rule as the intro pools: only tokens this flow
- *  can ALWAYS honestly fill, so the render guard never holds on missing data. */
-const LI_CONNECT_NOTE =
-  "Hi {{First_Name}}, {saw|noticed} {{Company}} is hiring {{A_Open_Role}}. I {work with|help} teams filling that seat and had {a couple of ideas|a thought} worth sharing. Open to connecting? {Thanks|Best}, {{Your_Name}}";
-const VOICE_HOT_SCRIPT =
-  "Hi {{First_Name}}, it's {{Your_Name}}. Quick note about the {{Open_Role}} opening at {{Company}}. I sent over a short video with a few thoughts on filling it. If hiring's on your plate this quarter, I'd love to help. No pressure at all. Talk soon.";
-const BREAKUP_BODY =
-  "Hi {{First_Name}},\n\n{I'll stop here so I'm not a pest.|Last note from me, promise.} If the {{Open_Role}} search {heats up|becomes a priority}, just reply and I'll {jump in|pick it right back up}.\n\n{All the best|Best}, {{Your_Name}}";
-
 export function videoSequenceModel(draft: OpenerDraft, motion: Motion, videoDelayDays = 1): CampaignModel {
   const nowIso = new Date().toISOString();
   const videoDay = Math.max(1, Math.round(videoDelayDays));
-  const closerDay = videoDay + closerDelayDays();
-  const closer = pickVideoCloser(`${draft.first.subject}|${draft.second.subject}|${motion}`);
-  const emailTouches: CampaignModel["touches"] = [
-    { key: "email_intro", day: 0, channel: "email", label: "Text intro", subject: draft.first.subject, body: draft.first.body },
-    { key: "email_video", day: videoDay, channel: "email", label: "Video follow-up", subject: draft.second.subject, body: draft.second.body },
-    {
-      key: "email_close", day: closerDay, channel: "email", label: "Direct-ask closer",
-      subject: closer.subject, body: closer.body,
-      subjectWatched: closer.subjectWatched, bodyWatched: closer.bodyWatched,
-    },
-  ];
-  if (!multichannelEnabled()) {
-    return {
-      generatedAt: nowIso, approvedAt: nowIso, engine: "video_sequence", motion,
-      summary: "Text intro → personalized video follow-up → direct-ask closer (3 touches, threaded)",
-      touches: emailTouches,
-    };
-  }
   return {
     generatedAt: nowIso,
     approvedAt: nowIso,
     engine: "video_sequence",
     motion,
-    summary:
-      "Multichannel belt: profile view + connect → text intro → video follow-up → direct-ask closer → hot-tier voicemail → break-up (7 touches; email thread + LinkedIn OS policy)",
+    summary: "Custom MPC intro → personalized video follow-up (2 emails, threaded; a video watch triggers the LinkedIn connect)",
     touches: [
-      // Engage before the ask: the profile view lands first, then the connect.
-      { key: "li_view", day: 0, channel: "linkedin", action: "profile_view", label: "Profile view (warm-up)", body: "" },
-      { key: "li_connect", day: 0, channel: "linkedin", action: "connect_note", label: "Connect (role note)", body: LI_CONNECT_NOTE },
-      ...emailTouches,
-      // Hot-tier only: the cadence auto-skips voice below the warmth threshold.
-      { key: "voice_hot", day: Math.max(closerDay + 2, 7), channel: "voice", action: "voice_note", label: "Voicemail (hot only)", body: VOICE_HOT_SCRIPT },
-      { key: "email_breakup", day: Math.max(closerDay + 7, 12), channel: "email", label: "Break-up", subject: "Closing the loop", body: BREAKUP_BODY },
+      { key: "email_intro", day: 0, channel: "email", label: "Text intro", subject: draft.first.subject, body: draft.first.body },
+      { key: "email_video", day: videoDay, channel: "email", label: "Video follow-up", subject: draft.second.subject, body: draft.second.body },
     ],
   };
 }

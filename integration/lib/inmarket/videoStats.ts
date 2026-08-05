@@ -112,6 +112,15 @@ export async function recordVideoEvent(e: VideoEventIn): Promise<void> {
     }
   }
 
+  // A REAL watch (play or complete, attributed to a prospect) fires the
+  // one-time LinkedIn connect: interest first, connect second. Fire-and-forget;
+  // the beacon response never waits on LinkedIn.
+  if ((e.type === "play" || e.type === "complete") && e.recipient) {
+    void import("./watchConnect")
+      .then((m) => m.connectAfterWatch(e.recipient!, e.roleTitle || a.roleTitle))
+      .catch(() => { /* tracking never fails on the connect hook */ });
+  }
+
   // Activity feed (skip heartbeats — too noisy).
   if (e.type !== "heartbeat") {
     st.feed.unshift({
