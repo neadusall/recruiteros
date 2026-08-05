@@ -27,7 +27,7 @@
 
   /* ── Lobby: one centered card, one big clear mark ── */
   .lobby{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;padding:24px}
-  .lobby .mark img{height:46px;display:block}
+  .lobby .mark img{height:78px;max-width:min(440px,88vw);object-fit:contain;display:block}
   .lobby .mark .txt{font-weight:700;font-size:30px;letter-spacing:-.02em}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);
     padding:26px;width:100%;max-width:400px;box-shadow:0 10px 30px rgba(10,14,20,.06)}
@@ -94,9 +94,12 @@
   // Host decides the brand (tenant isolation rule): customer domains never
   // show the house brand.
   var isHouse = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.hostname || "");
+  // White wordmark on the dark appearance, navy on light (both transparent SVGs).
+  var dark = (document.documentElement.getAttribute("data-theme") || "light") === "dark";
   var BRAND = isHouse
     ? { name: "RecruitersOS", logo: null }
-    : { name: "Lume Search Partners", logo: "/assets/img/lume-wordmark-navy.svg" };
+    : { name: "Lume Search Partners",
+        logo: dark ? "/assets/img/lume-wordmark-white.svg" : "/assets/img/lume-wordmark-navy.svg" };
   document.title = BRAND.name + " Meeting";
   document.getElementById("lobbyMark").innerHTML =
     BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
@@ -139,8 +142,10 @@
     var selfHosted = domain !== "meet.jit.si";
     if (!selfHosted) {
       // The public bridge would show a vendor mark: cover that corner with ours.
+      // The pill is white, so it always wears the navy wordmark regardless of theme.
       var ov = document.getElementById("brandOverlay");
-      ov.innerHTML = BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
+      var ovLogo = isHouse ? null : "/assets/img/lume-wordmark-navy.svg";
+      ov.innerHTML = ovLogo ? '<img src="' + ovLogo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
       ov.style.display = "block";
     } else {
       document.getElementById("recChip").style.display = "flex";
