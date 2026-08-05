@@ -9,10 +9,16 @@
  *
  *   Stage 1 (Gemini flash): audio -> verbatim transcript. Claude models cannot
  *     ingest audio, so the speech-to-text leg stays on Gemini; flash audio is
- *     already the cheapest tier for it. The transcript is kept on disk beside
- *     the audio as a permanent text record of the call.
- *   Stage 2 (Claude Haiku): transcript -> summary + action items + role brief.
- *     Cheap and strong at structured writing. If ANTHROPIC_API_KEY is absent,
+ *     already the cheapest tier for it. Audio over the inline limit is pushed
+ *     through the Gemini Files API so long recordings still transcribe, and a
+ *     transcript cut short by the output-token cap is continued in follow-up
+ *     rounds until the whole call is on paper. The transcript is kept on disk
+ *     beside the audio as a permanent text record of the call.
+ *   Stage 2 (Claude Opus): transcript -> summary + action items + role brief.
+ *     Call summaries are read by people making commitments off them, so this
+ *     leg runs the strong model; volume is a handful of calls a day. Very long
+ *     transcripts are summarized map-reduce style (notes per chunk, one merge
+ *     pass) so nothing is silently truncated. If ANTHROPIC_API_KEY is absent,
  *     the tick falls back to the original single Gemini call that listens and
  *     summarizes in one shot, so summaries never stop over a missing key.
  *
@@ -118,16 +124,16 @@ export async function saveRecording(room: string, mime: string, buf: Buffer): Pr
 
 const GEMINI_MODEL = () => process.env.RECRUITEROS_MEET_SUMMARY_MODEL || "gemini-3-flash-preview";
 const geminiKey = () => (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
-/** The cheap summarizer. Haiku cannot hear audio, so it reads the transcript. */
-const CLAUDE_MODEL = () => process.env.RECRUITEROS_MEET_SUMMARY_CLAUDE_MODEL || "claude-haiku-4-5";
+/** The summarizer. Claude cannot hear audio, so it reads the transcript. */
+const CLAUDE_MODEL = () => process.env.RECRUITEROS_MEET_SUMMARY_CLAUDE_MODEL || "claude-opus-5";
 const anthropicKey = () => (process.env.ANTHROPIC_API_KEY || "").trim();
 
 /* ────────────────────────────── Prompts ────────────────────────────── */
 
 const JSON_SHAPE = `Return ONLY strict JSON with these keys:
 {
-  "summary": "5-10 sentence plain-language summary of the call",
-  "action_items": ["each concrete follow-up that was agreed or implied, with owner if clear"],
+  "summary": "Plain-language summary of the call. 5-10 sentences for a short call; scale up to 20 sentences for a long one. Every decision, commitment, deadline, dollar figure, and named person that mattered must appear here or in the lists below; nothing important may be dropped no matter how long the call ran.",
+  "action_items": ["each concrete follow-up that was agreed or implied, with owner and deadline if stated"],
   "role_brief": "If a job/role was discussed: what the client is looking for, written so a recruiter can present the role to candidates. Cover the mission of the role, must-haves, nice-to-haves, team and culture notes, compensation and benefits IF stated, and the genuine selling points. If no role was discussed, an empty string.",
   "objections_and_notes": ["hesitations, constraints, or context worth remembering"]
 }
@@ -166,59 +172,161 @@ function parseSummaryJson(out: string): SummaryShape {
   return s;
 }
 
-/** ~150K tokens of transcript, comfortably inside Haiku's 200K window. */
+/** Single-pass ceiling, ~150K tokens: far below Opus's 1M window but keeps one call sane. */
 const MAX_TRANSCRIPT_CHARS = 600_000;
+/** Map-reduce chunk size for transcripts beyond the single-pass ceiling. */
+const CHUNK_CHARS = 400_000;
 const GEMINI_TIMEOUT_MS = 180_000;
+/** Above this, inline base64 audio is rejected by Gemini; use the Files API instead. */
+const INLINE_AUDIO_LIMIT = 19 * 1024 * 1024;
+/** 8 continuation rounds of transcript output covers calls far longer than any real meeting. */
+const MAX_TRANSCRIBE_ROUNDS = 8;
 
-async function geminiGenerate(parts: Array<Record<string, unknown>>): Promise<string> {
+interface GeminiResult { text: string; finishReason: string }
+
+async function geminiGenerate(contents: Array<Record<string, unknown>>): Promise<GeminiResult> {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL()}:generateContent`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey() },
-      body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0 } }),
+      body: JSON.stringify({ contents, generationConfig: { temperature: 0 } }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     },
   );
   if (!res.ok) throw new Error(`gemini_${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-  return (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+  const data = (await res.json()) as {
+    candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const cand = data.candidates?.[0];
+  return {
+    text: (cand?.content?.parts || []).map((p) => p.text || "").join(""),
+    finishReason: cand?.finishReason || "",
+  };
 }
 
-/** Stage 1: Gemini flash turns the audio into a verbatim transcript. */
-async function transcribeAudio(bytes: Buffer, mime: string): Promise<string> {
-  const out = (await geminiGenerate([
-    { inlineData: { mimeType: mime, data: bytes.toString("base64") } },
-    { text: TRANSCRIBE_PROMPT },
-  ])).trim();
-  if (out.length < 10) throw new Error("transcript_empty");
-  return out;
+/** Push oversized audio through the Gemini Files API and wait until it is usable. */
+async function uploadAudioToGemini(bytes: Buffer, mime: string): Promise<string> {
+  const start = await fetch("https://generativelanguage.googleapis.com/upload/v1beta/files", {
+    method: "POST",
+    headers: {
+      "x-goog-api-key": geminiKey(),
+      "X-Goog-Upload-Protocol": "resumable",
+      "X-Goog-Upload-Command": "start",
+      "X-Goog-Upload-Header-Content-Length": String(bytes.length),
+      "X-Goog-Upload-Header-Content-Type": mime,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ file: { display_name: "meet-recording" } }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!start.ok) throw new Error(`gemini_upload_start_${start.status}`);
+  const uploadUrl = start.headers.get("x-goog-upload-url");
+  if (!uploadUrl) throw new Error("gemini_upload_no_url");
+
+  const up = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { "X-Goog-Upload-Offset": "0", "X-Goog-Upload-Command": "upload, finalize" },
+    body: new Uint8Array(bytes),
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!up.ok) throw new Error(`gemini_upload_${up.status}`);
+  const meta = (await up.json()) as { file?: { name?: string; uri?: string; state?: string } };
+  const name = meta.file?.name;
+  const uri = meta.file?.uri;
+  let state = meta.file?.state;
+  if (!uri || !name) throw new Error("gemini_upload_no_uri");
+
+  // Audio is processed server-side before it can be referenced in a prompt.
+  for (let i = 0; i < 30 && state === "PROCESSING"; i++) {
+    await new Promise((r) => setTimeout(r, 4000));
+    const poll = await fetch(`https://generativelanguage.googleapis.com/v1beta/${name}`, {
+      headers: { "x-goog-api-key": geminiKey() },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!poll.ok) throw new Error(`gemini_file_poll_${poll.status}`);
+    state = ((await poll.json()) as { state?: string }).state;
+  }
+  if (state !== "ACTIVE") throw new Error(`gemini_file_state_${state || "unknown"}`);
+  return uri;
 }
 
-/** Stage 2: Claude Haiku writes the summary + role brief from the transcript. */
-async function summarizeTranscript(transcript: string): Promise<SummaryShape> {
+/** Audio as a Gemini content part: inline when small, Files API when large. */
+async function geminiAudioPart(bytes: Buffer, mime: string): Promise<Record<string, unknown>> {
+  if (bytes.length <= INLINE_AUDIO_LIMIT) {
+    return { inlineData: { mimeType: mime, data: bytes.toString("base64") } };
+  }
+  return { fileData: { mimeType: mime, fileUri: await uploadAudioToGemini(bytes, mime) } };
+}
+
+const TRANSCRIBE_CONTINUE_PROMPT =
+  "Continue the transcript exactly where it stopped. Do not repeat lines already transcribed and do not add commentary.";
+
+/** Stage 1: Gemini flash turns the audio into a verbatim transcript, continuing past output caps. */
+async function transcribeAudio(audioPart: Record<string, unknown>): Promise<string> {
+  const contents: Array<Record<string, unknown>> = [
+    { role: "user", parts: [audioPart, { text: TRANSCRIBE_PROMPT }] },
+  ];
+  let transcript = "";
+  for (let round = 0; round < MAX_TRANSCRIBE_ROUNDS; round++) {
+    const { text, finishReason } = await geminiGenerate(contents);
+    transcript += (transcript && text.trim() ? "\n" : "") + text.trim();
+    if (finishReason !== "MAX_TOKENS") {
+      if (transcript.length < 10) throw new Error("transcript_empty");
+      return transcript;
+    }
+    // The model ran out of output room mid-call: ask it to keep going.
+    contents.push({ role: "model", parts: [{ text }] });
+    contents.push({ role: "user", parts: [{ text: TRANSCRIBE_CONTINUE_PROMPT }] });
+  }
+  // Failing loudly beats mailing a summary that is missing the end of the call.
+  throw new Error("transcript_incomplete_after_max_rounds");
+}
+
+const CHUNK_NOTES_PROMPT = `You are a recruiting operations analyst. Below is ONE PART of the transcript of a long recorded business call between a recruiter and a client or candidate. Write exhaustive plain-text notes on this part: every decision, commitment, date, deadline, dollar figure, name, role requirement, objection, and open question, in the order they occur. Use ONLY what is actually said; never invent anything. No em-dashes. Return the notes only, no preamble.`;
+
+const MERGE_NOTES_PROMPT = `You are a recruiting operations analyst. Below are sequential notes covering the full transcript of one long recorded business call between a recruiter and a client or candidate, in order.
+
+${JSON_SHAPE}`;
+
+async function claudeText(content: string): Promise<string> {
   const { anthropicClient } = await import("../sourcing/anthropic");
   const msg = await anthropicClient().messages.create({
     model: CLAUDE_MODEL(),
-    max_tokens: 8000,
-    temperature: 0,
-    messages: [{
-      role: "user",
-      content: `${TRANSCRIPT_SUMMARY_PROMPT}\n\nTranscript:\n${transcript.slice(0, MAX_TRANSCRIPT_CHARS)}`,
-    }],
+    max_tokens: 16000,
+    messages: [{ role: "user", content }],
   });
-  // A truncated reply cannot be trusted to be complete JSON.
+  // A refused or truncated reply cannot be trusted; throw so the Gemini fallback ships instead.
+  // The installed SDK's stop_reason union predates "refusal", hence the widening cast.
+  if ((msg.stop_reason as string) === "refusal") throw new Error("summary_refused");
   if (msg.stop_reason === "max_tokens") throw new Error("summary_truncated");
-  const out = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-  return parseSummaryJson(out);
+  return msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+}
+
+/** Stage 2: Claude writes the summary + role brief from the transcript. */
+async function summarizeTranscript(transcript: string): Promise<SummaryShape> {
+  if (transcript.length <= MAX_TRANSCRIPT_CHARS) {
+    return parseSummaryJson(
+      await claudeText(`${TRANSCRIPT_SUMMARY_PROMPT}\n\nTranscript:\n${transcript}`),
+    );
+  }
+  // Marathon transcript: notes per chunk, then one merge pass, so no part is dropped.
+  const notes: string[] = [];
+  for (let i = 0; i < transcript.length; i += CHUNK_CHARS) {
+    const part = transcript.slice(i, i + CHUNK_CHARS);
+    notes.push(await claudeText(`${CHUNK_NOTES_PROMPT}\n\nTranscript part ${notes.length + 1}:\n${part}`));
+  }
+  return parseSummaryJson(
+    await claudeText(`${MERGE_NOTES_PROMPT}\n\n${notes.map((n, i) => `Notes for part ${i + 1}:\n${n}`).join("\n\n")}`),
+  );
 }
 
 /** Fallback: the original single Gemini call that listens and summarizes. */
-async function summarizeAudio(bytes: Buffer, mime: string): Promise<SummaryShape> {
-  return parseSummaryJson(await geminiGenerate([
-    { inlineData: { mimeType: mime, data: bytes.toString("base64") } },
-    { text: AUDIO_SUMMARY_PROMPT },
-  ]));
+async function summarizeAudio(audioPart: Record<string, unknown>): Promise<SummaryShape> {
+  const { text } = await geminiGenerate([
+    { role: "user", parts: [audioPart, { text: AUDIO_SUMMARY_PROMPT }] },
+  ]);
+  return parseSummaryJson(text);
 }
 
 function block(title: string, items?: string[]): string {
@@ -230,14 +338,17 @@ function block(title: string, items?: string[]): string {
  * Get a transcript for the recording, paying for transcription at most once:
  * a transcript already on disk from an earlier attempt is reused as-is.
  */
-async function ensureTranscript(r: MeetRecording, bytes: Buffer): Promise<string> {
+async function ensureTranscript(
+  r: MeetRecording,
+  audioPart: () => Promise<Record<string, unknown>>,
+): Promise<string> {
   if (r.transcriptFile) {
     try {
       const prev = (await fs.readFile(path.join(dir(), r.transcriptFile), "utf8")).trim();
       if (prev.length >= 10) return prev;
     } catch { /* transcript file lost: transcribe again below */ }
   }
-  const transcript = await transcribeAudio(bytes, r.mime);
+  const transcript = await transcribeAudio(await audioPart());
   const tFile = r.file.replace(/\.[^.]+$/, "") + ".txt";
   try {
     await fs.writeFile(path.join(dir(), tFile), transcript, "utf8");
@@ -269,24 +380,26 @@ async function runQueuePass(): Promise<number> {
     r.attempts += 1;
     try {
       const bytes = await fs.readFile(path.join(dir(), r.file));
-      if (bytes.length > 19 * 1024 * 1024) throw new Error("audio_too_large_for_inline");
+      // Built (and, for large files, uploaded) only if a Gemini leg actually runs.
+      let cachedPart: Record<string, unknown> | null = null;
+      const audioPart = async () => (cachedPart ??= await geminiAudioPart(bytes, r.mime));
 
-      // Two-stage when the Anthropic key is present (Gemini transcribes, Haiku
-      // writes); single Gemini listen-and-summarize call otherwise. A Haiku
+      // Two-stage when the Anthropic key is present (Gemini transcribes, Claude
+      // writes); single Gemini listen-and-summarize call otherwise. A Claude
       // failure after a good transcript falls back to the one-shot Gemini call
       // in the same attempt, so a write-up still ships.
       let s: SummaryShape;
       if (anthropicKey()) {
-        const transcript = await ensureTranscript(r, bytes);
+        const transcript = await ensureTranscript(r, audioPart);
         try {
           s = await summarizeTranscript(transcript);
           r.summaryModel = CLAUDE_MODEL();
         } catch (claudeErr) {
-          s = await summarizeAudio(bytes, r.mime);
-          r.summaryModel = `${GEMINI_MODEL()} (haiku_failed: ${String((claudeErr as Error)?.message || claudeErr).slice(0, 80)})`;
+          s = await summarizeAudio(await audioPart());
+          r.summaryModel = `${GEMINI_MODEL()} (claude_failed: ${String((claudeErr as Error)?.message || claudeErr).slice(0, 80)})`;
         }
       } else {
-        s = await summarizeAudio(bytes, r.mime);
+        s = await summarizeAudio(await audioPart());
         r.summaryModel = GEMINI_MODEL();
       }
 
