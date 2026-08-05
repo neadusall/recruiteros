@@ -1300,8 +1300,13 @@ export async function getOrStartShot(req: ShotRequest, opts?: { force?: boolean 
  */
 const CARD_ACCENT = (process.env.INMARKET_CARD_ACCENT || "#2e5bd7").trim();
 
-/** Minimum card height, so even a one-role company yields a real top-to-bottom scroll. */
-const MIN_CARD_H = 1500;
+/**
+ * Minimum card height. It has to clear the ${FRAME_H}px capture window with room to pan, or the
+ * synthesized scroll drops under the content-frame floor and fails the job empty. Kept modest and
+ * paired with vertical centering: a company with one open role should read as a composed title
+ * card, not as a tall page with a hole in the middle. Rich cards outgrow it naturally.
+ */
+const MIN_CARD_H = 1000;
 
 /** The fallback is ON by default: no video at all is strictly worse than a typeset one. */
 export function roleCardEnabled(): boolean {
@@ -1361,14 +1366,12 @@ function roleCardHtml(req: ShotRequest): string {
     font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased}
   .bar{height:8px;background:${esc(CARD_ACCENT)}}
-  /* The card must always be TALLER than the ${FRAME_H}px capture window, or the synthesized pan has
-     no distance to travel, falls under the content-frame floor, and the whole job fails empty. The
-     flex column pushes the footer to the bottom so the extra height reads as layout, not padding. */
-  .wrap{padding:56px 72px 64px;min-height:${MIN_CARD_H}px;display:flex;flex-direction:column}
+  /* Centering (not a bottom-anchored footer) is what keeps a sparse card presentable: leftover
+     height splits evenly above and below instead of opening a gap in the middle. */
+  .wrap{padding:56px 72px 64px;min-height:${MIN_CARD_H}px;display:flex;flex-direction:column;justify-content:center}
   .roles{margin:0 0 8px}
   .role{padding:13px 0;border-bottom:1px solid #eef1f6;color:#28303c;font-size:17px}
   .role:last-child{border-bottom:0}
-  .spacer{flex:1 1 auto;min-height:24px}
   .co{font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:${esc(CARD_ACCENT)};font-weight:700}
   h1{font-size:40px;line-height:1.2;margin:14px 0 12px;font-weight:700;letter-spacing:-.015em}
   .meta{font-size:15px;color:#5b6472;margin-bottom:28px}
@@ -1388,7 +1391,6 @@ function roleCardHtml(req: ShotRequest): string {
   <div class="rule"></div>
   ${body}
   ${otherBlock}
-  <div class="spacer"></div>
   <div class="tail">Open role at ${esc(req.company)}</div>
   </div>`;
 }
