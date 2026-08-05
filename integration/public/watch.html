@@ -18,7 +18,7 @@
     font:15px/1.55 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   .top{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;
-    padding:16px 44px;background:var(--card);border-bottom:1px solid var(--line)}
+    padding:18px 44px;background:var(--card);border-bottom:1px solid var(--line)}
   .brand{font-weight:600;letter-spacing:-.3px;font-size:19px;color:var(--ink)}
   main{flex:1;display:flex;justify-content:center;padding:38px 44px 64px}
   .stage{width:100%;max-width:1160px}
@@ -183,7 +183,7 @@
   brandLabel = brandName || "RecruitersOS";
   var topEl = document.querySelector(".top .brand");
   var logoOk = isHttp(logo) || logo.charAt(0) === "/";   // same-origin asset paths are fine
-  if (topEl) { if (logoOk) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:60px;max-width:340px;display:block" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
+  if (topEl) { if (logoOk) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:88px;max-width:min(460px,82vw);display:block;object-fit:contain" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
   var rt = $("replyTitle"); if (rt) rt.textContent = "Reply to " + brandLabel.replace(/[<>&]/g, "");
   document.title = company ? ("A quick note about " + company) : ("A message from " + brandLabel);
 
