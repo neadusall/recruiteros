@@ -124,8 +124,15 @@ export async function saveRecording(room: string, mime: string, buf: Buffer): Pr
 
 const GEMINI_MODEL = () => process.env.RECRUITEROS_MEET_SUMMARY_MODEL || "gemini-3-flash-preview";
 const geminiKey = () => (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
-/** The summarizer. Claude cannot hear audio, so it reads the transcript. */
-const CLAUDE_MODEL = () => process.env.RECRUITEROS_MEET_SUMMARY_CLAUDE_MODEL || "claude-opus-5";
+/**
+ * The summarizer. Claude cannot hear audio, so it reads the transcript.
+ *
+ * OWNER DECISION (2026-08-05): Haiku, for cost (about 1.5 cents per call vs
+ * about 7 on Opus). Do NOT "upgrade" this default to Opus or Sonnet; quality
+ * work belongs in the prompts. The model changes only via the env override,
+ * which is also pinned to claude-haiku-4-5 in prod .env.production.
+ */
+const CLAUDE_MODEL = () => process.env.RECRUITEROS_MEET_SUMMARY_CLAUDE_MODEL || "claude-haiku-4-5";
 const anthropicKey = () => (process.env.ANTHROPIC_API_KEY || "").trim();
 
 /* ────────────────────────────── Prompts ────────────────────────────── */
