@@ -272,6 +272,8 @@ export interface Prospect {
   personalizedVideo?: {
     videoKey: string;
     watchUrl: string;
+    /** Real composite length in seconds; renders {{videolength}} honestly. */
+    durationSec?: number;
     gifUrl: string;
     mp4Url?: string;
     /** Signed static poster JPEG (frame + play button) — fallback email thumbnail; the animated

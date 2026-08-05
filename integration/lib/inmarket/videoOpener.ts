@@ -51,7 +51,7 @@ const SYSTEM = `You write a TWO-EMAIL cold outreach SEQUENCE for a recruiting / 
 
 EMAIL 1 — TEXT ONLY, no video. A short cold intro anchored on the REAL signal (they are hiring for {{role}}). Offer to help FILL the search; do NOT claim you already have a specific candidate in hand, and do NOT invent locations, metrics, or candidate details. Specific, honest, human. 40-70 words, 2-4 short sentences. End with a low-friction question. Do NOT mention a video.
 
-EMAIL 2 — the FOLLOW-UP, sent a few days after email 1 (assume no reply yet). Reference the first note lightly ("coming back to my note about {{role}}", "wanted to put a face to it" — NEVER "circling back", "following up", "checking in": those are banned template phrases). Then introduce a short personalized video: the sender ON CAMERA, recorded over the prospect's ACTUAL job posting. Describe the video ONLY as that (a real person, a face to the name, over their real posting); never claim it contains role-specific analysis, sourcing plans, or fill-time estimates it does not have. Put the literal token {{videoembed}} on its OWN line where the video goes. 40-75 words. End with a low-friction question (worth a quick look? open to a short call?).
+EMAIL 2 — the FOLLOW-UP, sent a few days after email 1 (assume no reply yet). Reference the first note lightly ("coming back to my note about {{role}}", "wanted to put a face to it" — NEVER "circling back", "following up", "checking in": those are banned template phrases). Then introduce a short personalized video: the sender ON CAMERA, recorded over the prospect's ACTUAL job posting. If you mention the video's length, use the literal token {{videolength}} (it renders as the real duration); NEVER write a specific number of seconds yourself. Describe the video ONLY as that (a real person, a face to the name, over their real posting); never claim it contains role-specific analysis, sourcing plans, or fill-time estimates it does not have. Put the literal token {{videoembed}} on its OWN line where the video goes. 40-75 words. End with a low-friction question (worth a quick look? open to a short call?).
 
 Rules for BOTH: anchor on the real signal, no hype, no fake familiarity, no "I hope this finds you well", no emojis. Use ONLY these merge fields: {{firstName}}, {{company}}, {{role}}. Do not invent stats or names.
 Return STRICT JSON only, no prose: { "subject1": "...", "body1": "...", "subject2": "...", "body2": "...with {{videoembed}} on its own line..." }`;
@@ -103,29 +103,29 @@ export async function draftVideoOpener(input: OpenerInput): Promise<OpenerDraft 
  */
 const VIDEO_FOLLOWUPS: EmailDraft[] = [
   {
-    subject: "{a 30-second video for your {{Open_Role}} search|30 seconds on your {{Open_Role}} search}",
+    subject: "{a quick video for your {{Open_Role}} search|{{videolength}} on your {{Open_Role}} search}",
     body:
-      "Hi {{First_Name}}, {coming back to my note about|one more thought on} your {{Open_Role}}. {i'd rather not be just another name in your inbox|rather than send another email you'll skim past}, so i recorded a quick video, {it's 30 seconds of me|just me, about 30 seconds}, {putting a face to the name|so you can see there's a real person here}, recorded {over your actual {{Open_Role}} posting|right on top of your {{Open_Role}} posting}.\n\n{{videoembed}}\n\n{if the seat's still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a quick look?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {coming back to my note about|one more thought on} your {{Open_Role}}. {i'd rather not be just another name in your inbox|rather than send another email you'll skim past}, so i recorded a quick video, {it's {{videolength}} of me|just me, {{videolength}}}, {putting a face to the name|so you can see there's a real person here}, recorded {over your actual {{Open_Role}} posting|right on top of your {{Open_Role}} posting}.\n\n{{videoembed}}\n\n{if the seat's still open|if this is still a priority}, {i'd genuinely like to help|i'd love to help you get it filled}. {worth a quick look?|worth 10 minutes?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
     subject: "{put a face to my note about {{Open_Role}}|a face to go with my {{Open_Role}} note}",
     body:
-      "Hi {{First_Name}}, {wanted to put a face to my note about|thought a video would land better than another email about} your {{Open_Role}}. {i taped a short clip over your actual posting|i recorded 30 seconds in front of your job page} so you can {see who you'd be working with|see there's a real person on this end}.\n\n{{videoembed}}\n\n{if filling it is still on your plate|if it's still live}, {i think i can genuinely move it|i'd like to help you close it out}. {open to a quick look?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
+      "Hi {{First_Name}}, {wanted to put a face to my note about|thought a video would land better than another email about} your {{Open_Role}}. {i taped a short clip over your actual posting|i recorded {{videolength}} in front of your job page} so you can {see who you'd be working with|see there's a real person on this end}.\n\n{{videoembed}}\n\n{if filling it is still on your plate|if it's still live}, {i think i can genuinely move it|i'd like to help you close it out}. {open to a quick look?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
   },
   {
     subject: "{recorded this for you, {{First_Name}}|made you a quick video, {{First_Name}}}",
     body:
-      "Hi {{First_Name}}, {i made you a short video instead of writing another note|i'd rather show you than write another email}. {it's 30 seconds over your {{Open_Role}} posting|half a minute, recorded over your actual {{Open_Role}} page}, so you can {put a face to the name|see who's actually offering to help}.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the role's still open}, {i'd love to help|i think i can help}. {worth a look?|worth comparing notes?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {i made you a short video instead of writing another note|i'd rather show you than write another email}. {it's {{videolength}} over your {{Open_Role}} posting|{{videolength}}, recorded over your actual {{Open_Role}} page}, so you can {put a face to the name|see who's actually offering to help}.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the role's still open}, {i'd love to help|i think i can help}. {worth a look?|worth comparing notes?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
-    subject: "{30 seconds on your {{Open_Role}} posting|your {{Open_Role}} posting, in 30 seconds}",
+    subject: "{{{videolength}} on your {{Open_Role}} posting|your {{Open_Role}} posting, in {{videolength}}}",
     body:
       "Hi {{First_Name}}, {coming back to my note from the other day|one quick add to my note} about your {{Open_Role}}. {i pulled up your posting and recorded a short video over it|i recorded a quick clip right over your job page}, {so you can see it's really your posting, not a blast|so it's concrete, not another pitch}.\n\n{{videoembed}}\n\n{if it's still a live search|if the seat still needs filling}, {i'd genuinely like to take it on|i'd love to help}. {worth a quick watch?|open to a short call?}\n{Best|Thanks}, {{Your_Name}}",
   },
   {
     subject: "{a real person behind that last email|proof there's a person behind my last email}",
     body:
-      "Hi {{First_Name}}, {emails are easy to ignore, so here's my face instead|figured you should see who's actually writing you}. {i recorded 30 seconds over your {{Open_Role}} posting|a short clip on your {{Open_Role}}, short and to the point}, so you know {who you'd actually be dealing with|there's a real person on this end}.\n\n{{videoembed}}\n\n{if the role's still open|if this is still on your list}, {i'd like to help you fill it|i can genuinely move it}. {worth 30 seconds?|worth a quick look?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {emails are easy to ignore, so here's my face instead|figured you should see who's actually writing you}. {i recorded {{videolength}} over your {{Open_Role}} posting|a short clip on your {{Open_Role}}, short and to the point}, so you know {who you'd actually be dealing with|there's a real person on this end}.\n\n{{videoembed}}\n\n{if the role's still open|if this is still on your list}, {i'd like to help you fill it|i can genuinely move it}. {worth {{videolength}}?|worth a quick look?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
     subject: "{would rather show you than tell you|show, not tell, on {{Open_Role}}}",
@@ -145,12 +145,12 @@ const VIDEO_FOLLOWUPS: EmailDraft[] = [
   {
     subject: "{the video version of my last note|my last note, as a video}",
     body:
-      "Hi {{First_Name}}, {my last note was words, this one's a face|here's the human version of my last email}. {i recorded a short clip over your {{Open_Role}} posting|30 seconds on your {{Open_Role}}, recorded over the posting itself}, so you can {see who you're dealing with|put a person to the words}.\n\n{{videoembed}}\n\n{if it's still a priority|if the role's still open}, {i'd genuinely like to help|i can help you close it out}. {worth a quick look?|worth a conversation?}\n{Thanks|Best}, {{Your_Name}}",
+      "Hi {{First_Name}}, {my last note was words, this one's a face|here's the human version of my last email}. {i recorded a short clip over your {{Open_Role}} posting|{{videolength}} on your {{Open_Role}}, recorded over the posting itself}, so you can {see who you're dealing with|put a person to the words}.\n\n{{videoembed}}\n\n{if it's still a priority|if the role's still open}, {i'd genuinely like to help|i can help you close it out}. {worth a quick look?|worth a conversation?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
     subject: "{before you archive this, {{First_Name}}|one video before you archive me}",
     body:
-      "Hi {{First_Name}}, {before this thread goes quiet|before you file me under later}, {i recorded you a short video|here's 30 seconds of me} over your {{Open_Role}} posting, {a real person you can actually size up|who i am and why i'm writing}.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the search is still live}, {i'd love to help|i'd like to take it on}. {worth 30 seconds?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
+      "Hi {{First_Name}}, {before this thread goes quiet|before you file me under later}, {i recorded you a short video|here's {{videolength}} of me} over your {{Open_Role}} posting, {a real person you can actually size up|who i am and why i'm writing}.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the search is still live}, {i'd love to help|i'd like to take it on}. {worth {{videolength}}?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
   },
 ];
 

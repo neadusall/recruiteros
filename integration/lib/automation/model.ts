@@ -63,6 +63,15 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
     return pv.watchUrl + extra;
   })();
   vals.watchlink = watch;
+  // {{videolength}}: the video's REAL length ("45 seconds", "about a minute"). When the exact
+  // duration was not recorded, "under a minute" keeps the copy honest for standard renders.
+  vals.videolength = (() => {
+    const d = Math.round(Number(pv?.durationSec) || 0);
+    if (!d) return "under a minute";
+    if (d <= 70) return `${d} seconds`;
+    const min = Math.round(d / 60);
+    return min <= 1 ? "about a minute" : `about ${min} minutes`;
+  })();
   vals.videogif = pv?.gifUrl || "";
   vals.videoposter = pv?.posterUrl || "";
   // Loom-look embed, centered like a share card, rounded, with a "Watch" line beneath for

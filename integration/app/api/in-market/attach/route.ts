@@ -100,6 +100,16 @@ export async function POST(req: Request) {
   // (cached by name, non-blocking) and stamp each prospect with THEIR videoKey + signed links.
   // Without clipId we fall back to the single shared videoKey.
   const clipId = String(b?.clipId ?? "").trim();
+  // The video's REAL length, stamped on the prospect so {{videolength}} renders honestly:
+  // an explicit compose override wins, else the recorded clip's own duration.
+  const durRaw = Number(b?.durationSec);
+  let videoDurationSec: number | undefined = Number.isFinite(durRaw) && durRaw > 0 ? Math.round(durRaw) : undefined;
+  if (!videoDurationSec && clipId) {
+    try {
+      const { clipDurationSec } = await import("../../../../lib/inmarket/roleVideo");
+      videoDurationSec = (await clipDurationSec(clipId)) || undefined;
+    } catch { /* fallback copy stays honest without it */ }
+  }
   const personalize = !!clipId && b?.personalize !== false;
   const reqShot = { company, roleTitle, roleUrl: b?.roleUrl ? String(b.roleUrl) : undefined };
   const { cleanFirstName } = await import("../../../../lib/inmarket/nameAudio");
@@ -130,6 +140,7 @@ export async function POST(req: Request) {
     const pv = {
       videoKey: vk, watchUrl: sh.watch, gifUrl: sh.gif, mp4Url: sh.mp4, posterUrl: sh.poster,
       roleTitle: roleTitle || undefined, sequence, expiresAt: sh.exp, at: nowIso,
+      durationSec: videoDurationSec,
     };
     const next: Prospect = { ...p, personalizedVideo: pv };
     if (campaignId) next.campaignId = campaignId;

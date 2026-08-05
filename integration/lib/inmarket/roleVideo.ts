@@ -586,6 +586,16 @@ function ffprobeBin(): string {
 }
 
 /** Duration of a media file in ms (the recorded webcam clip), or null if ffprobe can't read it. */
+/** The recorded clip's real length in seconds (the composite matches it when no explicit
+ *  duration override is set) - lets senders render {{videolength}} honestly. */
+export async function clipDurationSec(clipId: string): Promise<number | null> {
+  const clip = await getClip(clipId);
+  if (!clip) return null;
+  try { await materializeClip(clip); } catch { /* probe still tries the local path */ }
+  const ms = await probeDurationMs(clipPath(clip.id, clip.ext)).catch(() => null);
+  return ms ? Math.round(ms / 1000) : null;
+}
+
 async function probeDurationMs(file: string): Promise<number | null> {
   return new Promise((resolve) => {
     let proc: ReturnType<typeof spawn>;
