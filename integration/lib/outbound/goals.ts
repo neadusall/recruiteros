@@ -56,7 +56,10 @@ export const DEFAULT_TRIGGERS: TriggerThresholds = {
   linkedinUtilPct: 60,
   smsReplyWaitMinutes: 60,
   noPostDays: 7,
-  bounceRatePct: 5,
+  // Mirrors the sending governor's hard stop (lib/sending/policy.ts): the
+  // accountability dashboard must flag a recruiter's list BEFORE the governor
+  // pauses their domains, never after.
+  bounceRatePct: 2,
   optOutRatePct: 2,
   responseDropPct: 30,
   activityDropPct: 35,

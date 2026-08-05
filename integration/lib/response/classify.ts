@@ -15,7 +15,7 @@ const MODEL = process.env.RECRUITEROS_LLM_MODEL ?? "claude-sonnet-4-6";
 
 const VALID: ResponseClass[] = [
   "positive", "soft_yes", "timing_objection", "fit_objection",
-  "referral", "not_interested", "stop", "unclassified",
+  "referral", "not_interested", "stop", "auto_reply", "unclassified",
 ];
 
 const SYSTEM = `You classify inbound replies to recruiter / business-development outreach. Return strict JSON only.
@@ -27,10 +27,11 @@ Classes:
 - referral: points you to someone else. Capture who.
 - not_interested: a clean no, no hostility.
 - stop: asks to stop / unsubscribe / do not contact.
+- auto_reply: an automated response, not a human: out-of-office / vacation responder / "I'm away until", "thanks, we received your message" bots, delivery notices. A human who ALSO answers the outreach inside an OOO is NOT auto_reply.
 - unclassified: genuinely ambiguous; abstain rather than guess.
 Capture timing for timing_objection and referralTo for referral when present.`;
 
-/** Free, instant path for opt-outs and obvious booking intent. */
+/** Free, instant path for opt-outs, obvious booking intent, and machine mail. */
 export function fastPath(text: string): Classification | null {
   const t = text.toLowerCase().trim();
   if (/\b(stop|unsubscribe|do not contact|remove me|opt[\s-]?out|take me off)\b/.test(t)) {
@@ -39,10 +40,25 @@ export function fastPath(text: string): Classification | null {
   if (/\b(booked|calendly\.com|cal\.com\/|i picked|just grabbed a slot)\b/.test(t)) {
     return { class: "positive", confidence: 0.95, reasoning: "booking-link interaction" };
   }
+  // OOO / responder markers near the top of the message (a human quoting an OOO
+  // deep in a real answer shouldn't trip this, so only scan the first ~300 chars).
+  const head = t.slice(0, 300);
+  if (/\b(out of (the )?office|on vacation|annual leave|parental leave|maternity leave|paternity leave|automatic reply|auto[\s-]?repl(y|ied)|autoreply|away from (my )?(email|desk)|limited access to (my )?email|currently (out|away|traveling|travelling)|(will|i'll) (respond|reply|return) (when|on|upon))\b/.test(head)) {
+    return { class: "auto_reply", confidence: 0.9, reasoning: "OOO/responder marker" };
+  }
   return null;
 }
 
-export async function classify(text: string): Promise<Classification> {
+export interface ClassifyHints {
+  /** True when the raw message carried machine headers (Auto-Submitted,
+   *  X-Autoreply, Precedence: auto_reply), a definitive auto_reply signal. */
+  autoSubmitted?: boolean;
+}
+
+export async function classify(text: string, hints?: ClassifyHints): Promise<Classification> {
+  if (hints?.autoSubmitted) {
+    return { class: "auto_reply", confidence: 0.98, reasoning: "auto-submitted header" };
+  }
   const fast = fastPath(text);
   if (fast) return fast;
 

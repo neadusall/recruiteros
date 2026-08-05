@@ -9,7 +9,7 @@ export type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, Recr
 export {
   ready, persist, toPublic,
   listInboxes, getInbox, findInboxByEmail, addInbox, saveInbox, deleteInbox,
-  assignOwner, setStatus, recruiterPools, stats, recordSend, resetDaily, resetDailyIfNewDay, listSenderWorkspaceIds,
+  assignOwner, setStatus, recruiterPools, stats, recordSend, recordBounce, recordSendFailure, resetDaily, resetDailyIfNewDay, listSenderWorkspaceIds,
   sendCapacity,
 } from "./store";
 export type { NewInboxInput, RecruiterCapacity, SendCapacity } from "./store";
@@ -21,6 +21,9 @@ export type { FleetSyncReport } from "./fleetSync";
 
 export { runSenderHealthGuard, guardStatus } from "./healthGuard";
 export type { GuardReport, GuardAction } from "./healthGuard";
+
+export { runReplySync } from "./replySync";
+export type { ReplySyncReport } from "./replySync";
 
 export { COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCap, coldCapFor, coldMaxPerInbox, RAMP_BY_WEEK } from "./limits";
 

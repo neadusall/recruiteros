@@ -13,8 +13,9 @@
 
 import { allDomains, allMailboxes, saveDomain, saveMailbox } from "./store";
 import type { SendingDomain, DeliveryMetrics } from "./types";
+import { BOUNCE_PAUSE_RATE, COMPLAINT_PAUSE_RATE, SPAM_PAUSE_RATE_PCT, DOMAIN_MIN_SAMPLE } from "./policy";
 
-export const THRESHOLDS = { bounceRate: 0.02, complaintRate: 0.001, spamRatePct: 0.3 };
+export const THRESHOLDS = { bounceRate: BOUNCE_PAUSE_RATE, complaintRate: COMPLAINT_PAUSE_RATE, spamRatePct: SPAM_PAUSE_RATE_PCT };
 
 function rate(part: number, whole: number): number {
   return whole > 0 ? part / whole : 0;
@@ -23,7 +24,7 @@ function rate(part: number, whole: number): number {
 /** Evaluate one domain; returns a pause reason or null. */
 export function evaluateDomain(d: SendingDomain): string | null {
   const m: DeliveryMetrics | undefined = d.metrics;
-  if (m && m.sent >= 50) {
+  if (m && m.sent >= DOMAIN_MIN_SAMPLE) {
     const b = rate(m.bounced, m.sent);
     const c = rate(m.complained, m.sent);
     if (b > THRESHOLDS.bounceRate) return `bounce rate ${(b * 100).toFixed(1)}% > ${(THRESHOLDS.bounceRate * 100)}%`;

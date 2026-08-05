@@ -140,6 +140,21 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
         const guarded = await guardTouch(workspaceId, t);
         if (guarded) return guarded;
       }
+      // PRE-SEND LIST HYGIENE (lib/sending/verify): provable garbage never
+      // leaves. Bad syntax, a stored "invalid" verdict, or a domain with no MX
+      // permanently disqualifies the address; the prospect is parked as
+      // do_not_contact so the cadence stops retrying a dead mailbox every tick.
+      if (t.prospect.email) {
+        const { preSendCheck } = await import("../sending/verify");
+        const verdict = await preSendCheck(t.prospect.email, t.prospect.emailVerification);
+        if (!verdict.ok) {
+          try {
+            const fresh = await getCore().getProspect(t.prospect.id);
+            if (fresh && fresh.status !== "do_not_contact") { fresh.status = "do_not_contact"; await getCore().saveProspect(fresh); }
+          } catch { /* best-effort status flip */ }
+          return { ok: false, channel: "email", provider: "verify", error: verdict.reason };
+        }
+      }
       // WHITE-LABEL FAIL-CLOSED (same rule as transactional mail): resolve the
       // workspace's brand identity ONCE. A white-label tenant's cold email may
       // only leave through its own inbox pool; when no compliant inbox exists
@@ -163,21 +178,42 @@ async function dispatch(workspaceId: string, t: SendTouch): Promise<SendResult> 
       const { mtaPreferred, sendEmail } = await import("../providers/mta");
       if (mtaPreferred() && t.prospect.email) {
         const { complianceFooter } = await import("../sending/compliance");
+        const { unsubscribeHeaders } = await import("../sending/unsubscribe");
         const footer = complianceFooter(workspaceId, t.prospect.email, brand);
+        // Real threading: follow-ups ride the first email's conversation.
+        const thread = threadPlanFor(t, (process.env.RECRUITEROS_APP_URL || "recruitersos.co").replace(/^https?:\/\//, ""));
+        const payload = emailPayload(t.text);
         const m = await sendEmail(workspaceId, {
           to: t.prospect.email,
-          subject: t.subject ?? "",
-          htmlBody: emailPayload(t.text).html + footer.html,
-          fromName: t.prospect.company ? undefined : undefined,
+          subject: thread.subject,
+          htmlBody: payload.html + footer.html,
+          plainBody: payload.text + footer.text,
+          headers: {
+            ...unsubscribeHeaders(workspaceId, t.prospect.email),
+            ...(thread.messageId ? { "Message-ID": thread.messageId } : {}),
+            ...(thread.inReplyTo ? { "In-Reply-To": thread.inReplyTo } : {}),
+            ...(thread.references ? { References: thread.references } : {}),
+          },
+          coldOutreach: true,
         });
         // A clean skip (no capacity / not ready) falls through to Instantly so a
         // send is never silently dropped during warm-up.
-        if (m.ok) return { ok: true, channel: "email", provider: "mta", providerMessageId: m.messageId };
+        if (m.ok) {
+          await stampThread(t, thread);
+          return { ok: true, channel: "email", provider: "mta", providerMessageId: m.messageId };
+        }
         if (m.skipped === "suppressed") return { ok: false, channel: "email", provider: "mta", error: "suppressed" };
       }
+      // Instantly fallback: only a real, configured Instantly send may report
+      // ok. The old behavior returned ok:true on the unconfigured dry-run, so a
+      // misconfigured pool + MTA "looked sent" while nothing left the building,
+      // and the cadence advanced the sequence past a send that never happened.
       const cid = t.campaignChannelIds?.instantlyCampaignId ?? "";
       const r: any = await instantly.addLeads(cid, [{ email: t.prospect.email ?? "", first_name: t.prospect.firstName, company_name: t.prospect.company, custom_variables: { subject: t.subject, body: t.text } }]);
-      return { ok: true, channel: "email", provider: "instantly", dryRun: r?.dryRun, providerMessageId: r?.id };
+      if (r?.dryRun) {
+        return { ok: false, channel: "email", provider: "instantly", dryRun: true, error: "email_no_provider" };
+      }
+      return { ok: true, channel: "email", provider: "instantly", providerMessageId: r?.id };
     }
     case "linkedin": {
       const pid = t.prospect.linkedinUrl ?? "";
@@ -315,14 +351,41 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
     const { signatureFor } = await import("../sending/signature");
     const sig = signatureFor({ inboxEmail: inbox.email, ownerId: inbox.ownerId, ownerName: inbox.ownerName });
     const footer = complianceFooter(workspaceId, t.prospect.email, brand);
+    // Real threading: the first email mints a Message-ID on the inbox's own
+    // domain; every follow-up carries In-Reply-To/References + "Re: <subject>"
+    // so the whole sequence is ONE conversation in the recipient's inbox.
+    const thread = threadPlanFor(t, inbox.email.split("@")[1] || "mail.invalid");
     const res = await sendViaInbox(inbox, {
       to: t.prospect.email,
-      subject: t.subject ?? "",
+      subject: thread.subject,
       html: payload.html + sig.html + footer.html,
       text: payload.text + sig.text + footer.text,
       headers: unsubscribeHeaders(workspaceId, t.prospect.email, inbox.email),
+      messageId: thread.messageId,
+      inReplyTo: thread.inReplyTo,
+      references: thread.references,
     });
-    if (!res.ok) return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: res.error };
+    if (!res.ok) {
+      // A recipient rejection is a hard bounce: suppress the address, count it
+      // against this inbox's window, and park the prospect. Anything else is a
+      // transport failure: stamp it so three strikes stop the rotation from
+      // picking a dead login forever (it used to be re-picked FIRST).
+      const { isRecipientRejection } = await import("../sending/bounces");
+      const senders = await import("../senders");
+      if (res.error && isRecipientRejection(res.error)) {
+        const store = await import("../sending/store");
+        await store.suppress(t.prospect.email, "bounce", "smtp", { kind: "hard" });
+        await senders.recordBounce(workspaceId, inbox.id);
+        try {
+          const fresh = await getCore().getProspect(t.prospect.id);
+          if (fresh && fresh.status !== "do_not_contact") { fresh.status = "do_not_contact"; await getCore().saveProspect(fresh); }
+        } catch { /* best-effort */ }
+        return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: "bounced" };
+      }
+      await senders.recordSendFailure(workspaceId, inbox.id, res.error || "smtp_send_failed");
+      return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: res.error };
+    }
+    await stampThread(t, thread, res.messageId);
     await recordSend(inbox);
     if (t.prospect.senderInboxId !== inbox.id) {
       try {
@@ -335,6 +398,44 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
   } catch {
     return null; // any error -> fall through to existing providers
   }
+}
+
+/* ---------------- real email threading ---------------- */
+
+export interface ThreadPlan {
+  subject: string;
+  /** Minted for the FIRST email of a sequence (RFC 5322 Message-ID). */
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string;
+  isFollowUp: boolean;
+}
+
+/** Build the threading plan for this touch: mint an anchor on the first email,
+ *  ride the stored conversation on every later one. */
+function threadPlanFor(t: SendTouch, senderDomain: string): ThreadPlan {
+  const thread = t.prospect.emailThread;
+  const raw = t.subject ?? "";
+  if (thread?.messageId) {
+    const base = thread.subject || raw;
+    const subject = /^re:/i.test(base) ? base : `Re: ${base}`;
+    return { subject, inReplyTo: thread.messageId, references: thread.messageId, isFollowUp: true };
+  }
+  const mid = `<ros.${rid("m")}.${Date.now().toString(36)}@${senderDomain}>`;
+  return { subject: raw, messageId: mid, isFollowUp: false };
+}
+
+/** Persist the thread anchor after the FIRST successful email send. */
+async function stampThread(t: SendTouch, plan: ThreadPlan, sentMessageId?: string): Promise<void> {
+  if (plan.isFollowUp) return;
+  const messageId = plan.messageId || sentMessageId;
+  if (!messageId) return;
+  const thread = { messageId, subject: plan.subject, startedAt: nowIso() };
+  t.prospect.emailThread = thread;
+  try {
+    const fresh = await getCore().getProspect(t.prospect.id);
+    if (fresh && !fresh.emailThread) { fresh.emailThread = thread; await getCore().saveProspect(fresh); }
+  } catch { /* best-effort stamp */ }
 }
 
 /** The workspace's brand identity (house or white-label), used by the sending-domain
@@ -390,6 +491,15 @@ async function logTouch(workspaceId: string, t: SendTouch, r: SendResult): Promi
   const core = getCore();
   const ref = t.prospect.atsPersonId ?? t.prospect.email ?? t.prospect.id;
   let eventId: string | undefined;
+  if (r.ok && !r.dryRun && t.prospect.email) {
+    // Email-level cooldown memory: the warehouse stamp below only lands for
+    // people with a DataRecord; the ledger covers everyone (cold BD included)
+    // so the 14-day no-double-contact rule actually holds.
+    try {
+      const { recordContact } = await import("../outreach/contactLedger");
+      await recordContact(workspaceId, t.prospect.email, t.channel);
+    } catch { /* best-effort */ }
+  }
   if (r.ok && !r.dryRun) {
     // Workspace-aware write-back: stamp the warehouse record (the guard sees the
     // touch immediately) and log a real person_event in the connected Loxo, so

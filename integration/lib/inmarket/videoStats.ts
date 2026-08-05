@@ -124,6 +124,19 @@ export async function recordVideoEvent(e: VideoEventIn): Promise<void> {
   scheduleSave();
 }
 
+/**
+ * Did THIS prospect engage with their video? Scans the recent-events feed for
+ * the prospect's rcpt attribution (the watch link carries &rcpt=<prospectId>).
+ * Drives the Day-4 close branch: viewers get the warm variant, non-viewers the
+ * standard one. Best-effort: the feed is capped, so an old view can age out;
+ * that only ever downgrades to the SAFE (non-viewer) copy.
+ */
+export async function recipientEngaged(prospectId: string): Promise<boolean> {
+  if (!prospectId) return false;
+  const st = await ensure();
+  return st.feed.some((f) => f.recipient === prospectId && (f.type === "play" || f.type === "complete" || f.type === "open"));
+}
+
 export interface VideoStatRow {
   videoKey: string;
   company?: string;

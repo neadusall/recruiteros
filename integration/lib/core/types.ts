@@ -76,6 +76,12 @@ export interface SequenceStep {
 }
 
 /** A campaign: the unit of work for a targeting motion. */
+/** Per-day Autopilot enrollment counter (true daily cap; persists across ticks). */
+export interface EnrollClock {
+  day: string;   // YYYY-MM-DD (UTC)
+  count: number; // sequences started that day
+}
+
 export interface Campaign {
   id: string;
   workspaceId: string;
@@ -89,6 +95,9 @@ export interface Campaign {
   /** Score at/above which a Day-14 voice note is allowed (HOT tier, default 80). */
   voiceNoteThreshold: number;
   dailyCap: number;
+  /** True-daily enrollment counter behind dailyCap (persists across the 30-min
+   *  ticks; without it the cap silently multiplied by ticks-per-day). */
+  enrollClock?: EnrollClock;
   status: "draft" | "active" | "paused";
   createdAt: string;
   /** The visually built multi-channel sequence (Campaign Studio). Optional so
@@ -154,6 +163,11 @@ export interface CampaignModelTouch {
   label: string;
   subject?: string;
   body: string;
+  /** Watch-aware branch (video sequences): when the prospect's watch-page
+   *  telemetry shows they engaged with the video, the cadence renders these
+   *  instead of subject/body. Absent = no branching for this touch. */
+  subjectWatched?: string;
+  bodyWatched?: string;
 }
 
 /** The LLM-drafted, human-approved outreach model for a campaign. */
@@ -213,6 +227,14 @@ export interface Prospect {
     reason?: string;
     source?: "reoon" | "smtp" | "dns";
     checkedAt: string;
+  };
+  /** Real email threading state: the RFC Message-ID + subject of the FIRST email
+   *  sent to this prospect. Every later email touch rides the same conversation
+   *  (In-Reply-To/References + "Re: <subject>") instead of faking a re: prefix. */
+  emailThread?: {
+    messageId: string;
+    subject: string;
+    startedAt: string;
   };
   linkedinUrl?: string;
   /** Primary outreach number (SMS/voice). Defaults to mobile when known. */

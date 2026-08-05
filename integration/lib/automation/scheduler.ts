@@ -115,6 +115,35 @@ async function tickSending(): Promise<void> {
   } catch { /* guard is best-effort per tick */ }
 }
 
+/** Reply sync: pull replies + DSN bounces off our own pool inboxes over IMAP.
+ *  The webhookless half of the reply pipeline; without it, replies to
+ *  pool/MTA cold sends are invisible and sequences never stop. */
+async function tickReplySync(): Promise<void> {
+  const { runReplySync } = await import("../senders");
+  await runReplySync();
+}
+
+/** SMTP credential sweep: re-verify the stalest pool logins so a dead login is
+ *  flagged (and an errored one revived) without anyone opening the Senders tab. */
+async function tickSmtpAuth(): Promise<void> {
+  const { sweepSmtpAuth } = await import("../senders/infra");
+  const { listSenderWorkspaceIds } = await import("../senders");
+  for (const ws of await listSenderWorkspaceIds()) {
+    try { await sweepSmtpAuth(ws, 30); } catch { /* one workspace's sweep */ }
+  }
+}
+
+/** Warm-up engagement round (mailbox<->seed sends + opens + replies). A no-op
+ *  unless SENDING_WARMUP_ENGAGE=1; when on, it needs minutes-cadence, which the
+ *  6h sending tick could never provide. */
+async function tickWarmupEngage(): Promise<void> {
+  if (process.env.SENDING_WARMUP_ENGAGE !== "1") return;
+  const { listSendingWorkspaceIds, runWarmupRound } = await import("../sending");
+  for (const ws of await listSendingWorkspaceIds()) {
+    try { await runWarmupRound(ws); } catch { /* one workspace's round */ }
+  }
+}
+
 /** Send due booking reminder texts (24h and 1h before each booked call). */
 async function tickBookingSms(): Promise<void> {
   const { tickBookingReminders } = await import("../inmarket/booking");
@@ -234,6 +263,9 @@ const TICKS: TickSpec[] = [
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },
   { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },
   { key: "sending", label: "Email warm-up + reputation", env: "RECRUITEROS_SENDING_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 75_000, fn: tickSending },
+  { key: "reply_sync", label: "Inbox reply + bounce sync (own inboxes)", env: "RECRUITEROS_REPLY_SYNC_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 85_000, fn: tickReplySync },
+  { key: "smtp_auth", label: "SMTP login sweep (pool credentials)", env: "RECRUITEROS_SMTP_AUTH_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 140_000, fn: tickSmtpAuth },
+  { key: "warmup_engage", label: "Warm-up engagement rounds", env: "RECRUITEROS_WARMUP_ENGAGE_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 95_000, fn: tickWarmupEngage },
   { key: "outbound", label: "Outbound performance + accountability", env: "RECRUITEROS_OUTBOUND_TICK_MS", defaultMs: 10 * 60_000, firstDelayMs: 100_000, fn: tickOutbound },
   { key: "resume_inbox", label: "Resume inbox (emailed resumes -> candidate profiles)", env: "RECRUITEROS_RESUME_INBOX_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 70_000, fn: tickResumeInbox },
 ];

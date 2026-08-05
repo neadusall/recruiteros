@@ -384,6 +384,37 @@ export async function recordSend(m: SenderInbox): Promise<void> {
   m.sentToday += 1;
   m.sent += 1;
   m.lastSendAt = nowIso();
+  // A clean send proves transport health again.
+  m.errorStreak = 0;
+  m.lastError = undefined;
+  m.updatedAt = nowIso();
+  save();
+}
+
+/** A recipient rejected the message (hard bounce seen at SMTP time or via a
+ *  DSN pulled by reply-sync). Feeds the health guard's windowed bounce rule. */
+export async function recordBounce(workspaceId: string, inboxId: string): Promise<void> {
+  await hydrate();
+  const m = state.inboxes.find((x) => x.id === inboxId && x.workspaceId === workspaceId);
+  if (!m) return;
+  m.bounced = (m.bounced || 0) + 1;
+  m.updatedAt = nowIso();
+  save();
+}
+
+/**
+ * A transport-level send failure (auth / connection / TLS), NOT a bounce.
+ * Stamps the error and, after three consecutive failures, flips the inbox to
+ * "error" so the rotation stops picking a dead login. sweepSmtpAuth /
+ * reviveErroredSmtpLogins bring it back once the credentials verify again.
+ */
+export async function recordSendFailure(workspaceId: string, inboxId: string, error: string): Promise<void> {
+  await hydrate();
+  const m = state.inboxes.find((x) => x.id === inboxId && x.workspaceId === workspaceId);
+  if (!m) return;
+  m.lastError = (error || "send failed").slice(0, 300);
+  m.errorStreak = (m.errorStreak || 0) + 1;
+  if (m.errorStreak >= 3 && m.status !== "paused") m.status = "error";
   m.updatedAt = nowIso();
   save();
 }

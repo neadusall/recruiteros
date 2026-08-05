@@ -85,7 +85,16 @@ async function run(req: Request) {
     revive = { workspaces: ids.length, checked, revived, stillFailing, cleared };
   } catch (e: any) { revive = { error: e?.message ?? "revive_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive });
+  // Reply + bounce sync over the pool's own inboxes (IMAP). The hourly server
+  // timer drives this in prod even when the in-process scheduler is off, so
+  // replies to pool/MTA cold sends always stop sequences and reach a human.
+  let replies: unknown = null;
+  try {
+    const { runReplySync } = await import("../../../../lib/senders");
+    replies = await runReplySync();
+  } catch (e: any) { replies = { error: e?.message ?? "reply_sync_failed" }; }
+
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, replies });
 }
 
 export const GET = run;

@@ -49,7 +49,15 @@ export interface SenderInbox {
   bounced: number;
   lastSendAt?: string;
   lastError?: string;
+  /** Consecutive transport failures; 3 flips the inbox to "error" until the
+   *  auth sweep proves the login again. Reset by any clean send. */
+  errorStreak?: number;
   pausedReason?: string;
+
+  // Reply-sync cursor (lib/senders/replySync): IMAP UID high-water mark so each
+  // poll only reads mail that arrived since the last one.
+  replySyncUid?: number;
+  replySyncAt?: string;
 
   // Health guard (set ONLY by lib/senders/healthGuard; operator pauses never set autoHold)
   autoHold?: boolean;         // the guard (not an operator) paused this inbox

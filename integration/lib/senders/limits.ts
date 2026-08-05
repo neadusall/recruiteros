@@ -46,11 +46,20 @@ export function coldCap(storedDailyCap?: number): number {
 /** Effective cold cap for one inbox: provider-, status- and age-aware. */
 export function coldCapFor(m: { status?: string; createdAt?: string; provider?: string }): number {
   if (m.status === "paused" || m.status === "error") return 0;
+  const created = m.createdAt ? Date.parse(m.createdAt) : NaN;
+  const ageDays = Number.isFinite(created) ? Math.max(0, (Date.now() - created) / 86_400_000) : Infinity;
+  // A brand-new Email ID (just provisioned/imported) sends NO cold mail until
+  // it has a few days of history; legacy rows without createdAt are exempt.
+  if (ageDays < coldMinAgeDaysPool()) return 0;
   if (m.provider === "sending-ac") return SENDING_AC_PER_INBOX; // flat, never ramps
   if (m.status === "warming") return COLD_PER_INBOX;
-  const created = m.createdAt ? Date.parse(m.createdAt) : NaN;
-  const ageDays = Number.isFinite(created) ? Math.max(0, (Date.now() - created) / 86_400_000) : 0;
-  const week = Math.floor(ageDays / 7);
+  const week = Math.floor((Number.isFinite(ageDays) ? ageDays : 999) / 7);
   const cap = week < RAMP_BY_WEEK.length ? RAMP_BY_WEEK[week] : coldMaxPerInbox();
   return Math.min(cap, coldMaxPerInbox());
+}
+
+/** Days a freshly imported Email ID must age before cold sends (env-tunable). */
+function coldMinAgeDaysPool(): number {
+  const n = Number(process.env.SENDING_COLD_MIN_AGE_DAYS);
+  return Number.isFinite(n) && n >= 0 && n <= 60 ? Math.floor(n) : 3;
 }

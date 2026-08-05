@@ -19,16 +19,26 @@ function safeEq(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
-function hmacOk(raw: string, sig: string, secret?: string): boolean {
-  if (!secret) return true;
+/** Unset-secret sources are allowed through (live reply flows must not break on
+ *  a missing env), but LOUDLY: one warning per source per process, so the gap is
+ *  visible in the logs instead of silently authenticating nothing. */
+const warned = new Set<string>();
+function warnUnverified(source: string, envVar: string): void {
+  if (warned.has(source)) return;
+  warned.add(source);
+  console.error(`[ROS-DENY] response webhook "${source}" is UNVERIFIED: set ${envVar} to enforce signatures`);
+}
+
+function hmacOk(raw: string, sig: string, secret?: string, source?: string, envVar?: string): boolean {
+  if (!secret) { if (source && envVar) warnUnverified(source, envVar); return true; }
   if (!sig) return false;
   const digest = createHmac("sha256", secret).update(raw).digest("hex");
   return safeEq(sig.replace(/^sha256=/, ""), digest);
 }
 
 /** ED25519 over `${timestamp}|${raw}` against a base64 public key (Telnyx style). */
-function ed25519Ok(raw: string, sig: string, timestamp: string, publicKeyB64?: string): boolean {
-  if (!publicKeyB64) return true;
+function ed25519Ok(raw: string, sig: string, timestamp: string, publicKeyB64?: string, source?: string, envVar?: string): boolean {
+  if (!publicKeyB64) { if (source && envVar) warnUnverified(source, envVar); return true; }
   if (!sig || !timestamp) return false;
   try {
     const key = {
@@ -47,15 +57,17 @@ export function verifyWebhook(source: ResponseSource, req: Request, raw: string)
   const h = (name: string) => req.headers.get(name) ?? "";
   switch (source) {
     case "instantly":
-      return hmacOk(raw, h("x-instantly-signature"), process.env.INSTANTLY_WEBHOOK_SECRET);
+      return hmacOk(raw, h("x-instantly-signature"), process.env.INSTANTLY_WEBHOOK_SECRET, source, "INSTANTLY_WEBHOOK_SECRET");
     case "salesrobot":
-      return hmacOk(raw, h("x-salesrobot-signature"), process.env.SALESROBOT_WEBHOOK_SECRET);
+      return hmacOk(raw, h("x-salesrobot-signature"), process.env.SALESROBOT_WEBHOOK_SECRET, source, "SALESROBOT_WEBHOOK_SECRET");
     case "unipile":
-      return hmacOk(raw, h("x-unipile-signature"), process.env.UNIPILE_WEBHOOK_SECRET);
+      return hmacOk(raw, h("x-unipile-signature"), process.env.UNIPILE_WEBHOOK_SECRET, source, "UNIPILE_WEBHOOK_SECRET");
     case "taltxt":
-      return ed25519Ok(raw, h("telnyx-signature-ed25519"), h("telnyx-timestamp"), process.env.TALTXT_PUBLIC_KEY);
+      return ed25519Ok(raw, h("telnyx-signature-ed25519"), h("telnyx-timestamp"), process.env.TALTXT_PUBLIC_KEY, source, "TALTXT_PUBLIC_KEY");
     default:
-      return true;
+      // "smtp" (our own IMAP pull) never arrives via webhook; any other unknown
+      // source is rejected rather than silently trusted.
+      return false;
   }
 }
 

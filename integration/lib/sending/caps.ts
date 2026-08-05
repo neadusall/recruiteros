@@ -6,6 +6,7 @@
  */
 
 import { allMailboxes, allDomains, saveMailbox, getServer, saveServer } from "./store";
+import { coldMinAgeDays } from "./policy";
 import type { Mailbox, SendingDomain, MtaServer } from "./types";
 
 /**
@@ -41,9 +42,17 @@ export async function recordServerSend(workspaceId: string, serverId?: string): 
   await saveServer(s);
 }
 
-/** A mailbox can send now if active/warming, not paused, and under its cap. */
+/** A mailbox can send now if active/warming, not paused, under its cap, and
+ *  old enough for COLD mail. A mailbox created hours ago has no reputation at
+ *  all; the ramp cap alone was letting day-0 boxes send 10 cold emails. */
 function sendable(m: Mailbox): boolean {
-  return m.status !== "paused" && m.sentToday < m.dailyCap;
+  if (m.status === "paused" || m.sentToday >= m.dailyCap) return false;
+  const minDays = coldMinAgeDays();
+  if (minDays > 0) {
+    const created = Date.parse(m.createdAt);
+    if (Number.isFinite(created) && Date.now() - created < minDays * 86_400_000) return false;
+  }
+  return true;
 }
 
 /**

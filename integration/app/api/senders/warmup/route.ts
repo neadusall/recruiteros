@@ -252,7 +252,11 @@ function computeHealth(d: WarmupDomainRow): { score: number; label: "healthy" | 
   if (d.dns) {
     score += (d.dns.spf ? 9 : 0) + (d.dns.dmarc ? 9 : 0) + (d.dns.mx ? 4 : 0) + (d.dns.dkim ? 3 : 0); // 0-25
   } else {
-    score += 18;                                                             // unknown DNS: neutral, not punitive
+    // Unknown DNS scores like a bare-MX domain (4/25), never like a verified
+    // one: 18 "neutral" points used to rank an UNPROBED domain above one with
+    // confirmed-missing SPF+DMARC, which inverted the operator's priority list.
+    // The probe cache self-heals unknowns within the hour, so this is brief.
+    score += 4;
   }
   score += Math.max(0, 15 - d.paused * 3);                                   // 0-15
   // A confirmed public-blocklist listing is an emergency regardless of warm-up

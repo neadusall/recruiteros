@@ -7,9 +7,10 @@
 import { resolveSender, saveDomain, saveMailbox, recordEvent, suppress } from "./store";
 import { ensureMetrics, runGovernor } from "./governor";
 import { isMachineOpen } from "./openClass";
+import { classifyBounce } from "./bounces";
 import type { SendEvent } from "./types";
 
-export type DeliveryEventType = "delivered" | "bounce" | "complaint" | "open";
+export type DeliveryEventType = "delivered" | "bounce" | "complaint" | "open" | "held";
 
 /**
  * Apply one event. `from` maps it to a domain/mailbox; `to` is the recipient
@@ -35,7 +36,10 @@ export async function applyDeliveryEvent(ev: {
 
   const machineOpen = ev.type === "open" && isMachineOpen({ eventName: ev.eventName, userAgent: ev.userAgent, ip: ev.ip });
 
-  if (domain) {
+  // "held" is Postal parking the message (content/queue hold), not a recipient
+  // rejection: visible in the event feed, but it must not poison the bounce
+  // rate or suppress the address.
+  if (domain && ev.type !== "held") {
     const m = ensureMetrics(domain);
     if (ev.type === "delivered") m.delivered += 1;
     else if (ev.type === "bounce") m.bounced += 1;
@@ -46,13 +50,16 @@ export async function applyDeliveryEvent(ev: {
     }
     await saveDomain(domain);
   }
-  if (mailbox) {
+  if (mailbox && ev.type !== "held") {
     if (ev.type === "bounce") mailbox.bounced += 1;
     if (ev.type === "complaint") mailbox.complained += 1;
     await saveMailbox(mailbox);
   }
 
-  if (ev.type === "bounce") await suppress(ev.to, "bounce", "postal");
+  if (ev.type === "bounce") {
+    const severity = classifyBounce(ev.detail, ev.eventName);
+    await suppress(ev.to, "bounce", "postal", { kind: severity });
+  }
   if (ev.type === "complaint") await suppress(ev.to, "complaint", "postal");
 
   await recordEvent({
@@ -80,8 +87,8 @@ export function mapPostalEvent(name: string): DeliveryEventType | null {
   switch (name) {
     case "MessageDelivered": return "delivered";
     case "MessageDeliveryFailed":
-    case "MessageBounced":
-    case "MessageHeld": return "bounce";
+    case "MessageBounced": return "bounce";
+    case "MessageHeld": return "held"; // parked by Postal, NOT a bounce
     case "MessageSpamComplaint":
     case "DomainSpamComplaint": return "complaint";
     case "MessageLoaded":

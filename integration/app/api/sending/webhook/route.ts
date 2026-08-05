@@ -3,18 +3,33 @@
  * Postal posts message events here (delivered / bounced / held / spam complaint /
  * opens). We normalize and apply them to metrics + suppression + the governor.
  *
- * No session (Postal is server-to-server). Optionally verify a shared secret via
- * SENDING_WEBHOOK_SECRET (?secret= or X-Postal-Signature presence).
+ * AUTH (fail-closed): unauthenticated events could forge bounces -> permanent
+ * suppression + governor domain pauses, i.e. remote shutdown of the sending
+ * stack. So the endpoint requires SENDING_WEBHOOK_SECRET, checked in constant
+ * time against `?secret=` or the `x-webhook-secret` header. With no secret
+ * configured, events are REJECTED unless SENDING_WEBHOOK_ALLOW_UNSIGNED=1
+ * (the explicit dev/bootstrap escape hatch).
  */
 
+import { timingSafeEqual } from "node:crypto";
 import { ok, fail, body } from "../../../../lib/api";
 import { applyDeliveryEvent, mapPostalEvent } from "../../../../lib/sending/ingest";
+
+function safeEq(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
 
 export async function POST(req: Request) {
   const secret = process.env.SENDING_WEBHOOK_SECRET;
   if (secret) {
     const url = new URL(req.url);
-    if (url.searchParams.get("secret") !== secret) return fail("forbidden", 403);
+    const provided = url.searchParams.get("secret") || req.headers.get("x-webhook-secret") || "";
+    if (!safeEq(provided, secret)) return fail("forbidden", 403);
+  } else if (!["1", "true", "yes", "on"].includes((process.env.SENDING_WEBHOOK_ALLOW_UNSIGNED || "").toLowerCase())) {
+    // Nothing fails silently: the 403 body says exactly what to configure.
+    return fail("webhook_secret_not_configured: set SENDING_WEBHOOK_SECRET (and append ?secret=... to the Postal webhook URL) or SENDING_WEBHOOK_ALLOW_UNSIGNED=1", 403);
   }
 
   const b = await body<any>(req);

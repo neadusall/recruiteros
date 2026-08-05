@@ -85,6 +85,24 @@ export async function checkContactable(
         };
       }
     }
+
+    // 3) Email-level contact ledger. Cold BD prospects usually have NO
+    // warehouse record, which used to make the cooldown a silent no-op for
+    // exactly the population it matters most for. The ledger is written on
+    // every cold send (channels dispatcher + bulk paths) keyed by address.
+    if (checkRecency && cooldown > 0 && who.email) {
+      const { recentContact } = await import("./contactLedger");
+      const recent = await recentContact(workspaceId, who.email);
+      if (recent) {
+        return {
+          ok: false,
+          reason: "recently_contacted",
+          detail: `Contacted ${recent.daysAgo <= 1 ? "1 day" : recent.daysAgo + " days"} ago via ${recent.channel}.`,
+          lastContactedAt: recent.at,
+          lastContactChannel: recent.channel,
+        };
+      }
+    }
     return { ok: true, lastContactedAt: rec?.lastContactedAt, lastContactChannel: rec?.lastContactChannel };
   } catch {
     return { ok: true };

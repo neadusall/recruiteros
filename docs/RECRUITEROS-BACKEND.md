@@ -7,11 +7,16 @@
 > **Email-stack note (read first):** the email sender is **self-hosted** — our own domains,
 > mailboxes, **Postal MTA**, warm-up, and deliverability monitoring (see
 > [`design/self-hosted-email-infrastructure.md`](design/self-hosted-email-infrastructure.md)).
-> **Instantly is the interim sender** still wired in code (`lib/providers/instantly.ts`)
-> until the MTA send-provider ships; it is being replaced, not extended. **Winnr, Mailivery,
-> OutEngine, Zapmail, Mailforge, Infraforge, Smartlead are NOT used** — they were considered
-> and dropped. The campaign engine (Sequences Library / Campaign Studio / campaigns / email
-> sequencing) is unchanged by the swap — **only the sender underneath changes.**
+> **The live cold-email sender is the recruiter SMTP inbox pool** (`lib/senders`,
+> Sending.ac + own-SMTP inboxes, first in dispatch priority), then the owned MTA,
+> then Instantly as last resort (`lib/providers/instantly.ts`; an unconfigured
+> fallback now fails loudly instead of dry-running). **Smartlead and Zapmail ARE
+> live dependencies today**: Smartlead warms the fleet and is the health guard's
+> reputation source (`lib/sending/smartlead.ts`), Zapmail hosts Google Workspace
+> inboxes; this section originally said they were dropped, which is outdated.
+> Winnr, Mailivery, OutEngine, Mailforge, Infraforge remain unused. The campaign
+> engine (Sequences Library / Campaign Studio / campaigns / email sequencing) is
+> unchanged by any sender swap: **only the sender underneath changes.**
 
 ---
 
@@ -204,7 +209,7 @@ to-build `integration/lib/providers/mta.ts` (Postal send provider) swapped into 
 - **Still to build:** Postal install + `mta.ts` send provider, the deliverability engine, warm-up.
 - **Interim:** Instantly (`lib/providers/instantly.ts`) remains the live email path until `mta.ts` ships.
   Keep it working; do **not** extend it. **Deliverability > having an API** — warm IPs/domains before volume.
-- **Do NOT use** Winnr / Mailivery / OutEngine / Zapmail / Mailforge / Infraforge / Smartlead. Dropped.
+- **Do NOT use** Winnr / Mailivery / OutEngine / Mailforge / Infraforge. Dropped. (Smartlead = live warm-up + reputation source; Zapmail = live Google Workspace inbox host. Both ARE in use; an earlier revision of this line said otherwise.)
 
 **Unipile** — base `https://{subdomain}.unipile.com/api/v1`, header `X-API-KEY`.
 - **Use for LinkedIn only** (1–2 accounts = the $55 floor). Each linked account is billed, and an email

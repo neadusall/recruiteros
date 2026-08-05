@@ -218,12 +218,14 @@ So that a prospect's reply pauses their sequence and lands in the unified inbox:
    (`lib/providers/signatures.ts`). If the secret is blank the check is skipped
    (dev only) — set it in production.
 
-On each reply the pipeline normalizes it (`fromInstantly`), matches the prospect
-by email, classifies it with Claude into one of 6 classes
-(interested / OOO / referral / not-now / no / unsub), routes per SLA, calls
-`instantly.pauseLead()` so no further drip goes out, and logs a person_event to
-the ATS. Unsub/"no" also feed suppression + the Instantly block-list
-(`instantly.blocklistAdd()`) so they're never contacted again.
+On each reply the pipeline normalizes it (`fromInstantly`; replies to our own
+pool/MTA inboxes arrive via the IMAP reply-sync tick instead), matches the
+prospect by email, classifies it with Claude into one of 9 classes
+(positive / soft_yes / timing / fit / referral / not_interested / stop /
+auto_reply / unclassified), routes per SLA, pauses every channel for a HUMAN
+reply (an OOO/bot auto_reply deliberately does NOT pause the sequence), and
+logs a person_event to the ATS. Stop/"no" also feed suppression + the Instantly
+block-list (`instantly.blocklistAdd()`) so they're never contacted again.
 
 ================================================================
 Test it

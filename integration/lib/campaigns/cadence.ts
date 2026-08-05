@@ -201,7 +201,11 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
     if (c.scheduledFor && /^\d{4}-\d{2}-\d{2}$/.test(c.scheduledFor) && c.scheduledFor > todayStr) continue;
     const touches = c.model!.touches;
     const engine = c.model!.engine;
-    let newBudget = c.dailyCap || 25; // cap only NEW enrollments per tick
+    // TRUE daily enrollment cap. `newBudget` used to reset on every 30-min tick,
+    // so "dailyCap: 25" quietly allowed up to 25 x 48 = 1,200 new sequence
+    // starts a day. The counter now persists on the campaign, keyed to the day.
+    const enrollClock = c.enrollClock?.day === todayStr ? { ...c.enrollClock } : { day: todayStr, count: 0 };
+    let newBudget = Math.max(0, (c.dailyCap || 25) - enrollClock.count);
 
     // Both freshly-queued prospects (enroll + send day-0) and already-enrolled
     // ones (send whatever model touches have since come due) are processed here —
@@ -259,7 +263,19 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         // Which EMAIL this is in the sequence (1 = first email, 2 = second, …). The video fail-safe
         // in renderTouch only attaches the video on the 2nd email.
         const emailStep = t.channel === "email" ? touches.slice(0, i + 1).filter((x) => x.channel === "email").length : 0;
-        let r = renderTouch(t, p, { emailStep });
+        // WATCH-AWARE BRANCH: a touch carrying a watched-variant renders it when
+        // this prospect's watch-page telemetry shows they engaged with the video.
+        // Lookup failure only ever downgrades to the standard (safe) copy.
+        let touchToRender = t;
+        if (t.channel === "email" && t.bodyWatched) {
+          try {
+            const { recipientEngaged } = await import("../inmarket/videoStats");
+            if (await recipientEngaged(p.id)) {
+              touchToRender = { ...t, body: t.bodyWatched, subject: t.subjectWatched ?? t.subject };
+            }
+          } catch { /* standard copy stands */ }
+        }
+        let r = renderTouch(touchToRender, p, { emailStep });
 
         // RENDER GUARD (fail-safe): never send a touch whose merged copy has missing data points
         // or reads broken. HOLD the prospect — nothing sends, nothing advances — and record why,
@@ -319,12 +335,18 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
       if (held) continue;
 
       if (isNew || fired) {
-        if (isNew) { p.sequenceStartedAt = now.toISOString(); p.status = "in_sequence"; newBudget--; }
+        if (isNew) { p.sequenceStartedAt = now.toISOString(); p.status = "in_sequence"; newBudget--; enrollClock.count++; }
         p.dripStage = sent;
-        if (sent >= touches.length) p.status = "nurture"; // finished the approved model
+        if (sent >= touches.length) p.status = "nurture"; // finished the approved model (NOT a reply; stats no longer count it as one)
         if (fired && p.copyHold) p.copyHold = undefined; // a clean send releases the hold record
         await core.saveProspect(p);
       }
+    }
+
+    // Persist the day's enrollment count so the cap survives the next tick.
+    if (enrollClock.count !== (c.enrollClock?.day === todayStr ? c.enrollClock.count : -1)) {
+      c.enrollClock = enrollClock;
+      try { await core.saveCampaign(c); } catch { /* best-effort; worst case the clock re-reads next tick */ }
     }
   }
 

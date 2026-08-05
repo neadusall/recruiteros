@@ -76,11 +76,26 @@ export function fromOsText(workspaceId: string, p: Raw): InboundResponse | null 
   });
 }
 
+/** Replies pulled from OUR OWN inboxes over IMAP (sender pool / owned MTA) by
+ *  lib/senders/replySync. The poller pre-extracts the fields, so this is thin. */
+export function fromOwnedInbox(workspaceId: string, p: Raw): InboundResponse | null {
+  const from = String(p.fromEmail ?? "").toLowerCase();
+  if (!from) return null;
+  return base(workspaceId, "smtp", "email", {
+    providerMessageId: String(p.messageId ?? ""),
+    fromName: p.fromName ? String(p.fromName) : undefined,
+    fromHandle: from,
+    text: String(p.text ?? ""),
+    receivedAt: p.receivedAt ? String(p.receivedAt) : undefined,
+  });
+}
+
 const NORMALIZERS: Record<ResponseSource, (ws: string, p: Raw) => InboundResponse | null> = {
   instantly: fromInstantly,
   unipile: fromUnipile,
   salesrobot: fromUnipile,
   taltxt: fromOsText,
+  smtp: fromOwnedInbox,
 };
 
 export function normalize(source: ResponseSource, workspaceId: string, payload: Raw): InboundResponse | null {

@@ -13,6 +13,7 @@
 
 import type { SendingDomain, Mailbox, SeedTest, DomainStatus, MtaServer } from "./types";
 import { THRESHOLDS } from "./governor";
+import { BOUNCE_WARN_RATE, DOMAIN_MIN_SAMPLE } from "./policy";
 import { serverDailyCap } from "./caps";
 
 /** Steady-state daily ceiling a mailbox warms up to (mirrors warmup.ts). */
@@ -20,7 +21,7 @@ const CEILING = Number(process.env.SENDING_MAILBOX_CEILING || 50);
 /** Steady-state per-IP daily ceiling (mirrors caps.ts). */
 const IP_CEILING = Number(process.env.SENDING_IP_CEILING || 1000);
 /** A domain needs this many sends before metric-based health is trusted. */
-const MIN_VOLUME = 50;
+const MIN_VOLUME = DOMAIN_MIN_SAMPLE;
 
 function pct(part: number, whole: number): number {
   return whole > 0 ? (part / whole) * 100 : 0;
@@ -161,7 +162,7 @@ export function domainHealth(d: SendingDomain, latestSeed?: SeedTest): DomainHea
   // Metric penalties only count once there is enough volume to be meaningful.
   if (sent >= MIN_VOLUME) {
     if (bounceRatePct > bounceCeil) { score -= 40; warnings.push(`bounce ${bounceRatePct.toFixed(1)}% over ${bounceCeil}%`); }
-    else if (bounceRatePct > bounceCeil * 0.6) { score -= 15; warnings.push(`bounce ${bounceRatePct.toFixed(1)}% approaching limit`); }
+    else if (bounceRatePct > BOUNCE_WARN_RATE * 100) { score -= 15; warnings.push(`bounce ${bounceRatePct.toFixed(1)}% approaching limit`); }
 
     if (complaintRatePct > complaintCeil) { score -= 45; warnings.push(`complaints ${complaintRatePct.toFixed(2)}% over ${complaintCeil}%`); }
     else if (complaintRatePct > complaintCeil * 0.6) { score -= 20; warnings.push(`complaints ${complaintRatePct.toFixed(2)}% approaching limit`); }

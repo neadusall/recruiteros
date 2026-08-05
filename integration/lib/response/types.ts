@@ -18,10 +18,14 @@ export type ResponseClass =
   | "referral"          // "talk to X"
   | "not_interested"    // a clean no, no hostility
   | "stop"              // "stop" / "remove" / unsubscribe
+  | "auto_reply"        // OOO / vacation responder / bot ack: NOT a human reply.
+                        // Never pauses the sequence, never notifies, never counts
+                        // as engagement in stats.
   | "unclassified";     // classifier abstained; needs human review
 
-/** Where an inbound reply came from. */
-export type ResponseSource = "instantly" | "unipile" | "salesrobot" | "taltxt";
+/** Where an inbound reply came from. "smtp" = our own inboxes (the sender pool /
+ *  owned MTA), pulled by lib/senders/replySync rather than a provider webhook. */
+export type ResponseSource = "instantly" | "unipile" | "salesrobot" | "taltxt" | "smtp";
 
 /** A normalized inbound reply, channel-agnostic. */
 export interface InboundResponse {

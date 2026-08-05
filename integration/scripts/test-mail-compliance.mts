@@ -92,8 +92,14 @@ async function main() {
     assert.equal(coldCapFor({ status: "warming", createdAt: days(60) }), COLD_PER_INBOX);
   });
 
-  await test("active inbox ramps 5 / 10 / 15 / 20 by week", () => {
-    assert.equal(coldCapFor({ status: "active", createdAt: days(2) }), 5);
+  await test("brand-new inboxes send NO cold mail until the minimum age", () => {
+    assert.equal(coldCapFor({ status: "active", createdAt: days(0) }), 0);
+    assert.equal(coldCapFor({ status: "active", createdAt: days(2) }), 0);
+    assert.equal(coldCapFor({ status: "warming", createdAt: days(1), provider: "sending-ac" }), 0);
+  });
+
+  await test("active inbox ramps 5 / 10 / 15 / 20 by week (after the age gate)", () => {
+    assert.equal(coldCapFor({ status: "active", createdAt: days(4) }), 5);
     assert.equal(coldCapFor({ status: "active", createdAt: days(8) }), 10);
     assert.equal(coldCapFor({ status: "active", createdAt: days(16) }), 15);
     assert.equal(coldCapFor({ status: "active", createdAt: days(30) }), 20);
@@ -101,7 +107,7 @@ async function main() {
 
   await test("Sending.ac inboxes stay flat at 2/day and NEVER ramp", () => {
     assert.equal(coldCapFor({ status: "active", createdAt: days(60), provider: "sending-ac" }), 2);
-    assert.equal(coldCapFor({ status: "warming", createdAt: days(1), provider: "sending-ac" }), 2);
+    assert.equal(coldCapFor({ status: "warming", createdAt: days(4), provider: "sending-ac" }), 2);
     assert.equal(coldCapFor({ status: "paused", createdAt: days(60), provider: "sending-ac" }), 0);
     assert.equal(coldCapFor({ status: "active", createdAt: days(60), provider: "own-smtp" }), 20);
   });

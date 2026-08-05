@@ -186,19 +186,25 @@ export interface Mailbox {
   updatedAt: string;
 }
 
-/** A suppressed recipient — never contacted again (compliance + reputation). */
+/** A suppressed recipient (compliance + reputation). Hard bounces, complaints
+ *  and unsubscribes are permanent; soft (transient) bounces carry an expiry so
+ *  a full mailbox does not blacklist a good address forever. */
 export interface SuppressionEntry {
   email: string;
   reason: "bounce" | "complaint" | "unsubscribe" | "manual";
   source?: string;
   at: string;
+  /** Bounce severity; absent on legacy rows (treated as hard/permanent). */
+  kind?: "hard" | "soft";
+  /** When set, the entry stops suppressing after this instant (soft bounces). */
+  expiresAt?: string;
 }
 
 /** A recent delivery event, kept capped for the UI feed. */
 export interface SendEvent {
   id: string;
   at: string;
-  type: "sent" | "delivered" | "bounce" | "complaint" | "open";
+  type: "sent" | "delivered" | "bounce" | "complaint" | "open" | "held";
   domainId?: string;
   mailboxId?: string;
   to?: string;

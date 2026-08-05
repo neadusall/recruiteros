@@ -30,11 +30,15 @@ export const ROUTING_RULES: Record<ResponseClass, RoutingRule> = {
     class: "soft_yes",
     label: "Soft yes",
     triggers: ["has a question", "asks for details", "requests an asset", "what's the comp / stack"],
+    // A person asking a question IS the conversation starting: pause the
+    // automation and ping a human (follow-up speed is a top-conversion lever).
+    // The old advance_step kept robo-touching someone who had engaged.
     actions: [
+      { kind: "push_notification", detail: "Engaged reply (question/asset ask): respond personally now" },
+      { kind: "pause_all_sequences" },
       { kind: "send_asset" },
       { kind: "tag", detail: "engaged" },
-      { kind: "advance_step" },
-      { kind: "log_activity", detail: "Soft yes, asset sent" },
+      { kind: "log_activity", detail: "Soft yes: paused sequence, human pinged, asset sent" },
     ],
     sla: "four_hours",
     escalate: true,
@@ -102,6 +106,19 @@ export const ROUTING_RULES: Record<ResponseClass, RoutingRule> = {
     sla: "immediate",
     escalate: false,
   },
+  auto_reply: {
+    class: "auto_reply",
+    label: "Auto-reply",
+    triggers: ["out of office", "vacation responder", "automatic reply", "received-your-message bot"],
+    // Machine mail: log it and move on. It must NOT pause the sequence (a
+    // 2-week vacation responder used to kill a live sequence permanently), must
+    // not ping a human, and stats exclude it from reply counts entirely.
+    actions: [
+      { kind: "log_activity", detail: "Automated reply (OOO/bot); sequence continues" },
+    ],
+    sla: "same_day",
+    escalate: false,
+  },
   unclassified: {
     class: "unclassified",
     label: "Needs review",
@@ -129,4 +146,5 @@ export const CLASS_ORDER: ResponseClass[] = [
   "fit_objection",
   "not_interested",
   "stop",
+  "auto_reply",
 ];

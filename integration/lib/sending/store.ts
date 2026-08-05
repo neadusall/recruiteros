@@ -10,6 +10,7 @@
 import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { encryptSecret } from "./secrets";
+import { SOFT_BOUNCE_SUPPRESS_DAYS } from "./policy";
 import type { SendingDomain, MtaServer, Mailbox, SuppressionEntry, SendEvent, SeedAccount, SeedTest, WarmupThread } from "./types";
 
 /** Per-workspace one-click auto-setup target the cron keeps driving toward. */
@@ -304,16 +305,44 @@ export async function resolveSender(fromAddress: string): Promise<{ workspaceId:
 
 /* ---------------- suppression ---------------- */
 
+function suppressionLive(s: SuppressionEntry): boolean {
+  if (!s.expiresAt) return true; // legacy + hard entries: permanent
+  const exp = Date.parse(s.expiresAt);
+  return !Number.isFinite(exp) || Date.now() < exp;
+}
+
 export async function isSuppressed(email: string): Promise<boolean> {
   await hydrate();
   const e = email.toLowerCase().trim();
-  return state.suppression.some((s) => s.email === e);
+  return state.suppression.some((s) => s.email === e && suppressionLive(s));
 }
-export async function suppress(email: string, reason: SuppressionEntry["reason"], source?: string): Promise<void> {
+export async function suppress(
+  email: string,
+  reason: SuppressionEntry["reason"],
+  source?: string,
+  opts: { kind?: "hard" | "soft" } = {},
+): Promise<void> {
   await hydrate();
   const e = email.toLowerCase().trim();
-  if (!e || state.suppression.some((s) => s.email === e)) return;
-  state.suppression.push({ email: e, reason, source, at: nowIso() });
+  if (!e) return;
+  const existing = state.suppression.find((s) => s.email === e);
+  const soft = opts.kind === "soft";
+  const expiresAt = soft
+    ? new Date(Date.now() + SOFT_BOUNCE_SUPPRESS_DAYS * 86_400_000).toISOString()
+    : undefined;
+  if (existing) {
+    // A soft entry can be upgraded to permanent (hard bounce / complaint /
+    // unsubscribe later); a permanent entry is never downgraded.
+    if (existing.expiresAt && !soft) {
+      existing.reason = reason;
+      existing.kind = "hard";
+      existing.expiresAt = undefined;
+      existing.at = nowIso();
+      save();
+    }
+    return;
+  }
+  state.suppression.push({ email: e, reason, source, at: nowIso(), kind: soft ? "soft" : "hard", expiresAt });
   save();
 }
 export async function listSuppression(): Promise<SuppressionEntry[]> {

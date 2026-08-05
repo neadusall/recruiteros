@@ -27,6 +27,16 @@ function secret(): string {
   );
 }
 
+/** True when unsubscribe links would be signed with the known dev literal:
+ *  forgeable by anyone reading the source. Surfaced as a go-live check. */
+export function unsubSecretIsFallback(): boolean {
+  return !(
+    process.env.RECRUITEROS_UNSUB_SECRET ||
+    process.env.RECRUITEROS_CRON_SECRET ||
+    process.env.RECRUITEROS_API_TOKEN
+  );
+}
+
 function norm(email: string): string {
   return email.trim().toLowerCase();
 }

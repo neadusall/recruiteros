@@ -106,23 +106,39 @@ export async function POST(req: Request) {
     const sender: string | undefined = typeof b.sender === "string" ? b.sender : undefined;
     const fromName: string | undefined = typeof b.fromName === "string" ? b.fromName : undefined;
 
-    const summary = { attempted: 0, sent: 0, suppressed: 0, noCapacity: 0, errors: 0 };
+    // Per-recipient gates (previously this path had NONE of them):
+    //   verify   - syntax + live MX; provable garbage never leaves (bounce control)
+    //   cooldown - the 14-day contact ledger; re-uploading a CSV can't re-mail everyone
+    //   footer   - the CAN-SPAM brand + postal-address + unsubscribe footer
+    // DNC/STOP + List-Unsubscribe headers ride inside sendEmail via coldOutreach.
+    const { preSendCheck } = await import("../../../lib/sending/verify");
+    const { recentContact, recordContact } = await import("../../../lib/outreach/contactLedger");
+    const { complianceFooter } = await import("../../../lib/sending/compliance");
+    const { notifyBrand } = await import("../../../lib/outbound/brand");
+    const brand = await notifyBrand(ws);
+
+    const summary = { attempted: 0, sent: 0, suppressed: 0, invalid: 0, cooldown: 0, noCapacity: 0, errors: 0 };
     let capacityHit = false;
     for (let i = 0; i < window.length; i++) {
       const row = window[i];
       const to = (row as any).email as string | undefined;
       if (!to) { summary.errors++; continue; }
+      const verdict = await preSendCheck(to);
+      if (!verdict.ok) { summary.invalid++; continue; }
+      if (await recentContact(ws, to)) { summary.cooldown++; continue; }
       const mail = assembleEmail(row, enriched[i], offset + i);
+      const footer = complianceFooter(ws, to, brand);
       summary.attempted++;
       const res = await sendEmail(ws, {
         to,
         subject: mail.subject,
-        plainBody: mail.body,
-        htmlBody: `<p>${escapeHtml(mail.body)}</p>`,
+        plainBody: mail.body + footer.text,
+        htmlBody: `<p>${escapeHtml(mail.body)}</p>` + footer.html,
         fromName,
         replyTo: sender,
+        coldOutreach: true,
       });
-      if (res.ok) summary.sent++;
+      if (res.ok) { summary.sent++; await recordContact(ws, to, "email"); }
       else if (res.skipped === "suppressed") summary.suppressed++;
       else if (res.skipped === "no_capacity") { summary.noCapacity++; capacityHit = true; break; } // pool full for today; stop the batch
       else summary.errors++;

@@ -59,7 +59,11 @@ export interface PricingConstants {
 
 export const DEFAULT_CONSTANTS: PricingConstants = {
   sequenceStepsPerProspect: 3,
-  sendsPerInboxMonth: 750,
+  // Mirrors the ENFORCED pool practice (lib/senders/limits): 2 cold/day flat on
+  // Sending.ac inboxes, ramping to 20/day on own-SMTP. The blended planning
+  // figure uses the conservative end so the cost model never under-counts the
+  // inbox estate a volume target needs (750/mo here once claimed 12.5x reality).
+  sendsPerInboxMonth: 60,
   inboxesPerDomain: 3,
   replyRate: 0.04,
   targetGrossMargin: 0.85,
@@ -199,7 +203,7 @@ export const DEFAULT_RATES: CostRate[] = [
     category: "ai",
     unitCostUsd: 0.001,
     unit: "per reply processed",
-    note: "6-class response routing (interested / OOO / referral / not-now / no / unsub). Small prompt, only fires on actual replies.",
+    note: "9-class response routing (positive / soft-yes / timing / fit / referral / no / stop / auto-reply / review). Small prompt, only fires on actual replies.",
     scales: "per_reply",
   },
   {

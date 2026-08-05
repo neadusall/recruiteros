@@ -14,6 +14,11 @@ export interface SmtpMessage {
   text?: string;
   replyTo?: string;
   headers?: Record<string, string>;
+  /** RFC 5322 Message-ID to stamp on this send (threading anchor). */
+  messageId?: string;
+  /** Thread onto an earlier message: In-Reply-To / References values. */
+  inReplyTo?: string;
+  references?: string;
 }
 
 export interface SmtpResult { ok: boolean; messageId?: string; error?: string; }
@@ -60,6 +65,9 @@ export async function sendViaInbox(m: SenderInbox, msg: SmtpMessage): Promise<Sm
       text: msg.text,
       replyTo: msg.replyTo,
       headers: msg.headers,
+      messageId: msg.messageId,
+      inReplyTo: msg.inReplyTo,
+      references: msg.references,
     });
     return { ok: true, messageId: info.messageId };
   } catch (e: any) {

@@ -21,6 +21,8 @@
 import { getCore } from "../core/repository";
 import { listInboxes, coldCap } from "../senders";
 import { automationEnabled } from "../automation/scheduler";
+import { footerAddressMissing } from "./compliance";
+import { unsubSecretIsFallback } from "./unsubscribe";
 import type { Campaign } from "../core/types";
 
 export interface GoLiveCheck {
@@ -99,6 +101,40 @@ export async function goLiveReadiness(
       detail: automationEnabled() ? "On: the scheduler ticks the Autopilot" : "Set AUTOMATION_ENABLED=on in the server env (the master switch)",
     },
   ];
+
+  // Deliverability + compliance rows. Holds/paused inboxes are excluded from the
+  // capacity math above; these rows surface WHY a pool is thin and stop a launch
+  // that would violate CAN-SPAM or send from an unhealthy fleet.
+  const heldInboxes = inboxes.filter((m) => m.status === "paused" || m.status === "error").length;
+  const usableOwned = ownedInboxes.filter((m) => m.status === "active" || m.status === "warming").length;
+  let footerMissing = false;
+  try {
+    const { notifyBrand } = await import("../outbound/brand");
+    footerMissing = footerAddressMissing(workspaceId, await notifyBrand(workspaceId));
+  } catch { /* fail-open row */ }
+  checks.push(
+    {
+      key: "postal_address", required: true, ok: !footerMissing,
+      label: "CAN-SPAM postal address set",
+      detail: footerMissing
+        ? "Set the workspace postal address (Senders screen) - required on every cold email footer"
+        : "Set: every cold email carries the compliance footer",
+    },
+    {
+      key: "unsub_secret", required: true, ok: !unsubSecretIsFallback(),
+      label: "Unsubscribe signing secret set",
+      detail: unsubSecretIsFallback()
+        ? "Set RECRUITEROS_UNSUB_SECRET in the server env - unsubscribe links are forgeable on the dev fallback"
+        : "Set: one-click unsubscribe links are HMAC-signed",
+    },
+    {
+      key: "pool_health", required: false, ok: heldInboxes === 0,
+      label: "Inbox pool clear of health holds",
+      detail: heldInboxes === 0
+        ? "No inboxes paused or in error"
+        : `${heldInboxes.toLocaleString()} inbox${heldInboxes === 1 ? "" : "es"} paused/errored (health guard or SMTP failures) - ${usableOwned.toLocaleString()} usable in this recruiter's pool`,
+    },
+  );
 
   const autopilotOn = !!(c?.autoRun && c?.status === "active");
   const launchDate = c?.scheduledFor && /^\d{4}-\d{2}-\d{2}$/.test(c.scheduledFor) ? c.scheduledFor : undefined;

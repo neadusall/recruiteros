@@ -118,7 +118,7 @@ const VIDEO_FOLLOWUPS: EmailDraft[] = [
       "Hi {{First_Name}}, {i made you a short video instead of writing another note|i'd rather show you than write another email}. {it's {{videolength}} over your {{Open_Role}} posting|{{videolength}}, recorded over your actual {{Open_Role}} page}, so you can {put a face to the name|see who's actually offering to help}.\n\n{{videoembed}}\n\n{if you're still hiring for it|if the role's still open}, {i'd love to help|i think i can help}. {worth a look?|worth comparing notes?}\n{Thanks|Best}, {{Your_Name}}",
   },
   {
-    subject: "{{{videolength}} on your {{Open_Role}} posting|your {{Open_Role}} posting, in {{videolength}}}",
+    subject: "{a {{videolength}} take on your {{Open_Role}} posting|your {{Open_Role}} posting, in {{videolength}}}",
     body:
       "Hi {{First_Name}}, {coming back to my note from the other day|one quick add to my note} about your {{Open_Role}}. {i pulled up your posting and recorded a short video over it|i recorded a quick clip right over your job page}, {so you can see it's really your posting, not a blast|so it's concrete, not another pitch}.\n\n{{videoembed}}\n\n{if it's still a live search|if the seat still needs filling}, {i'd genuinely like to take it on|i'd love to help}. {worth a quick watch?|open to a short call?}\n{Best|Thanks}, {{Your_Name}}",
   },
@@ -187,7 +187,7 @@ const VIDEO_INTROS: EmailDraft[] = [
       "Hi {{First_Name}}, {if filling the {{Open_Role}} seat is on your plate this quarter|if the {{Open_Role}} opening is a priority right now}, {that's the exact search i run|this is the work i do all day}. {no pitch deck, just help|no pressure at all}. {worth a conversation?|worth a short call?}\n{Best|Thanks}, {{Your_Name}}",
   },
   {
-    subject: "{one question about your {{Open_Role}}|quick question on the {{Open_Role}} opening}",
+    subject: "{one question about your {{Open_Role}}|a question on the {{Open_Role}} opening}",
     body:
       "Hi {{First_Name}}, quick one: {do you have the {{Open_Role}} search fully covered|is the {{Open_Role}} seat fully covered}, or {could you use one more set of eyes on it|is there room for real help on it}? {this is the profile i place|i place this profile regularly}, and {i move fast when a seat matters|i'm happy to prove it quickly}. {worth a conversation?|open to a quick call?}\n{Thanks|Best}, {{Your_Name}}",
   },
@@ -221,6 +221,67 @@ export function pickVideoIntro(seed: string): EmailDraft {
 export { VIDEO_INTROS };
 
 /**
+ * Day-4 CLOSER pool: the third email that ties the sequence together and makes the
+ * direct ask. Two variants of each closer:
+ *   - standard (no watch signal): re-anchor the signal, mention the intro + video
+ *     WITHOUT claiming they saw either, direct CTA, graceful exit line. It never
+ *     re-embeds the video and never uses video tokens, so it can always render.
+ *   - watched (the prospect's watch telemetry shows a view): acknowledge softly
+ *     (never "I saw you watching", which reads like surveillance), then the same
+ *     direct ask.
+ * Claims stay inside what we know: they are hiring {{Open_Role}}, we wrote twice,
+ * a video was in note two. Tokens: {{First_Name}} {{Company}} {{Open_Role}}
+ * {{A_Open_Role}} {{Your_Name}} only.
+ */
+export interface CloserDraft extends EmailDraft { subjectWatched: string; bodyWatched: string }
+
+const VIDEO_CLOSERS: CloserDraft[] = [
+  {
+    subject: "{closing the loop on {{Open_Role}}|last note on your {{Open_Role}} search}",
+    body:
+      "Hi {{First_Name}}, {last note from me on this|i'll make this the last unprompted one}. {you're hiring {{A_Open_Role}}, i sent a note and a short video|i've sent a note and a quick video about your {{Open_Role}} search}, {and i still think i can help you fill it|and the offer stands: i think i can fill it}.\n\n{can we take 15 minutes this week?|worth 15 minutes this week to compare notes?} {a one-word reply works|even a quick 'not now' helps me close the loop}. {if the seat's already filled, congrats, and ignore me|if it's handled, ignore me and good luck with the start date}.\n{Thanks|Best}, {{Your_Name}}",
+    subjectWatched: "{the next step on {{Open_Role}}|following the video, {{First_Name}}}",
+    bodyWatched:
+      "Hi {{First_Name}}, {glad the video made it in front of you|hope the video was worth the minute}. {you're hiring {{A_Open_Role}} and that's exactly the search i run|the {{Open_Role}} seat is exactly the work i do}, {so let's make it concrete|so here's the direct ask}:\n\n{15 minutes this week|a quick call this week}, {i'll bring specific people we could put in front of you|i'll walk in with names, not a pitch}. {does tuesday or thursday work?|what day works best?}\n{Thanks|Best}, {{Your_Name}}",
+  },
+  {
+    subject: "{should i close the file on {{Open_Role}}?|keep working your {{Open_Role}}, or stand down?}",
+    body:
+      "Hi {{First_Name}}, {quick yes or no|one simple question}: {is the {{Open_Role}} search still open|are you still filling the {{Open_Role}} seat}? {i've written twice, once with a short video|my note and video are in your inbox somewhere}, {because this is the exact seat i fill|because i genuinely work this exact search}.\n\n{if yes, give me 15 minutes this week|if it's still open, 15 minutes is all i need}. {if no, tell me and i'm gone|if not, one word and i'll close the file}.\n{Best|Thanks}, {{Your_Name}}",
+    subjectWatched: "{a concrete next step for {{Open_Role}}|making {{Open_Role}} easy to say yes to}",
+    bodyWatched:
+      "Hi {{First_Name}}, {since the video reached you, i'll skip the intro|you've seen my face, so i'll get to it}: {the {{Open_Role}} seat is my lane|{{Open_Role}} searches are the work i do daily}, {and i'd like to earn this one|and i'd like a real shot at this one}.\n\n{15 minutes this week and i'll show you exactly who i'd put forward|give me 15 minutes and i'll bring specifics, not a deck}. {tuesday or thursday?|what day suits you?}\n{Best|Thanks}, {{Your_Name}}",
+  },
+  {
+    subject: "{third and final note on {{Open_Role}}|calling it on {{Open_Role}} after this}",
+    body:
+      "Hi {{First_Name}}, {third note, and i cap it here|i keep these to three, so this is the last}. {the {{Open_Role}} opening at {{Company}} is still the reason i'm writing|{{Company}}'s {{Open_Role}} search is still worth filling fast}, {and between my first note and the video, you know who i am by now|and you've got my note and video for context}.\n\n{the ask is small: 15 minutes|all i'm asking is 15 minutes}. {worth it this week?|can we find a slot this week?} {either way, i'll stop cluttering your inbox|no reply and i'll leave you to it}.\n{Thanks|Best}, {{Your_Name}}",
+    subjectWatched: "{one small ask on {{Open_Role}}|the 15-minute version of {{Open_Role}}}",
+    bodyWatched:
+      "Hi {{First_Name}}, {thanks for giving the video a look|glad the video landed}. {so here's the honest close|so let me close the loop properly}: {the {{Open_Role}} seat is open, i fill seats like it|you have {{A_Open_Role}} to fill and that's my exact lane}, {and one short call tells us both if there's a fit|and 15 minutes tells us both whether i can help}.\n\n{what does this week look like?|does this week have 15 minutes in it?}\n{Thanks|Best}, {{Your_Name}}",
+  },
+  {
+    subject: "{before i let {{Open_Role}} go|last thought on the {{Open_Role}} seat}",
+    body:
+      "Hi {{First_Name}}, {i'll be straight|straight to it}: {i've sent a note and a video about your {{Open_Role}} search|two notes so far, one with a video, all about your {{Open_Role}}}, {because seats like it are where i earn my keep|because it's squarely the search i run}. {silence usually means busy, not no|no reply usually just means a busy week}, {so here's one last, easy out|so one final, low-effort ask}:\n\n{reply 'yes' and i'll send times|reply with a day and i'll work around it}, {or 'no' and i'll close the file politely|or tell me it's covered and i'm gone}.\n{Best|Thanks}, {{Your_Name}}",
+    subjectWatched: "{turning the video into a call?|from video to 15 minutes, {{First_Name}}}",
+    bodyWatched:
+      "Hi {{First_Name}}, {the video did its job if you know who i am now|hopefully the video made me a person, not a template}. {what it couldn't do is fill your {{Open_Role}}|the {{Open_Role}} seat still needs a person in it}, {which is the part i'm good at|which is where i come in}.\n\n{15 minutes this week and i'll bring real candidates to the conversation|one short call and i'll show you exactly what i'd do with the search}. {which day works?|when's good?}\n{Best|Thanks}, {{Your_Name}}",
+  },
+];
+
+/** Deterministic closer pick (same FNV-1a family, its own salt). */
+export function pickVideoCloser(seed: string): CloserDraft {
+  let h = 2166136261;
+  const s = `closer|${seed}`;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return VIDEO_CLOSERS[(h >>> 0) % VIDEO_CLOSERS.length] ?? VIDEO_CLOSERS[0];
+}
+
+/** The closer pool, exported for the copy-hygiene test. */
+export { VIDEO_CLOSERS };
+
+/**
  * THE video-sequence pair. Day-0 is a search-anchored text intro from VIDEO_INTROS (one consistent
  * story with the video: "you're hiring this seat, i can help fill it"). Day-1 is the real-person
  * PiP video follow-up above. Every token is resolved per prospect (bd/mpc/resolve) and spintax
@@ -232,23 +293,44 @@ export function templateOpener(input: OpenerInput): OpenerDraft {
   return { first: pickVideoIntro(seed), second: pickVideoFollowup(seed), source: "template" };
 }
 
+/** Days after the video email before the closer goes out (Day 0 / 1 / 5 by default:
+ *  the study-backed shape is intro, fast video bump, then a spaced direct ask). */
+function closerDelayDays(): number {
+  const n = Number(process.env.INMARKET_CLOSER_DELAY_DAYS);
+  return Number.isFinite(n) && n >= 1 && n <= 21 ? Math.round(n) : 4;
+}
+
 /**
- * Turn a drafted sequence into a runnable, APPROVED CampaignModel the autopilot cadence sends:
- * touch 1 (day 0) = the text intro, touch 2 (day N) = the video follow-up (its body carries
- * {{videoembed}}, filled per prospect from personalizedVideo at send time). The video is always
- * the SECOND touch. Auto-approved because the operator explicitly attached the sequence.
+ * Turn a drafted sequence into a runnable, APPROVED CampaignModel the autopilot cadence sends,
+ * now THREE touches:
+ *   touch 1 (day 0)   - the text intro
+ *   touch 2 (day N)   - the video follow-up (its body carries {{videoembed}}, filled per
+ *                       prospect from personalizedVideo at send time; always the 2nd touch)
+ *   touch 3 (day N+4) - the CLOSER: ties signal + intro + video together and makes the direct
+ *                       15-minute ask. Watch-aware: prospects whose watch telemetry shows a view
+ *                       get the warm variant (subjectWatched/bodyWatched), everyone else the
+ *                       standard one. Both variants claim nothing beyond what really happened.
+ * Follow-up emails thread onto the first (In-Reply-To/References), so touches 2-3 arrive as
+ * replies in the same conversation. Auto-approved because the operator attached the sequence.
  */
 export function videoSequenceModel(draft: OpenerDraft, motion: Motion, videoDelayDays = 1): CampaignModel {
   const nowIso = new Date().toISOString();
+  const videoDay = Math.max(1, Math.round(videoDelayDays));
+  const closer = pickVideoCloser(`${draft.first.subject}|${draft.second.subject}|${motion}`);
   return {
     generatedAt: nowIso,
     approvedAt: nowIso,
     engine: "video_sequence",
     motion,
-    summary: "Text intro → personalized video follow-up (video is the 2nd touch)",
+    summary: "Text intro → personalized video follow-up → direct-ask closer (3 touches, threaded)",
     touches: [
       { key: "email_intro", day: 0, channel: "email", label: "Text intro", subject: draft.first.subject, body: draft.first.body },
-      { key: "email_video", day: Math.max(1, Math.round(videoDelayDays)), channel: "email", label: "Video follow-up", subject: draft.second.subject, body: draft.second.body },
+      { key: "email_video", day: videoDay, channel: "email", label: "Video follow-up", subject: draft.second.subject, body: draft.second.body },
+      {
+        key: "email_close", day: videoDay + closerDelayDays(), channel: "email", label: "Direct-ask closer",
+        subject: closer.subject, body: closer.body,
+        subjectWatched: closer.subjectWatched, bodyWatched: closer.bodyWatched,
+      },
     ],
   };
 }

@@ -13,16 +13,50 @@ import { allMailboxes, saveMailbox, listServers, saveServer } from "./store";
 import { capForDay, serverCapForDay } from "./caps";
 import { postalConfigured } from "./postal";
 import { runEngagement } from "./engagement";
+import { loadSnapshot, debouncedSaver } from "../db";
 
 const CEILING = Number(process.env.SENDING_MAILBOX_CEILING || 50);
 const IP_CEILING = Number(process.env.SENDING_IP_CEILING || 1000);
 
 /**
+ * Once-per-UTC-day guard. advanceWarmup used to advance on EVERY caller (the
+ * 6h scheduler tick, the hourly external cron, the manual button), which burned
+ * ~4+ ramp days per calendar day: a mailbox hit full volume in ~2 days and a
+ * cold IP compressed its ~3-week ramp into ~5 days. A ramp day is a calendar
+ * day, period. Same pattern as lib/senders/store.resetDailyIfNewDay.
+ */
+interface WarmupClock { lastAdvanceDay: Record<string, string> } // workspaceId -> YYYY-MM-DD (UTC)
+const CLOCK_KEY = "sending_warmup_clock_v1";
+let clock: WarmupClock = { lastAdvanceDay: {} };
+let clockHydrated = false;
+let clockHydrating: Promise<void> | null = null;
+const saveClock = debouncedSaver(CLOCK_KEY, () => clock);
+
+async function alreadyAdvancedToday(workspaceId: string): Promise<boolean> {
+  if (!clockHydrated) {
+    if (!clockHydrating) {
+      clockHydrating = loadSnapshot<WarmupClock>(CLOCK_KEY).then((s) => {
+        if (s?.lastAdvanceDay) clock = s;
+        clockHydrated = true;
+      });
+    }
+    await clockHydrating;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  if (clock.lastAdvanceDay[workspaceId] === today) return true;
+  clock.lastAdvanceDay[workspaceId] = today;
+  saveClock();
+  return false;
+}
+
+/**
  * Advance every warming mailbox one ramp day (graduate at the ceiling), AND ramp
  * each live server's shared-IP daily ceiling on its own slower curve — the IP is
  * the long pole, so a cold IPv4 is warmed gently or every mailbox on it suffers.
+ * No-ops for the rest of the day after the first call (date-guarded).
  */
 export async function advanceWarmup(workspaceId: string): Promise<{ advanced: number; graduated: number; ipsAdvanced: number }> {
+  if (await alreadyAdvancedToday(workspaceId)) return { advanced: 0, graduated: 0, ipsAdvanced: 0 };
   let advanced = 0;
   let graduated = 0;
   for (const m of await allMailboxes(workspaceId)) {

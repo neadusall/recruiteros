@@ -188,6 +188,7 @@ export async function sendBookingAsk(
   if (bookingMode() === "draft" || !p.email || !mtaPreferred()) {
     return { ok: true, mode: "draft", draft: ask, detail: !p.email ? "no_email" : undefined };
   }
-  const m = await sendEmail(workspaceId, { to: p.email, subject: ask.subject ?? CALL_TITLE, htmlBody: toHtml(ask.body) });
+  // An earned ask is still outreach: honor the DNC/STOP list + unsubscribe header.
+  const m = await sendEmail(workspaceId, { to: p.email, subject: ask.subject ?? CALL_TITLE, htmlBody: toHtml(ask.body), coldOutreach: true });
   return { ok: m.ok, mode: "send", provider: m.provider, detail: m.skipped, draft: ask };
 }

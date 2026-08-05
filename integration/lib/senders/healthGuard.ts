@@ -35,6 +35,7 @@ import type { SmartleadAccount } from "../sending/smartlead";
 import { probeDnsMany } from "../sending/dnsProbe";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { nowIso } from "../core/ids";
+import { INBOX_BOUNCE_HOLD_RATE, INBOX_MIN_SAMPLE } from "../sending/policy";
 
 function envNum(name: string, fallback: number): number {
   const n = Number(process.env[name]);
@@ -46,8 +47,8 @@ const repFloor = () => envNum("SENDER_GUARD_REP_FLOOR", 45);        // hold at A
 const repHoldMature = () => envNum("SENDER_GUARD_REP_HOLD", 60);    // hold below this once warmed 7+ days
 const repRecover = () => envNum("SENDER_GUARD_REP_RECOVER", 85);    // healthy again at/above this
 const repGraceDays = () => envNum("SENDER_GUARD_REP_GRACE_DAYS", 3); // reputation rules stay quiet before this age
-const bounceHoldRate = () => envNum("SENDER_GUARD_BOUNCE_RATE", 0.08);
-const BOUNCE_MIN_SAMPLE = 25;      // sends in the window before the bounce rule can trip
+const bounceHoldRate = () => envNum("SENDER_GUARD_BOUNCE_RATE", INBOX_BOUNCE_HOLD_RATE);
+const BOUNCE_MIN_SAMPLE = INBOX_MIN_SAMPLE; // sends in the window before the bounce rule can trip
 const RECOVER_STREAK = 2;          // consecutive healthy checks required to revive
 const MIN_HOLD_MS = 24 * 60 * 60 * 1000; // minimum rest before a revive
 

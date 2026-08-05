@@ -40,14 +40,23 @@ export async function dispatchNurture(
   content: NurtureContent,
 ): Promise<NurtureSendResult> {
   // EMAIL (incl. the earned-ask rung) — send now through the owned MTA.
+  // Nurture is marketing mail: coldOutreach enforces the DNC/STOP list and
+  // stamps List-Unsubscribe; the CAN-SPAM footer rides in the body.
   if (touch.channel === "email" || touch.channel === "ask_email") {
     if (!e.lead.email || !mtaPreferred()) {
       return { ok: false, channel: touch.channel, staged: true, detail: "no_email_or_mta" };
     }
+    let footer = { html: "", text: "" };
+    try {
+      const { complianceFooter } = await import("../sending/compliance");
+      const { notifyBrand } = await import("../outbound/brand");
+      footer = complianceFooter(e.workspaceId, e.lead.email, await notifyBrand(e.workspaceId));
+    } catch { /* footer is best-effort; the unsubscribe header still rides */ }
     const m = await sendEmail(e.workspaceId, {
       to: e.lead.email,
       subject: content.subject ?? "",
-      htmlBody: toHtml(content.body),
+      htmlBody: toHtml(content.body) + footer.html,
+      coldOutreach: true,
     });
     return { ok: m.ok, channel: "email", provider: m.provider, detail: m.skipped };
   }

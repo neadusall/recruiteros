@@ -161,9 +161,15 @@ function inferIndustry(text: string): string {
 /* ------------------------------- stats math ----------------------------- */
 
 const POSITIVE_CLASSES = new Set(["positive", "soft_yes"]);
-/** Statuses only reachable via an inbound reply (any sentiment) — so they count
- *  as "replied" even when the original ProcessedResponse predates the window. */
-const REPLY_STATUSES = new Set(["replied", "booked", "won", "nurture", "closed_lost", "do_not_contact"]);
+/** Statuses only reachable via an inbound HUMAN reply, so they count as
+ *  "replied" even when the original ProcessedResponse predates the window.
+ *  "nurture" and "do_not_contact" are deliberately NOT here: the cadence sets
+ *  nurture when a sequence merely finishes with zero replies, and suppression /
+ *  ATS-DNC sync sets do_not_contact with no reply at all. Counting them used to
+ *  drive completed campaigns toward a fake 100% reply rate. */
+const REPLY_STATUSES = new Set(["replied", "booked", "won", "closed_lost"]);
+/** Machine mail (OOO / bots): excluded from every reply metric. */
+const MACHINE_CLASSES = new Set(["auto_reply"]);
 /** Statuses that imply a positive outcome. */
 const POSITIVE_STATUSES = new Set(["booked", "won"]);
 
@@ -248,7 +254,7 @@ export async function buildOutreachStats(workspaceId: string, opts: OutreachStat
     const industry = inferIndustry(idText);
     const variant = sends.find((s) => s.variant)?.variant || `${industry}/${intel.function}/${intel.seniority}`;
     const firstSendMs = Math.min(...sends.map((s) => Date.parse(s.at)));
-    const myResp = respByProspect.get(p.id) ?? [];
+    const myResp = (respByProspect.get(p.id) ?? []).filter((r) => !MACHINE_CLASSES.has(r.classification.class));
     const hasPositive = myResp.some((r) => POSITIVE_CLASSES.has(r.classification.class));
     const status = p.status;
     // A booking/win only belongs to THIS window when we know it happened in it.

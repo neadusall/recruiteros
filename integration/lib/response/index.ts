@@ -26,6 +26,7 @@ export async function processInbound(
   workspaceId: string,
   payload: Record<string, unknown>,
   pauseSequences?: PauseSequences,
+  hints?: import("./classify").ClassifyHints,
 ): Promise<ProcessedResponse | null> {
   const inbox = getInbox();
 
@@ -34,7 +35,7 @@ export async function processInbound(
   if (!inbox.claim(inbound.providerMessageId)) return null; // already processed
 
   inbound = await matchProspect(inbound);
-  const classification = await classify(inbound.text);
+  const classification = await classify(inbound.text, hints);
   const processed = await route(inbound, classification, pauseSequences);
 
   inbox.add(processed);

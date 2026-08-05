@@ -40,7 +40,7 @@ export async function POST(req: Request, { params }: { params: { source: string 
   // cancels pending LinkedIn actions, releases reserved capacity, pauses
   // enrollments and flips the core prospect off the cadence engines.
   const channelBySource: Record<ResponseSource, string> = {
-    instantly: "email", unipile: "linkedin", salesrobot: "linkedin", taltxt: "sms",
+    instantly: "email", unipile: "linkedin", salesrobot: "linkedin", taltxt: "sms", smtp: "email",
   };
   const pauseSequences = async (prospectId: string) => {
     const { replyStopByProspectId } = await import("../../../../../lib/linkedin/os/outreachState");
@@ -53,7 +53,9 @@ export async function POST(req: Request, { params }: { params: { source: string 
   // Belt and braces: whatever the reply classified as, an inbound from a known
   // person always pauses their automated outreach (the rules matrix only
   // attaches pause_all_sequences to some classes; the spec wants ANY reply).
-  if (processed.inbound.prospectId) {
+  // EXCEPT machine mail: an OOO responder is not a person replying, and pausing
+  // on it permanently killed live sequences for anyone on vacation.
+  if (processed.inbound.prospectId && processed.classification.class !== "auto_reply") {
     try { await pauseSequences(processed.inbound.prospectId); } catch { /* stop is idempotent + best-effort */ }
   }
 

@@ -109,10 +109,12 @@ Tune (rarely needed): `RENDER_GUARD_OPTIONAL_TOKENS` (csv of tokens allowed empt
 Tests: `npx tsx lib/copy/renderGuard.test.ts` — includes the guarantee that all 50 MPC templates +
 the video follow-up pass the guard with full data.
 
-## Harden before arming sending (known gaps)
+## Hardening status (all five original gaps are CLOSED as of 2026-08-05)
 
-1. The opt-out/DNC list is **in-memory only** — a server restart forgets who said stop. Persist it before real volume.
-2. The recruiter sender-pool path doesn't check the bounce-suppression list before sending.
-3. No `List-Unsubscribe` header on cold mail (compliance at 3K/day).
-4. Positive-reply push notification is a TODO — the 20-minute model needs a ping when someone replies "interested," not a page you remember to check.
-5. If the sender pool and MTA are both misconfigured, dispatch falls through to Instantly **dry-run** and looks sent. Make that fail loudly.
+1. ~~In-memory DNC list~~ CLOSED: durable, workspace-scoped suppression store (`lib/response/suppression`), mirrored to provider blocklists.
+2. ~~Sender pool skips bounce suppression~~ CLOSED: both lists (DNC + bounce/complaint) gate every email path at `lib/channels/index.ts` dispatch, and the direct MTA callers (BD Bulk, nurture, booking) enforce them via `sendEmail`'s `coldOutreach` contract.
+3. ~~No List-Unsubscribe~~ CLOSED: signed one-click RFC 8058 headers on the pool path AND every cold MTA send; the CAN-SPAM body footer (brand + postal address + unsubscribe link) rides on pool, MTA, BD Bulk and nurture sends.
+4. ~~No positive-reply ping~~ CLOSED: `positive`, `soft_yes`, `referral` and `unclassified` classes all fire `push_notification` (set `RECRUITEROS_NOTIFY_EMAIL`); `soft_yes` also pauses the sequence so a human takes over.
+5. ~~Instantly dry-run looks sent~~ CLOSED: an unconfigured Instantly fallback now returns `ok:false / email_no_provider`, holds the prospect, and nothing advances.
+
+New protections shipped with the 2026-08-05 hardening pass: pre-send syntax+MX verification at the chokepoint, the email-level 14-day contact ledger (cooldown now covers cold prospects with no ATS record), hard/soft bounce classification with 30-day soft expiry, IMAP reply + DSN sync for the pool's own inboxes (`reply_sync` tick), OOO/auto-reply detection that no longer kills live sequences, real email threading (touches 2+ ride the first email's conversation), true per-day enrollment caps, the holiday-aware send window, and SMTP failure accounting that pulls a dead inbox out of rotation after 3 strikes.
