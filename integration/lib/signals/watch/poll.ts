@@ -138,6 +138,30 @@ export async function pollOne(w: Watchlist, todayIso: string): Promise<PollOutco
       return { ...base, found: leads.length };
     }
 
+    // 2b) SIGNAL STACKING (free, timeboxed): a company whose job posting is
+    // corroborated by a second live signal (funding round, new leadership,
+    // expansion) replies at a multiple of single-signal cold. Boost its score
+    // so it jumps the curation order, and put the plain-English "why now" on
+    // the lead so the recruiter and the copy both see it. Additive only: a
+    // news outage or the kill switch (SIGNALS_STACK=0) leaves the belt as-is.
+    try {
+      const { stackCompanies } = await import("./stack");
+      const stacks = await stackCompanies(fresh.map((l) => l.company));
+      if (stacks.size) {
+        for (const l of fresh) {
+          const s = stacks.get(l.company);
+          if (!s) continue;
+          if (s.boost) {
+            l.score = Math.min(100, (l.score ?? 0) + s.boost);
+            l.scoreReasons = [...(l.scoreReasons || []), `Stacked signal: ${s.whyNow || s.types.join(", ")}`];
+          }
+          if (s.whyNow) l.reason = l.reason ? `${l.reason}; also ${s.whyNow}` : `Hiring now and ${s.whyNow}`;
+          if (s.caution) l.scoreReasons = [...(l.scoreReasons || []), "Caution: recent layoff news"];
+        }
+        fresh.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      }
+    } catch { /* stacking is additive; the belt runs fine single-signal */ }
+
     // 3) Enrich 3 decision-makers per company and write them to the Clients-tab curation store.
     //    curateFromPool is idempotent + free; InMarketLead is a structural superset of its input.
     let contactable = 0;
