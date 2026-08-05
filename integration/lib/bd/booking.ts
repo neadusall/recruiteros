@@ -189,6 +189,13 @@ export async function sendBookingAsk(
     return { ok: true, mode: "draft", draft: ask, detail: !p.email ? "no_email" : undefined };
   }
   // An earned ask is still outreach: honor the DNC/STOP list + unsubscribe header.
+  // The ATS doNotContact flag lives outside the DNC list, so check it here too
+  // (no recency: the ask follows an active conversation or enrolled sequence).
+  try {
+    const { checkContactable } = await import("../outreach/contactGuard");
+    const c = await checkContactable(workspaceId, { email: p.email, fullName: p.fullName, company: p.company }, { checkRecency: false });
+    if (!c.ok) return { ok: false, mode: "skipped", detail: c.reason ?? "do_not_contact", draft: ask };
+  } catch { /* guard fails open; the DNC list check still rides in the MTA */ }
   const m = await sendEmail(workspaceId, { to: p.email, subject: ask.subject ?? CALL_TITLE, htmlBody: toHtml(ask.body), coldOutreach: true });
   return { ok: m.ok, mode: "send", provider: m.provider, detail: m.skipped, draft: ask };
 }

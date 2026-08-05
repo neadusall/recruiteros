@@ -39,6 +39,19 @@ export async function dispatchNurture(
   touch: NurtureTouch,
   content: NurtureContent,
 ): Promise<NurtureSendResult> {
+  // ATS do-not-contact: coldOutreach inside the MTA covers the STOP/DNC list,
+  // but only this guard sees the warehouse doNotContact flag the Loxo sync
+  // maintains. No recency check: nurture is an enrolled sequence with its own
+  // spacing. Applies to EVERY nurture channel, including the LinkedIn legs.
+  try {
+    const { checkContactable } = await import("../outreach/contactGuard");
+    const c = await checkContactable(
+      e.workspaceId,
+      { email: e.lead.email, fullName: e.lead.fullName, company: e.lead.company },
+      { checkRecency: false },
+    );
+    if (!c.ok) return { ok: false, channel: touch.channel, detail: c.reason ?? "do_not_contact" };
+  } catch { /* guard fails open; the DNC list check still rides in the MTA */ }
   // EMAIL (incl. the earned-ask rung) — send now through the owned MTA.
   // Nurture is marketing mail: coldOutreach enforces the DNC/STOP list and
   // stamps List-Unsubscribe; the CAN-SPAM footer rides in the body.
@@ -68,6 +81,41 @@ export async function dispatchNurture(
     return { ok: false, channel: touch.channel, staged: true, detail: "no_linkedin_context" };
   }
 
+  // ONE LINKEDIN ENGINE: nurture used to call Unipile directly, so its sends
+  // dodged every account policy (pacing, health, contact pressure, the ledger).
+  // Both legs now file an ACTION REQUEST with LinkedIn OS like every other
+  // automated touch; the engine schedules and executes under the same caps.
+  // Suppressed is final; any other rejection stages the touch to retry later.
+  const requestViaEngine = async (
+    actionType: "voice_note" | "comment_post",
+    payload: Record<string, unknown>,
+  ): Promise<NurtureSendResult> => {
+    const { requestLinkedInAction } = await import("../linkedin/os/engine");
+    const res = await requestLinkedInAction({
+      workspaceId: e.workspaceId,
+      accountId,
+      person: {
+        prospectId: e.prospectId,
+        email: e.lead.email,
+        fullName: e.lead.fullName,
+        company: e.lead.company,
+        providerProfileId: pid,
+      },
+      actionType,
+      payload,
+      businessUnit: "bd",
+      sourceType: "multichannel_workflow",
+      idempotencyKey: `nurture|${e.prospectId}|${e.nextTouchIndex}|${actionType}`,
+    });
+    if (res.accepted) {
+      return { ok: true, channel: touch.channel, provider: "linkedin_engine" };
+    }
+    if (res.record.status === "suppressed") {
+      return { ok: false, channel: touch.channel, detail: "suppressed" };
+    }
+    return { ok: false, channel: touch.channel, staged: true, detail: res.reason ?? res.record.status };
+  };
+
   if (touch.channel === "linkedin_voice_note") {
     let audioUrl: string | undefined;
     try {
@@ -80,17 +128,16 @@ export async function dispatchNurture(
       /* no audio -> stage */
     }
     if (!audioUrl) return { ok: false, channel: touch.channel, staged: true, detail: "no_audio" };
-    const r: any = await unipile.sendVoiceNote(accountId, pid, audioUrl);
-    return { ok: true, channel: touch.channel, provider: "unipile", detail: r?.dryRun ? "dry_run" : undefined };
+    return requestViaEngine("voice_note", { audioUrl, text: content.body });
   }
 
   if (touch.channel === "linkedin_comment") {
+    // Post discovery is a read; the COMMENT (the outreach action) goes through the engine.
     const posts: any = await unipile.listPosts(accountId, pid).catch(() => null);
     const items: any[] = posts?.items ?? posts?.data ?? (Array.isArray(posts) ? posts : []);
     const postId = items[0]?.id ?? items[0]?.social_id ?? items[0]?.post_id;
     if (!postId) return { ok: false, channel: "linkedin_comment", staged: true, detail: "no_recent_post" };
-    const r: any = await unipile.commentOnPost(accountId, String(postId), content.body);
-    return { ok: true, channel: "linkedin_comment", provider: "unipile", detail: r?.dryRun ? "dry_run" : undefined };
+    return requestViaEngine("comment_post", { postUrl: String(postId), text: content.body });
   }
 
   return { ok: false, channel: touch.channel, staged: true, detail: "unknown_channel" };

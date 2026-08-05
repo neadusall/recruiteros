@@ -126,6 +126,13 @@ export async function POST(req: Request) {
       const verdict = await preSendCheck(to);
       if (!verdict.ok) { summary.invalid++; continue; }
       if (await recentContact(ws, to)) { summary.cooldown++; continue; }
+      // ATS do-not-contact (warehouse flag from the Loxo sync): the only DNC
+      // source coldOutreach can't see. Recency is the ledger's job above.
+      try {
+        const { checkContactable } = await import("../../../lib/outreach/contactGuard");
+        const c = await checkContactable(ws, { email: to, company: (row as any).company }, { checkRecency: false });
+        if (!c.ok) { summary.suppressed++; continue; }
+      } catch { /* fails open; DNC list still enforced inside sendEmail */ }
       const mail = assembleEmail(row, enriched[i], offset + i);
       const footer = complianceFooter(ws, to, brand);
       summary.attempted++;
