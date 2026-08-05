@@ -155,7 +155,7 @@
   brandLabel = brandName || "RecruitersOS";
   var topEl = document.querySelector(".top .brand");
   var logoOk = isHttp(logo) || logo.charAt(0) === "/";   // same-origin asset paths are fine
-  if (topEl) { if (logoOk) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:30px;max-width:200px;display:block" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
+  if (topEl) { if (logoOk) topEl.outerHTML = '<img src="' + logo.replace(/"/g, "%22") + '" alt="" style="max-height:48px;max-width:280px;display:block" />'; else topEl.textContent = brandLabel.replace(/[<>&]/g, ""); }
   var fromEl = $("fromLine");
   if (fromEl) fromEl.textContent = (name ? "A note for " + name : "A quick note") + (company ? " · " + company : "");
   var rt = $("replyTitle"); if (rt) rt.textContent = "Reply to " + brandLabel.replace(/[<>&]/g, "");
