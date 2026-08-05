@@ -78,6 +78,20 @@
   }
   function pct(n) { return Math.max(0, Math.min(100, Math.round(n))); }
 
+  /* White-label: copy in this tool names the tenant's product (e.g. "Lume"),
+   * never the house brand on a customer domain. command.js paints the sidebar
+   * brand before any tab renders, so read it from there; host decides the
+   * fallback when nothing is painted. */
+  function brandName() {
+    try {
+      var img = document.querySelector(".brand-logo");
+      if (img && img.alt && img.alt !== "Workspace logo") return img.alt;
+      var word = document.querySelector(".brand-word");
+      if (word && word.textContent && word.textContent.trim()) return word.textContent.trim();
+    } catch (e) {}
+    return /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.host || "") ? "RecruitersOS" : "the platform";
+  }
+
   var HEALTH_PILL = { healthy: "green", watch: "amber", elevated: "amber", cooldown: "red", paused: "red", disconnected: "red" };
   var PRESSURE_PILL = { low: "green", medium: "", elevated: "amber", high: "red" };
   var STATUS_PILL = {
@@ -142,7 +156,7 @@
       return '<a class="vd-tab' + (S.tab === t[0] ? " active" : "") + '" href="#linkedin/' + t[0] + '">' + esc(t[1]) + "</a>";
     }).join("");
     view.innerHTML =
-      '<div class="v-head"><p>Unified LinkedIn outreach across RecruitersOS. One shared engine, one set of account policies, one ledger for ' +
+      '<div class="v-head"><p>Unified LinkedIn outreach across ' + esc(brandName()) + '. One shared engine, one set of account policies, one ledger for ' +
       (S.motion === "recruiting" ? "Recruiting and Business Development" : "Business Development and Recruiting") + ".</p></div>" +
       '<div class="vd-tabs lio-tabs">' + tabsHtml + "</div>" +
       '<div id="lioBody" class="lio-body"><div class="empty">Loading LinkedIn OS...</div></div>';
@@ -168,7 +182,7 @@
       var kpis =
         '<div class="lio-kpis">' +
         kpi("Account", a ? a.displayName : "None connected", a ? "" : "Connect one in Accounts") +
-        kpi("Utilization", u ? u.utilizationPct + "%" : "0%", "of RecruitersOS daily targets") +
+        kpi("Utilization", u ? u.utilizationPct + "%" : "0%", "of " + brandName() + " daily targets") +
         kpi("Queued", String(d.counters.queued), "actions in the LinkedIn queue") +
         kpi("Replies", String(d.counters.needsAttention), "conversations need attention") +
         kpi("Health", a ? title(a.health) : "No account", a && a.healthReason ? a.healthReason : "", a ? HEALTH_PILL[a.health] : "") +
@@ -176,7 +190,7 @@
 
       var bars = "";
       if (u) {
-        bars = '<div class="card lio-card"><div class="lio-card-t">Shared LinkedIn utilization <span class="lio-hint" title="These are RecruitersOS utilization policies for this account, not limits LinkedIn publishes or guarantees.">?</span></div>' +
+        bars = '<div class="card lio-card"><div class="lio-card-t">Shared LinkedIn utilization <span class="lio-hint" title="These are ' + esc(brandName()) + ' utilization policies for this account, not limits LinkedIn publishes or guarantees.">?</span></div>' +
           u.categories.filter(function (c) { return ["connections", "messages", "voice_notes", "inmails"].indexOf(c.category) >= 0; })
             .map(function (c) { return utilBar(c); }).join("") +
           '<div class="lio-split">' +
@@ -511,7 +525,7 @@
         rv("Slow drip", w.dailyEnrollTarget + " new people per business day") +
         "</div>" +
         (cc && !cc.fitsToday
-          ? '<div class="lio-note">This campaign cannot consume all requested LinkedIn actions today. RecruitersOS will slow-drip it based on available capacity; nothing exceeds the account policy.</div>'
+          ? '<div class="lio-note">This campaign cannot consume all requested LinkedIn actions today. ' + esc(brandName()) + ' will slow-drip it based on available capacity; nothing exceeds the account policy.</div>'
           : '<div class="lio-note lio-note-ok">Capacity is available for the first sends today. Pacing and randomized timing still apply.</div>');
     }
   }
@@ -1110,7 +1124,7 @@
         kpi("Available", o.availablePct + "%") +
         "</div>" +
         '<div class="lio-cols">' +
-        '<div class="card lio-card"><div class="lio-card-t">Action utilization today <span class="lio-hint" title="Used = provider-confirmed sends. Reserved = capacity held for scheduled actions. Waiting = actions in line for headroom. Targets and ceilings are RecruitersOS account policies.">?</span></div>' +
+        '<div class="card lio-card"><div class="lio-card-t">Action utilization today <span class="lio-hint" title="Used = provider-confirmed sends. Reserved = capacity held for scheduled actions. Waiting = actions in line for headroom. Targets and ceilings are ' + esc(brandName()) + ' account policies.">?</span></div>' +
         '<div class="lio-tablewrap"><table class="lio-table"><thead><tr><th>Category</th><th>Used</th><th>Reserved</th><th>Waiting</th><th>Target</th><th>Hard ceiling</th></tr></thead><tbody>' + catRows + "</tbody></table></div>" +
         '<div style="margin-top:8px">' + weekly + "</div></div>" +
         '<div class="card lio-card"><div class="lio-card-t">Fair capacity allocation</div>' +
@@ -1168,7 +1182,7 @@
   function explainModal(actionId) {
     act("action_explain", { id: actionId }).then(function (d) {
       var m = el('<div class="modal-bg"><div class="modal-card">' +
-        '<div class="lio-wiz-head"><b>Why did RecruitersOS run this LinkedIn action?</b><button class="modal-x">&times;</button></div>' +
+        '<div class="lio-wiz-head"><b>Why did ' + esc(brandName()) + ' run this LinkedIn action?</b><button class="modal-x">&times;</button></div>' +
         '<div class="lio-wiz-body">' +
         rv("Person", (d.person && d.person.name) || "Unknown") +
         rv("Action", title(d.action.actionType)) +
@@ -1214,7 +1228,7 @@
         return "<tr data-w='" + k + "'><td>" + title(k) + "</td><td><input class='lio-input lio-input-n' type='number' min='0' step='0.5' value='" + p.pressure.weights[k] + "'></td></tr>";
       }).join("");
       body.innerHTML =
-        '<div class="lio-toolbar"><div>Account: ' + accSel + '</div><div class="lio-dim">These are RecruitersOS utilization policies for pacing this account. They are not numbers LinkedIn publishes or guarantees. <span class="lio-hint" title="RecruitersOS never presents any action count as a guaranteed safe LinkedIn limit. Targets pace normal operation; the hard ceiling is the wall the engine will not cross.">?</span></div></div>' +
+        '<div class="lio-toolbar"><div>Account: ' + accSel + '</div><div class="lio-dim">These are ' + esc(brandName()) + ' utilization policies for pacing this account. They are not numbers LinkedIn publishes or guarantees. <span class="lio-hint" title="' + esc(brandName()) + ' never presents any action count as a guaranteed safe LinkedIn limit. Targets pace normal operation; the hard ceiling is the wall the engine will not cross.">?</span></div></div>' +
         '<div class="lio-cols">' +
         '<div class="card lio-card"><div class="lio-card-t">Operating mode</div>' + modes +
         '<div class="lio-dim" style="margin-top:6px">Selecting a mode applies its recommended starting policy. Adjust any number below and the mode becomes Custom.</div></div>' +
@@ -1298,7 +1312,7 @@
   function modeBlurb(mo) {
     return {
       conservative: "Lower daily targets, wider spacing, stricter burst protection, earlier cooldowns.",
-      balanced: "RecruitersOS recommended starting policy: steady utilization with pacing and automatic cooldowns.",
+      balanced: brandName() + " recommended starting policy: steady utilization with pacing and automatic cooldowns.",
       aggressive: "Higher configured targets and closer pacing, still protected by hard ceilings and risk monitoring.",
       custom: "You control every setting below."
     }[mo];
