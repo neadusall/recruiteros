@@ -12659,6 +12659,12 @@
        small: name, a plain-English stage line, and Remove. Finished items show what
        they added; the list itself appears under saved lists like any other run. ---- */
     var nightTimer = null;
+    /** Searches THIS visit's own flows are driving right now (token -> 1). A held
+        crash-net checkpoint whose token is in here already has a live progress bar
+        in front of the recruiter; everywhere else (another tab, another recruiter,
+        or a visit that navigated away and came back) the checkpoint is the only
+        visible trace of the running search, so it gets shown and watched instead. */
+    var liveSearchTokens = {};
     function renderNight(items) {
       // The Boost progress card mirrors queue state, so it updates on the same
       // refresh; must run before the empty-queue early-out so a just-finished
@@ -12666,10 +12672,11 @@
       updateBoostCard(items);
       var host = $("#jdNight"); if (!host) return;
       // A still-queued crash-net checkpoint is the shadow of a search running right
-      // now in some tab (see watchRecovery): showing it here would read as a phantom
-      // duplicate. Once recovery actually starts (stage moves past queued) it is
-      // real server-side work and belongs on the card.
-      items = items.filter(function (i) { return !(i.recovery && i.stage === "queued"); });
+      // now. When it is THIS visit's own search the live bar already narrates it and
+      // a row here would read as a phantom duplicate; any other running search used
+      // to be hidden entirely, so a recruiter who navigated away mid-search came
+      // back to a page that looked like the search never happened.
+      items = items.filter(function (i) { return !(i.recovery && i.stage === "queued" && liveSearchTokens[i.recovery.token]); });
       if (!items.length) { host.innerHTML = ""; return; }
       var STAGE_WORDS = {
         queued: "waiting in line",
@@ -12690,6 +12697,10 @@
             ? (i.kind === "boost" && i.note ? i.note
               : (i.added ? (i.added.emails + " email" + (i.added.emails === 1 ? "" : "s") + " + " + i.added.phones + " phone" + (i.added.phones === 1 ? "" : "s") + " added") : "finished"))
             : (i.note || STAGE_WORDS[i.stage] || i.stage);
+          // A held checkpoint = a search running right now somewhere else. Say so
+          // plainly; "waiting in line" would be a lie about work already underway.
+          var held = i.recovery && i.stage === "queued";
+          if (held) line = "running now on the server; the finished list lands under Your saved candidate lists and is sent on automatically";
           if (i.stage === "error") line = "stopped: " + (i.error || "unknown");
           // Say where the finished list WENT, or "0 emails added" on a re-enrich
           // top-up reads as if the whole run went nowhere (it already delivered).
@@ -12702,7 +12713,9 @@
           return '<div class="jd-night-row" style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line, #e5e8ef)">' +
             '<b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(i.name) + '</b>' +
             '<span class="muted" style="flex:1;font-size:12.5px">' + esc(line) + '</span>' +
-            '<button class="btn btn-ghost btn-sm" data-nq-remove="' + esc(i.id) + '">Remove</button>' +
+            // No Remove on a running search: removing the checkpoint would not stop
+            // the search, only disarm its safety net, so the button would be a lie.
+            (held ? '' : '<button class="btn btn-ghost btn-sm" data-nq-remove="' + esc(i.id) + '">Remove</button>') +
           '</div>';
         }).join("") + '</div>';
       host.querySelectorAll("[data-nq-remove]").forEach(function (b) {
@@ -12756,6 +12769,7 @@
         state.runs = runs;
         renderQuota((d && d.apiQuota) || []);
         renderNight((d && d.nightQueue) || []);
+        resumeInflightSearches((d && d.nightQueue) || []);
         renderSnavTargets();
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
@@ -13390,7 +13404,7 @@
       var name = targetId ? "" : ((nameEl && nameEl.value.trim()) || "");
       btn.disabled = true; btn.textContent = "Searching…";
       smsg("");
-      showProgress("Running the LinkedIn search", 120, "Pulling the search's people from LinkedIn, then widening with the search waterfall…");
+      showProgress("Running the LinkedIn search", 120, "Pulling the search's people from LinkedIn, then widening with the search waterfall… You can leave this page: the search keeps running, and the finished list lands under Your saved candidate lists and is sent on automatically.");
       // Crash net, same one the JD search runs behind: the token rides along so the
       // server can arm a durable checkpoint BEFORE it starts pulling. This request
       // runs for minutes and writes nothing until it finishes, so a deploy recreating
@@ -13400,6 +13414,7 @@
       // A dead connection hands over to watchRecovery instead, which finds the
       // checkpoint by this token and narrates the server finishing the job.
       var snavToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      liveSearchTokens[snavToken] = 1;
       var payload = { action: "salesNav", url: url, breadth: jdBreadth(), recoveryToken: snavToken };
       if (targetId) payload.targetRunId = targetId;
       if (name) payload.name = name;
@@ -13522,7 +13537,7 @@
       // rank); no stage-by-stage narration, just the bar, the % and the time left.
       var etaCap = parseInt($("#jdCap") && $("#jdCap").value, 10) || 500;
       var needBrief = !(ta && ta.value.trim());
-      showProgress("Finding candidates", (needBrief ? 12 : 0) + 28 + findEta(etaCap), "Working…");
+      showProgress("Finding candidates", (needBrief ? 12 : 0) + 28 + findEta(etaCap), "Working… You can leave this page once the search is underway: it keeps running, and the finished list lands under Your saved candidate lists and is sent on automatically.");
       msg("");
       Promise.resolve().then(function () {
         // 1) Brief: only when the JD box is empty (same draft the builder button uses).
@@ -13569,6 +13584,7 @@
         var provisionalName = (nameEl0 && nameEl0.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
         if (state.location && provisionalName.indexOf(state.location) < 0) provisionalName += " · " + state.location;
         var recoveryToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+        liveSearchTokens[recoveryToken] = 1;
         return send("/sourcing", "POST", { action: "run", recoveryToken: recoveryToken, name: provisionalName, jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).catch(function () {
           // fetch itself rejected: the connection died mid-request (a deploy
           // recreating the server is the everyday cause). Not a server "no".
@@ -13696,6 +13712,92 @@
       // First knock after a short beat: right after a deploy the app needs a few
       // seconds to come back at all.
       return delay(5000).then(poll);
+    }
+
+    /* ---- Re-attach to a search already running on the server ----
+       A search keeps running server-side after the recruiter navigates away (its
+       held crash-net checkpoint in the overnight queue is the visible shadow), and
+       the finished list saves, enriches, and delivers with no tab open. But a fresh
+       visit to this tab used to show NOTHING about it: the recruiter came back to a
+       blank page and read the search as lost (Ariel, 2026-08-05, a live search that
+       had in fact landed and delivered on its own). On every runs refresh, any
+       running search this visit is not itself driving gets the progress bar back
+       and a watch that narrates the finish, exactly like never having left. */
+    var resumeWatching = {}; // tokens this visit has already re-attached
+    function resumeInflightSearches(items) {
+      (items || []).forEach(function (it) {
+        var tok = it.recovery && it.recovery.token;
+        if (!tok || it.stage === "done" || it.stage === "error") return;
+        if (liveSearchTokens[tok] || resumeWatching[tok]) return;
+        // A busy bar belongs to a flow the recruiter is watching right now; do not
+        // steal it. The checkpoint stays on the queue card, and the next refresh
+        // re-offers it here once the bar is free.
+        if (prog.timer) return;
+        resumeWatching[tok] = 1;
+        var label = it.name || "Your search";
+        var url = (it.salesNav && it.salesNav.url) || "";
+        var armedAt = Date.parse(it.recovery.armedAt || "") || (Date.now() - 60000);
+        var deadline = Date.now() + 45 * 60 * 1000;
+        showProgress('"' + label + '" is still running', 90 + findEta(it.cap || 300),
+          "This search kept running on the server while you were away. You can leave this page again: the finished list lands under Your saved candidate lists and is sent to Candidates and OS Text automatically.");
+        function poll() {
+          return api("/sourcing").then(function (d) {
+            var q = (d && d.nightQueue) || [];
+            var cur = q.filter(function (i) { return i.recovery && i.recovery.token === tok; })[0];
+            if (cur && cur.stage === "error") {
+              delete resumeWatching[tok];
+              failProgress("Search stopped");
+              msgStop("SRC-RECOVERY", 'The server could not finish "' + label + '" (' + (cur.error || "no reason given") + "). Nothing was saved. Run the search again.");
+              loadRuns();
+              return;
+            }
+            if (cur && cur.runId) {
+              // The queue's crash recovery re-ran it and the list is saved.
+              delete resumeWatching[tok];
+              finishProgress('Done · "' + (cur.name || label) + '" saved');
+              msg('"' + (cur.name || label) + '" finished and is saved below. Contact enrichment and delivery to Candidates and OS Text continue automatically.');
+              loadRuns();
+              return;
+            }
+            if (cur) {
+              setProgPhase(cur.note || "Still searching on the server. You can leave this page; the finished list lands below on its own.");
+              if (Date.now() < deadline) return delay(15000).then(poll);
+              delete resumeWatching[tok];
+              finishProgress("Still working");
+              msg("The search is still finishing on the server. It will appear under Your saved candidate lists on its own; no need to keep this page open.");
+              return;
+            }
+            // Checkpoint gone: the request driving the search answered, and a landed
+            // list is saved BEFORE the checkpoint is removed, so it is findable in
+            // this same response. Match the pasted URL first (a URL search with no
+            // typed name lands under a derived name), then the intended name.
+            delete resumeWatching[tok];
+            var runs = (d && d.runs) || [];
+            var hit = runs.filter(function (r) {
+              var upd = Date.parse(r.updatedAt || r.createdAt || "") || 0;
+              if (upd < armedAt - 60000) return false;
+              if (url && (r.jdUrl || "").trim() === url.trim()) return true;
+              return label && (r.name || "").toLowerCase().indexOf(label.toLowerCase()) === 0;
+            })[0];
+            if (hit) {
+              finishProgress('Done · "' + hit.name + '" saved');
+              msg('"' + hit.name + '" finished and is saved below with ' + ((hit.candidates || []).length) + " candidates. Contact enrichment and delivery to Candidates and OS Text continue automatically.");
+            } else {
+              // Honest end-state: the search answered, but nothing recognizably
+              // landed. The everyday cause is a search that found nobody (a real
+              // answer), so say that instead of inventing a success.
+              finishProgress("Search finished");
+              msg("The search finished on the server. Check Your saved candidate lists below; if it is not there, the search found nobody to save, so running it again is safe.");
+            }
+            loadRuns();
+          }).catch(function () {
+            // The server may be mid-deploy; keep knocking until the deadline.
+            if (Date.now() < deadline) return delay(15000).then(poll);
+            delete resumeWatching[tok];
+          });
+        }
+        delay(15000).then(poll);
+      });
     }
 
     /** "Dive deeper", refine the ICP with a natural-language instruction (LLM). */
