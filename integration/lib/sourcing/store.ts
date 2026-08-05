@@ -73,6 +73,8 @@ export interface SaveRunInput {
   apiUsage?: SourcingRun["apiUsage"];
   /** Auto-send on the next sweep with no settle wait (runs born finished, e.g. a combine). */
   sendAsap?: boolean;
+  /** Set only by the live search route when IT saved the finished result. */
+  serverSavedAt?: string;
   /** Source run ids when this run is a "Combine lists" merge. */
   combinedFrom?: string[];
   /** The recruiter who initiated the search (drives the OS Text campaign owner). */
@@ -94,6 +96,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     if (input.warnings) existing.warnings = input.warnings;
     if (input.apiUsage) existing.apiUsage = input.apiUsage;
     if (input.sendAsap !== undefined) existing.sendAsap = input.sendAsap;
+    if (input.serverSavedAt) existing.serverSavedAt = input.serverSavedAt;
     if (input.combinedFrom) existing.combinedFrom = input.combinedFrom;
     // First writer wins: a later re-save (enrich tick, merge) never steals the list.
     if (input.createdBy && !existing.createdBy) existing.createdBy = input.createdBy;
@@ -115,6 +118,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     warnings: input.warnings || [],
     apiUsage: input.apiUsage,
     sendAsap: input.sendAsap,
+    serverSavedAt: input.serverSavedAt,
     combinedFrom: input.combinedFrom,
     createdBy: input.createdBy,
     createdAt: nowIso(),

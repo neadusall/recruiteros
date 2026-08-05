@@ -13605,6 +13605,10 @@
           state.icp = r.data.icp || state.icp; state.queries = r.data.queries || state.queries;
           state.candidates = r.data.candidates || []; state.warnings = r.data.warnings || [];
           state.usage = r.data.usage || null; // the run's search-API spend, saved onto the list
+          // The server now saves the finished list itself before answering, so a
+          // tab that dies anywhere past this line loses nothing. Remember the
+          // saved run so step 4 adopts it instead of saving a duplicate.
+          state.serverRun = (r.data && r.data.run) || null;
           renderPlan(); renderResults();
           if (!state.candidates.length) {
             failProgress("No candidates found");
@@ -13621,6 +13625,15 @@
         var nameEl = $("#jdName");
         runName = (nameEl && nameEl.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
         if (state.location && runName.indexOf(state.location) < 0) runName += " · " + state.location;
+        // The search response already carries the run the SERVER saved; adopt it
+        // and skip the duplicate save (the server also recognizes and absorbs a
+        // stale tab's re-save of the same result).
+        if (state.serverRun && state.serverRun.id) {
+          savedId = state.serverRun.id;
+          runName = state.serverRun.name || runName;
+          state.serverRun = null;
+          return null;
+        }
         return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings, apiUsage: state.usage || undefined }).then(function (r) {
           if (!r.ok) throw { stage: "Save", r: r };
           savedId = r.data && r.data.run && r.data.run.id;

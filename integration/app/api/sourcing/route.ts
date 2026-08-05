@@ -308,11 +308,68 @@ export async function POST(req: Request) {
         }));
         // Remember who we surfaced so a later fresh-only run skips them.
         await addSeenKeys(ws, result.candidates.map(candKey));
-        return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true });
+        // SERVER-SIDE SAVE (2026-08-05). The finished result used to ride back to
+        // the browser, which then POSTed a separate "save": a tab that closed or
+        // reloaded mid-search meant the server finished the PAID search, handed the
+        // candidates to nobody, removed the checkpoint, and the whole run
+        // evaporated. The server now saves the list itself, exactly like the
+        // salesNav path always has; the client sees the saved run in the response
+        // and skips its own save. Best-effort with the client save as fallback: a
+        // store hiccup here must not turn a successful search into a 500.
+        let savedRun;
+        if (result.candidates.length) {
+          const listName = (typeof b.name === "string" && b.name.trim()) || icp.label || "Candidate search";
+          try {
+            savedRun = await saveSourcingRun(ws, {
+              name: listName,
+              jd: typeof b.jd === "string" ? b.jd : "",
+              location: (b.location as string) || undefined,
+              icp, queries,
+              candidates: result.candidates,
+              warnings: result.warnings,
+              motion: "recruiting",
+              createdBy: actor,
+              apiUsage: result.usage ? {
+                rapidapi: Number(result.usage.rapidapi) || 0,
+                serper: Number(result.usage.serper) || 0,
+                google: Number(result.usage.google) || 0,
+              } : undefined,
+              serverSavedAt: nowIso(),
+            });
+            // The list is durable: stand the net down NOW rather than in the
+            // finally, shrinking the window where a process kill would leave a
+            // checkpoint behind a run that already saved (the queue would re-pay
+            // for a search whose list exists).
+            if (recoveryId) { const id = recoveryId; recoveryId = ""; await removeNightItem(ws, id).catch(() => {}); }
+          } catch (err) {
+            console.warn("[sourcing] server-side save failed, leaving it to the client:", (err as Error).message);
+          }
+        } else if (recoveryId) {
+          // Nobody found is a real answer, and it must stay visible even when the
+          // tab that asked is gone (same rule as the salesNav path): park the
+          // checkpoint as a stopped queue item carrying the engine's own reason.
+          const id = recoveryId;
+          recoveryId = "";
+          await failNightItem(ws, id,
+            (result.stopReason && result.stopReason.message) ||
+            "The search came back with nobody. Adjust the role, location, or filters and run it again.").catch(() => {});
+        }
+        return ok({ icp, queries, ...result, freshOnly: b.freshOnly === true, run: savedRun });
+      } catch (err) {
+        // A crash while the recruiter is away used to vanish with the checkpoint;
+        // park it as a stopped item so the reason survives on the queue card.
+        if (recoveryId) {
+          const id = recoveryId;
+          recoveryId = "";
+          await failNightItem(ws, id,
+            "The search stopped unexpectedly (" + ((err as Error).message || "no reason given") + "). Nothing was saved, so running it again is safe.").catch(() => {});
+        }
+        throw err;
       } finally {
         // The request ran to completion (either way, the client got a real answer),
-        // so the crash net stands down. A killed process never reaches this line —
-        // exactly the case the checkpoint exists for.
+        // so the crash net stands down. A killed process never reaches this line;
+        // that is exactly the case the checkpoint exists for. Saves, refusals, and
+        // crashes above already cleared recoveryId, so this is the backstop.
         if (recoveryId) await removeNightItem(ws, recoveryId).catch(() => {});
       }
     }
@@ -519,6 +576,21 @@ export async function POST(req: Request) {
 
     if (action === "save") {
       if (!b?.name || !b?.icp) return fail("missing_fields", 422, { detail: "name and icp required" });
+      // OLD-CLIENT DOUBLE-SAVE GUARD. The live search route now saves its result
+      // server-side, and an updated client skips this call; a tab still running
+      // pre-update JS (open across the deploy) will save the same result again.
+      // A brand-new save that exactly mirrors a run the SERVER just saved (same
+      // name, same row count, same recruiter, minutes old) is that duplicate:
+      // hand back the existing run instead of creating a second list.
+      if (!b.id) {
+        const twin = (await listSourcingRuns(ws)).find((r) =>
+          r.serverSavedAt &&
+          Date.now() - Date.parse(r.serverSavedAt) < 15 * 60_000 &&
+          r.name.trim().toLowerCase() === String(b.name).trim().toLowerCase() &&
+          r.candidates.length === (Array.isArray(b.candidates) ? b.candidates.length : 0) &&
+          (!r.createdBy || r.createdBy.userId === actor.userId));
+        if (twin) return ok({ run: twin });
+      }
       const run = await saveSourcingRun(ws, {
         id: b.id, name: b.name, jd: b.jd ?? "", jdUrl: b.jdUrl, location: b.location,
         icp: b.icp, queries: b.queries ?? [], candidates: b.candidates ?? [],

@@ -161,6 +161,11 @@ export interface SourcingRun {
    *  name; absent (legacy runs, pre-2026-07-21), the campaign lands Unassigned
    *  and admins get the new-candidates ping instead. */
   createdBy?: { userId: string; name: string; email: string };
+  /** Stamped when the SERVER saved this run at the end of a live search (the
+   *  2026-08-05 tab-independence fix). Lets the "save" action recognize an old
+   *  cached client's follow-up save of the same result and return this run
+   *  instead of creating a duplicate list. */
+  serverSavedAt?: string;
   /** The name the recruiter saves it under — reused as the Candidates list name. */
   name: string;
   motion: Motion;
