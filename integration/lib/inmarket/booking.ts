@@ -44,14 +44,52 @@ export interface Booking {
 }
 
 /**
- * A unique, no-account video room for one booking. Jitsi Meet rooms exist the
- * moment someone opens the link (both sides just click to join in the browser),
- * so there is nothing to provision and no vendor account to hold. A workspace
+ * A unique, no-account video room for one booking. Rooms exist the moment
+ * someone opens the link (both sides just click to join in the browser), so
+ * there is nothing to provision and no vendor account to hold. A workspace
  * that prefers its own room (Teams/Zoom/Meet) sets bookingMeetingUrl instead.
  */
-export function mintMeetingUrl(brandName: string, bookingId: string): string {
+export function meetRoomName(brandName: string, bookingId: string): string {
   const slug = (brandName || "").replace(/[^a-zA-Z0-9]+/g, "").slice(0, 24) || "RecruitersOS";
-  return `https://meet.jit.si/${slug}Call-${bookingId.slice(0, 8)}`;
+  return `${slug}Call-${bookingId.slice(0, 8)}`;
+}
+
+/* ------------------- branded meet server (self-hosted Jitsi) ------------------- */
+/* When RECRUITEROS_MEET_BASE + RECRUITEROS_MEET_JWT_SECRET are set AND the
+   workspace's own portal shares the meet server's root domain, rooms are minted
+   on OUR server with a signed join token (the server rejects tokenless
+   visitors, so the public hostname can't be used to host free calls). The
+   instance carries ONE brand's look, so workspaces on another brand's portal
+   keep the neutral meet.jit.si default. */
+
+const b64url = (buf: Buffer) => buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+/** Compact HS256 JWT in the shape Jitsi's token auth expects. */
+function meetJwt(room: string, appId: string, secret: string, expSec: number): string {
+  const enc = (o: object) => b64url(Buffer.from(JSON.stringify(o)));
+  const head = enc({ alg: "HS256", typ: "JWT" });
+  const body = enc({ aud: "jitsi", iss: appId, sub: "*", room, nbf: Math.floor(Date.now() / 1000) - 300, exp: expSec });
+  const sig = b64url(createHmac("sha256", secret).update(`${head}.${body}`).digest());
+  return `${head}.${body}.${sig}`;
+}
+
+const rootDomain = (host: string) => host.split(".").slice(-2).join(".");
+
+async function brandedMeetingUrl(workspaceId: string, room: string, startIso: string): Promise<string | null> {
+  const base = (process.env.RECRUITEROS_MEET_BASE || "").trim().replace(/\/+$/, "");
+  const secret = (process.env.RECRUITEROS_MEET_JWT_SECRET || "").trim();
+  if (!base || !secret) return null;
+  try {
+    const { notifyBrand } = await import("../outbound/brand");
+    const appHost = new URL((await notifyBrand(workspaceId)).appUrl).hostname;
+    if (rootDomain(new URL(base).hostname) !== rootDomain(appHost)) return null;
+    // Valid from now (links are emailed at booking time) until 24h past the call start.
+    const exp = Math.floor(Date.parse(startIso) / 1000) + 24 * 3600;
+    const appId = (process.env.RECRUITEROS_MEET_JWT_APP_ID || "recruiteros").trim();
+    return `${base}/${room}?jwt=${meetJwt(room, appId, secret, exp)}`;
+  } catch {
+    return null;
+  }
 }
 
 let mem: Map<string, Booking[]> | null = null;
@@ -233,6 +271,14 @@ export async function listOpenSlots(workspaceId: string, s: VideoSettings, now =
 function icsEscape(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
 }
+/** RFC 5545 line folding: content lines over 75 octets continue on the next line after one space. */
+function icsFold(line: string): string {
+  const out: string[] = [];
+  let rest = line;
+  while (rest.length > 74) { out.push(rest.slice(0, 74)); rest = " " + rest.slice(74); }
+  out.push(rest);
+  return out.join("\r\n");
+}
 function icsStamp(iso: string): string {
   return iso.replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
@@ -256,7 +302,7 @@ export function buildInviteIcs(b: Booking, organizerEmail: string, organizerName
     "STATUS:CONFIRMED",
     "END:VEVENT",
     "END:VCALENDAR",
-  ].join("\r\n");
+  ].map(icsFold).join("\r\n");
 }
 
 /* ----------------------------- booking ----------------------------- */
@@ -292,13 +338,18 @@ async function bookOne(
 
   const brandName = (s.brandName || "").trim() || "our team";
   const id = randomUUID();
+  const room = meetRoomName(s.brandName || "", id);
+  const meetingUrl =
+    (s.bookingMeetingUrl || "").trim() ||
+    (await brandedMeetingUrl(workspaceId, room, startIso)) ||
+    `https://meet.jit.si/${room}`;
   const booking: Booking = {
     id,
     start: startIso,
     end: new Date(Date.parse(startIso) + cfg.slotMin * 60 * 1000).toISOString(),
     name: guest.name, email: guest.email,
     note: guest.note || undefined,
-    meetingUrl: (s.bookingMeetingUrl || "").trim() || mintMeetingUrl(s.brandName || "", id),
+    meetingUrl,
     createdAt: new Date().toISOString(),
     organizerEmailed: false, guestEmailed: false,
   };

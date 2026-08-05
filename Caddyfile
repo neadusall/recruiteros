@@ -151,6 +151,17 @@ https:// {
 	}
 }
 
+# meet.lumesp.com: Lume-branded video calls (self-hosted Jitsi, /opt/jitsi
+# compose stack; jitsi-web joins the recruiteros_default network). Join links
+# are minted by the booking engine with a signed token and the stack rejects
+# tokenless visitors, so the public hostname can't be used to host free calls.
+meet.lumesp.com {
+	encode zstd gzip
+	reverse_proxy jitsi-web:80 {
+		import resilient
+	}
+}
+
 # mytal.co: client onboarding portal, served by the standalone mytal-web
 # container (static page + POST /api/onboard intake capture to
 # /opt/mytal/data/onboarding.jsonl). Named blocks win over the catch-all.
