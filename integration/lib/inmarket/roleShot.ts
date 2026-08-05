@@ -1470,27 +1470,40 @@ export async function captureRoleShot(req: ShotRequest, opts?: { force?: boolean
   const key = shotKey(req.company, req.roleTitle);
   const cache = await ensureCache();
 
+  // A CACHED NEGATIVE still deserves a card. Returning it verbatim was skipping the fallback for
+  // exactly the roles that need it most: the verdict cache is warm for the whole book, so every
+  // uncapturable role short-circuited here and shipped no video at all. Reuse the cached verdict as
+  // proof the live page is a dead end (so we skip the pointless re-capture), then typeset the card.
+  let cachedNegative: ShotResult | null = null;
   if (!opts?.force) {
     const hit = cache.get(key);
     if (hit && freshEnough(hit)) {
       // Confirm the PNG still exists on disk before trusting a positive verdict.
-      if (!isCaptured(hit.status) || (await fileExists(assetPath(key, "png")))) {
+      if (isCaptured(hit.status)) {
+        if (await fileExists(assetPath(key, "png"))) return stripRow(hit);
+      } else if (hit.status === "staffing_blocked" || !roleCardEnabled()) {
         return stripRow(hit);
+      } else {
+        cachedNegative = stripRow(hit);
       }
     }
   }
 
   let result: ShotResult;
-  try {
-    const browser = await getBrowser();
-    const target = await resolveTarget(req, browser);
-    if ("status" in target) {
-      result = { ok: false, status: target.status, key, reason: target.reason, at: new Date().toISOString() };
-    } else {
-      result = await doCapture(browser, key, target, req);
+  if (cachedNegative) {
+    result = cachedNegative;
+  } else {
+    try {
+      const browser = await getBrowser();
+      const target = await resolveTarget(req, browser);
+      if ("status" in target) {
+        result = { ok: false, status: target.status, key, reason: target.reason, at: new Date().toISOString() };
+      } else {
+        result = await doCapture(browser, key, target, req);
+      }
+    } catch (e) {
+      result = { ok: false, status: "error", key, reason: (e as Error).message, at: new Date().toISOString() };
     }
-  } catch (e) {
-    result = { ok: false, status: "error", key, reason: (e as Error).message, at: new Date().toISOString() };
   }
 
   // GUARANTEED BACKGROUND: a live capture is best-effort, but a prospect with no video is a lost
