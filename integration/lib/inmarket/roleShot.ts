@@ -1388,9 +1388,7 @@ function roleCardHtml(req: ShotRequest): string {
   <h1>${esc(req.roleTitle)}</h1>
   ${meta ? `<div class="meta">${meta}</div>` : ""}
   ${signal}
-  <div class="rule"></div>
-  ${body}
-  ${otherBlock}
+  ${body || otherBlock ? `<div class="rule"></div>${body}${otherBlock}` : ""}
   <div class="tail">Open role at ${esc(req.company)}</div>
   </div>`;
 }
