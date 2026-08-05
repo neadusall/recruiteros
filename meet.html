@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Meeting</title>
+<link rel="icon" href="/assets/img/lume-favicon.svg" />
+<script>(function(){try{var t=localStorage.getItem('ros_theme');if(!t)t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<style>
+  /* Meridian tokens (docs/DESIGN-SYSTEM.md): solid surfaces, one accent. */
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --line:#e5e8ee; --line-2:#cfd5df;
+    --ink:#14181f; --mut:#4b5364; --faint:#8a93a5;
+    --accent:#2e5bd7; --accent-hover:#2448ad; --accent-soft:rgba(46,91,215,.09);
+    --rad:10px;
+  }
+  html[data-theme="dark"]{
+    --bg:#0f1216; --panel:#171b22; --line:#262c36; --line-2:#3a4250;
+    --ink:#f2f4f8; --mut:#aab2c0; --faint:#737d8d;
+    --accent:#567fe4; --accent-hover:#7d9ff0; --accent-soft:rgba(86,127,228,.16);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif}
+
+  /* ── Lobby: one centered card, one big clear mark ── */
+  .lobby{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;padding:24px}
+  .lobby .mark img{height:78px;max-width:min(440px,88vw);object-fit:contain;display:block}
+  .lobby .mark .txt{font-weight:700;font-size:30px;letter-spacing:-.02em}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);
+    padding:26px;width:100%;max-width:400px;box-shadow:0 10px 30px rgba(10,14,20,.06)}
+  .card h1{margin:0 0 16px;font-size:18px;letter-spacing:-.015em;text-align:center}
+  input[type=text]{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line-2);
+    border-radius:8px;padding:11px 13px;font:inherit;font-size:15px}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .go{width:100%;margin-top:12px;border:0;background:var(--accent);color:#fff;font:inherit;font-size:15px;
+    font-weight:600;padding:12px;border-radius:8px;cursor:pointer}
+  .go:hover{background:var(--accent-hover)}
+  .lobby .note{color:var(--faint);font-size:12.5px}
+
+  /* ── In meeting: the call is the whole screen ── */
+  body.inmeeting{background:#0b0d10}
+  #stage{position:fixed;inset:0;display:none}
+  #jitsi{position:absolute;inset:0}
+  #jitsi iframe{width:100%;height:100%;border:0}
+  .float{position:absolute;top:14px;right:16px;z-index:6;display:flex;gap:8px;align-items:center}
+  .fbtn{border:1px solid rgba(255,255,255,.16);background:rgba(15,18,22,.62);color:#fff;
+    font:inherit;font-size:12.5px;font-weight:500;padding:7px 14px;border-radius:999px;cursor:pointer;
+    backdrop-filter:blur(8px);text-decoration:none}
+  .fbtn:hover{background:rgba(15,18,22,.85)}
+  .rec{position:absolute;left:16px;bottom:14px;z-index:6;display:none;align-items:center;gap:7px;
+    border-radius:999px;padding:6px 13px;font-size:12px;font-weight:500;color:#fff;
+    background:rgba(15,18,22,.62);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(8px);pointer-events:none}
+  .rec .dot{width:7px;height:7px;border-radius:50%;background:#e5695f;flex:none}
+  /* Brand cover for the public-bridge fallback only (our own server wears the
+     brand inside the call, so nothing doubles up). */
+  #brandOverlay{position:absolute;top:14px;left:16px;z-index:5;pointer-events:none;display:none;
+    background:rgba(255,255,255,.94);border-radius:8px;padding:8px 14px;box-shadow:0 1px 6px rgba(10,14,20,.25)}
+  #brandOverlay img{height:24px;display:block}
+  #brandOverlay .txt{font-weight:700;font-size:15px;color:#14181f;white-space:nowrap}
+
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#14181f;color:#fff;
+    font-size:13px;padding:9px 16px;border-radius:8px;opacity:0;pointer-events:none;transition:.18s;z-index:50}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="lobby" id="lobby">
+  <span class="mark" id="lobbyMark"></span>
+  <div class="card">
+    <h1>Start a meeting</h1>
+    <input type="text" id="roomInput" placeholder="Name the meeting" />
+    <button class="go" id="btnStart">Start meeting</button>
+  </div>
+  <span class="note">Share one link. Anyone joins from a browser, nothing to install.</span>
+</div>
+
+<div id="stage">
+  <div id="jitsi"></div>
+  <div class="float">
+    <button class="fbtn" id="btnCopy">Copy invite link</button>
+    <a class="fbtn" href="/meet">New meeting</a>
+  </div>
+  <span class="rec" id="recChip"><span class="dot"></span>Recorded for meeting notes</span>
+  <div id="brandOverlay"></div>
+</div>
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+  // Host decides the brand (tenant isolation rule): customer domains never
+  // show the house brand.
+  var isHouse = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.hostname || "");
+  // White wordmark on the dark appearance, navy on light (both transparent SVGs).
+  var dark = (document.documentElement.getAttribute("data-theme") || "light") === "dark";
+  var BRAND = isHouse
+    ? { name: "RecruitersOS", logo: null }
+    : { name: "Lume Search Partners",
+        logo: dark ? "/assets/img/lume-wordmark-white.svg" : "/assets/img/lume-wordmark-navy.svg" };
+  document.title = BRAND.name + " Meeting";
+  document.getElementById("lobbyMark").innerHTML =
+    BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
+
+  function toast(m) { var t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(function () { t.classList.remove("show"); }, 2600); }
+
+  var params = new URLSearchParams(location.search);
+  var room = (params.get("room") || "").trim();
+
+  function slugify(name) {
+    var s = name.trim().replace(/['"]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!s) s = "Meeting";
+    // A short random tail keeps rooms private-by-obscurity on the public bridge.
+    return s + "-" + Math.random().toString(36).slice(2, 8);
+  }
+  document.getElementById("btnStart").addEventListener("click", function () {
+    location.search = "?room=" + encodeURIComponent(slugify(document.getElementById("roomInput").value || "Meeting"));
+  });
+  document.getElementById("roomInput").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") document.getElementById("btnStart").click();
+  });
+
+  if (!room) return;
+
+  // ---- In-meeting mode ----
+  document.body.classList.add("inmeeting");
+  document.getElementById("lobby").style.display = "none";
+  document.getElementById("stage").style.display = "block";
+  var inviteUrl = location.origin + "/meet?room=" + encodeURIComponent(room);
+  document.getElementById("btnCopy").addEventListener("click", function () {
+    (navigator.clipboard ? navigator.clipboard.writeText(inviteUrl) : Promise.reject())
+      .then(function () { toast("Invite link copied."); })
+      .catch(function () { window.prompt("Copy the invite link:", inviteUrl); });
+  });
+
+  var rootDomain = function (h) { return String(h || "").split(".").slice(-2).join("."); };
+  var joinName = (params.get("name") || "").trim().slice(0, 60);
+
+  function startMeeting(domain, jwt) {
+    var selfHosted = domain !== "meet.jit.si";
+    if (!selfHosted) {
+      // The public bridge would show a vendor mark: cover that corner with ours.
+      // The pill is white, so it always wears the navy wordmark regardless of theme.
+      var ov = document.getElementById("brandOverlay");
+      var ovLogo = isHouse ? null : "/assets/img/lume-wordmark-navy.svg";
+      ov.innerHTML = ovLogo ? '<img src="' + ovLogo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
+      ov.style.display = "block";
+    } else {
+      document.getElementById("recChip").style.display = "flex";
+    }
+    var s = document.createElement("script");
+    s.src = "https://" + domain + "/external_api.js";
+    s.onload = function () {
+      /* global JitsiMeetExternalAPI */
+      var opts = {
+        roomName: room,
+        parentNode: document.getElementById("jitsi"),
+        configOverwrite: {
+          prejoinConfig: { enabled: true },
+          disableDeepLinking: true,
+        },
+        interfaceConfigOverwrite: {
+          SHOW_JITSI_WATERMARK: false,
+          SHOW_WATERMARK_FOR_GUESTS: false,
+          SHOW_BRAND_WATERMARK: false,
+          SHOW_POWERED_BY: false,
+          JITSI_WATERMARK_LINK: "",
+          APP_NAME: BRAND.name + " Meeting",
+          NATIVE_APP_NAME: BRAND.name + " Meeting",
+        },
+      };
+      if (jwt) opts.jwt = jwt;
+      if (joinName) opts.userInfo = { displayName: joinName };
+      var japi = new JitsiMeetExternalAPI(domain, opts);
+      if (selfHosted) {
+        // Every call is recorded for the summary + role brief. First joiner
+        // starts it; recordingStatusChanged stops later joiners re-asking.
+        var recOn = false;
+        japi.addListener("recordingStatusChanged", function (e) { if (e && e.on) recOn = true; });
+        japi.addListener("videoConferenceJoined", function () {
+          setTimeout(function () {
+            if (recOn) return;
+            try { japi.executeCommand("startRecording", { mode: "file" }); } catch (e) { /* recorder absent */ }
+          }, 2500);
+        });
+      }
+    };
+    s.onerror = function () { toast("Could not reach the meeting service. Check your connection and reload."); };
+    document.head.appendChild(s);
+  }
+
+  // Backend pick: a token in the link wins (guests), then the portal session
+  // mints one for our own meet server, then the neutral public bridge.
+  var linkJwt = (params.get("j") || "").trim();
+  var linkHost = (params.get("b") || "").trim();
+  if (linkJwt && linkHost && rootDomain(linkHost) === rootDomain(location.hostname)) {
+    inviteUrl += "&j=" + encodeURIComponent(linkJwt) + "&b=" + encodeURIComponent(linkHost);
+    startMeeting(linkHost, linkJwt);
+    return;
+  }
+  fetch("/api/meet?room=" + encodeURIComponent(room), { credentials: "same-origin" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) {
+      var join = j && j.join;
+      if (join && join.base && join.jwt) {
+        var h = new URL(join.base).hostname;
+        if (rootDomain(h) === rootDomain(location.hostname)) {
+          inviteUrl += "&j=" + encodeURIComponent(join.jwt) + "&b=" + encodeURIComponent(h);
+          startMeeting(h, join.jwt);
+          return;
+        }
+      }
+      startMeeting("meet.jit.si", null);
+    })
+    .catch(function () { startMeeting("meet.jit.si", null); });
+})();
+</script>
+</body>
+</html>

@@ -11,7 +11,7 @@
  *   delete_inspiration{ id }
  *   rewrite           { inspirationId? | text?, author?, guidance? } -> new draft
  *   regenerate        { draftId, guidance? }
- *   update_draft      { draftId, text?, imageId? (null clears) }
+ *   update_draft      { draftId, text?, imageId? (null clears), firstComment? }
  *   discard_draft     { draftId }
  *   approve           { draftId, when? }   <- THE gate: now, or scheduled
  *   cancel_schedule   { draftId }
@@ -19,7 +19,15 @@
  *   upload_image      { name?, dataUrl }
  *   delete_image      { id }
  *   make_card         { headline }
+ *   make_original     { guidance? }         (AI writes a brand-grounded original)
+ *   make_job_post     {}                    (blind spotlight of an open Job Library job)
+ *   make_carousel     { draftId }           (draft -> branded slide PDF, attached)
+ *   duplicate         { draftId }           (reuse a post as a fresh draft)
+ *   refresh_stats     {}                    (pull engagement counters for posted)
  *   save_settings     { settings }
+ *   watch_add         { name?, url }       (follow a creator; new posts land in the inbox)
+ *   watch_remove      { id }
+ *   watch_pull        { id }               (pull that creator's recent posts now)
  *   ayrshare_create_profile {}             (Business plan: per-workspace profile)
  *   ayrshare_link_url {}                   (Business plan: SSO linking URL)
  */
@@ -29,7 +37,8 @@ import {
   getState, addInspiration, deleteInspiration, rewriteToDraft, regenerateDraft,
   updateDraft, discardDraft, approveDraft, cancelSchedule, retryDraft,
   uploadImage, deleteImage, generateQuoteCard, saveSettings, getSettings,
-  enginePublishStatus,
+  enginePublishStatus, addWatchedProfile, removeWatchedProfile, pullWatchedProfile,
+  generateCarousel, duplicateDraft, refreshPostStats, createOriginalDraft, createJobSpotlightDraft,
 } from "../../../../lib/linkedin/poster";
 import {
   ayrshareConfigured, ayrshareLinkingConfigured, getAccountStatus, createProfile, generateLinkUrl,
@@ -69,6 +78,8 @@ interface PosterPost {
   guidance?: string;
   draftId?: string;
   imageId?: string | null;
+  firstComment?: string;
+  slides?: unknown[];
   when?: string;
   name?: string;
   dataUrl?: string;
@@ -103,7 +114,7 @@ export async function POST(req: Request) {
       }
       case "update_draft": {
         if (!b.draftId) return fail("draftId_required");
-        return ok({ draft: await updateDraft(ws, b.draftId, { text: b.text, imageId: b.imageId }) });
+        return ok({ draft: await updateDraft(ws, b.draftId, { text: b.text, imageId: b.imageId, firstComment: b.firstComment }) });
       }
       case "discard_draft": {
         if (!b.draftId) return fail("draftId_required");
@@ -135,8 +146,36 @@ export async function POST(req: Request) {
         if (!b.headline?.trim()) return fail("headline_required");
         return ok({ image: await generateQuoteCard(ws, { headline: b.headline }) });
       }
+      case "make_original":
+        return ok({ draft: await createOriginalDraft(ws, { topic: b.guidance }) });
+      case "make_job_post":
+        return ok({ draft: await createJobSpotlightDraft(ws) });
+      case "make_carousel": {
+        if (!b.draftId) return fail("draftId_required");
+        const slides = Array.isArray(b.slides) ? b.slides.filter((x): x is string => typeof x === "string") : undefined;
+        return ok(await generateCarousel(ws, { draftId: b.draftId, slides }));
+      }
+      case "duplicate": {
+        if (!b.draftId) return fail("draftId_required");
+        return ok({ draft: await duplicateDraft(ws, b.draftId) });
+      }
+      case "refresh_stats":
+        return ok({ updated: await refreshPostStats(ws, true) });
       case "save_settings":
         return ok({ settings: await saveSettings(ws, (b.settings ?? {}) as never) });
+      case "watch_add": {
+        if (!b.url?.trim()) return fail("url_required");
+        return ok({ profile: await addWatchedProfile(ws, { name: b.name, url: b.url }) });
+      }
+      case "watch_remove": {
+        if (!b.id) return fail("id_required");
+        await removeWatchedProfile(ws, b.id);
+        return ok({ removed: true });
+      }
+      case "watch_pull": {
+        if (!b.id) return fail("id_required");
+        return ok(await pullWatchedProfile(ws, b.id));
+      }
       case "ayrshare_create_profile": {
         if (!ayrshareConfigured()) return fail("ayrshare_not_configured", 409);
         const key = await createProfile(`RecruitersOS ${g.ctx.workspace.name ?? ws}`);
