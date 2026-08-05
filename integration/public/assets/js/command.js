@@ -12204,6 +12204,11 @@
       '.jd-helpsec p{margin:0 0 8px;font-size:12.5px;color:var(--text-muted);line-height:1.5}' +
       '.jd-helpsec p b{color:var(--text)}' +
       '.jd-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}' +
+      '.jd-actnote{font-size:12.5px;max-width:760px;line-height:1.55;margin-top:9px}' +
+      '.jd-seat{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;padding:11px 14px;background:var(--bg-soft);border:1px solid var(--border);border-radius:11px;margin:4px 0 12px}' +
+      '.jd-seat-main{flex:1 1 340px;min-width:0;font-size:12.5px;color:var(--text-muted);line-height:1.55}' +
+      '.jd-seat-main .jd-eng{margin-right:9px;vertical-align:middle;position:relative;top:-1px}' +
+      '.jd-seat-act{display:flex;align-items:center;gap:8px;flex:0 0 auto;margin-left:auto}' +
       '.jd-cap{font-size:12.5px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px}' +
       '.jd-cap input{width:62px;background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:7px;color:var(--text);font:inherit;font-size:12.5px;padding:5px 7px;margin:0 2px}' +
       '.jd-cost{display:inline-block;margin-left:10px;padding:4px 12px;border-radius:999px;background:linear-gradient(135deg,var(--brand-soft),rgba(80,200,255,.12));border:1px solid color-mix(in srgb, var(--brand) 40%, transparent);color:var(--text);font-size:12.5px;font-weight:600;vertical-align:middle;transition:transform .12s ease;white-space:nowrap}' +
@@ -12523,11 +12528,11 @@
             '<select id="jdSnavTarget" title="Where the results land. Pick a past search (from any search type) to add to it without creating duplicates, or keep New list to save under a new name."><option value="">New list…</option></select>' +
             '<input id="jdSnavName" type="text" placeholder="Name the new list" /></div></div>' +
         '</div>' +
-        '<div id="jdSnavSeat" class="muted" style="display:none;font-size:12.5px;margin:2px 0 8px"></div>' +
+        '<div id="jdSnavSeat" class="jd-seat" style="display:none"></div>' +
         '<div class="jd-actions">' +
           '<button class="btn btn-primary" id="jdSnavGo">Search &amp; Enrich</button>' +
-          '<span class="muted" style="font-size:12.5px;max-width:560px">Adding to an existing list never creates duplicates: people already on it are kept once, anything the new pull knows (title, company, location, contact info) fills in their blanks, and the list re-enriches and re-sends on its own. Re-using an existing name does the same instead of creating a second list.</span>' +
         '</div>' +
+        '<div class="muted jd-actnote">Adding to an existing list never creates duplicates: people already on it are kept once, anything the new pull knows (title, company, location, contact info) fills in their blanks, and the list re-enriches and re-sends on its own. Re-using an existing name does the same instead of creating a second list.</div>' +
         '<div id="jdSnavMsg" class="muted" style="margin-top:8px"></div>' +
       '</div>' +
       '<div class="card jd-prog" id="jdProgress" style="display:none"></div>' +
@@ -14341,9 +14346,11 @@
     /* ---------- per-recruiter LinkedIn connection (Sales Nav card) ---------- */
     var liPoll = null;
     function seatRow(cls, pillText, bodyHtml, buttons) {
-      return '<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap">' +
-        '<span class="jd-eng ' + cls + '"><span class="jd-eng-dot"></span>' + pillText + '</span> ' +
-        '<span class="muted">' + bodyHtml + '</span>' + (buttons || "") + '</span>';
+      return '<div class="jd-seat-main">' +
+        '<span class="jd-eng ' + cls + '"><span class="jd-eng-dot"></span>' + pillText + '</span>' +
+        '<span>' + bodyHtml + '</span>' +
+      '</div>' +
+      (buttons ? '<div class="jd-seat-act">' + buttons + '</div>' : '');
     }
     function renderLinkedInSeat(seat) {
       var host = $("#jdSnavSeat"); if (!host) return;
