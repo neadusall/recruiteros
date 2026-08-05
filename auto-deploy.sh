@@ -40,6 +40,29 @@ if [ -z "${DEPLOY_SELF_COPY:-}" ]; then
   unset DEPLOY_SELF_COPY
 fi
 
+# APP-SWAP LOCK. Every cron tick that `docker exec`s into the app container
+# (sending-health, engine-health, nightqueue, receipts) holds
+# /var/lock/recruiteros-app-swap.lock SHARED for its run: a container recreate
+# landing mid-exec kills the tick with SIGKILL/137 (2026-08-05: the
+# sending-health WARNING email at 21:00). So every recreate that touches the
+# app goes through swap_app(): take that lock EXCLUSIVELY (waits for running
+# ticks, max 120s), recreate, release. On timeout swap anyway: a deploy must
+# never be blocked by a stuck tick, and the ticks' own retries recover them.
+# This is deliberately a SEPARATE lock from recruiteros-deploy.lock: this
+# script systemctl-starts some of those very ticks while holding the deploy
+# lock, so ticks waiting on the deploy lock would deadlock against it.
+SWAP_LOCK=/var/lock/recruiteros-app-swap.lock
+swap_app() {
+  flock -x -w 120 -E 249 "$SWAP_LOCK" "$@"
+  local rc=$?
+  if [ "$rc" -eq 249 ]; then
+    echo "$(date -u) swap-lock: a tick held it >120s, swapping without the lock (tick retries cover)" >> "$LOG"
+    "$@"
+    rc=$?
+  fi
+  return "$rc"
+}
+
 # One-time: MIGRATE persistence off Postgres onto the durable /data file volume.
 # The app now snapshots accounts/sessions to /data (the app_data named volume),
 # which survives every redeploy with no password to sync — see lib/db mode().
@@ -55,7 +78,7 @@ if [ ! -f "$DIR/.file-persistence-v1" ]; then
       && mv "$DIR/.env.production.tmp" "$DIR/.env.production" \
       && chmod 600 "$DIR/.env.production"
     echo "$(date -u) removed stale DATABASE_URL from .env.production" >> "$LOG"
-    docker compose up -d --force-recreate app >> "$LOG" 2>&1 || true
+    swap_app docker compose up -d --force-recreate app >> "$LOG" 2>&1 || true
   fi
   touch "$DIR/.file-persistence-v1"
   echo "$(date -u) file persistence active" >> "$LOG"
@@ -77,7 +100,7 @@ fi
 # volume and the Hire Signals pool (+ accounts/sessions) finally persist + compound.
 if [ ! -f "$DIR/.edge-recreate-v2" ]; then
   echo "$(date -u) one-time(v2): force-recreate app+caddy to mount durable /data volume..." >> "$LOG"
-  if docker compose up -d --force-recreate app caddy >> "$LOG" 2>&1; then
+  if swap_app docker compose up -d --force-recreate app caddy >> "$LOG" 2>&1; then
     touch "$DIR/.edge-recreate-v2"
     echo "$(date -u) app+caddy recreated with app_data:/data — persistence now durable" >> "$LOG"
   else
@@ -141,7 +164,7 @@ if [ ! -f "$DIR/.ostext-token-sync-v1" ] && [ -f "$DIR/money-maker-sms/.env.prod
     else
       echo "RECRUITEROS_OSTEXT_TOKEN=${TX_TOKEN}" >> "$DIR/.env.production"
     fi
-    if docker compose up -d --force-recreate app >> "$LOG" 2>&1; then
+    if swap_app docker compose up -d --force-recreate app >> "$LOG" 2>&1; then
       touch "$DIR/.ostext-token-sync-v1"
       echo "$(date -u) OS Text SSO token synced; app recreated" >> "$LOG"
     else
@@ -167,7 +190,7 @@ for SVC in taltxt lume-jobs app db caddy searxng; do
   if [ -z "$(docker compose ps -q --status running "$SVC" 2>/dev/null)" ]; then
     echo "$(date -u) FAIL-SAFE: $SVC has no running container, reviving from existing image..." >> "$LOG"
     docker ps -aq --filter "name=${SVC}" --filter status=created | xargs -r docker rm -f >> "$LOG" 2>&1 || true
-    if docker compose up -d --no-build --no-deps "$SVC" >> "$LOG" 2>&1; then
+    if swap_app docker compose up -d --no-build --no-deps "$SVC" >> "$LOG" 2>&1; then
       echo "$(date -u) FAIL-SAFE: $SVC revived" >> "$LOG"
     else
       echo "$(date -u) FAIL-SAFE: $SVC revive failed, will retry next tick" >> "$LOG"
@@ -316,7 +339,7 @@ ENGINE_STAMP=/var/lib/recruiteros/engine-health.last
 ENGINE_KICK=/var/lib/recruiteros/engine-health.kick
 ENGINE_RUNNER=/usr/local/bin/recruiteros-engine-health.sh
 # Bump this marker (and the one in the runner heredoc) to force a re-install.
-ENGINE_RUNNER_VERSION="engine-health-runner-v2"
+ENGINE_RUNNER_VERSION="engine-health-runner-v3"
 stamp_age() { # <file> -> seconds since it was written, or a huge number
   local v; v=$(cat "$1" 2>/dev/null || echo 0)
   case "$v" in (*[!0-9]*|"") v=0 ;; esac
@@ -449,11 +472,11 @@ fi
 
 # Deploy. Try the full stack; if any service (e.g. the `taltxt` OS Text service) fails to build, fall
 # back to (re)building just the core app + db + caddy so app updates ALWAYS ship.
-if docker compose up -d --build >> "$LOG" 2>&1; then
+if swap_app docker compose up -d --build >> "$LOG" 2>&1; then
   echo "$(date -u) deploy complete (full stack)" >> "$LOG"
 else
   echo "$(date -u) full build failed — deploying core only (skipping the OS Text service)" >> "$LOG"
-  docker compose up -d --build --no-deps app >> "$LOG" 2>&1 || true
+  swap_app docker compose up -d --build --no-deps app >> "$LOG" 2>&1 || true
   docker compose up -d --no-deps db caddy >> "$LOG" 2>&1 || true
   # A failed full build must NEVER leave OS Text (or lume-jobs) dark: bring both
   # back up on their existing images (no build) so the old version keeps serving.
@@ -504,7 +527,7 @@ else
   if docker image inspect recruiteros-app:previous >/dev/null 2>&1; then
     echo "$(date -u) !! rolling back to the previous app image..." >> "$LOG"
     docker tag recruiteros-app:previous recruiteros-app:latest >> "$LOG" 2>&1 || true
-    docker compose up -d --no-build --no-deps app >> "$LOG" 2>&1 || true
+    swap_app docker compose up -d --no-build --no-deps app >> "$LOG" 2>&1 || true
     ROLLED=0
     for _ in $(seq 1 20); do
       if app_healthy; then ROLLED=1; break; fi

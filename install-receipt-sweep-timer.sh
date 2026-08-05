@@ -27,7 +27,7 @@ install -d -m 755 /var/lib/recruiteros
 
 cat > "$RUNNER" <<'EOF'
 #!/usr/bin/env bash
-# receipt-sweep-runner-v1
+# receipt-sweep-runner-v2
 #
 # RETRIES on purpose: this box redeploys often, and the single most common reason a
 # scheduled tick silently does nothing is that it fired while the app container was
@@ -36,6 +36,13 @@ cat > "$RUNNER" <<'EOF'
 # The secret is read from the container's own environment and never printed. Rendering
 # an image per receipt takes minutes on a full backfill, so the timeout is generous.
 set -uo pipefail
+
+# DEPLOY-SWAP GATE. auto-deploy.sh holds /var/lock/recruiteros-app-swap.lock
+# exclusively around every app-container recreate; ticks hold it SHARED so a
+# swap can never SIGKILL a docker exec in flight (the 2026-08-05 sending-health
+# 137). Fail open after 15 min WITH a log line; the retries below still cover.
+exec 8>/var/lock/recruiteros-app-swap.lock
+flock -s -w 900 8 || echo "swap-gate: exclusive holder still there after 15 min; proceeding on retries" >&2
 
 STAMP=/var/lib/recruiteros/receipts.last
 ATTEMPTS=3
@@ -75,11 +82,14 @@ cat > "$UNIT" <<EOF
 Description=RecruitersOS nightly receipt sweep (vendor billing APIs + billing mailboxes)
 After=docker.service
 Requires=docker.service
+OnFailure=recruiteros-tick-recover@%n.service
 
 [Service]
 Type=oneshot
-TimeoutStartSec=1800
+# Swap-gate wait (900s) + retry ladder + minutes of receipt rendering.
+TimeoutStartSec=2700
 ExecStart=$RUNNER
+ExecStartPost=-/bin/rm -f /run/tick-recover-%n.count
 EOF
 
 cat > "$TIMER" <<EOF
