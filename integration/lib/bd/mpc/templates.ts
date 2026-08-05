@@ -30,7 +30,7 @@ export interface MpcTemplate {
   needsCompetitor?: boolean;
 }
 
-const SIGN = "\n{Thanks|Best}, {{Your_Name}}";
+export const SIGN = "\n{Thanks|Best}, {{Your_Name}}";
 
 export const MPC_TEMPLATES: MpcTemplate[] = [
   /* 1. Direct value ------------------------------------------------------------------ */

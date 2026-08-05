@@ -104,13 +104,14 @@ export function truthPreserved(reference: string, candidate: string, mustAppear:
  * Layer 2 — the AI rewrite                                            *
  * ------------------------------------------------------------------ */
 
-/** ON by default whenever an Anthropic key exists — per-send variation is the main defense against
- *  template fingerprinting at volume, so cold email should never silently run without it. Explicit
- *  opt-out only (MPC_HUMANIZER=0/false/off/no). Without a key it is off and the deterministic engine
- *  runs exactly as before. */
+/** DEMOTED to an explicit testing switch (2026-08). Per-send variation now comes from the
+ *  pre-generated variant bank (variantBank.ts): the same gate-approved AI phrasing, produced once
+ *  per template per week instead of once per send, so the send path costs zero AI spend. The
+ *  per-send rewrite only runs when the operator explicitly forces it (MPC_HUMANIZER=force/1/true)
+ *  AND a key exists; the cadence only consults it when the bank had no variant to offer. */
 export function humanizerEnabled(): boolean {
   if (!process.env.ANTHROPIC_API_KEY) return false;
-  return !["0", "false", "no", "off"].includes((process.env.MPC_HUMANIZER || "").toLowerCase());
+  return ["1", "true", "yes", "on", "force"].includes((process.env.MPC_HUMANIZER || "").toLowerCase());
 }
 
 const STYLE = [
