@@ -561,13 +561,16 @@ async function bookOne(
   scheduleSave();
 
   const when = speakSlot(startIso, cfg);
+  // Everyone gets the short link: clean in the email, one tap on a phone, and
+  // it re-mints a fresh token at click time so it never arrives stale.
+  const appUrl = await workspaceAppUrl(workspaceId);
+  const joinLink = appUrl ? `${appUrl}/j/${id.slice(0, 12)}` : (booking.meetingUrl as string);
   const summary = `${guest.name} + ${brandName} (${cfg.slotMin} min call)`;
   const description =
-    `Booked from the video page.\n` +
-    `Join the call: ${booking.meetingUrl}\n` +
+    `Join the call: ${joinLink}\n` +
     `Guest: ${guest.name} (${guest.email})` +
-    (guest.note ? `\nNote from the guest: ${guest.note}` : "");
-  const ics = buildInviteIcs(booking, s.bookingEmail as string, brandName, summary, description);
+    (guest.note ? `\nNote: ${guest.note}` : "");
+  const ics = buildInviteIcs({ ...booking, meetingUrl: joinLink }, s.bookingEmail as string, brandName, summary, description);
 
   // Both sends ride the workspace's white-label mailbox; a mail failure never
   // loses the booking (it is already stored) and is visible in the response.
@@ -576,11 +579,11 @@ async function bookOne(
     await sendWorkspaceEmail(
       s.bookingEmail as string,
       `New call booked: ${guest.name}, ${when}`,
-      `${guest.name} just booked a ${cfg.slotMin} minute call with you for ${when}.\n\n` +
-      `Guest: ${guest.name}\nEmail: ${guest.email}\n` +
-      (guest.note ? `Note: ${guest.note}\n` : "") +
-      `Join the call: ${booking.meetingUrl}\n` +
-      `\nThe attached invite adds it to your calendar.`,
+      `${guest.name} booked ${when} (${cfg.slotMin} min).\n\n` +
+      `${guest.email}` +
+      (booking.phone ? `\n${booking.phone} (text reminders on)` : "") +
+      (guest.note ? `\nNote: ${guest.note}` : "") +
+      `\n\nJoin: ${joinLink}\n`,
       workspaceId, { ics: { method: "REQUEST", content: ics } },
     );
     booking.organizerEmailed = true;
@@ -591,11 +594,12 @@ async function bookOne(
     await sendWorkspaceEmail(
       guest.email,
       `You're booked: ${when}`,
-      `Hi ${guest.name},\n\nYou're confirmed for a ${cfg.slotMin} minute call with ${brandName} on ${when}.\n\n` +
-      `Join the call here when it's time: ${booking.meetingUrl}\n\n` +
-      `The attached invite adds it to your calendar (the join link is inside too). ` +
-      (booking.phone ? `We'll also text you a reminder before the call. ` : "") +
-      `If the time stops working, just reply to this email.\n\n${brandName}`,
+      `Hi ${guest.name},\n\n` +
+      `You're confirmed: ${cfg.slotMin} minutes with ${brandName}, ${when}.\n\n` +
+      `Join: ${joinLink}\n\n` +
+      `One tap from any phone or computer, nothing to install. The attached invite puts it on your calendar.` +
+      (booking.phone ? ` We'll text you a reminder before the call.` : "") +
+      ` Need a different time? Just reply.\n\n${brandName}`,
       workspaceId, { ics: { method: "REQUEST", content: ics } },
     );
     booking.guestEmailed = true;
@@ -609,9 +613,7 @@ async function bookOne(
     const confirm = booking.reminders.find((r) => r.kind === "confirm");
     if (confirm) {
       try {
-        const appUrl = await workspaceAppUrl(workspaceId);
-        const link = appUrl ? `${appUrl}/j/${id.slice(0, 12)}` : (booking.meetingUrl as string);
-        await sendBookingSms(workspaceId, booking.phone, reminderText("confirm", brandName, when, link));
+        await sendBookingSms(workspaceId, booking.phone, reminderText("confirm", brandName, when, joinLink));
         confirm.sentAt = new Date().toISOString();
       } catch (e: any) {
         confirm.error = String(e?.message || e).slice(0, 200);

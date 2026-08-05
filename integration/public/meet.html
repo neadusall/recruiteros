@@ -13,7 +13,7 @@
     --bg:#f7f8fa; --panel:#ffffff; --line:#e5e8ee; --line-2:#cfd5df;
     --ink:#14181f; --mut:#4b5364; --faint:#8a93a5;
     --accent:#2e5bd7; --accent-hover:#2448ad; --accent-soft:rgba(46,91,215,.09);
-    --rad:8px; --rad-sm:6px;
+    --rad:10px;
   }
   html[data-theme="dark"]{
     --bg:#0f1216; --panel:#171b22; --line:#262c36; --line-2:#3a4250;
@@ -23,66 +23,69 @@
   *{box-sizing:border-box}
   html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--ink);
-    font:14.5px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;display:flex;flex-direction:column}
-  header{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel);flex:none}
-  .wm{display:flex;align-items:center;gap:10px;min-width:0}
-  .wm img{height:22px;display:block}
-  .wm .txt{font-weight:700;font-size:16px;letter-spacing:-.015em;white-space:nowrap}
-  .room{color:var(--mut);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .spacer{flex:1}
-  .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line-2);background:var(--panel);
-    color:var(--ink);font:inherit;font-size:13px;font-weight:500;padding:6px 13px;border-radius:var(--rad-sm);cursor:pointer;text-decoration:none}
-  .btn:hover{border-color:var(--faint)}
-  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  .btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
-  main{flex:1;position:relative;min-height:0}
+    font:15px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif}
+
+  /* ── Lobby: one centered card, one big clear mark ── */
+  .lobby{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;padding:24px}
+  .lobby .mark img{height:46px;display:block}
+  .lobby .mark .txt{font-weight:700;font-size:30px;letter-spacing:-.02em}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);
+    padding:26px;width:100%;max-width:400px;box-shadow:0 10px 30px rgba(10,14,20,.06)}
+  .card h1{margin:0 0 16px;font-size:18px;letter-spacing:-.015em;text-align:center}
+  input[type=text]{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line-2);
+    border-radius:8px;padding:11px 13px;font:inherit;font-size:15px}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .go{width:100%;margin-top:12px;border:0;background:var(--accent);color:#fff;font:inherit;font-size:15px;
+    font-weight:600;padding:12px;border-radius:8px;cursor:pointer}
+  .go:hover{background:var(--accent-hover)}
+  .lobby .note{color:var(--faint);font-size:12.5px}
+
+  /* ── In meeting: the call is the whole screen ── */
+  body.inmeeting{background:#0b0d10}
+  #stage{position:fixed;inset:0;display:none}
   #jitsi{position:absolute;inset:0}
   #jitsi iframe{width:100%;height:100%;border:0}
-  /* The brand mark that sits where Jitsi's watermark would be: above the
-     iframe, click-through, so the meeting always wears the house logo. */
-  #brandOverlay{position:absolute;top:14px;left:16px;z-index:5;pointer-events:none;
-    background:rgba(255,255,255,.92);border-radius:8px;padding:7px 12px;display:none;align-items:center;box-shadow:0 1px 6px rgba(10,14,20,.18)}
-  #brandOverlay img{height:20px;display:block}
-  #brandOverlay .txt{font-weight:700;font-size:14px;color:#14181f;white-space:nowrap}
-  /* Lobby (no room yet) */
-  .lobby{max-width:460px;margin:8vh auto 0;padding:0 20px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);padding:22px}
-  .card h1{margin:0 0 6px;font-size:19px;letter-spacing:-.015em}
-  .card p{color:var(--mut);font-size:13.5px;margin:0 0 16px}
-  label{display:block;font-size:12px;font-weight:600;color:var(--mut);margin:12px 0 5px}
-  input[type=text]{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line-2);border-radius:var(--rad-sm);padding:9px 11px;font:inherit;font-size:14px}
-  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-  .row{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
-  .note{color:var(--faint);font-size:12px;margin-top:14px}
-  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+  .float{position:absolute;top:14px;right:16px;z-index:6;display:flex;gap:8px;align-items:center}
+  .fbtn{border:1px solid rgba(255,255,255,.16);background:rgba(15,18,22,.62);color:#fff;
+    font:inherit;font-size:12.5px;font-weight:500;padding:7px 14px;border-radius:999px;cursor:pointer;
+    backdrop-filter:blur(8px);text-decoration:none}
+  .fbtn:hover{background:rgba(15,18,22,.85)}
+  .rec{position:absolute;left:16px;bottom:14px;z-index:6;display:none;align-items:center;gap:7px;
+    border-radius:999px;padding:6px 13px;font-size:12px;font-weight:500;color:#fff;
+    background:rgba(15,18,22,.62);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(8px);pointer-events:none}
+  .rec .dot{width:7px;height:7px;border-radius:50%;background:#e5695f;flex:none}
+  /* Brand cover for the public-bridge fallback only (our own server wears the
+     brand inside the call, so nothing doubles up). */
+  #brandOverlay{position:absolute;top:14px;left:16px;z-index:5;pointer-events:none;display:none;
+    background:rgba(255,255,255,.94);border-radius:8px;padding:8px 14px;box-shadow:0 1px 6px rgba(10,14,20,.25)}
+  #brandOverlay img{height:24px;display:block}
+  #brandOverlay .txt{font-weight:700;font-size:15px;color:#14181f;white-space:nowrap}
+
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#14181f;color:#fff;
     font-size:13px;padding:9px 16px;border-radius:8px;opacity:0;pointer-events:none;transition:.18s;z-index:50}
   #toast.show{opacity:1}
 </style>
 </head>
 <body>
-<header>
-  <span class="wm" id="wm"></span>
-  <span class="room" id="roomLabel"></span>
-  <span class="spacer"></span>
-  <button class="btn" id="btnCopy" style="display:none">Copy invite link</button>
-  <a class="btn" id="btnNew" href="/meet" style="display:none">New meeting</a>
-</header>
-<main id="main">
-  <div class="lobby" id="lobby">
-    <div class="card">
-      <h1 id="lobbyTitle">Start a meeting</h1>
-      <p>A private video room on your own page, your brand on it, nothing to install. Share the link and anyone can join from a browser.</p>
-      <label>Meeting name</label>
-      <input type="text" id="roomInput" placeholder="Call with Acme, Thursday intro, anything" />
-      <div class="row">
-        <button class="btn primary" id="btnStart">Start meeting</button>
-      </div>
-      <div class="note">Joiners see this page with your logo, never a vendor's. Mic and camera permissions are asked by the browser once you join.</div>
-    </div>
+<div class="lobby" id="lobby">
+  <span class="mark" id="lobbyMark"></span>
+  <div class="card">
+    <h1>Start a meeting</h1>
+    <input type="text" id="roomInput" placeholder="Name the meeting" />
+    <button class="go" id="btnStart">Start meeting</button>
   </div>
-  <div id="jitsi" style="display:none"></div>
+  <span class="note">Share one link. Anyone joins from a browser, nothing to install.</span>
+</div>
+
+<div id="stage">
+  <div id="jitsi"></div>
+  <div class="float">
+    <button class="fbtn" id="btnCopy">Copy invite link</button>
+    <a class="fbtn" href="/meet">New meeting</a>
+  </div>
+  <span class="rec" id="recChip"><span class="dot"></span>Recorded for meeting notes</span>
   <div id="brandOverlay"></div>
-</main>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -93,14 +96,10 @@
   var isHouse = /(^|\.)recruitersos\.co$|localhost|127\.0\.0\.1|^$/.test(location.hostname || "");
   var BRAND = isHouse
     ? { name: "RecruitersOS", logo: null }
-    : { name: "Lume Search Partners", logo: "/assets/img/lume-wordmark-navy.svg", logoLight: "/assets/img/lume-wordmark-white.svg" };
+    : { name: "Lume Search Partners", logo: "/assets/img/lume-wordmark-navy.svg" };
   document.title = BRAND.name + " Meeting";
-
-  function brandHtml(forOverlay) {
-    if (BRAND.logo) return '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />';
-    return '<span class="txt">' + BRAND.name + "</span>";
-  }
-  document.getElementById("wm").innerHTML = brandHtml(false);
+  document.getElementById("lobbyMark").innerHTML =
+    BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
 
   function toast(m) { var t = document.getElementById("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(function () { t.classList.remove("show"); }, 2600); }
 
@@ -113,50 +112,38 @@
     // A short random tail keeps rooms private-by-obscurity on the public bridge.
     return s + "-" + Math.random().toString(36).slice(2, 8);
   }
-
   document.getElementById("btnStart").addEventListener("click", function () {
-    var name = document.getElementById("roomInput").value || "Meeting";
-    location.search = "?room=" + encodeURIComponent(slugify(name));
+    location.search = "?room=" + encodeURIComponent(slugify(document.getElementById("roomInput").value || "Meeting"));
   });
   document.getElementById("roomInput").addEventListener("keydown", function (e) {
     if (e.key === "Enter") document.getElementById("btnStart").click();
   });
 
-  if (!room) {
-    document.getElementById("lobbyTitle").textContent = "Start a " + BRAND.name + " meeting";
-    return;
-  }
+  if (!room) return;
 
   // ---- In-meeting mode ----
+  document.body.classList.add("inmeeting");
   document.getElementById("lobby").style.display = "none";
-  document.getElementById("jitsi").style.display = "block";
-  var pretty = room.replace(/-[a-z0-9]{6}$/i, "").replace(/-/g, " ");
-  document.getElementById("roomLabel").textContent = pretty;
-  var copyBtn = document.getElementById("btnCopy");
-  copyBtn.style.display = "inline-flex";
-  document.getElementById("btnNew").style.display = "inline-flex";
+  document.getElementById("stage").style.display = "block";
   var inviteUrl = location.origin + "/meet?room=" + encodeURIComponent(room);
-  copyBtn.addEventListener("click", function () {
+  document.getElementById("btnCopy").addEventListener("click", function () {
     (navigator.clipboard ? navigator.clipboard.writeText(inviteUrl) : Promise.reject())
       .then(function () { toast("Invite link copied."); })
       .catch(function () { window.prompt("Copy the invite link:", inviteUrl); });
   });
 
   var rootDomain = function (h) { return String(h || "").split(".").slice(-2).join("."); };
-
   var joinName = (params.get("name") || "").trim().slice(0, 60);
 
   function startMeeting(domain, jwt) {
-    // Our own meet server carries the brand natively; the overlay badge only
-    // covers the vendor watermark on the public-bridge fallback.
     var selfHosted = domain !== "meet.jit.si";
     if (!selfHosted) {
+      // The public bridge would show a vendor mark: cover that corner with ours.
       var ov = document.getElementById("brandOverlay");
       ov.innerHTML = BRAND.logo ? '<img src="' + BRAND.logo + '" alt="' + BRAND.name + '" />' : '<span class="txt">' + BRAND.name + "</span>";
-      ov.style.display = "flex";
+      ov.style.display = "block";
     } else {
-      // Recording disclosure: visible before and during the call.
-      document.getElementById("roomLabel").textContent = pretty + " · recorded for meeting notes";
+      document.getElementById("recChip").style.display = "flex";
     }
     var s = document.createElement("script");
     s.src = "https://" + domain + "/external_api.js";
