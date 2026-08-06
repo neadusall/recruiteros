@@ -25,7 +25,7 @@ process.env.HOUSE_WORKSPACE_ID = "ws_house";
 delete process.env.ROS_READY_GATE;
 
 const { toolReadiness, toolGate, allToolReadiness } = await import("../lib/ready/index.js");
-const { saveKeys, markTested } = await import("../lib/connected/credentials.js");
+const { saveKeys, markTested, clearKeys } = await import("../lib/connected/credentials.js");
 
 const here = dirname(fileURLToPath(import.meta.url));
 const client = readFileSync(join(here, "..", "..", "assets", "js", "command.js"), "utf8");
@@ -67,6 +67,24 @@ check("tested connections read ready with nothing to say",
 // in these tiles. It must stay out until the check can ask the engine itself.
 check("OS Text is deliberately not gated on the integration tiles",
   (await toolReadiness(WS, "ostext" as never)) === null);
+
+/* --- keys on the box beat a stale tile ------------------------------------ */
+
+// The operator's own workspace reads the house env. A row that was once
+// disconnected stays red there for ever, and reading colour instead of keys is
+// what made the first live audit call the operator's own LinkedIn "not
+// connected" while the automation was running fine.
+process.env.UNIPILE_DSN = "api-test.unipile.com:1234";
+process.env.UNIPILE_API_KEY = "test-token";
+await clearKeys("ws_house", "unipile");            // disconnect -> stored red
+const houseLi = await toolReadiness("ws_house", "linkedin");
+check("a stale red tile does not block a tool whose keys are on the box",
+  houseLi?.state === "unverified" && houseLi?.ready === true, houseLi?.state);
+delete process.env.UNIPILE_DSN;
+delete process.env.UNIPILE_API_KEY;
+const goneLi = await toolReadiness("ws_house", "linkedin");
+check("with the keys actually gone, the same tool is blocked",
+  goneLi?.state === "blocked", goneLi?.state);
 
 /* --- shapes the registry has to get right --------------------------------- */
 

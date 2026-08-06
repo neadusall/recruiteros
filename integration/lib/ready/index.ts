@@ -188,15 +188,38 @@ function readFrom(list: Awaited<ReturnType<typeof listIntegrations>>, tool: Tool
     return { id, label: found?.label || id, status: found?.status || "red" };
   };
 
+  /**
+   * Can this connection actually run, whatever its tile says?
+   *
+   * Key presence, not tile colour, because the two disagree in a way that
+   * matters: the tile keeps a stored status, and a row that was once
+   * disconnected stays red even when the keys the tool would really use are
+   * sitting right there (the operator's own workspace reads the house env, and
+   * `present` already accounts for that, per workspace and per grant). The
+   * first live audit called the operator's own LinkedIn "not connected" on
+   * exactly that stale row while the automation ran fine.
+   *
+   *   blocked    a required key is genuinely absent
+   *   unverified the keys are there, but the tile has not gone green
+   *   ready      connected and tested
+   */
+  const runnable = (id: IntegrationId): ToolState => {
+    const i = byId.get(id);
+    if (!i) return "blocked";
+    const needed = i.fields.filter((f) => f.required).map((f) => f.key);
+    if (!needed.every((k) => i.present.includes(k))) return "blocked";
+    return i.status === "green" ? "ready" : "unverified";
+  };
+
   const required = spec.needs.map(dep);
-  const blocked = required.filter((d) => d.status === "red");
-  const unverified = required.filter((d) => d.status === "yellow");
+  const blocked = required.filter((d) => runnable(d.id) === "blocked");
+  const unverified = required.filter((d) => runnable(d.id) === "unverified");
 
-  // Interchangeable providers: one connected is enough, all red blocks.
+  // Interchangeable providers: one usable is enough, all missing blocks.
   const alts = (spec.anyOf || []).map(dep);
-  if (alts.length && alts.every((d) => d.status === "red")) blocked.push(...alts);
+  if (alts.length && alts.every((d) => runnable(d.id) === "blocked")) blocked.push(...alts);
 
-  const degraded = (spec.helps || []).map(dep).filter((d) => d.status === "red");
+  const degraded = (spec.helps || []).map(dep).filter((d) => runnable(d.id) === "blocked");
 
   const state: ToolState = blocked.length ? "blocked" : unverified.length ? "unverified" : "ready";
   return {

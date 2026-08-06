@@ -258,14 +258,25 @@
       var f = byId[id];
       return { id: id, label: (f && f.label) || id, status: (f && f.status) || "red" };
     };
+    // Keys, not tile colour: a row that was once disconnected stays red even
+    // when the keys the tool would really use are present. Mirrors lib/ready.
+    var runnable = function (id) {
+      var i = byId[id];
+      if (!i) return "blocked";
+      var needed = (i.fields || []).filter(function (f) { return f.required; }).map(function (f) { return f.key; });
+      var present = i.present || [];
+      var have = needed.every(function (k) { return present.indexOf(k) >= 0; });
+      if (!have) return "blocked";
+      return i.status === "green" ? "ready" : "unverified";
+    };
     return Object.keys(READY_TOOLS).map(function (key) {
       var spec = READY_TOOLS[key];
       var required = spec.needs.map(dep);
-      var blocked = required.filter(function (x) { return x.status === "red"; });
-      var unverified = required.filter(function (x) { return x.status === "yellow"; });
+      var blocked = required.filter(function (x) { return runnable(x.id) === "blocked"; });
+      var unverified = required.filter(function (x) { return runnable(x.id) === "unverified"; });
       var alts = (spec.anyOf || []).map(dep);
-      if (alts.length && alts.every(function (x) { return x.status === "red"; })) blocked = blocked.concat(alts);
-      var degraded = (spec.helps || []).map(dep).filter(function (x) { return x.status === "red"; });
+      if (alts.length && alts.every(function (x) { return runnable(x.id) === "blocked"; })) blocked = blocked.concat(alts);
+      var degraded = (spec.helps || []).map(dep).filter(function (x) { return runnable(x.id) === "blocked"; });
       var state = blocked.length ? "blocked" : unverified.length ? "unverified" : "ready";
       var message = "";
       if (blocked.length) {
