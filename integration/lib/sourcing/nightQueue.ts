@@ -777,6 +777,9 @@ async function step(item: NightItem): Promise<void> {
       name: item.name,
       jd: item.jd,
       location: item.location,
+      // The number the run actually enforced, so every later touch of this list
+      // (merge, enrichment, push) re-enforces the SAME radius.
+      radiusMi,
       createdBy: item.createdBy,
       icp,
       queries,

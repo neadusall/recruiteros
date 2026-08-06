@@ -19,6 +19,7 @@ import { addProspect } from "../prospects";
 import { createCampaign } from "../campaigns";
 import { upsertProspectList } from "../prospect-lists";
 import { getSourcingRun, saveSourcingRun } from "./store";
+import { enforceRunGeo } from "./geoEnforce";
 
 export interface PromoteResult {
   campaignId: string;
@@ -27,6 +28,9 @@ export interface PromoteResult {
   deduped: number;
   /** The name carried through from the JD Sourcing tab. */
   name: string;
+  /** People held back because they sit outside the list's own radius. Reported so the
+   *  recruiter sees the filter working instead of wondering where the count went. */
+  outOfAreaHeld?: number;
 }
 
 export interface PromoteOptions {
@@ -45,6 +49,19 @@ export interface PromoteOptions {
    * on the handful of new people and the tag filter in Candidates would miss the rest.
    */
   retag?: boolean;
+  /**
+   * Deliver people the list marked as OUTSIDE the recruiter's radius too.
+   *
+   * Off by default, and that default is the point (owner mandate 2026-08-06): the
+   * mileage on the search is a promise about who gets contacted, not a sort order.
+   * Out-of-area rows reach a list by several routes that never measured them against
+   * THIS role's radius — the out-of-area appendix, the never-empty rescue, a folded
+   * duplicate search that ran wider, a Sales Navigator URL pulled into the list — and
+   * every one of those used to flow straight into Candidates and OS Text. They stay
+   * visible in the saved list either way; they just do not get texted because a
+   * different search's radius let them in.
+   */
+  includeOutOfArea?: boolean;
 }
 
 /**
@@ -102,8 +119,18 @@ export async function promoteSourcingRun(
   const prospectIds: string[] = [];
   let added = 0;
   let deduped = 0;
+  // Re-measure against the list's OWN dials before anyone is delivered. A list changes
+  // after its search — merges fold in other runs, enrichment fills in locations that
+  // were blank at search time — and this is the last point at which the radius can still
+  // be honoured. Marks only; nothing is removed from the saved list.
+  const geo = enforceRunGeo(run);
+  if (geo.marked || geo.cleared) await saveSourcingRun(workspaceId, { ...run });
+  const skipOutOfArea = opts.includeOutOfArea !== true;
+  let outOfAreaHeld = 0;
+
   for (const c of run.candidates) {
     if (c.fitScore < minFit) continue;
+    if (skipOutOfArea && c.outOfArea) { outOfAreaHeld++; continue; }
     if (c.linkedinUrl) {
       const existing = await core.findProspectByLinkedin(workspaceId, c.linkedinUrl);
       if (existing) {
@@ -174,5 +201,5 @@ export async function promoteSourcingRun(
     void pairRunToJobLibrary(run);
   } catch { /* never blocks the push */ }
 
-  return { campaignId, listId: list.id, added, deduped, name: listName };
+  return { campaignId, listId: list.id, added, deduped, name: listName, outOfAreaHeld };
 }

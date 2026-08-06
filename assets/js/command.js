@@ -12824,8 +12824,8 @@
         '<div class="jd-fieldgrid">' +
           '<div class="jd-field"><label>City &amp; state <span class="jd-opt muted">+ radius</span></label>' +
             '<div class="jd-locrow"><input id="jdbLocation" type="text" placeholder="e.g. Fair Lawn, NJ" />' +
-              '<select id="jdbRadius" title="Expand beyond the exact metro by estimated drive distance">' +
-                '<option value="0">Exact</option><option value="25">+25mi</option><option value="50">+50mi</option><option value="100">+100mi</option><option value="250">+250mi</option>' +
+              '<select id="jdbRadius" title="How far out the search may reach. This is a hard limit: nobody further away is added to the list, and nobody further away is contacted.">' +
+                '<option value="0">Exact (city only)</option><option value="25">+25mi</option><option value="50">+50mi</option><option value="100">+100mi</option><option value="250">+250mi</option>' +
               '</select></div></div>' +
           '<div class="jd-field"><label>List name</label><input id="jdName" type="text" placeholder="e.g. JAGGAER VP Sales · East" /></div>' +
         '</div>' +
@@ -12875,7 +12875,7 @@
             '</div>' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdAnywhere"><input type="checkbox" id="jdAnywhere"> Include out-of-area</label>' +
-              '<div class="jd-opt2-def">Keeps candidates whose profile shows a location outside the city and radius you set, mixed into one ranked list. Turn it on for remote roles or when you would relocate the right person.</div>' +
+              '<div class="jd-opt2-def">Lifts the mileage limit for this run: candidates outside the city and radius you set are kept and mixed into one ranked list. Leave it off and the mileage is a hard limit, so nobody further out is added to the list or contacted. Turn it on for remote roles or when you would relocate the right person.</div>' +
             '</div>' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdOutside"><input type="checkbox" id="jdOutside"> Also list out-of-area (separate list)</label>' +

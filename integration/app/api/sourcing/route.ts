@@ -50,6 +50,7 @@ import {
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { sendRunNow } from "../../../lib/sourcing/autoflow";
 import { pickSameRoleMaster } from "../../../lib/sourcing/sameRole";
+import { enforceGeo, enforceRunGeo } from "../../../lib/sourcing/geoEnforce";
 import { enrich, cheapFirstContactWaterfall } from "../../../lib/signals";
 import { withWorkspaceCreds } from "../../../lib/connected";
 import { listLinkedInAccounts } from "../../../lib/accounts";
@@ -332,6 +333,10 @@ export async function POST(req: Request) {
               name: listName,
               jd: typeof b.jd === "string" ? b.jd : "",
               location: (b.location as string) || undefined,
+              // The number, not just the "+25mi" label: the list re-enforces its own
+              // radius on every later merge / enrichment / push, and re-reading prose
+              // each time is how a list drifts onto a radius it was never run with.
+              radiusMi,
               icp, queries,
               candidates: result.candidates,
               warnings: result.warnings,
@@ -601,6 +606,7 @@ export async function POST(req: Request) {
       }
       const run = await saveSourcingRun(ws, {
         id: b.id, name: b.name, jd: b.jd ?? "", jdUrl: b.jdUrl, location: b.location,
+        radiusMi: parseRadiusMi(b.radiusMi, b.location),
         icp: b.icp, queries: b.queries ?? [], candidates: b.candidates ?? [],
         warnings: b.warnings ?? [],
         motion: b.motion === "bd" ? "bd" : "recruiting",
@@ -1113,9 +1119,18 @@ export async function POST(req: Request) {
       if (!run) return fail("run_not_found", 404);
       const name = ((b.name as string) || run.name || "").trim();
       if (!name) return fail("missing_name", 422);
+      // Re-measure against the list's own location + mileage before anyone is queued
+      // for a text. This is the last gate before real outbound, and the list may have
+      // changed since its search (a folded duplicate run, a Sales Nav pull, enrichment).
+      const geo = enforceRunGeo(run);
+      if (geo.marked || geo.cleared) await saveSourcingRun(ws, { ...run });
       let noPhone = 0;
+      let outOfArea = 0;
       const contacts: OsTextContact[] = [];
       for (const c of run.candidates) {
+        // Outside the radius the recruiter set = not texted. Visible on the list, held
+        // out of the send (owner mandate 2026-08-06).
+        if (c.outOfArea) { outOfArea++; continue; }
         if (!c.phone) { noPhone++; continue; }
         const parts = (c.fullName || "").trim().split(/\s+/);
         const custom: Record<string, string> = {};
@@ -1133,6 +1148,11 @@ export async function POST(req: Request) {
           linkedinUrl: c.linkedinUrl || "",
           location: c.location || "",
           customFields: custom,
+        });
+      }
+      if (!contacts.length && outOfArea && !noPhone) {
+        return fail("all_out_of_area", 422, {
+          detail: `Everyone on this list sits outside the ${geo.radiusMi} mile radius the search was set to, so nobody was queued. Widen the location on the search and run it again, or push these people deliberately from the list.`,
         });
       }
       if (!contacts.length) {
@@ -1207,8 +1227,16 @@ export async function POST(req: Request) {
       const master = pickSameRoleMaster(runs);
       const carried = master.autoflow?.sentAt || master.promotedCampaignId ? master : undefined;
       const name = ((b.name as string) || "").trim() || (carried ? carried.name : `${anchor.name} (combined)`);
+      // The combined list inherits the anchor's location, so it must also inherit the
+      // anchor's MILEAGE — and the union has to be re-measured against it. Combining a
+      // tight list with a wide one otherwise hands the tight one every distant person
+      // the wide search found, which is the single loudest way the radius got ignored.
+      // Marks only: everyone stays on the list, the far ones just stop being deliverable.
+      const anchorRadius = anchor.radiusMi ?? parseRadiusMi(undefined, anchor.location);
+      enforceGeo(candidates, { location: anchor.location, radiusMi: anchorRadius });
       const mergedRun = await saveSourcingRun(ws, {
         name, jd: anchor.jd, jdUrl: anchor.jdUrl, location: anchor.location,
+        radiusMi: anchorRadius,
         icp: anchor.icp,
         queries: runs.flatMap((r) => r.queries),
         candidates,

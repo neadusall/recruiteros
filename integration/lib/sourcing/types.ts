@@ -119,6 +119,18 @@ export interface CandidateRow {
   outOfArea?: boolean;
 
   /**
+   * True when this row survived the location filter WITHOUT being measured — its stated
+   * location would not resolve to a coordinate, so it was kept on the never-empty rule
+   * rather than because the radius cleared it.
+   *
+   * It exists so an unmeasured row can be re-judged later: enrichment often fills in a
+   * real city after the search is over, and `enforceRunGeo` re-measures every row still
+   * carrying this flag. Without it a person whose location only became readable
+   * post-search would sit in the deliverable list as though the mileage had passed them.
+   */
+  geoUnverified?: boolean;
+
+  /**
    * Straight-line miles from the recruiter's typed location, when both that location and
    * the person's stated one could be resolved to coordinates. Undefined means "not
    * measurable" (no radius picked, or a location the place table does not know) — it is
@@ -171,8 +183,18 @@ export interface SourcingRun {
   motion: Motion;
   jd: string;
   jdUrl?: string;
-  /** City & state of the role, as entered by the recruiter (saved with the list). */
+  /** City & state of the role, as entered by the recruiter (saved with the list). The
+   *  label carries the radius suffix ("Howell, NJ +25mi"). */
   location?: string;
+  /**
+   * The mileage the recruiter picked, as a NUMBER (0 = "Exact").
+   *
+   * The label above already encodes it, but a saved list has to be able to re-enforce
+   * its own radius long after the search — on a merge, after enrichment, before delivery
+   * — and re-deriving the number from prose every time is how a list quietly ends up
+   * enforcing a different radius than the one it was run with.
+   */
+  radiusMi?: number;
   icp: CandidateICP;
   queries: SourcingQuery[];
   candidates: CandidateRow[];

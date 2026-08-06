@@ -196,6 +196,34 @@ export function stripRadiusSuffix(text: string): string {
 export const MAX_RADIUS_MI = 250;
 
 /**
+ * What "Exact" means as a NUMBER of miles.
+ *
+ * "Exact" used to mean "no radius", and "no radius" meant the distance filter never
+ * engaged at all — the run fell back to the keep-biased name matcher, which reads a
+ * shared state token as "in area". So the tightest setting on the dropdown was in fact
+ * the LOOSEST filter in the product: typing "Fair Lawn, NJ" and leaving the dropdown
+ * alone returned people from the whole state. That is the opposite of what the word on
+ * the button says.
+ *
+ * Exact is now a measured, tight radius: the typed city and the towns that genuinely
+ * touch it. 15 miles is a metro's own footprint — a candidate who states the next
+ * neighbourhood over is the same local — and it is still narrower than every other
+ * option on the dropdown, so the choices stay strictly ordered.
+ */
+export const EXACT_RADIUS_MI = 15;
+
+/**
+ * The radius the FILTER should enforce for a given pick.
+ *
+ * The one place the "Exact means 15, not infinity" rule lives, so a caller can never
+ * accidentally reintroduce the unbounded branch by testing `radiusMi > 0` itself.
+ */
+export function enforcedRadiusMi(radiusMi: unknown): number {
+  const n = typeof radiusMi === "number" && isFinite(radiusMi) ? radiusMi : 0;
+  return n > 0 ? Math.min(n, MAX_RADIUS_MI) : EXACT_RADIUS_MI;
+}
+
+/**
  * Read the recruiter's radius pick, in miles, from an explicit value or from the "+25mi"
  * suffix the UI bakes into the location label.
  *

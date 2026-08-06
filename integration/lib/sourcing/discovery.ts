@@ -46,7 +46,8 @@
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SearchBreadth, SourcingQuery } from "./types";
 import { scoreCandidate, inTargetGeo, US_STATE_FULL, type ScoreOptions } from "./score";
 import {
-  distanceFromCenter, geocodeUsPlace, stateOfPlace, statesWithinRadius, stripRadiusSuffix, withinRadius,
+  distanceFromCenter, enforcedRadiusMi, geocodeUsPlace, stateOfPlace, statesWithinRadius,
+  stripRadiusSuffix, withinRadius,
 } from "./geoRadius";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
 import { cred } from "../providers/http";
@@ -832,13 +833,24 @@ export async function runDiscovery(
   const outByKey = new Map<string, CandidateRow>();
   const OUT_CAP = Math.min(300, cap); // the out-of-area block is a bounded appendix, not the list
   // Radius state, resolved ONCE per run: the recruiter's mileage pick plus the coordinate
-  // of the location they typed. Both must be present for distance filtering to engage;
-  // a center we cannot geocode leaves every row on the legacy string matcher.
+  // of the location they typed.
+  //
+  // THE MILEAGE IS A CEILING, NOT A HINT (owner mandate 2026-08-06). The center is
+  // geocoded whenever a location was typed at all — including "Exact". Gating it on
+  // `radiusMi > 0` meant the tightest setting on the dropdown silently disabled the only
+  // real filter in the product and handed every row to the keep-biased name matcher,
+  // which passes anyone sharing a state token. That is exactly how people hundreds of
+  // miles out kept landing in a pinned search. "Exact" is now a measured 15mi
+  // (EXACT_RADIUS_MI) rather than "unlimited".
+  //
+  // Only a center we genuinely cannot place on a map falls back to the string matcher.
   const radiusMi = opts.radiusMi ?? 0;
   const geoLabel = stripRadiusSuffix(opts.geoCenter || icp.geos?.[0] || "");
-  const geoCenter = radiusMi > 0 ? geocodeUsPlace(geoLabel) : null;
+  // What the FILTER enforces (Exact = 15mi) vs what the recruiter picked (0 for Exact).
+  const filterRadiusMi = enforcedRadiusMi(radiusMi);
+  const geoCenter = geoLabel ? geocodeUsPlace(geoLabel) : null;
   // Every state the circle touches, for the coarse fallback on rows we cannot place.
-  const radiusStates = geoCenter ? statesWithinRadius(geoCenter, radiusMi) : [];
+  const radiusStates = geoCenter ? statesWithinRadius(geoCenter, filterRadiusMi) : [];
   let scanned = 0;
   let geoDropped = 0;
   // SAFEGUARD buffers: sub-fit-bar rows and (in default geo-only mode) the out-of-area
@@ -860,7 +872,9 @@ export async function runDiscovery(
       // Measure BEFORE scoring: the scorer reads milesFromTarget to award geo credit on
       // a sliding scale, so the distance has to be on the row by the time it runs.
       r.milesFromTarget = distanceFromCenter(r.location, geoCenter);
-      const sc = scoreCandidate(r, icp, { radiusMi, geoLabel: geoLabel });
+      // Score against the ENFORCED radius, so an Exact search ranks by real miles too
+      // instead of dropping to name matching the moment the dropdown says "Exact".
+      const sc = scoreCandidate(r, icp, { radiusMi: geoCenter ? filterRadiusMi : radiusMi, geoLabel: geoLabel });
       r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
       // Strict location: a row that states a DIFFERENT location is marked for the
       // separate out-of-area list (unknown locations stay in the main list — the
@@ -873,7 +887,7 @@ export async function runDiscovery(
       // fallback for rows whose stated location will not geocode.
       let outside = false;
       if (opts.strictGeo && icp.geos && icp.geos.length) {
-        const measured = withinRadius(r.location, geoCenter, radiusMi);
+        const measured = withinRadius(r.location, geoCenter, filterRadiusMi);
         if (measured !== undefined) {
           outside = !measured;
         } else if (geoCenter) {
@@ -885,11 +899,19 @@ export async function runDiscovery(
           // far, per the never-empty rule.
           const st = stateOfPlace(r.location);
           outside = Boolean(st && !radiusStates.includes(st));
+          // We kept this row on a guess, not a measurement. Say so on the row: later
+          // enrichment routinely fills in a real city, and enforceRunGeo re-measures
+          // every unverified row the moment that happens, so a person whose location
+          // only becomes readable AFTER the search can never ride into the deliverable
+          // list as if the radius had cleared them.
+          r.geoUnverified = true;
         } else {
           outside = inTargetGeo(r.location, icp.geos) === false;
+          r.geoUnverified = true; // name matching is not a measurement either
         }
       }
       if (outside) r.outOfArea = true; // marked BEFORE buffering so rescued rows stay labeled
+      if (outside || !opts.strictGeo) r.geoUnverified = undefined; // settled: measured out, or no geo filter asked for
       if (r.fitScore < minFit) {
         // Keep the strongest sub-threshold rows for the empty-run rescue (0 = disqualified, never kept).
         if (r.fitScore > 0) {
@@ -1151,7 +1173,9 @@ export async function runDiscovery(
   // already fetched.
   let rescued = false;
   if (!inList.length && !outList.length && (geoBuffer.length || fitBuffer.length)) {
-    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap, { radiusMi, geoLabel });
+    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap, {
+      radiusMi: geoCenter ? filterRadiusMi : radiusMi, geoLabel,
+    });
     if (rescue) {
       rescued = true;
       inList = rescue.candidates.filter((r) => !r.outOfArea);

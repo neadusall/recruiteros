@@ -94,8 +94,10 @@ import { pinIcpLocation } from "./pinLocation";
 export {
   geocodeUsPlace, haversineMi, withinRadius, distanceFromCenter, citiesWithinRadius,
   statesWithinRadius, radiusBudgetMi, parseRadiusMi, stripRadiusSuffix, formatPlace,
-  MAX_RADIUS_MI,
+  MAX_RADIUS_MI, EXACT_RADIUS_MI, enforcedRadiusMi,
 } from "./geoRadius";
+export { enforceGeo, enforceRunGeo } from "./geoEnforce";
+export type { GeoEnforceResult, RunGeo } from "./geoEnforce";
 import { parseRadiusMi } from "./geoRadius";
 
 /** Parse a JD and generate its search set in one call (no discovery yet). */

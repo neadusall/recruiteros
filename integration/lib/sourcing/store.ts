@@ -66,6 +66,9 @@ export interface SaveRunInput {
   jd: string;
   jdUrl?: string;
   location?: string;
+  /** The recruiter's mileage pick, kept as a number so the list can re-enforce its own
+   *  radius later without re-parsing the "+25mi" label. */
+  radiusMi?: number;
   icp: CandidateICP;
   queries: SourcingQuery[];
   candidates: CandidateRow[];
@@ -90,6 +93,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     existing.jd = input.jd ?? existing.jd;
     existing.jdUrl = input.jdUrl ?? existing.jdUrl;
     existing.location = input.location ?? existing.location;
+    if (input.radiusMi !== undefined) existing.radiusMi = input.radiusMi;
     existing.icp = input.icp ?? existing.icp;
     existing.queries = input.queries ?? existing.queries;
     existing.candidates = input.candidates ?? existing.candidates;
@@ -112,6 +116,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     jd: input.jd || "",
     jdUrl: input.jdUrl,
     location: input.location,
+    radiusMi: input.radiusMi,
     icp: input.icp,
     queries: input.queries || [],
     candidates: input.candidates || [],

@@ -34,6 +34,7 @@ import { listAllSourcingRuns, saveSourcingRun, deleteSourcingRun } from "./store
 import { promoteSourcingRun } from "./promote";
 import { listNightItems, addNightItem } from "./nightQueue";
 import { mergeSourcingRuns } from "./mergeRuns";
+import { enforceRunGeo } from "./geoEnforce";
 import { combinableGroups } from "./sameRole";
 import {
   ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
@@ -206,6 +207,12 @@ function toOsTextContacts(run: SourcingRun): OsTextContact[] {
   const out: OsTextContact[] = [];
   for (const c of run.candidates) {
     if (!c.phone) continue;
+    // The radius is a promise about who gets CONTACTED. A row the list marked as
+    // outside it never rides the texting lane, whichever route put it on the list
+    // (out-of-area appendix, never-empty rescue, a folded wider duplicate search, a
+    // Sales Nav URL). It stays on the saved list to be looked at; it does not get a
+    // text (owner mandate 2026-08-06).
+    if (c.outOfArea) continue;
     const parts = (c.fullName || "").trim().split(/\s+/);
     const custom: Record<string, string> = {};
     if (c.headline) custom.headline = c.headline;
@@ -537,6 +544,17 @@ async function autoCombinePass(runs: SourcingRun[], now: number): Promise<Set<st
       const master = g.master;
       const { candidates, overlap } = mergeSourcingRuns([master, ...g.donors]);
       master.candidates = candidates;
+      // THE MASTER'S MILEAGE WINS. The same-role key deliberately ignores radius tokens,
+      // so "VP Ops - Howell NJ" and its "+100mi" twin are one role and DO fold together
+      // — but folding them used to hand the master every one of the wider search's
+      // people, which is precisely how a +25mi list ended up full of candidates two
+      // hours away. Re-measure the whole union against the master's own location and
+      // radius: donor rows outside it are marked out-of-area, so they stay visible in
+      // the list and stay out of the delivery lane (owner mandate 2026-08-06).
+      const geo = enforceRunGeo(master);
+      if (geo.enforced && geo.marked) {
+        console.log(`[sourcing-autoflow] combine: ${geo.marked} merged row(s) fell outside the master's ${geo.radiusMi}mi radius and were marked out-of-area`);
+      }
       master.queries = master.queries.concat(g.donors.flatMap((d) => d.queries));
       master.combinedFrom = [...new Set([...(master.combinedFrom ?? []), ...g.donors.map((d) => d.id)])];
       // The union may hold rows the master's enrichment never saw: wipe the chunk
