@@ -45,7 +45,24 @@ export async function GET(req: Request) {
         status: w.health?.status ?? "idle",
       })),
     };
+    // VIDEO half, separated from research on purpose. videoOnline 0 while pending > 0 means the
+    // render units are down (nobody is asking) — as opposed to a reason of no_clip / no_shared_storage
+    // (they ask, the main has nothing to give) or queue_empty (there is genuinely no work).
+    out.video = {
+      online: f.videoOnline,
+      videosPerHour: f.totalVideosPerHour,
+      totalVideos: f.totalVideos,
+      lastClaimSec: f.lastVideoClaimSec,
+      workers: f.workers.filter((w) => w.lastVideoClaimSec !== null)
+        .map((w) => ({ id: w.id, lastClaimSec: w.lastVideoClaimSec, videosPerHour: w.videosPerHour, totalVideos: w.totalVideos })),
+    };
   } catch { /* fleet optional */ }
+  try {
+    const { videoSupply } = await import("../../../../lib/inmarket/autoVideo");
+    const s = await videoSupply();
+    const v = (out.video ?? {}) as Record<string, unknown>;
+    out.video = { ...v, pending: s.pending, rebuilds: s.rebuilds, clip: s.clip, shared: s.shared, reason: s.reason };
+  } catch { /* supply optional */ }
   try {
     const { engineHealth } = await import("../../../../lib/inmarket/accumulator");
     const h = await engineHealth();

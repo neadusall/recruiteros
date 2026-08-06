@@ -177,7 +177,12 @@ async function loop(): Promise<void> {
         console.log(`[video-worker] ${ts()} no clip configured on main (record one in Video Studio / set INMARKET_AUTOVIDEO_CLIP_ID). Sleeping.`);
         await sleep(120_000); continue;
       }
-      if (!jobs.length) { await sleep(IDLE_SLEEP_MS); continue; }
+      // An empty claim is worth one journal line: "the queue is drained" and "the main handed me
+      // nothing" are indistinguishable on this box otherwise, and silence reads as a dead unit.
+      if (!jobs.length) {
+        console.log(`[video-worker] ${ts()} idle — ${String(claim.reason || "queue_empty")} (${Number(claim.pending) || 0} pending)`);
+        await sleep(IDLE_SLEEP_MS); continue;
+      }
 
       // The clip registry lives on the main (Postgres snapshot KV) which this box cannot reach;
       // the claim payload carries the clip's metadata, so prime the local registry with it.

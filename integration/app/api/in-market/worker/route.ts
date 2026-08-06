@@ -15,7 +15,7 @@
  */
 
 import { claimResearchBatch, mergeCuratedRows, type CuratedProspect, type CurationStatus } from "../../../../lib/inmarket/curation";
-import { recordClaim, recordSubmit, recordHealth, recordSource, fleetStatus } from "../../../../lib/inmarket/fleet";
+import { recordClaim, recordSubmit, recordHealth, recordSource, recordVideoClaim, recordVideoSubmit, fleetStatus } from "../../../../lib/inmarket/fleet";
 import type { InMarketLead } from "../../../../lib/inmarket/index";
 import { ok, fail, body } from "../../../../lib/api";
 
@@ -179,7 +179,7 @@ export async function POST(req: Request) {
     const { claimVideoJobs } = await import("../../../../lib/inmarket/autoVideo");
     const limit = Math.min(Math.max(Number(b.limit) || 8, 1), 100);
     const res = await claimVideoJobs(limit);
-    recordClaim(workerId, res.jobs.length);
+    recordVideoClaim(workerId, res.jobs.length);   // video claims stay OFF the research counters
     return ok(res);
   }
   if (b?.action === "submit_video") {
@@ -196,7 +196,7 @@ export async function POST(req: Request) {
       .map((x: { company?: unknown; role?: unknown; reason?: unknown }) => ({ company: String(x?.company ?? ""), role: String(x?.role ?? ""), reason: String(x?.reason ?? "") }))
       .filter((x: { company: string; role: string }) => x.company && x.role);
     const benched = await recordVideoFailures(failures).catch(() => 0);
-    recordSubmit(workerId, results.length, recorded);
+    recordVideoSubmit(workerId, recorded);         // composites are not "names" — keep names/hour honest
     return ok({ recorded, received: raw.length, failuresRecorded: benched });
   }
 

@@ -8,7 +8,15 @@
  */
 
 interface Ev { at: number; jobs: number; named: number }
-interface W { id: string; firstSeen: number; lastSeen: number; claims: number; totalJobs: number; totalNamed: number; totalSourced: number; ev: Ev[]; health?: WorkerHealth }
+/** VIDEO events are kept apart from research events on purpose: a box that only renders video would
+ *  otherwise read as a research box with a names/hour rate, and a dead video unit on a live research
+ *  box would be invisible — which is exactly how video output stalled silently. */
+interface VEv { at: number; made: number }
+interface W {
+  id: string; firstSeen: number; lastSeen: number; claims: number;
+  totalJobs: number; totalNamed: number; totalSourced: number; ev: Ev[]; health?: WorkerHealth;
+  videoClaims: number; totalVideos: number; lastVideoClaimAt: number; vev: VEv[];
+}
 
 /** Compact per-box health digest reported by each worker on its heartbeat (claim/submit). Self-reported
  *  telemetry from a token-authenticated box — coerced defensively where it's recorded. */
@@ -34,7 +42,7 @@ function get(id: string): W {
       if (stalest) fleet.delete(stalest);
     }
     const now = Date.now();
-    w = { id, firstSeen: now, lastSeen: now, claims: 0, totalJobs: 0, totalNamed: 0, totalSourced: 0, ev: [] };
+    w = { id, firstSeen: now, lastSeen: now, claims: 0, totalJobs: 0, totalNamed: 0, totalSourced: 0, ev: [], videoClaims: 0, totalVideos: 0, lastVideoClaimAt: 0, vev: [] };
     fleet.set(id, w);
   }
   return w;
@@ -45,6 +53,29 @@ export function recordClaim(id: string, count: number): void {
   const w = get(id);
   w.lastSeen = Date.now();
   w.claims += Math.max(0, count);
+}
+
+/** A box asked for VIDEO jobs. Recorded even when the claim came back empty — the point of this
+ *  counter is "is anything still asking?", which is what tells a stall (units dead) apart from a
+ *  starved queue (units alive, nothing to hand them). */
+export function recordVideoClaim(id: string, count: number): void {
+  if (!id) return;
+  const w = get(id);
+  const now = Date.now();
+  w.lastSeen = now;
+  w.lastVideoClaimAt = now;
+  w.videoClaims += Math.max(0, count);
+}
+
+/** A box reported finished composites. Kept out of recordSubmit so videos never inflate names/hour. */
+export function recordVideoSubmit(id: string, made: number): void {
+  if (!id) return;
+  const w = get(id);
+  const now = Date.now();
+  w.lastSeen = now;
+  w.totalVideos += Math.max(0, made);
+  w.vev.push({ at: now, made: Math.max(0, made) });
+  if (w.vev.length > 2000 || w.vev[0].at < now - KEEP_MS) w.vev = w.vev.filter((e) => e.at > now - KEEP_MS);
 }
 
 /** A worker shipped freshly-SOURCED companies to the pool (the "build" half). */
@@ -104,6 +135,11 @@ export interface FleetWorker {
   totalSourced: number;
   /** Latest self-reported health digest from the box (undefined until it heartbeats). */
   health?: WorkerHealth;
+  /** VIDEO half of this box: composites finished in the last hour and since it came up. */
+  videosPerHour: number;
+  totalVideos: number;
+  /** Seconds since this box last ASKED for video jobs; null if it never has (no video unit running). */
+  lastVideoClaimSec: number | null;
 }
 export interface FleetStatus {
   workers: FleetWorker[];
@@ -113,6 +149,14 @@ export interface FleetStatus {
   totalNamed: number;
   /** Fleet-wide health roll-up: worst online box wins, so a single strained IP is visible at a glance. */
   health: "healthy" | "degraded" | "unhealthy" | "idle";
+  /** VIDEO fleet, tracked separately from research: boxes whose video unit claimed in the last 5 min
+   *  (the worker's idle sleep is 30s, so a live unit always lands inside that window), what they
+   *  produced, and how long since ANY box asked for video work. videoOnline 0 with work waiting =
+   *  the render units are down, not a starved queue. */
+  videoOnline: number;
+  totalVideosPerHour: number;
+  totalVideos: number;
+  lastVideoClaimSec: number | null;
 }
 
 export function fleetStatus(): FleetStatus {
@@ -122,6 +166,7 @@ export function fleetStatus(): FleetStatus {
     const elapsedMin = Math.max(1 / 60, (now - w.firstSeen) / 60_000);
     const jobs5 = w.ev.filter((e) => e.at > now - 300_000).reduce((s, e) => s + e.jobs, 0);
     const names60 = w.ev.filter((e) => e.at > now - 3_600_000).reduce((s, e) => s + e.named, 0);
+    const videos60 = w.vev.filter((e) => e.at > now - 3_600_000).reduce((s, e) => s + e.made, 0);
     workers.push({
       id: w.id,
       online: now - w.lastSeen < 120_000,                 // seen in the last 2 min
@@ -132,6 +177,9 @@ export function fleetStatus(): FleetStatus {
       totalNamed: w.totalNamed,
       totalSourced: w.totalSourced,
       health: w.health,
+      videosPerHour: Math.round((videos60 / Math.min(60, elapsedMin)) * 60),
+      totalVideos: w.totalVideos,
+      lastVideoClaimSec: w.lastVideoClaimAt ? Math.round((now - w.lastVideoClaimAt) / 1000) : null,
     });
   }
   workers.sort((a, b) => Number(b.online) - Number(a.online) || b.namesPerHour - a.namesPerHour || b.totalNamed - a.totalNamed);
@@ -149,5 +197,12 @@ export function fleetStatus(): FleetStatus {
     totalNamesPerHour: workers.reduce((s, w) => s + w.namesPerHour, 0),
     totalNamed: workers.reduce((s, w) => s + w.totalNamed, 0),
     health: worst,
+    videoOnline: workers.filter((w) => w.lastVideoClaimSec !== null && w.lastVideoClaimSec < 300).length,
+    totalVideosPerHour: workers.reduce((s, w) => s + w.videosPerHour, 0),
+    totalVideos: workers.reduce((s, w) => s + w.totalVideos, 0),
+    lastVideoClaimSec: workers.reduce<number | null>(
+      (best, w) => (w.lastVideoClaimSec === null ? best : best === null ? w.lastVideoClaimSec : Math.min(best, w.lastVideoClaimSec)),
+      null,
+    ),
   };
 }

@@ -177,12 +177,15 @@ export interface VideoJob {
  * Requires shared object storage (ROS_S3_*) so a worker's video is servable by the main — otherwise
  * the composite would live only on the worker's disk.
  */
-export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<VideoJob>; clipId: string | null; clip?: import("./roleVideo").ClipMeta | null; durationSec: number; shared: boolean }> {
+export async function claimVideoJobs(limit: number): Promise<VideoClaim> {
   const dur = videoSeconds();
   const clipId = await resolveClipId();
   let shared = false;
   try { shared = (await import("./assetStore")).s3Enabled(); } catch { /* no s3 module */ }
-  if (!clipId) return { jobs: [], clipId: null, durationSec: dur, shared };
+  if (!clipId) {
+    noteSupply({ reason: "no_clip", pending: 0, rebuilds: 0, clip: false, shared });
+    return { jobs: [], clipId: null, durationSec: dur, shared, pending: 0, rebuilds: 0, reason: "no_clip" };
+  }
 
   // Ship the clip METADATA with the claim: the registry lives in the main's Postgres snapshot
   // KV, which worker boxes deliberately cannot reach (they only get the token + S3). Without
@@ -251,7 +254,50 @@ export async function claimVideoJobs(limit: number): Promise<{ jobs: Array<Video
     const start = pending.length > room ? Math.floor(Math.random() * (pending.length - room)) : 0;
     batch.push(...pending.slice(start, start + room));
   }
-  return { jobs: batch, clipId, clip, durationSec: dur, shared };
+  const reason: VideoClaim["reason"] = !shared ? "no_shared_storage" : batch.length ? "ok" : "queue_empty";
+  noteSupply({ reason, pending: pending.length, rebuilds: rebuilds.length, clip: true, shared });
+  return { jobs: batch, clipId, clip, durationSec: dur, shared, pending: pending.length, rebuilds: rebuilds.length, reason };
+}
+
+/**
+ * WHY a claim came back empty — so a stall is never silent.
+ *
+ * An empty claim used to look identical whether the clip was missing, storage was unwired, or the
+ * queue was genuinely drained, and none of those look different from "the render units are dead"
+ * when all you have is the output rate. That ambiguity is the whole reason a stall with work
+ * waiting could sit unexplained. The reason rides back on the claim (the worker journals it) and is
+ * cached below for the probe.
+ */
+export interface VideoClaim {
+  jobs: Array<VideoJob>;
+  clipId: string | null;
+  clip?: import("./roleVideo").ClipMeta | null;
+  durationSec: number;
+  shared: boolean;
+  /** Real queue depth right now — rows contactable, un-rendered, and not benched/backing off. */
+  pending: number;
+  /** Composites queued for the one-time re-render sweep (these are served before new work). */
+  rebuilds: number;
+  reason: "ok" | "no_clip" | "no_shared_storage" | "queue_empty";
+}
+
+interface Supply { reason: VideoClaim["reason"]; pending: number; rebuilds: number; clip: boolean; shared: boolean; at: number }
+let lastSupply: Supply | null = null;
+function noteSupply(s: Omit<Supply, "at">): void { lastSupply = { ...s, at: Date.now() }; }
+
+/**
+ * Supply side of video production for the diagnostics probe: is there a clip, is storage wired, how
+ * deep is the queue. Answered from the last real claim when one is recent — a live worker claims
+ * every ~30s, so a stale cache is itself the tell that nothing is claiming. Recomputes only when
+ * cold or stale, and never throws: the diagnostic must not become the outage.
+ */
+export async function videoSupply(maxAgeMs = 120_000): Promise<Supply & { fresh: boolean }> {
+  if (lastSupply && Date.now() - lastSupply.at < maxAgeMs) return { ...lastSupply, fresh: true };
+  try {
+    await claimVideoJobs(1);   // claiming holds no lease, so a read for diagnostics costs nothing
+  } catch { /* fall back to whatever we last knew */ }
+  if (!lastSupply) return { reason: "queue_empty", pending: 0, rebuilds: 0, clip: false, shared: false, at: Date.now(), fresh: false };
+  return { ...lastSupply, fresh: false };
 }
 
 /** Composites recorded before this instant get re-rendered once (smooth-PiP compose fix). */
