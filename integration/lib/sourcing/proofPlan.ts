@@ -68,6 +68,12 @@ export function isSearchableEvidence(raw: string): boolean {
   if (s.length < 2 || s.length > 42) return false;
   const low = s.toLowerCase();
   if (NOT_EVIDENCE.some((n) => low.includes(n))) return false;
+  // Bracketed annotation is the signature of requirement language, not profile language.
+  // A real run produced "CPA license (active)" as a search term: it matches nobody (no
+  // profile is written that way), and it burned a query slot while duplicating "CPA".
+  if (/[()\[\]]/.test(s)) return false;
+  // Requirement qualifiers give the same tell in prose form.
+  if (/\b(required|preferred|desired|a plus|or equivalent|must have|minimum|active|current)\b/.test(low)) return false;
   // Wordy phrases are descriptions, not the words people put on profiles.
   const words = low.split(/\s+/).filter(Boolean);
   if (words.length > 4) return false;
@@ -143,7 +149,15 @@ export function buildProofPlan(
       }
       if (!isSearchableEvidence(s)) continue;
       if (seen.has(s.toLowerCase())) continue;
-      seen.add(s.toLowerCase());
+      // CONTAINMENT DEDUPE. A JD often restates a term we already hold, wrapped in its
+      // own words ("CPA" -> "CPA license", "ASC 740" -> "ASC 740 provision work"). The
+      // longer form is strictly worse as a search term: it matches a subset of what the
+      // short form matches, usually nobody, and it costs the same query slot. Keep the
+      // short one. Word-boundary checked so "SALT" does not swallow "SALT compliance"
+      // by accident of spelling.
+      const lowS = s.toLowerCase();
+      if ([...seen].some((k) => k.length < lowS.length && new RegExp(`(^|[^a-z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9])`).test(lowS))) continue;
+      seen.add(lowS);
       // JD-specific terms have no kind we can infer reliably, so they are filed as
       // "domain": the middle weighting, neither gate-keeping nor mere tool exposure.
       terms.push({ term: s, kind: "domain", weight });

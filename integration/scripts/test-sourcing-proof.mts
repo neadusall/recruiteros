@@ -88,6 +88,13 @@ ok("soft skill is rejected", !isSearchableEvidence("strong communication skills"
 ok("degree language is rejected", !isSearchableEvidence("Bachelor's degree in Accounting"));
 ok("long sentence is rejected", !isSearchableEvidence("ability to work in a fast paced environment and multitask"));
 ok("empty is rejected", !isSearchableEvidence(""));
+// Found on a real Palm Beach tax run: JD phrasing that matched nobody and burned a slot.
+ok("bracketed requirement language is rejected", !isSearchableEvidence("CPA license (active)"));
+ok("a 'required' qualifier is rejected", !isSearchableEvidence("CPA required"));
+ok("an 'or equivalent' qualifier is rejected", !isSearchableEvidence("CPA or equivalent"));
+ok("the bare credential still passes", isSearchableEvidence("CPA"));
+// The A&P regression: a word boundary sits between "a" and "&".
+ok("a term beginning A& is searchable", isSearchableEvidence("A&P License"));
 
 /* ---- the plan ---- */
 const planned = buildProofPlan(icp({ mustHave: ["CPA"], niceToHave: ["NetSuite", "strong communication skills", "ASC 740"] }), "Senior Tax Accountant for a public accounting firm");
@@ -99,6 +106,20 @@ ok("JD term already in the library is not duplicated",
   planned.terms.filter((t) => t.term.toLowerCase() === "netsuite").length === 1);
 ok("an explicit must-have outranks the shelf default",
   (planned.terms.find((t) => t.term === "CPA")?.weight ?? 0) === 3);
+// Containment dedupe: the longer restatement matches a subset of the short form (usually
+// nobody) and costs the same query slot, so the short form wins.
+const restated = buildProofPlan(
+  icp({ mustHave: ["CPA"], niceToHave: ["CPA license", "ASC 740 provision work"] }),
+  "Senior Tax Accountant, public accounting",
+);
+ok("a JD restatement of a known term does not become its own term",
+  !restated.terms.some((t) => /^CPA license$/i.test(t.term)));
+ok("a JD restatement wrapping a known phrase is dropped too",
+  !restated.terms.some((t) => /provision work/i.test(t.term)));
+ok("the short canonical form survives the dedupe",
+  restated.terms.some((t) => t.term === "CPA") && restated.terms.some((t) => t.term === "ASC 740"));
+ok("a genuinely new JD phrase still gets through",
+  buildProofPlan(icp({ niceToHave: ["1031 exchanges"] }), "tax").terms.some((t) => /1031/.test(t.term)));
 const offBook = buildProofPlan(icp({ titles: ["Underwater Basket Weaver"], industries: [], label: "Basket Weaver" }), "weaving baskets underwater");
 ok("off-book role produces an empty plan rather than nonsense", offBook.terms.length === 0 && offBook.queryGroups.length === 0);
 
