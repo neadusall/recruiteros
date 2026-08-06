@@ -1072,6 +1072,7 @@
       (d.error ? '<div class="errbox">Publish failed: ' + esc(d.error) + "</div>" : "") +
       '<div class="imgrow">' +
       '<button class="btn small" data-act="choose-img" data-id="' + d.id + '">' + (img ? "Change media" : "Attach media") + "</button>" +
+      '<button class="btn small" data-act="make-ai-media" data-id="' + d.id + '" title="Reads the post and designs a stat graphic from its own numbers, then attaches it here for your approval.">Create media for me</button>' +
       '<button class="btn small" data-act="open-card" data-id="' + d.id + '">Quote card</button>' +
       '<button class="btn small" data-act="make-carousel" data-id="' + d.id + '">Carousel</button>' +
       (img ? '<span class="sub">' + esc(img.name) + "</span>" : '<span class="sub">No media attached.</span>') +
@@ -1666,6 +1667,12 @@
       api("make_card", { headline: headline })
         .then(function (r) { return api("update_draft", { draftId: id, imageId: r.image.id }); })
         .then(function () { cardOpen = false; toast("Quote card attached."); return load(); })
+        .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
+    } else if (act === "make-ai-media") {
+      flushDraftText(id);
+      busy(b, true, "Designing…");
+      api("make_ai_media", { draftId: id })
+        .then(function () { pickOpen = false; toast("Media designed from your post and attached. Check the preview, then approve."); return load(); })
         .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "make-carousel") {
       flushDraftText(id);

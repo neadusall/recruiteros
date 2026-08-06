@@ -1370,6 +1370,217 @@ export async function generateCarousel(ws: string, opts: { draftId: string; slid
   return { image: img, slides };
 }
 
+/* ----------------------------- AI stat media ------------------------------ */
+
+const STAT_MEDIA_SYSTEM = `You design the data graphic for ONE LinkedIn post by a recruiter. Extract ONLY numbers and claims that are literally in the post. Never invent, estimate, round differently, or add outside facts. No em-dashes anywhere.
+
+Return ONLY a JSON object:
+{
+  "kicker": string,
+  "headline": string,
+  "hero": { "value": string, "label": string } | null,
+  "bars": [ { "label": string, "display": string, "amount": number } ],
+  "gap": string | null,
+  "source": string | null
+}
+
+Field rules:
+- kicker: a 2 to 5 word section label for the top of the card, <= 34 characters, plain words (it is rendered uppercase).
+- headline: the post's sharpest claim in its own words, <= 90 characters.
+- hero: the single most striking number, e.g. {"value":"-30%","label":"CPA exam participation since 2016"}. value <= 8 characters including sign and unit; label <= 70 characters. null when the post has no standout number.
+- bars: 0, 2, or 3 quantities from the post that share a unit and are worth comparing, largest story first. label <= 34 characters; display is the formatted figure exactly as the post gives it (e.g. "124,200"); amount is its plain numeric value. Use [] when the post has no comparable pair. Never repeat the hero number as a bar unless it is one side of the comparison.
+- gap: <= 44 characters naming the difference the bars expose (e.g. "69,000 people short every year"), ONLY if the post states or directly implies it. Otherwise null.
+- source: <= 70 characters of attribution ONLY if the post names a source. Otherwise null.
+
+No other text before or after the JSON.`;
+
+interface StatMediaSpec {
+  kicker: string;
+  headline: string;
+  hero: { value: string; label: string } | null;
+  bars: { label: string; display: string; amount: number }[];
+  gap: string | null;
+  source: string | null;
+}
+
+function cleanStr(v: unknown, max: number): string {
+  return typeof v === "string" ? scrubDashes(v.trim()).slice(0, max) : "";
+}
+
+async function generateStatSpec(text: string): Promise<StatMediaSpec> {
+  const client = anthropicClient();
+  const msg = await client.messages.create({
+    model: MODEL(),
+    max_tokens: 700,
+    system: STAT_MEDIA_SYSTEM,
+    messages: [{ role: "user", content: text.slice(0, 4000) }],
+  });
+  const out = msg.content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+  const start = out.indexOf("{"), end = out.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("stat_media_parse");
+  const raw = JSON.parse(out.slice(start, end + 1));
+  const headline = cleanStr(raw.headline, 90);
+  if (!headline) throw new Error("stat_media_parse");
+  const hero = raw.hero && cleanStr(raw.hero.value, 8) && cleanStr(raw.hero.label, 70)
+    ? { value: cleanStr(raw.hero.value, 8), label: cleanStr(raw.hero.label, 70) }
+    : null;
+  let bars = (Array.isArray(raw.bars) ? raw.bars : [])
+    .map((b: any) => ({ label: cleanStr(b?.label, 34), display: cleanStr(b?.display, 12), amount: Number(b?.amount) }))
+    .filter((b: { label: string; display: string; amount: number }) => b.label && b.display && Number.isFinite(b.amount) && b.amount > 0)
+    .slice(0, 3);
+  if (bars.length < 2) bars = [];
+  return {
+    kicker: cleanStr(raw.kicker, 34) || "THE MARKET RIGHT NOW",
+    headline,
+    hero,
+    bars,
+    gap: bars.length ? cleanStr(raw.gap, 44) || null : null,
+    source: cleanStr(raw.source, 70) || null,
+  };
+}
+
+/** No-AI fallback: a clean headline card from the draft's own first line. */
+function statSpecNaive(text: string): StatMediaSpec {
+  const firstLine = (text.split(/\n/).map((l) => l.trim()).filter(Boolean)[0] ?? text).slice(0, 90);
+  return { kicker: "THE MARKET RIGHT NOW", headline: scrubDashes(firstLine), hero: null, bars: [], gap: null, source: null };
+}
+
+/** Bar with a square baseline (left) and 8px-rounded data end (right). */
+function barPath(x: number, y: number, w: number, h: number): string {
+  const r = Math.min(8, w / 2);
+  return `M${x} ${y} h${w - r} a${r} ${r} 0 0 1 ${r} ${r} v${h - 2 * r} a${r} ${r} 0 0 1 -${r} ${r} h-${w - r} Z`;
+}
+
+/**
+ * 1200x1500 (4:5 portrait, LinkedIn's tallest feed crop) stat card: light
+ * surface, ink text, single blue ramp for the bars, red reserved for a
+ * negative hero. Sections are optional and the layout reflows around them.
+ */
+function statMediaSvg(spec: StatMediaSpec): string {
+  const W = 1200, H = 1500, M = 96;
+  const FONT = "FreeSans, DejaVu Sans, Arial, sans-serif";
+  const INK = "#0b0b0b", SECONDARY = "#52514e", MUTED = "#898781";
+  const HAIRLINE = "#e1e0d9", BRACKET = "#c3c2b7", BLUE = "#2a78d6", RED = "#d03b3b";
+  // One blue ramp, darkest first: 2 bars use the far-apart validated pair,
+  // 3 bars insert the middle step between them.
+  const RAMP = spec.bars.length === 2 ? ["#2a78d6", "#86b6ef"] : ["#2a78d6", "#5598e7", "#86b6ef"];
+  const parts: string[] = [];
+  let y = 150;
+
+  parts.push(`<rect x="${M}" y="${y - 10}" width="52" height="7" rx="3.5" fill="${BLUE}"/>`);
+  parts.push(`<text x="${M + 72}" y="${y}" font-family="${FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="${MUTED}">${escXml(spec.kicker.toUpperCase())}</text>`);
+  y += 84;
+
+  const hFs = spec.headline.length > 60 ? 58 : 66;
+  const hLines = wrapLines(spec.headline, Math.floor((W - 2 * M) / (hFs * 0.5)), 3);
+  const hLineH = Math.round(hFs * 1.18);
+  for (const l of hLines) {
+    parts.push(`<text x="${M}" y="${y}" font-family="${FONT}" font-size="${hFs}" font-weight="800" letter-spacing="-1" fill="${INK}">${escXml(l)}</text>`);
+    y += hLineH;
+  }
+  y += 40;
+
+  if (spec.hero) {
+    const negative = /^[-−↓]/.test(spec.hero.value);
+    const heroFs = 175;
+    const heroW = Math.round(spec.hero.value.length * heroFs * 0.58) + 30;
+    parts.push(`<text x="${M}" y="${y + heroFs * 0.78}" font-family="${FONT}" font-size="${heroFs}" font-weight="800" letter-spacing="-4" fill="${negative ? RED : BLUE}">${escXml(spec.hero.value)}</text>`);
+    if (heroW <= 560) {
+      // Label beside the number.
+      let ly = y + 60;
+      for (const l of wrapLines(spec.hero.label, 26, 3)) {
+        parts.push(`<text x="${M + heroW}" y="${ly}" font-family="${FONT}" font-size="31" fill="${SECONDARY}">${escXml(l)}</text>`);
+        ly += 42;
+      }
+      y += heroFs + 46;
+    } else {
+      // Wide number: the label drops below it so nothing runs off the edge.
+      let ly = y + heroFs + 34;
+      const labLines = wrapLines(spec.hero.label, 64, 2);
+      for (const l of labLines) {
+        parts.push(`<text x="${M}" y="${ly}" font-family="${FONT}" font-size="31" fill="${SECONDARY}">${escXml(l)}</text>`);
+        ly += 42;
+      }
+      y += heroFs + 34 + labLines.length * 42 + 12;
+    }
+  }
+
+  if (spec.bars.length) {
+    parts.push(`<rect x="${M}" y="${y}" width="${W - 2 * M}" height="1" fill="${HAIRLINE}"/>`);
+    y += 78;
+    const maxAmount = Math.max(...spec.bars.map((b) => b.amount));
+    const maxW = W - 2 * M - 220; // room for the value at the tip
+    const ends: number[] = [];
+    for (let i = 0; i < spec.bars.length; i++) {
+      const b = spec.bars[i];
+      const w = Math.max(14, Math.round((b.amount / maxAmount) * maxW));
+      ends.push(w);
+      parts.push(`<text x="${M}" y="${y}" font-family="${FONT}" font-size="30" fill="${SECONDARY}">${escXml(b.label)}</text>`);
+      y += 22;
+      parts.push(`<path d="${barPath(M, y, w, 40)}" fill="${RAMP[i]}"/>`);
+      parts.push(`<text x="${M + w + 22}" y="${y + 31}" font-family="${FONT}" font-size="33" font-weight="700" fill="${INK}">${escXml(b.display)}</text>`);
+      y += 84;
+    }
+    if (spec.gap && spec.bars.length === 2 && ends[0] - ends[1] > 120) {
+      const x0 = M + Math.min(ends[0], ends[1]), x1 = M + Math.max(ends[0], ends[1]);
+      parts.push(`<path d="M${x0} ${y - 20} v14 h${x1 - x0} v-14" stroke="${BRACKET}" stroke-width="1.5" fill="none"/>`);
+      parts.push(`<text x="${(x0 + x1) / 2}" y="${y + 40}" text-anchor="middle" font-family="${FONT}" font-size="31" font-weight="700" fill="${INK}">${escXml(spec.gap)}</text>`);
+      y += 76;
+    } else if (spec.gap) {
+      parts.push(`<text x="${M}" y="${y + 10}" font-family="${FONT}" font-size="31" font-weight="700" fill="${INK}">${escXml(spec.gap)}</text>`);
+      y += 56;
+    }
+  }
+
+  // Sparse cards drift toward the optical center; dense cards stay put. The
+  // source line is pinned to the bottom edge outside the centering group.
+  const shift = Math.max(0, Math.floor((H - 130 - y) / 2) - 60);
+  const source = spec.source
+    ? `<text x="${M}" y="${H - 76}" font-family="${FONT}" font-size="21" fill="${MUTED}">${escXml(spec.source)}</text>`
+    : "";
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">` +
+    `<rect width="${W}" height="${H}" fill="#fcfcfb"/>` +
+    `<g transform="translate(0 ${shift})">${parts.join("\n")}</g>${source}</svg>`;
+}
+
+/**
+ * "Create media for me": read the draft, extract its own numbers (AI when
+ * available, headline-only fallback otherwise), render the stat card, save it
+ * to the library, and attach it to the draft for approval.
+ */
+export async function generateStatMedia(ws: string, opts: { draftId: string }): Promise<{ image: PosterImage; draft: PosterDraft }> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const d = s.drafts.find((x) => x.id === opts.draftId);
+  if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
+  if (!d.text.trim()) throw Object.assign(new Error("empty_post"), { status: 400 });
+
+  let spec: StatMediaSpec | null = null;
+  if (process.env.ANTHROPIC_API_KEY) {
+    try { spec = await generateStatSpec(d.text); } catch { spec = null; }
+  }
+  if (!spec) spec = statSpecNaive(d.text);
+
+  const sharp = (await import("sharp")).default;
+  const bytes = await sharp(Buffer.from(statMediaSvg(spec))).png().toBuffer();
+  const id = rid();
+  const file = id + ".png";
+  await writeMedia(file, bytes);
+  const img: PosterImage = {
+    id, file, mime: "image/png", kind: "card",
+    name: ("AI media: " + spec.headline).slice(0, 80),
+    createdAt: nowIso(),
+  };
+  s.images.unshift(img);
+  d.imageId = id;
+  d.updatedAt = nowIso();
+  persist();
+  return { image: img, draft: d };
+}
+
 /* --------------------------- reuse + performance -------------------------- */
 
 /** Evergreen recycling: copy a posted (or any) draft back into Drafts. */

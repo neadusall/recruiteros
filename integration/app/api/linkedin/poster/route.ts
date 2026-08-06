@@ -25,6 +25,7 @@
  *   note_delete       { id }
  *   make_job_post     {}                    (blind spotlight of an open Job Library job)
  *   make_carousel     { draftId }           (draft -> branded slide PDF, attached)
+ *   make_ai_media     { draftId }           (draft -> stat card from its own numbers, attached)
  *   duplicate         { draftId }           (reuse a post as a fresh draft)
  *   refresh_stats     {}                    (pull engagement counters for posted)
  *   save_settings     { settings }
@@ -41,7 +42,7 @@ import {
   updateDraft, discardDraft, approveDraft, cancelSchedule, retryDraft,
   uploadImage, deleteImage, generateQuoteCard, saveSettings, getSettings,
   enginePublishStatus, addWatchedProfile, removeWatchedProfile, pullWatchedProfile,
-  generateCarousel, duplicateDraft, refreshPostStats, createOriginalDraft, createJobSpotlightDraft,
+  generateCarousel, generateStatMedia, duplicateDraft, refreshPostStats, createOriginalDraft, createJobSpotlightDraft,
   createPlaybookDraft, addDeskNote, deleteDeskNote,
 } from "../../../../lib/linkedin/poster";
 import {
@@ -174,6 +175,10 @@ export async function POST(req: Request) {
         if (!b.draftId) return fail("draftId_required");
         const slides = Array.isArray(b.slides) ? b.slides.filter((x): x is string => typeof x === "string") : undefined;
         return ok(await generateCarousel(ws, { draftId: b.draftId, slides }));
+      }
+      case "make_ai_media": {
+        if (!b.draftId) return fail("draftId_required");
+        return ok(await generateStatMedia(ws, { draftId: b.draftId }));
       }
       case "duplicate": {
         if (!b.draftId) return fail("draftId_required");
