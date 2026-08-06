@@ -59,6 +59,8 @@ export interface PosterDraft {
   jobSpotlight?: boolean;
   /** The job title behind a spotlight, for the UI chip only. */
   jobTitle?: string;
+  /** True when the AI wrote the post around a photo the recruiter uploaded. */
+  photoPost?: boolean;
   /** 2026 playbook drafts: which weekday pillar and vertical produced this
    *  (e.g. "Desk story" / "Accounting"), for the UI chips only. */
   pillar?: string;
@@ -794,6 +796,104 @@ export async function createOriginalDraft(ws: string, opts: { topic?: string; us
   if (s.drafts.length > 300) s.drafts.length = 300;
   persist();
   await autoAttachCard(ws, draft.id);
+  return draft;
+}
+
+/* ------------------------------ photo posts ------------------------------- */
+
+function photoSystem(settings: PosterSettings, notes: string): string {
+  return `You ghostwrite ONE LinkedIn post for a recruiter, built around a photo THEY took and are attaching to the post. You are shown the photo. Write the post it belongs to: the photo is the proof of a real moment, the text gives it meaning for the recruiter's market.
+
+GROUNDING RULES (non-negotiable):
+- Reference ONLY what is plainly visible in the photo. Never guess or invent names, companies, clients, locations, events, or outcomes from it.
+- People in the photo stay anonymous unless the recruiter's notes below name them.
+- If the photo is a document, chart, or screen, you may read figures straight off it, and ONLY those figures.
+- When unsure what the photo shows, write around the moment ("this morning's desk", "notes from a search in progress") rather than making a specific claim.
+
+THE RECRUITER'S RAW MATERIAL (real desk notes from the last few days; use at most one true detail):
+${notes || "(none today)"}
+${settings.brandLine ? `
+THE BRAND: the recruiter posts on behalf of ${settings.brandLine}. Sound like a senior recruiter there.` : ""}
+THE RECRUITER'S VOICE PROFILE (follow it exactly):
+${settings.voiceProfile || "Plainspoken, direct, warm. A working recruiter talking to their market, not a content marketer."}
+
+STRUCTURE:
+- First line is the hook: under 10 words, and it must NOT describe the photo ("A photo of..." is dead on arrival). The photo intrigues; the hook explains why it matters.
+- Short lines, a line break every one or two sentences, 60 to 150 words.
+- End with one genuine question the reader would actually answer. No hard CTA.
+
+HUMAN SIGNALS (use them):
+- Contractions. Sentences that start with And or But. Varied sentence length.
+- A named feeling where honest: annoyed, relieved, proud, embarrassed.
+
+${PLAYBOOK_KILL}
+
+Return ONLY the post text. No preamble, no quotes around it, no markdown.`;
+}
+
+/**
+ * Photo-first drafting: the recruiter uploads a real photo and the AI writes
+ * the post around it (vision call), attaching that photo to the new draft.
+ */
+export async function createPhotoDraft(ws: string, opts: { imageId: string; guidance?: string; userId?: string }): Promise<PosterDraft> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const img = s.images.find((i) => i.id === opts.imageId);
+  if (!img) throw Object.assign(new Error("image_not_found"), { status: 404 });
+  if (!img.mime.startsWith("image/")) {
+    throw Object.assign(new Error("photo_only: pick a photo (PNG, JPG, or WebP); a PDF or video can't drive a written post"), { status: 400 });
+  }
+  const media = await readMediaById(img.id);
+  if (!media) throw Object.assign(new Error("image_not_found"), { status: 404 });
+
+  // Normalize for the vision call: JPEG, long edge capped at 1568px (the
+  // model's sweet spot), which also keeps any 8MB upload under the API's
+  // per-image ceiling.
+  const sharp = (await import("sharp")).default;
+  const prepped = await sharp(media.bytes)
+    .rotate() // honor EXIF orientation from phone cameras
+    .resize(1568, 1568, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+
+  const notes = s.deskNotes.slice(0, 5).map((n) => `- (${n.at.slice(0, 10)}) ${n.text}`).join("\n");
+  const client = anthropicClient();
+  const msg = await client.messages.create({
+    model: MODEL(),
+    max_tokens: 1024,
+    system: photoSystem(s.settings, notes),
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: prepped.toString("base64") } },
+        {
+          type: "text",
+          text: (opts.guidance?.trim() ? `EXTRA DIRECTION FROM THE RECRUITER: ${opts.guidance.trim().slice(0, 500)}\n\n` : "") +
+            "Write the post now.",
+        },
+      ],
+    }],
+  });
+  const out = msg.content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+  if (!out) throw new Error("photo_post_empty");
+
+  const draft: PosterDraft = {
+    id: rid(),
+    text: scrubDashes(out),
+    imageId: img.id,
+    photoPost: true,
+    createdBy: opts.userId,
+    status: "draft",
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  s.drafts.unshift(draft);
+  if (s.drafts.length > 300) s.drafts.length = 300;
+  persist();
   return draft;
 }
 

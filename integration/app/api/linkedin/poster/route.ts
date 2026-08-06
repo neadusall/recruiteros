@@ -26,6 +26,7 @@
  *   make_job_post     {}                    (blind spotlight of an open Job Library job)
  *   make_carousel     { draftId }           (draft -> branded slide PDF, attached)
  *   make_ai_media     { draftId }           (draft -> stat card from its own numbers, attached)
+ *   make_from_photo   { imageId, guidance? } (photo -> AI writes the post around it, photo attached)
  *   duplicate         { draftId }           (reuse a post as a fresh draft)
  *   refresh_stats     {}                    (pull engagement counters for posted)
  *   save_settings     { settings }
@@ -43,7 +44,7 @@ import {
   uploadImage, deleteImage, generateQuoteCard, saveSettings, getSettings,
   enginePublishStatus, addWatchedProfile, removeWatchedProfile, pullWatchedProfile,
   generateCarousel, generateStatMedia, duplicateDraft, refreshPostStats, createOriginalDraft, createJobSpotlightDraft,
-  createPlaybookDraft, addDeskNote, deleteDeskNote,
+  createPlaybookDraft, createPhotoDraft, addDeskNote, deleteDeskNote,
 } from "../../../../lib/linkedin/poster";
 import {
   ayrshareConfigured, ayrshareLinkingConfigured, getAccountStatus, createProfile, generateLinkUrl,
@@ -179,6 +180,10 @@ export async function POST(req: Request) {
       case "make_ai_media": {
         if (!b.draftId) return fail("draftId_required");
         return ok(await generateStatMedia(ws, { draftId: b.draftId }));
+      }
+      case "make_from_photo": {
+        if (!b.imageId) return fail("imageId_required");
+        return ok({ draft: await createPhotoDraft(ws, { imageId: b.imageId, guidance: b.guidance, userId: g.ctx.user.id }) });
       }
       case "duplicate": {
         if (!b.draftId) return fail("draftId_required");

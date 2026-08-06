@@ -243,8 +243,9 @@
   .imggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
   .imgcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);overflow:hidden}
   .imgcard img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--panel-2)}
-  .imgcard .cap{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 9px;font-size:11.5px;color:var(--mut)}
-  .imgcard .cap span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .imgcard .cap{display:flex;align-items:center;gap:6px;padding:7px 9px;font-size:11.5px;color:var(--mut);flex-wrap:wrap}
+  .imgcard .cap span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 100%;min-width:0}
+  .imgcard .cap .btn{white-space:nowrap;flex:0 0 auto}
   .filetile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;aspect-ratio:1;
     background:var(--panel-2);color:var(--mut);text-decoration:none}
   .filetile svg{width:34px;height:34px;color:var(--faint)}
@@ -422,7 +423,9 @@
       <p class="hint">Upload brand-safe media once; attach it to drafts with one click. Generated quote cards and carousels land here too. A PDF publishes as a native LinkedIn document post (readers swipe through the pages), the format with the highest engagement on the platform right now.</p>
       <div class="btnrow" style="margin-top:0">
         <label class="btn primary" for="fileInput" id="btnUpload">Upload media</label>
+        <label class="btn" for="photoInput" title="Pick a photo from your computer or phone; the AI writes the post around it and drops both in Drafts.">Photo straight to a post</label>
         <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,application/pdf,video/mp4" style="display:none" />
+        <input type="file" id="photoInput" accept="image/png,image/jpeg,image/webp" style="display:none" />
         <span class="sub">PNG, JPG, or WebP up to 8MB. PDF or MP4 video up to 15MB.</span>
       </div>
     </div>
@@ -966,7 +969,8 @@
         '<div class="empty"><b>No drafts waiting</b>Pull ideas in the Sources tab, or create something right now.' +
         '<div class="btnrow" style="justify-content:center;margin-top:14px">' +
         '<button class="btn primary" data-act="quick-original">Write an original post</button>' +
-        '<button class="btn" data-act="quick-job">Spotlight an open job</button></div></div>';
+        '<button class="btn" data-act="quick-job">Spotlight an open job</button>' +
+        '<label class="btn" for="photoInput">Photo straight to a post</label></div></div>';
       return;
     }
     if (!sel || !list.some(function (d) { return d.id === sel; })) { sel = list[0].id; pvOpen = false; pickOpen = false; hooksOpen = false; regenOpen = false; cardOpen = false; }
@@ -975,6 +979,7 @@
       var chip = d.status === "failed" ? '<span class="badge failed">failed</span>'
         : d.pillar ? '<span class="statchip">' + esc(d.pillar) + '</span>'
         : d.jobSpotlight ? '<span class="statchip">job spotlight</span>'
+        : d.photoPost ? '<span class="statchip">photo post</span>'
         : d.aiOriginal ? '<span class="statchip">original</span>'
         : d.sourceAuthor ? '<span class="badge draft">rewrite</span>' : '<span class="badge draft">draft</span>';
       return '<div class="railcard' + (d.id === sel ? " active" : "") + '" data-act="sel-draft" data-id="' + d.id + '">' +
@@ -1055,6 +1060,7 @@
     var srcChip = d.sourceAuthor ? "idea from <b>" + esc(d.sourceAuthor) + "</b> (attribution only, never posted)"
       : d.pillar ? '<span class="statchip">' + esc(d.pillar) + (d.vertical ? " · " + esc(d.vertical) : "") + "</span> <span>today's playbook post</span>"
       : d.jobSpotlight ? '<span class="statchip">job spotlight' + (d.jobTitle ? ": " + esc(d.jobTitle) : "") + "</span> <span>client never named</span>"
+      : d.photoPost ? '<span class="statchip">written from your photo</span> <span>only what the photo shows</span>'
       : d.aiOriginal ? '<span class="statchip">original, written for your brand</span>' : "original";
     return '<div class="workgrid"><div>' +
       '<div class="item" style="margin-bottom:0" data-draft="' + d.id + '">' +
@@ -1233,6 +1239,7 @@
           '<span class="ftype">' + kindTag(k) + "</span></a>";
       return '<div class="imgcard">' + face +
         '<div class="cap"><span title="' + esc(i.name) + '">' + esc(i.name) + "</span>" +
+        (k === "image" ? '<button class="btn small" data-act="write-from-photo" data-id="' + i.id + '" title="The AI looks at this photo and writes the post around it, in your voice.">Write a post</button>' : "") +
         '<button class="btn danger small" data-act="del-img" data-id="' + i.id + '">Delete</button></div></div>';
     }).join("");
     empty.style.display = S.images.length ? "none" : "block";
@@ -1426,6 +1433,30 @@
           return load();
         })
         .catch(function (e) { uploadAttachTo = null; toast(e.message); });
+    };
+    rd.readAsDataURL(f);
+    this.value = "";
+  });
+
+  // Photo straight to a post: upload, then the AI writes the draft around it.
+  document.getElementById("photoInput").addEventListener("change", function () {
+    var f = this.files && this.files[0]; if (!f) return;
+    if (f.size > 8 * 1024 * 1024) { toast("Photos up to 8MB."); this.value = ""; return; }
+    toast("Uploading your photo…");
+    var rd = new FileReader();
+    rd.onload = function () {
+      api("upload_image", { name: f.name, dataUrl: rd.result })
+        .then(function (r) {
+          toast("Photo in. Writing the post…");
+          return api("make_from_photo", { imageId: r.image.id });
+        })
+        .then(function (r) {
+          sel = r.draft.id; pvOpen = false; pickOpen = false; hooksOpen = false; regenOpen = false; cardOpen = false;
+          showView("studio");
+          toast("Post written from your photo. Read it out loud once, then approve.");
+          return load();
+        })
+        .catch(function (e) { toast(e.message); });
     };
     rd.readAsDataURL(f);
     this.value = "";
@@ -1687,6 +1718,16 @@
       busy(b, true, "Rendering…");
       api("make_carousel", { draftId: id, slides: texts })
         .then(function () { toast("Carousel re-rendered."); return load(); })
+        .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
+    } else if (act === "write-from-photo") {
+      busy(b, true, "Writing…");
+      api("make_from_photo", { imageId: id })
+        .then(function (r) {
+          sel = r.draft.id; pvOpen = false; pickOpen = false; hooksOpen = false; regenOpen = false; cardOpen = false;
+          showView("studio");
+          toast("Post written from your photo. Read it out loud once, then approve.");
+          return load();
+        })
         .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "del-img") {
       if (!confirm("Delete this from the library?")) return;
