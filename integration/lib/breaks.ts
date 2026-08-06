@@ -20,7 +20,9 @@ const MAX = 300;
 
 export interface BreakEntry {
   id: string;
-  /** Quotable code shown on screen (ROS-NET / ROS-SRV / ROS-DENY / ROS-APP). */
+  /** Quotable code shown on screen (ROS-NET / ROS-SRV / ROS-DENY / ROS-APP /
+   *  ROS-SETUP — the last one is a tool refused for a missing connection, which
+   *  is a setup gap rather than a fault, and is filed so the owner sees it). */
   code: string;
   /** What the person was doing, named as the app names it ("JD Sourcing"). */
   where: string;

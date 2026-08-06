@@ -57,8 +57,11 @@ check("a read that fails reports instead of throwing a bare 0",
   /if \(!r\.ok \|\| d === null\) \{[\s\S]{0,400}reportBreak\(/.test(client));
 check("a request that never lands reports too (the deploy case)",
   /reportBreak\("ROS-NET"[\s\S]{0,120}fetch failed/.test(client));
+// The window is generous because a 409 (a tool refused for a missing
+// connection) is now peeled off first and handled by the readiness notice —
+// still reported, just not as an error. See scripts/test-ready.mts.
 check("a server error on a write reports even when the call site says nothing",
-  /if \(!r\.ok\) \{[\s\S]{0,200}breakCodeFor\(r\.status\)[\s\S]{0,120}reportBreak\(/.test(client));
+  /if \(!r\.ok\) \{[\s\S]{0,400}breakCodeFor\(r\.status\)[\s\S]{0,120}reportBreak\(/.test(client));
 check("a crash in the app itself reports", /addEventListener\("error"[\s\S]{0,200}ROS-APP/.test(client));
 check("an unhandled rejection reports", /addEventListener\("unhandledrejection"/.test(client));
 check("every notice carries a quotable code", /quote this when you report it/.test(client));

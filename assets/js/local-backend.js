@@ -217,6 +217,73 @@
     ];
   }
 
+  /* Tool readiness (/ready), mirroring integration/lib/ready. Same catalog as
+   * above drives it, so connecting something here clears the tool's strip just
+   * as it does against the real backend. Kept deliberately in step with the
+   * server registry: if a tool is added there, add it here too. */
+  var READY_TOOLS = {
+    inmarket: { label: "Hire Signals", needs: ["rapidapi"], helps: ["fresh_linkedin", "tomba"],
+      impact: "no new job postings come in, so the list can only ever show what was already pulled" },
+    builder: { label: "In-Market Leads", needs: ["rapidapi"], helps: ["fresh_linkedin", "tomba"],
+      impact: "no new hiring companies are found, so a build comes back empty" },
+    jdsourcing: { label: "JD Sourcing", needs: ["jd_sourcing", "ai"], helps: ["fresh_linkedin"],
+      impact: "a search cannot look anyone up, so every run finishes with no candidates" },
+    linkedin: { label: "LinkedIn", needs: ["unipile"],
+      impact: "invites and messages are queued but never actually sent" },
+    automation: { label: "LinkedIn Automation", needs: ["unipile"],
+      impact: "nothing runs on LinkedIn: invites, messages and profile views all stop at the queue" },
+    linkedinposter: { label: "LinkedIn Poster", needs: ["unipile", "ai"],
+      impact: "approved posts cannot be published" },
+    ostext: { label: "OS Text", needs: ["taltxt", "telnyx"],
+      impact: "campaigns build and schedule normally but no text ever leaves" },
+    vetting: { label: "AI Vetting", needs: ["telnyx", "ai"],
+      impact: "candidates are never called and no interview is scored" },
+    calls: { label: "Calls", needs: ["telnyx"], impact: "no call can be placed or received" },
+    bdphone: { label: "BD Phone", needs: ["telnyx"],
+      impact: "the dialer cannot connect, so calls fail the moment you press call" },
+    voicedrops: { label: "Voice Drops", needs: ["telnyx"], anyOf: ["elevenlabs", "cartesia", "hume"],
+      impact: "a drop has no voice to speak with and no line to deliver on" }
+  };
+
+  function readyList(names) {
+    if (names.length <= 1) return names[0] || "";
+    return names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+  }
+
+  function readiness(d) {
+    d.connected = d.connected || connectedCatalog();
+    var byId = {};
+    d.connected.forEach(function (i) { byId[i.id] = i; });
+    var dep = function (id) {
+      var f = byId[id];
+      return { id: id, label: (f && f.label) || id, status: (f && f.status) || "red" };
+    };
+    return Object.keys(READY_TOOLS).map(function (key) {
+      var spec = READY_TOOLS[key];
+      var required = spec.needs.map(dep);
+      var blocked = required.filter(function (x) { return x.status === "red"; });
+      var unverified = required.filter(function (x) { return x.status === "yellow"; });
+      var alts = (spec.anyOf || []).map(dep);
+      if (alts.length && alts.every(function (x) { return x.status === "red"; })) blocked = blocked.concat(alts);
+      var degraded = (spec.helps || []).map(dep).filter(function (x) { return x.status === "red"; });
+      var state = blocked.length ? "blocked" : unverified.length ? "unverified" : "ready";
+      var message = "";
+      if (blocked.length) {
+        message = readyList(blocked.map(function (x) { return x.label; })) +
+          (blocked.length > 1 ? " are not connected" : " is not connected") +
+          ". Until that is done, " + spec.impact + ".";
+      } else if (unverified.length) {
+        message = readyList(unverified.map(function (x) { return x.label; })) +
+          (unverified.length > 1 ? " have keys saved but have" : " has keys saved but has") +
+          " never been tested. " + spec.label + " will run, but it can still stop part-way if the key is wrong.";
+      }
+      return {
+        tool: key, label: spec.label, state: state, ready: state !== "blocked",
+        blocked: blocked, unverified: unverified, degraded: degraded, message: message
+      };
+    });
+  }
+
   // OS Text onboarding state, a fresh recruiting company starts with
   // nothing set up and walks the in-app step-by-step wizard to go live.
   function defaultOstext() {
@@ -823,6 +890,7 @@
       if (method === "POST") return addAccount(d, body);
       return ok(d.accounts);
     }
+    if (p === "/ready") return ok({ canFix: true, tools: readiness(d) });
     if (p === "/connected") {
       d.connected = d.connected || connectedCatalog();
       d.connectedKeys = d.connectedKeys || {};

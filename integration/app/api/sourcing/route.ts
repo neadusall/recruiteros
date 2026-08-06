@@ -28,6 +28,7 @@
  */
 
 import { body, ok, fail, requireCapability } from "../../../lib/api";
+import { toolGate } from "../../../lib/ready";
 import {
   planSourcing, pinIcpLocation, parseJobDescription, generateQueries, runDiscovery, parseRadiusMi,
   googleSearchConfigured, searxSearchConfigured, serperSearchConfigured, dataforseoSearchConfigured, rapidApiSearchConfigured,
@@ -221,6 +222,11 @@ export async function POST(req: Request) {
 
     if (action === "run") {
       if (!b?.jd) return fail("missing_jd", 422);
+      // Readiness gate: a search with no people-search connection can only ever
+      // finish with nothing found, which reads exactly like "no one matched" and
+      // sends the recruiter back to widen filters that were never the problem.
+      const gate = await toolGate(ws, "jdsourcing");
+      if (gate) return gate;
       // A typed hiring location is ground truth: it pins the ICP's geos (the LLM parse
       // otherwise drifts to a national metro list) and turns on the strict-location drop.
       // A client-supplied ICP (a Dive-deeper refinement) wins over re-parsing the JD,

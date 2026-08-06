@@ -268,8 +268,10 @@
           // A read that fails used to throw a bare 0, so callers rendered an empty
           // screen and the person was left guessing whether the data was missing
           // or the app was. Say so, once, with a code.
-          var code = breakCodeFor(r.status);
-          if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
+          if (r.status !== 409 || !readySetupNotice(path, d)) {
+            var code = breakCodeFor(r.status);
+            if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
+          }
           throw 0;
         }
         return d;
@@ -296,8 +298,12 @@
         // "name taken"). A 5xx or a denial is the platform failing, and gets a
         // coded notice whether or not the call site says anything.
         if (!r.ok) {
-          var code = breakCodeFor(r.status);
-          if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
+          // A tool refused for a missing connection is neither: it is a setup
+          // gap, and it gets the setup notice rather than an error banner.
+          if (r.status !== 409 || !readySetupNotice(path, d)) {
+            var code = breakCodeFor(r.status);
+            if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
+          }
         }
         return { ok: r.ok, status: r.status, data: d };
       });
@@ -447,6 +453,161 @@
     if (status === 403) return "ROS-DENY";
     if (status >= 500 || status === 0) return "ROS-SRV";
     return "";
+  }
+
+  /* ---------------- readiness: a tool says when it cannot work ---------------
+     The other way work disappears. Nothing here is BROKEN — no error, no crash,
+     nothing for the break layer above to catch — the tool simply has no account
+     connected behind it, so a search returns nobody and a campaign sends
+     nothing. That is indistinguishable from a real empty result, so the person
+     widens the filters, runs it again, and loses the afternoon to a setup step.
+
+     So every tool that depends on a connection says so BEFORE the work starts
+     (the strip below, drawn on arrival), and the server says so again if the
+     work is started anyway (a 409 the two request helpers turn into the same
+     notice). One registry answers both, server-side, in /api/ready. */
+  var readyTools = null;     // last answer: [{ tool, label, state, message }]
+  var readyCanFix = false;   // may THIS person fix it, or must they ask an admin
+  var readyAt = 0;
+  var readyPending = null;
+
+  /** Deliberately a raw fetch, not api(): readiness is a background question,
+   *  and a failed background question must never paint a break notice of its
+   *  own. Silence here degrades to the behaviour we had before, never worse. */
+  function loadReadiness(force) {
+    if (readyTools && !force && Date.now() - readyAt < 120000) return Promise.resolve(readyTools);
+    if (readyPending) return readyPending;
+    readyPending = fetch(API + "/ready", { credentials: "include", headers: authHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        readyPending = null;
+        if (d && d.tools) { readyTools = d.tools; readyCanFix = !!d.canFix; readyAt = Date.now(); }
+        return readyTools || [];
+      }, function () { readyPending = null; return readyTools || []; });
+    return readyPending;
+  }
+
+  function readinessFor(toolKey) {
+    if (!readyTools) return null;
+    for (var i = 0; i < readyTools.length; i++) if (readyTools[i].tool === toolKey) return readyTools[i];
+    return null;
+  }
+
+  /** The fix line, split by who is reading it: an admin can go and do it, a
+   *  recruiter needs to know who to ask (and that it is not their mistake). */
+  function readyFixLine() {
+    return readyCanFix
+      ? "Open Connect › Connected, add the account, then press Test."
+      : "This is a setup step, not something you did. Ask your admin to connect it.";
+  }
+
+  function readyHost() {
+    var el = document.getElementById("readyBar");
+    if (el) return el;
+    var v = document.getElementById("view");
+    if (!v || !v.parentNode) return null;
+    var css = document.createElement("style");
+    css.textContent =
+      '.ready-bar{margin:0 0 14px}' +
+      '.ready-note{font-size:13.5px;line-height:1.5;color:var(--text);background:var(--bg-soft);border:1px solid var(--border-strong);border-left:3px solid var(--accent-amber,#b7791f);border-radius:10px;padding:12px 14px}' +
+      '.ready-note.blocked{border-left-color:var(--danger,#d4544e)}' +
+      '.ready-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;padding-top:7px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)}' +
+      '.ready-act{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
+      '.ready-act:hover{color:var(--text)}';
+    document.head.appendChild(css);
+    el = document.createElement("div");
+    el.id = "readyBar";
+    el.className = "ready-bar";
+    v.parentNode.insertBefore(el, v);
+    return el;
+  }
+
+  /**
+   * Draw (or clear) the strip for the screen being opened. Called from render()
+   * on every navigation, so a tool can never be opened without its own answer
+   * to "will this actually do anything?".
+   *
+   * Not a lock: the strip explains, it does not disable the screen. Saved work,
+   * history and settings on a tool whose connection is missing all stay usable,
+   * and the one action that would burn a run for nothing is refused server-side
+   * where it cannot be clicked past.
+   */
+  function renderReadyGate(routeKey) {
+    var host = readyHost();
+    if (!host) return;
+    host.innerHTML = "";
+    var tool = ROUTES[routeKey] && ROUTES[routeKey].tool;
+    if (!tool) return;
+    var paint = function () {
+      if ((ROUTES[currentRoute()] || {}).tool !== tool) return; // navigated away mid-fetch
+      var r = readinessFor(tool);
+      // Always redraw from scratch: paint runs once from cache and again when
+      // the fetch settles, and two identical notices read like two problems.
+      host.innerHTML = "";
+      if (!r || r.state === "ready" || !r.message) return;
+      var blocked = r.state === "blocked";
+      var note = document.createElement("div");
+      note.className = "ready-note" + (blocked ? " blocked" : "");
+      note.innerHTML =
+        "<b>" + esc(blocked ? (r.label + " is not set up yet.") : (r.label + " is set up but unproven.")) + "</b><br>" +
+        esc(r.message) +
+        '<div class="ready-foot">' +
+          "<span>" + esc(readyFixLine()) + "</span>" +
+          (readyCanFix ? '<button class="ready-act" data-ready-go="1">Open Connected</button>' : "") +
+          '<button class="ready-act" data-ready-close="1">Dismiss</button>' +
+        "</div>";
+      var go = note.querySelector("[data-ready-go]");
+      if (go) go.onclick = function () { location.hash = "#connected"; };
+      note.querySelector("[data-ready-close]").onclick = function () { note.remove(); };
+      host.appendChild(note);
+    };
+    if (readyTools) paint();
+    loadReadiness().then(paint, function () { });
+  }
+
+  /**
+   * The server's answer to work that was started anyway (409 tool_not_connected).
+   * Same words as the strip, so the two surfaces never disagree, plus a quotable
+   * code for the person to send on. Returns true when it handled the response.
+   */
+  function readySetupNotice(path, data) {
+    if (!data || data.error !== "tool_not_connected") return false;
+    readyAt = 0; // this answer is newer than anything cached
+    var host = readyHost();
+    if (host) {
+      var note = document.createElement("div");
+      note.className = "ready-note blocked";
+      note.innerHTML =
+        "<b>" + esc((data.toolLabel || "This tool") + " could not start.") + "</b><br>" +
+        esc(data.message || "It needs an account connected before it can do anything.") +
+        '<div class="ready-foot">' +
+          "<span>" + esc(readyFixLine()) + " Reference <code>ROS-SETUP</code></span>" +
+          (readyCanFix ? '<button class="ready-act" data-ready-go="1">Open Connected</button>' : "") +
+          '<button class="ready-act" data-ready-close="1">Dismiss</button>' +
+        "</div>";
+      var go = note.querySelector("[data-ready-go]");
+      if (go) go.onclick = function () { location.hash = "#connected"; };
+      note.querySelector("[data-ready-close]").onclick = function () { note.remove(); };
+      host.innerHTML = "";
+      host.appendChild(note);
+    }
+    // A bar left spinning on a run the server refused is the same lie as a
+    // silent failure, so stop it the way a break does.
+    if (activeProgressFail) { try { activeProgressFail("Not connected"); } catch (e) { /* the notice still shows */ } }
+    try {
+      fetch(API + "/breaks", {
+        method: "POST", credentials: "include",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          code: "ROS-SETUP", where: data.toolLabel || "", at: new Date().toISOString(),
+          screen: (location.hash || "#overview").replace(/^#/, ""), path: path || "", status: 409,
+          detail: "not connected: " + ((data.missing || []).map(function (m) { return m.label || m.id; }).join(", ") || "unknown"),
+          agent: navigator.userAgent,
+        }),
+        keepalive: true,
+      }).catch(function () { });
+    } catch (e) { /* the person already sees the notice */ }
+    return true;
   }
 
   /* ---------------- reference content (product knowledge, not customer data) -- */
@@ -1203,7 +1364,7 @@
     // tabs; before this hub the last two had no nav entrance at all.
     clients: { title: "Pipeline", crumb: "Business Development", action: null, render: renderPipelineHub, motionOnly: "bd" },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
-    inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run" },
+    inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run", tool: "inmarket" },
     // Consolidation redirects: these screens moved into hubs (Send Queue into
     // Email, the sending fleet into Admin > Infrastructure). The routes stay
     // registered so every old hash and cross-link keeps resolving.
@@ -1216,25 +1377,25 @@
     autopilot: { title: "Autopilot", crumb: "Business Development", action: null, render: renderAutopilot, motionOnly: "bd", cap: "outreach:send" },
     campaigns: { title: "Campaigns", crumb: "Build", action: "+ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
-    jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting", cap: "sourcing:run" },
+    jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting", cap: "sourcing:run", tool: "jdsourcing" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
-    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext, motionOnly: "recruiting", cap: "outreach:send" },
-    voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops, cap: "voice:dial" },
+    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext, motionOnly: "recruiting", cap: "outreach:send", tool: "ostext" },
+    voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops, cap: "voice:dial", tool: "voicedrops" },
     // Email: the prep workbench plus the Send Queue supply gauge as a tab.
     email: { title: "Email", crumb: "Business Development", action: null, render: renderEmailHub, motionOnly: "bd", cap: "outreach:send" },
     pipstudio: { title: "PiP Studio", crumb: "Build", action: null, render: renderPipStudio },
-    vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting", cap: "voice:dial" },
+    vetting: { title: "AI Vetting", crumb: "Build", action: null, render: renderVetting, motionOnly: "recruiting", cap: "voice:dial", tool: "vetting" },
     joblibrary: { title: "Job Library", crumb: "Build", action: null, render: renderJobLibrary, motionOnly: "recruiting", cap: "prospects:view" },
-    calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting", cap: "voice:dial" },
-    bdphone: { title: "BD Phone", crumb: "Tools", action: null, render: renderBdPhone, motionOnly: "bd", cap: "voice:dial" },
+    calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting", cap: "voice:dial", tool: "calls" },
+    bdphone: { title: "BD Phone", crumb: "Tools", action: null, render: renderBdPhone, motionOnly: "bd", cap: "voice:dial", tool: "bdphone" },
     // LinkedIn OS: ONE unified LinkedIn tool (shared engine, accounts, ledger,
     // utilization) with two contextual nav entrances. BD > Tools and
     // Recruiting > Build both open this same route; the active motion sets the
     // default context. Not motionOnly: it belongs to both business units.
-    linkedin: { title: "LinkedIn", crumb: "Tools", action: null, render: renderLinkedInOs, cap: "outreach:send" },
-    linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd", cap: "outreach:send" },
-    builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run" },
-    automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation, cap: "outreach:send" },
+    linkedin: { title: "LinkedIn", crumb: "Tools", action: null, render: renderLinkedInOs, cap: "outreach:send", tool: "linkedin" },
+    linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd", cap: "outreach:send", tool: "linkedinposter" },
+    builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run", tool: "builder" },
+    automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation, cap: "outreach:send", tool: "automation" },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
     // Analytics: the live operational view, with the deep Outreach Statistics
     // engine as a cap-gated Statistics tab (the two built the same funnel and
@@ -3162,6 +3323,8 @@
     Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x.dataset.motion === motion); });
     clearViewTimers(); // stop any auto-refresh from the view we're leaving
     view.innerHTML = "";
+    // Before the tool draws anything: does it have what it needs to work at all?
+    renderReadyGate(key);
     r.render(view);
   }
 
