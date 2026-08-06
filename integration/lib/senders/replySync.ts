@@ -32,14 +32,59 @@ export interface ReplySyncReport {
   autoReplies: number;
   bouncesRecorded: number;
   errors: number;
+  /** IMAP-capable, unpaused inboxes in the fleet right now. */
+  fleetSize: number;
+  /** How many of them this round visited (scales with fleetSize). */
+  batch: number;
+  /** Age of the stalest inbox visited, in minutes. Should stay at or under
+   *  SENDER_REPLY_FRESHNESS_MIN; if it climbs, reply latency is growing. */
+  staleMinutes: number;
 }
 
-function batchSize(): number {
+/**
+ * How often EVERY inbox must be visited, in minutes. This is the real
+ * service-level knob: reply latency (and therefore how fast a recruiter can
+ * answer a hot lead) is bounded by it, not by the tick interval.
+ */
+function freshnessMinutes(): number {
+  const n = Number(process.env.SENDER_REPLY_FRESHNESS_MIN);
+  return Number.isFinite(n) && n >= 5 && n <= 720 ? Math.floor(n) : 30;
+}
+
+function tickMinutes(): number {
+  const ms = Number(process.env.RECRUITEROS_REPLY_SYNC_TICK_MS);
+  const m = Number.isFinite(ms) && ms > 0 ? ms / 60_000 : 5;
+  return Math.max(1, m);
+}
+
+/**
+ * Inboxes to visit this round.
+ *
+ * A FIXED batch does not survive fleet growth: 40 per 5-minute tick covers
+ * 11,520 visits/day, which across 1,450 mailboxes is one visit per inbox every
+ * ~3 hours. A reply would then sit unseen for hours, which defeats the whole
+ * point of reply-sync. So the default now SCALES with the fleet: enough per
+ * round that every inbox is visited inside the freshness window.
+ *
+ *   batch = ceil(fleetSize / (freshnessWindow / tickInterval))
+ *
+ * An explicit SENDER_REPLYSYNC_BATCH still wins (ops override, up to 5000).
+ */
+function batchSize(fleetSize: number): number {
   const n = Number(process.env.SENDER_REPLYSYNC_BATCH);
-  return Number.isFinite(n) && n >= 1 && n <= 200 ? Math.floor(n) : 40;
+  if (Number.isFinite(n) && n >= 1 && n <= 5000) return Math.floor(n);
+  const roundsPerWindow = Math.max(1, Math.floor(freshnessMinutes() / tickMinutes()));
+  return Math.max(40, Math.ceil(fleetSize / roundsPerWindow));
 }
 
-const CONCURRENCY = 5;
+/** Parallel IMAP connections per round. Raised for fleet scale; each connection
+ *  is to a different mailbox, so this is per-inbox concurrency, not per-server
+ *  hammering. Env-tunable if a host complains. */
+function concurrency(): number {
+  const n = Number(process.env.SENDER_REPLYSYNC_CONCURRENCY);
+  return Number.isFinite(n) && n >= 1 && n <= 32 ? Math.floor(n) : 8;
+}
+
 const MAX_MSGS_PER_INBOX = 50;
 const WARMUP_TAG = /\[rw[a-z0-9]{6,12}\]/i;
 
@@ -210,8 +255,8 @@ export async function runReplySync(opts: { batch?: number } = {}): Promise<Reply
     at: new Date().toISOString(),
     inboxesChecked: 0, messagesSeen: 0, repliesIngested: 0,
     autoReplies: 0, bouncesRecorded: 0, errors: 0,
+    fleetSize: 0, batch: 0, staleMinutes: 0,
   };
-  const batch = opts.batch ?? batchSize();
 
   let candidates: SenderInbox[] = [];
   try {
@@ -223,13 +268,23 @@ export async function runReplySync(opts: { batch?: number } = {}): Promise<Reply
     report.errors++;
     return report;
   }
+  report.fleetSize = candidates.length;
+  const batch = opts.batch ?? batchSize(candidates.length);
+  report.batch = batch;
+
   candidates = candidates
     .sort((a, b) => Date.parse(a.replySyncAt || "1970-01-01") - Date.parse(b.replySyncAt || "1970-01-01"))
     .slice(0, batch);
 
+  // Observability: how far behind the oldest inbox we are about to visit is.
+  // If this climbs past the freshness window, the fleet has outgrown the tick
+  // and replies are aging, so it must be visible rather than silent.
+  const oldest = candidates[0]?.replySyncAt;
+  report.staleMinutes = oldest ? Math.round((Date.now() - Date.parse(oldest)) / 60_000) : 0;
+
   let idx = 0;
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, async () => {
+    Array.from({ length: Math.min(concurrency(), candidates.length) }, async () => {
       while (idx < candidates.length) {
         const m = candidates[idx++];
         try {
