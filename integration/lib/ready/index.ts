@@ -57,17 +57,28 @@ interface ToolSpec {
  * false block is worse than no block, because people learn to ignore it.
  */
 const TOOLS: Record<ToolKey, ToolSpec> = {
+  // Hire Signals and In-Market Leads pull from the FREE sources (public ATS
+  // boards, EDGAR, WARN notices, the people graph) and need no key to do it.
+  // Both listed "Job Search (signal feed)" as a hard need until 2026-08-06,
+  // which blocked Lume on two tools that would have worked: that tile holds
+  // RAPIDAPI_KEY, and the only thing reading it on these paths is the contact
+  // enrichment waterfall (email/phone/person) — a helper, not the pull. The
+  // paid job feed is a different subscription altogether (RAPID_JOBS_KEY +
+  // RAPID_JOBS_HOST) which the tile does not hold and cannot turn on, and it
+  // already refuses honestly on its own with a 409 that names those two keys.
+  // Same family as the OS Text and operator-LinkedIn false alarms: never gate a
+  // tool on a tile that is not the true source of its capability.
   inmarket: {
     label: "Hire Signals",
-    needs: ["rapidapi"],
-    helps: ["fresh_linkedin", "tomba"],
-    impact: "no new job postings come in, so the list can only ever show what was already pulled",
+    needs: [],
+    helps: ["rapidapi", "fresh_linkedin", "tomba"],
+    impact: "signals still come in from the free sources, but fewer of them arrive with a contact attached",
   },
   builder: {
     label: "In-Market Leads",
-    needs: ["rapidapi"],
-    helps: ["fresh_linkedin", "tomba"],
-    impact: "no new hiring companies are found, so a build comes back empty",
+    needs: [],
+    helps: ["rapidapi", "fresh_linkedin", "tomba"],
+    impact: "a build still finds hiring companies, but fewer of them come back with someone to contact",
   },
   jdsourcing: {
     label: "JD Sourcing",

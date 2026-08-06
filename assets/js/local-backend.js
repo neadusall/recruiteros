@@ -170,9 +170,9 @@
         fields: [{ key: "UNIPILE_ACCOUNT_ID", label: "LinkedIn account id", required: false, placeholder: "auto-filled once you connect a seat", hint: "Optional, leave blank to use the seat you connect in LinkedIn Automation." }],
         steps: ["LinkedIn Automation is provided for you on a managed account, so there's no key to enter.", "Open LinkedIn Automation in the sidebar and connect your LinkedIn profile through the secure hosted sign-in.", "Come back here and hit Test to confirm your seat is linked and ready."], present: [] },
       { id: "rapidapi", label: "Job Search (signal feed)", status: "red", requiredFor: ["bd", "recruiting"],
-        blurb: "Daily job-posting pull that powers Hire Signals and 'role they're hiring for'.",
+        blurb: "Finds the contact behind a hiring signal: email, phone and person lookups. Signals still arrive without it, with fewer contacts attached.",
         fields: [{ key: "RAPIDAPI_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key" }],
-        steps: ["Sign in at RapidAPI and subscribe to the JSearch API.", "Open the JSearch dashboard → copy your X-RapidAPI-Key.", "Paste it below, Save, then Test."],
+        steps: ["Sign in at RapidAPI and subscribe to the JSearch API.", "Open the JSearch dashboard → copy your X-RapidAPI-Key.", "Paste it below, Save, then Test.", "Widening the job pull itself is a separate subscription, set on the box as RAPID_JOBS_KEY + RAPID_JOBS_HOST. It is not this key and is not saved here."],
         docsUrl: "https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch", docsLabel: "JSearch on RapidAPI ↗", present: [] },
       { id: "fresh_linkedin", label: "Profile enrichment", status: "red", requiredFor: ["bd", "recruiting"],
         blurb: "First rung of the enrichment waterfall: title, company, seniority, recent moves.",
@@ -222,10 +222,10 @@
    * as it does against the real backend. Kept deliberately in step with the
    * server registry: if a tool is added there, add it here too. */
   var READY_TOOLS = {
-    inmarket: { label: "Hire Signals", needs: ["rapidapi"], helps: ["fresh_linkedin", "tomba"],
-      impact: "no new job postings come in, so the list can only ever show what was already pulled" },
-    builder: { label: "In-Market Leads", needs: ["rapidapi"], helps: ["fresh_linkedin", "tomba"],
-      impact: "no new hiring companies are found, so a build comes back empty" },
+    inmarket: { label: "Hire Signals", needs: [], helps: ["rapidapi", "fresh_linkedin", "tomba"],
+      impact: "signals still come in from the free sources, but fewer of them arrive with a contact attached" },
+    builder: { label: "In-Market Leads", needs: [], helps: ["rapidapi", "fresh_linkedin", "tomba"],
+      impact: "a build still finds hiring companies, but fewer of them come back with someone to contact" },
     jdsourcing: { label: "JD Sourcing", needs: ["jd_sourcing", "ai"], helps: ["fresh_linkedin"],
       impact: "a search cannot look anyone up, so every run finishes with no candidates" },
     linkedin: { label: "LinkedIn", needs: ["unipile"],

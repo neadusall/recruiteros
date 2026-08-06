@@ -88,6 +88,20 @@ check("with the keys actually gone, the same tool is blocked",
 
 /* --- shapes the registry has to get right --------------------------------- */
 
+// A tool that pulls from the free sources is never blocked by an enrichment
+// key. Hire Signals and In-Market Leads were blocked on "Job Search (signal
+// feed)" until 2026-08-06, which stopped Lume using two tools that worked: the
+// pull needs no key, and that tile only feeds contact enrichment. Asserted with
+// NOTHING connected, because that is the state the false block fired in.
+for (const tool of ["inmarket", "builder"] as const) {
+  const free = await toolReadiness(WS, tool);
+  check(`${tool} runs on the free sources with no key connected`,
+    free?.state === "ready" && free.blocked.length === 0, `${free?.state}/${free?.blocked.length}`);
+  check(`${tool} still reports the enrichment it is missing`,
+    Boolean(free?.degraded.some((d) => d.id === "rapidapi")),
+    free?.degraded.map((d) => d.id).join(","));
+}
+
 // helps[] must never block: a tool that works with less still works.
 await saveKeys(WS, "rapidapi", { RAPIDAPI_KEY: "x" }, ["RAPIDAPI_KEY"]);
 await markTested(WS, "rapidapi", true);

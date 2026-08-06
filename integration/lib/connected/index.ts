@@ -118,7 +118,13 @@ const CATALOG: IntegrationMeta[] = [
   {
     id: "rapidapi",
     label: "Job Search (signal feed)",
-    blurb: "Daily job-posting pull that powers Hire Signals and 'role they're hiring for'.",
+    // The blurb used to say this key powered the Hire Signals pull. It does
+    // not: that pull runs on the free sources, and this key feeds the contact
+    // enrichment waterfall (email, phone, person lookups). Believing the old
+    // wording is what put "Job Search (signal feed)" in those tools' hard
+    // requirements and blocked a tenant that could have worked — so the words
+    // here say what the key actually changes.
+    blurb: "Finds the contact behind a hiring signal: email, phone and person lookups. Signals still arrive without it, with fewer contacts attached.",
     requiredFor: ["bd", "recruiting"],
     fields: [
       { key: "RAPIDAPI_KEY", label: "RapidAPI key", required: true, secret: true, placeholder: "paste your RapidAPI key" },
@@ -127,6 +133,7 @@ const CATALOG: IntegrationMeta[] = [
       "Sign in at RapidAPI and subscribe to the JSearch API.",
       "Open the JSearch dashboard → copy your X-RapidAPI-Key.",
       "Paste it below, Save, then Test.",
+      "Widening the job pull itself is a separate subscription, set on the box as RAPID_JOBS_KEY + RAPID_JOBS_HOST. It is not this key and is not saved here.",
     ],
     docsUrl: "https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch",
     docsLabel: "JSearch on RapidAPI ↗",
