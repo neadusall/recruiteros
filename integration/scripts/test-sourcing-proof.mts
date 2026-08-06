@@ -20,7 +20,7 @@ import type { CandidateICP, CandidateRow } from "../lib/sourcing/types";
 let pass = 0, fail = 0;
 function ok(name: string, cond: boolean, detail = "") {
   if (cond) { pass++; console.log(`PASS ${name}`); }
-  else { fail++; console.log(`FAIL ${name}${detail ? " — " + detail : ""}`); }
+  else { fail++; console.log(`FAIL ${name}${detail ? ": " + detail : ""}`); }
 }
 
 const icp = (o: Partial<CandidateICP> = {}): CandidateICP => ({

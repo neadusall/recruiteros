@@ -50,6 +50,10 @@ import {
   premiumPhoneQuote, runPremiumPhoneBoost,
   applyRemoteIcp, REMOTE_LABEL,
 } from "../../../lib/sourcing";
+import {
+  listStandingProfiles, addStandingProfile, updateStandingProfile,
+  removeStandingProfile, seedStandingSweeps,
+} from "../../../lib/sourcing/standingProfiles";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { sendRunNow } from "../../../lib/sourcing/autoflow";
 import { pickSameRoleMaster } from "../../../lib/sourcing/sameRole";
@@ -157,6 +161,45 @@ export async function POST(req: Request) {
      * thin run. MUST run inside withWorkspaceCreds: keys pasted in Setup live in the
      * workspace store, and cred() only sees that store inside this wrapper — without
      * it the readout (and the run below) silently ignored every Setup-pasted key. */
+    /* STANDING SWEEPS (lib/sourcing/standingProfiles): the rota of roles this desk
+     * always recruits for, swept unattended by the overnight queue's cron tick. The
+     * actions are plain CRUD; all the judgement lives in the module. */
+    if (action === "standingList") {
+      return ok({ profiles: await listStandingProfiles(ws) });
+    }
+    if (action === "standingAdd") {
+      if (!b?.name || !b?.jd) return fail("missing_name_or_brief", 422);
+      return ok({
+        profile: await addStandingProfile(ws, {
+          name: String(b.name), jd: String(b.jd), location: b.location ? String(b.location) : undefined,
+          breadth: parseBreadth(b.breadth), cap: b.cap as number, radiusMi: b.radiusMi as number,
+          cadenceDays: b.cadenceDays as number, active: b.active !== false,
+          // The rota's lists belong to whoever set the desk up, so the auto-sent
+          // campaign lands under their name rather than the workspace owner's.
+          createdBy: actor,
+        }),
+      });
+    }
+    if (action === "standingUpdate") {
+      if (!b?.id) return fail("missing_id", 422);
+      const updated = await updateStandingProfile(ws, String(b.id), {
+        name: b.name as string, jd: b.jd as string, location: b.location as string,
+        breadth: b.breadth ? parseBreadth(b.breadth) : undefined, cap: b.cap as number,
+        radiusMi: b.radiusMi as number, cadenceDays: b.cadenceDays as number,
+        active: b.active as boolean,
+      });
+      return updated ? ok({ profile: updated }) : fail("not_found", 404);
+    }
+    if (action === "standingRemove") {
+      if (!b?.id) return fail("missing_id", 422);
+      return (await removeStandingProfile(ws, String(b.id))) ? ok({ removed: true }) : fail("not_found", 404);
+    }
+    if (action === "standingSweepNow") {
+      // Operator nudge: seed whatever is due right now instead of waiting for the tick.
+      // Same pacing and in-flight guards apply, so pressing it twice is harmless.
+      return ok(await seedStandingSweeps(ws));
+    }
+
     if (action === "engines") {
       return ok(await withWorkspaceCreds(ws, async () => ({
         engines: {
