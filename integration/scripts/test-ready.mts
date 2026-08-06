@@ -40,27 +40,33 @@ const WS = "ws_customer";
 
 /* --- the three states ----------------------------------------------------- */
 
-const cold = await toolReadiness(WS, "ostext");
+const cold = await toolReadiness(WS, "vetting");
 check("a tool with nothing connected is blocked", cold?.state === "blocked" && cold?.ready === false, cold?.state);
 check("the message names the connection, not the env var",
-  Boolean(cold && /OS Text \(SMS\)|SMS/i.test(cold.message) && !/[A-Z]{3,}_[A-Z_]+/.test(cold.message)), cold?.message);
+  Boolean(cold && /Telnyx/i.test(cold.message) && !/[A-Z]{3,}_[A-Z_]+/.test(cold.message)), cold?.message);
 check("the message says what stops working",
-  Boolean(cold && /no text ever leaves/.test(cold.message)), cold?.message);
+  Boolean(cold && /candidates are never called/.test(cold.message)), cold?.message);
 check("blocked lists every missing connection", (cold?.blocked.length ?? 0) === 2, `${cold?.blocked.length}`);
 
-await saveKeys(WS, "taltxt", { TALTXT_API_KEY: "x" }, ["TALTXT_API_KEY"]);
 await saveKeys(WS, "telnyx", { TELNYX_API_KEY: "x" }, ["TELNYX_API_KEY"]);
-const saved = await toolReadiness(WS, "ostext");
+await saveKeys(WS, "ai", { ANTHROPIC_API_KEY: "x" }, ["ANTHROPIC_API_KEY"]);
+const saved = await toolReadiness(WS, "vetting");
 check("keys saved but untested is unverified, and work may still start",
   saved?.state === "unverified" && saved?.ready === true, saved?.state);
 check("the unverified message warns it can still stop part-way",
   Boolean(saved && /never been tested/.test(saved.message)), saved?.message);
 
-await markTested(WS, "taltxt", true);
 await markTested(WS, "telnyx", true);
-const green = await toolReadiness(WS, "ostext");
+await markTested(WS, "ai", true);
+const green = await toolReadiness(WS, "vetting");
 check("tested connections read ready with nothing to say",
   green?.state === "ready" && green?.message === "", `${green?.state} "${green?.message}"`);
+
+// Learned live on 2026-08-06: the first audit called OS Text broken for two
+// accounts that were texting fine, because sending lives in the engine and not
+// in these tiles. It must stay out until the check can ask the engine itself.
+check("OS Text is deliberately not gated on the integration tiles",
+  (await toolReadiness(WS, "ostext" as never)) === null);
 
 /* --- shapes the registry has to get right --------------------------------- */
 
@@ -81,7 +87,7 @@ const drops2 = await toolReadiness(WS, "voicedrops");
 check("one connected provider satisfies the alternatives", drops2?.ready === true, drops2?.state);
 
 check("an unknown tool is not invented", (await toolReadiness(WS, "nope" as never)) === null);
-check("every registered tool answers", (await allToolReadiness(WS)).length >= 11);
+check("every registered tool answers", (await allToolReadiness(WS)).length >= 10);
 
 /* --- the API gate --------------------------------------------------------- */
 
@@ -92,7 +98,7 @@ check("the refusal names itself so the client can tell it from an error",
   gateBody?.error === "tool_not_connected" && Boolean(gateBody?.message), JSON.stringify(gateBody).slice(0, 120));
 check("the refusal carries the missing connections by label",
   Array.isArray(gateBody?.missing) && gateBody.missing.length > 0 && Boolean(gateBody.missing[0].label));
-check("a ready tool is not gated", (await toolGate(WS, "ostext")) === null);
+check("a ready tool is not gated", (await toolGate(WS, "calls")) === null);
 
 process.env.ROS_READY_GATE = "off";
 check("the kill switch stands the gate down without a code change",

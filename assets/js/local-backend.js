@@ -234,8 +234,8 @@
       impact: "nothing runs on LinkedIn: invites, messages and profile views all stop at the queue" },
     linkedinposter: { label: "LinkedIn Poster", needs: ["unipile", "ai"],
       impact: "approved posts cannot be published" },
-    ostext: { label: "OS Text", needs: ["taltxt", "telnyx"],
-      impact: "campaigns build and schedule normally but no text ever leaves" },
+    /* OS Text is deliberately absent here too: its ability to send lives in the
+     * texting engine, not in these tiles. See integration/lib/ready. */
     vetting: { label: "AI Vetting", needs: ["telnyx", "ai"],
       impact: "candidates are never called and no interview is scored" },
     calls: { label: "Calls", needs: ["telnyx"], impact: "no call can be placed or received" },

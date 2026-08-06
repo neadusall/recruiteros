@@ -30,7 +30,7 @@ import { adminListAccounts } from "../auth";
 
 export type ToolKey =
   | "inmarket" | "builder" | "jdsourcing" | "linkedin" | "automation"
-  | "linkedinposter" | "ostext" | "vetting" | "calls" | "bdphone" | "voicedrops";
+  | "linkedinposter" | "vetting" | "calls" | "bdphone" | "voicedrops";
 
 export type ToolState = "ready" | "unverified" | "blocked";
 
@@ -90,11 +90,13 @@ const TOOLS: Record<ToolKey, ToolSpec> = {
     needs: ["unipile", "ai"],
     impact: "approved posts cannot be published",
   },
-  ostext: {
-    label: "OS Text",
-    needs: ["taltxt", "telnyx"],
-    impact: "campaigns build and schedule normally but no text ever leaves",
-  },
+  // OS Text is deliberately ABSENT. Its ability to send lives in the texting
+  // engine (its own service, its own credentials, its own watchdog), not in the
+  // integration tiles: on 2026-08-06 the first live audit called OS Text broken
+  // for two accounts that were texting perfectly well, because their "OS Text
+  // (SMS)" tile had never been filled in. A gate that cries wolf on working
+  // software teaches people to ignore every strip on the screen, so this tool
+  // stays out of the registry until the check can ask the engine itself.
   vetting: {
     label: "AI Vetting",
     needs: ["telnyx", "ai"],
@@ -266,14 +268,48 @@ export interface AuditRow {
 export interface ReadyAudit {
   generatedAt: string;
   workspaces: number;
+  /** Accounts deliberately left out of the alert, and why. */
+  skipped: { workspaceId: string; workspaceName: string; reason: string }[];
   blocked: AuditRow[];
   unverified: AuditRow[];
   /** Stable one-line digest the watchdog compares between ticks. */
   fingerprint: string;
 }
 
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Which accounts an alert is worth sending about.
+ *
+ * The first live audit covered seven workspaces, four of them demo, smoke-test
+ * and dev logins that have nothing connected because nothing is meant to be:
+ * 47 "blocked" rows, of which a handful were real. An alert nobody can read is
+ * an alert nobody reads, so the sweep is scoped.
+ *
+ * READY_AUDIT_WORKSPACES (comma-separated ids) pins it explicitly. Unset, the
+ * default keeps accounts that are on a real plan and have been used this month.
+ */
+/** Returns the reason to skip this account, or null to audit it. */
+function skipReason(a: { workspaceId: string; name: string; plan: string; suspended: boolean; lastActiveAt?: string }): string | null {
+  const pinned = (process.env.READY_AUDIT_WORKSPACES || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (pinned.length) return pinned.includes(a.workspaceId) ? null : "not in READY_AUDIT_WORKSPACES";
+  if (a.suspended) return "suspended";
+  // Self-signups sit on the demo plan until the owner activates them, and by
+  // definition have nothing connected yet.
+  if (a.plan === "demo" || a.plan === "trial") return `plan is ${a.plan}`;
+  const last = a.lastActiveAt ? Date.parse(a.lastActiveAt) : 0;
+  if (!last || Date.now() - last > THIRTY_DAYS_MS) return "not used in the last 30 days";
+  return null;
+}
+
 export async function auditReadiness(at: string): Promise<ReadyAudit> {
-  const accounts = adminListAccounts().filter((a) => !a.suspended);
+  const all = adminListAccounts();
+  const skipped: ReadyAudit["skipped"] = [];
+  const accounts = all.filter((a) => {
+    const reason = skipReason(a);
+    if (reason) skipped.push({ workspaceId: a.workspaceId, workspaceName: a.name, reason });
+    return !reason;
+  });
   const blocked: AuditRow[] = [];
   const unverified: AuditRow[] = [];
 
@@ -297,5 +333,5 @@ export async function auditReadiness(at: string): Promise<ReadyAudit> {
     .map((r) => `${r.workspaceId}:${r.tool}`)
     .sort()
     .join(",");
-  return { generatedAt: at, workspaces: accounts.length, blocked, unverified, fingerprint };
+  return { generatedAt: at, workspaces: accounts.length, skipped, blocked, unverified, fingerprint };
 }

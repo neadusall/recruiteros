@@ -1379,7 +1379,7 @@
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting", cap: "sourcing:run", tool: "jdsourcing" },
     data: { title: "Candidates", crumb: "Build", action: null, render: renderData },
-    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext, motionOnly: "recruiting", cap: "outreach:send", tool: "ostext" },
+    ostext: { title: "OS Text", crumb: "Build", action: null, render: renderOstext, motionOnly: "recruiting", cap: "outreach:send" },
     voicedrops: { title: "Voice Drops", crumb: "Build", action: null, render: renderVoiceDrops, cap: "voice:dial", tool: "voicedrops" },
     // Email: the prep workbench plus the Send Queue supply gauge as a tab.
     email: { title: "Email", crumb: "Business Development", action: null, render: renderEmailHub, motionOnly: "bd", cap: "outreach:send" },
