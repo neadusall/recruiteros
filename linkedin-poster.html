@@ -421,7 +421,7 @@
       <h3>Approved media library</h3>
       <p class="hint">Upload brand-safe media once; attach it to drafts with one click. Generated quote cards and carousels land here too. A PDF publishes as a native LinkedIn document post (readers swipe through the pages), the format with the highest engagement on the platform right now.</p>
       <div class="btnrow" style="margin-top:0">
-        <button class="btn primary" id="btnUpload">Upload media</button>
+        <label class="btn primary" for="fileInput" id="btnUpload">Upload media</label>
         <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,application/pdf,video/mp4" style="display:none" />
         <span class="sub">PNG, JPG, or WebP up to 8MB. PDF or MP4 video up to 15MB.</span>
       </div>
@@ -1026,13 +1026,16 @@
     var img = d.imageId ? imgById(d.imageId) : null;
     var chooser = pickOpen ?
       '<div class="imgrow">' +
+      // A real <label for> so the OS file picker opens natively, no scripted
+      // click relay; the delegated handler only records which draft to attach to.
+      '<label class="btn small" for="fileInput" data-act="upload-attach" data-id="' + d.id + '">Upload from computer</label>' +
       (S.images.length ? S.images.map(function (i) {
         var k = mediaKind(i);
         if (k === "image") {
           return '<img class="thumb' + (d.imageId === i.id ? " sel" : "") + '" src="' + mediaUrl(i.id) + '" title="' + esc(i.name) + '" data-act="pick-img" data-id="' + d.id + '" data-img="' + i.id + '" />';
         }
         return '<button class="thumb file' + (d.imageId === i.id ? " sel" : "") + '" title="' + esc(i.name) + '" data-act="pick-img" data-id="' + d.id + '" data-img="' + i.id + '">' + kindTag(k) + "</button>";
-      }).join("") : '<span class="sub">Library is empty. Upload in the Media tab, or generate a card.</span>') +
+      }).join("") : '<span class="sub">Library is empty. Upload straight from your computer, or generate a card.</span>') +
       '<button class="btn small" data-act="clear-img" data-id="' + d.id + '">No media</button>' +
       "</div>" : "";
     var hooks = hooksOpen ?
@@ -1399,17 +1402,29 @@
       .then(function () { busy(btn, false); });
   });
 
-  document.getElementById("btnUpload").addEventListener("click", function () { document.getElementById("fileInput").click(); });
+  // The Upload buttons are <label for="fileInput"> elements: the OS picker opens
+  // natively on click (no scripted .click() relay to fail). When the upload came
+  // from a draft's Attach media row, uploadAttachTo carries that draft and the
+  // file is attached to it the moment it lands in the library.
+  var uploadAttachTo = null;
   document.getElementById("fileInput").addEventListener("change", function () {
     var f = this.files && this.files[0]; if (!f) return;
     var isImage = /^image\//.test(f.type || "");
     var maxMb = isImage ? 8 : 15;
-    if (f.size > maxMb * 1024 * 1024) { toast((isImage ? "Images" : "PDF and video") + " up to " + maxMb + "MB."); this.value = ""; return; }
+    if (f.size > maxMb * 1024 * 1024) { toast((isImage ? "Images" : "PDF and video") + " up to " + maxMb + "MB."); uploadAttachTo = null; this.value = ""; return; }
     var rd = new FileReader();
     rd.onload = function () {
       api("upload_image", { name: f.name, dataUrl: rd.result })
-        .then(function () { toast("Added to the library."); return load(); })
-        .catch(function (e) { toast(e.message); });
+        .then(function (r) {
+          var attachTo = uploadAttachTo; uploadAttachTo = null;
+          if (attachTo && r && r.image && r.image.id) {
+            return api("update_draft", { draftId: attachTo, imageId: r.image.id })
+              .then(function () { pickOpen = false; toast("Uploaded and attached to your draft."); return load(); });
+          }
+          toast("Added to the library.");
+          return load();
+        })
+        .catch(function (e) { uploadAttachTo = null; toast(e.message); });
     };
     rd.readAsDataURL(f);
     this.value = "";
@@ -1629,6 +1644,8 @@
         .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "choose-img") {
       pickOpen = !pickOpen; var d5 = draftById(sel); if (d5) document.getElementById("draftWork").innerHTML = workspaceHtml(d5);
+    } else if (act === "upload-attach") {
+      uploadAttachTo = id; // the label's native for="fileInput" opens the picker
     } else if (act === "pick-img") {
       api("update_draft", { draftId: id, imageId: b.dataset.img })
         .then(function () { pickOpen = false; return load(); }).catch(function (err) { toast(err.message); });
