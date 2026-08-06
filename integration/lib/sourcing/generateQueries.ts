@@ -60,6 +60,11 @@ function chunkList<T>(items: T[], size: number): T[][] {
 /** How many title chunks each breadth runs (chunk = one titleCap-sized OR-group). */
 const TITLE_CHUNKS: Record<SearchBreadth, number> = { focused: 1, balanced: 3, wide: 5 };
 
+/** How many PROOF groups each breadth runs (see the precision block in generateQueries).
+ *  Kept well under the title fan-out: proof queries are narrow by design, so their job is
+ *  to bring back a smaller, better list, not to dominate the run's spend. */
+const PROOF_GROUPS: Record<SearchBreadth, number> = { focused: 1, balanced: 2, wide: 4 };
+
 /**
  * Metro synonyms: LinkedIn profiles state metros in region wording ("Dallas-Fort
  * Worth Metroplex", "Greater Boston") far more often than the "City, ST" a recruiter
@@ -131,6 +136,12 @@ export function generateQueries(
     radiusMi?: number;
     /** Remote role: search the whole country, and target remote wording explicitly. */
     remote?: boolean;
+    /** PRECISION PASS: ready X-ray fragments of proof evidence, strongest first, from
+     *  buildProofPlan (lib/sourcing/proofPlan). Each looks like
+     *  ("CPA" OR "ASC 740" OR "tax provision"). When present, the block below pairs the
+     *  lead titles with each fragment so the ENGINE filters on qualification instead of
+     *  us paying to filter a title-only list afterwards. Omitted = historical behavior. */
+    proofGroups?: string[];
   } = {},
 ): SourcingQuery[] {
   const titleCap = opts.titleCap ?? 4;
@@ -210,6 +221,43 @@ export function generateQueries(
         keyword: `${lead} ${geo}`.trim(),
       });
     });
+  }
+
+  // 3.5) PRECISION PASS: lead titles × proof evidence × geo.
+  //
+  //    This is the block that answers "find people who can actually DO the job" rather
+  //    than "find people whose title contains the words". A boolean like
+  //      site:linkedin.com/in ("Senior Accountant" OR "Tax Accountant")
+  //        ("CPA" OR "ASC 740" OR "tax provision") ("New Jersey" OR "Greater New York Area")
+  //    makes the search engine itself do the qualifying, for the same per-search price as
+  //    the broad query above. Every row it returns already carries evidence, so the same
+  //    spend buys a shortlist instead of a longlist.
+  //
+  //    Deliberately narrow in scope: LEAD title chunk only (the closest-matching titles),
+  //    because pairing every title chunk with every proof group multiplies the run past
+  //    what its budget should carry, and the marginal query is always weaker than the one
+  //    before it. Ordering matters too: these are pushed BEFORE the wide geo-free pass so
+  //    that a run truncated by a per-run budget keeps its best-qualified searches.
+  const proofGroups = (opts.proofGroups || []).slice(0, PROOF_GROUPS[breadth]);
+  if (proofGroups.length && titleGroup) {
+    for (const geo of icp.geos.slice(0, geoCap)) {
+      const geoVar = orGroup(geoVariants(geo, regionalAliases), 4);
+      for (const proof of proofGroups) {
+        const xray = [`site:linkedin.com/in`, titleGroup, proof, geoVar].filter(Boolean).join(" ");
+        // The label quotes the first term in the group, so the recruiter's provenance
+        // reads "Senior Accountant in New Jersey with CPA" rather than a boolean.
+        const firstTerm = (proof.match(/"([^"]+)"/) || [])[1] || "evidence";
+        out.push({
+          group: `qualified: ${firstTerm}`,
+          label: `${titleChunks[0][0] || leadTitle(icp)} in ${geo} with ${firstTerm}`,
+          xray,
+          googleUrl: googleUrl(xray),
+          linkedinUrl: linkedinUrl(`${titleChunks[0][0] || leadTitle(icp)} ${firstTerm} ${geo}`),
+          keyword: `${titleChunks[0][0] || leadTitle(icp)} ${firstTerm} ${geo}`.trim(),
+          titleTerm: titleChunks[0][0] || undefined,
+        });
+      }
+    }
   }
 
   // 4) WIDE ONLY: geo-free searches (title chunk × industry, no location term).

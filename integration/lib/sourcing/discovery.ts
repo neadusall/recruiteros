@@ -45,6 +45,7 @@
 
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SearchBreadth, SourcingQuery } from "./types";
 import { scoreCandidate, inTargetGeo, US_STATE_FULL, type ScoreOptions } from "./score";
+import { buildProofPlan } from "./proofPlan";
 import {
   distanceFromCenter, enforcedRadiusMi, geocodeUsPlace, stateOfPlace, statesWithinRadius,
   stripRadiusSuffix, withinRadius,
@@ -383,6 +384,13 @@ function mapGoogleItem(o: any): CandidateRow | null {
     fullName,
     title: headline,
     headline: headline || snippet,
+    // KEEP THE SNIPPET. It used to be collapsed into `headline` only when no headline
+    // existed, and otherwise dropped on the floor. It is the richest free text a search
+    // result carries: a line or two of the About section, which is exactly where the
+    // qualifying evidence lives ("CPA", "ASC 740", "BCBA", "PointClickCare"). Scoring
+    // now reads it (see proofTerms), so throwing it away was throwing away the whole
+    // long-tail signal we had already paid the search to fetch.
+    snippet: snippet || undefined,
     company,
     // Parsed from the snippet/meta when clearly stated; undefined stays neutral.
     location: locationFromSnippet([mt && str(mt["og:description"]), snippet, headline].filter(Boolean).join(" · ")),
@@ -622,6 +630,8 @@ function mapSearxItem(o: { url?: string; title?: string; content?: string }): Ca
     fullName,
     title: headline,
     headline: headline || snippet,
+    // Kept as evidence for proof-term scoring, same as the Google mapper above.
+    snippet: snippet || undefined,
     company,
     // Parsed from the snippet when clearly stated; undefined stays neutral.
     location: locationFromSnippet(hay || undefined),
@@ -855,6 +865,19 @@ export async function runDiscovery(
   // What the FILTER enforces (Exact = 15mi) vs what the recruiter picked (0 for Exact).
   const filterRadiusMi = remote ? 0 : enforcedRadiusMi(radiusMi);
   const geoCenter = geoLabel ? geocodeUsPlace(geoLabel) : null;
+  // PROOF EVIDENCE for this run. Built here rather than passed in so EVERY caller gets
+  // it (interactive run, overnight queue, Sales Nav import, crash recovery) with no
+  // wiring of its own, and so a row is always scored on the same vocabulary the plan
+  // searched with. Pure and cheap: no model call, no I/O.
+  const proofTerms = buildProofPlan(icp).terms;
+  // Score against the ENFORCED radius, so an Exact search ranks by real miles too
+  // instead of dropping to name matching the moment the dropdown says "Exact".
+  const scoreOpts: ScoreOptions = {
+    radiusMi: geoCenter ? filterRadiusMi : radiusMi,
+    geoLabel,
+    remote,
+    proofTerms,
+  };
   // Every state the circle touches, for the coarse fallback on rows we cannot place.
   const radiusStates = geoCenter ? statesWithinRadius(geoCenter, filterRadiusMi) : [];
   let scanned = 0;
@@ -878,13 +901,7 @@ export async function runDiscovery(
       // Measure BEFORE scoring: the scorer reads milesFromTarget to award geo credit on
       // a sliding scale, so the distance has to be on the row by the time it runs.
       r.milesFromTarget = distanceFromCenter(r.location, geoCenter);
-      // Score against the ENFORCED radius, so an Exact search ranks by real miles too
-      // instead of dropping to name matching the moment the dropdown says "Exact".
-      const sc = scoreCandidate(r, icp, {
-        radiusMi: geoCenter ? filterRadiusMi : radiusMi,
-        geoLabel: geoLabel,
-        remote,
-      });
+      const sc = scoreCandidate(r, icp, scoreOpts);
       r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
       // Strict location: a row that states a DIFFERENT location is marked for the
       // separate out-of-area list (unknown locations stay in the main list — the
@@ -1187,9 +1204,7 @@ export async function runDiscovery(
   // already fetched.
   let rescued = false;
   if (!inList.length && !outList.length && (geoBuffer.length || fitBuffer.length)) {
-    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap, {
-      radiusMi: geoCenter ? filterRadiusMi : radiusMi, geoLabel,
-    });
+    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap, scoreOpts);
     if (rescue) {
       rescued = true;
       inList = rescue.candidates.filter((r) => !r.outOfArea);

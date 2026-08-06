@@ -19,6 +19,7 @@
 
 import type { CandidateICP, CandidateRow } from "./types";
 import { rowSaysRemote } from "./remoteMode";
+import { type ProofTerm, matchProofTerms, proofScore } from "./proofTerms";
 
 /* ------------------------------------------------------------------ */
 /* Tokenization & boundary-aware matching                              */
@@ -259,7 +260,17 @@ export interface ScoreOptions {
    * remotely get the geography points, everyone else scores neutral on it.
    */
   remote?: boolean;
+  /** PROOF EVIDENCE for this run, from buildProofPlan (lib/sourcing/proofPlan). When
+   *  present the scorer looks for qualifying evidence in everything the row carries and
+   *  adds a bounded bonus with a plain-English reason per hit. Absent = historical
+   *  scoring exactly, so old runs and callers that never built a plan are unaffected. */
+  proofTerms?: ProofTerm[];
 }
+
+/** Ceiling on the proof bonus. Evidence is a strong signal but it must never outrank
+ *  the fundamentals: someone with the wrong role in the wrong state is still wrong,
+ *  however many certifications they list. */
+const PROOF_CAP = 24;
 
 export function scoreCandidate(
   row: CandidateRow,
@@ -274,6 +285,20 @@ export function scoreCandidate(
   const fullText = [row.title, row.headline, row.company, row.location].filter(Boolean).join(" · ");
   const titleText = (row.title || row.headline || "").trim();
   const reasons: string[] = [];
+
+  // EVIDENCE TEXT is deliberately wider than the text the rest of the scorer reads.
+  // Two sources were being thrown away:
+  //   - the search snippet (a line of the About section, now kept on the row), and
+  //   - the profile slug, which routinely spells out credentials that appear nowhere
+  //     else in a search result ("/in/jane-smith-cpa-mst" or "/in/john-doe-rn-bsn").
+  // Both are free: we already paid the search that returned them.
+  const slugWords = (row.linkedinUrl || "")
+    .replace(/^.*\/in\//i, "")
+    .replace(/[-_/]+/g, " ")
+    // A trailing hash ("jane-smith-4b7a91c2") is noise, not evidence.
+    .replace(/\b[0-9a-f]{6,}\b/gi, " ")
+    .trim();
+  const evidenceText = [fullText, row.snippet, slugWords].filter(Boolean).join(" · ");
 
   // Hard disqualifiers zero the row immediately.
   const dq = anyPhrase(fullText, icp.disqualifiers);
@@ -293,8 +318,12 @@ export function scoreCandidate(
   /* 1. Function match (35) — what the person actually does. */
   const titlePhrases = (icp.titles.length ? icp.titles : []).map(functionPhrase).filter(Boolean);
   const exactFn = titlePhrases.find((p) => phraseHit(titleText, p));
+  // Whether the person is plausibly in the right role family at all. Proof evidence is
+  // discounted below when this is false, so a credential cannot float someone doing a
+  // different job to the top of the list.
+  let fnMatched = false;
   if (exactFn) {
-    score += WEIGHTS.fn; reasons.push(`Function match: "${exactFn}"`);
+    score += WEIGHTS.fn; reasons.push(`Function match: "${exactFn}"`); fnMatched = true;
   } else {
     const terms = functionTerms(icp);
     const tt = new Set(tokens(titleText));
@@ -302,6 +331,7 @@ export function scoreCandidate(
     if (hits.length) {
       const partial = Math.min(WEIGHTS.fn - 7, hits.length * 14); // 1 hit→14, 2→28, capped < exact
       score += partial; reasons.push(`Partial function match: ${hits.slice(0, 3).join(", ")}`);
+      fnMatched = true;
     } else {
       reasons.push("No function match — likely a different role family");
     }
@@ -383,6 +413,28 @@ export function scoreCandidate(
   const nh = anyPhrase(fullText, icp.niceToHave);
   if (nh) { domain += 2; reasons.push(`Nice-to-have "${nh}"`); }
   score += Math.min(WEIGHTS.domain, domain);
+
+  /* 5b. PROOF EVIDENCE (up to 24, on top of the 100-point base).
+   *
+   * The long-tail layer: licences, certifications, systems and domain phrases that
+   * prove someone has done this work rather than merely holding a similar title. Unlike
+   * the must-have check above (first hit only, +9 flat), this COUNTS the evidence and
+   * weights it by kind, so a CPA who also shows ASC 740 and NetSuite outranks a CPA
+   * alone, which is the actual ordering a recruiter wants.
+   *
+   * Discounted hard without a function match: evidence explains WHY someone is good at
+   * a role, it cannot establish that they are in it. */
+  if (scoreOpts.proofTerms && scoreOpts.proofTerms.length) {
+    const hits = matchProofTerms(evidenceText, scoreOpts.proofTerms);
+    if (hits.length) {
+      const { points, reasons: why } = proofScore(hits, PROOF_CAP);
+      const applied = fnMatched ? points : Math.round(points * 0.4);
+      if (applied > 0) {
+        score += applied;
+        reasons.push(`Qualified: ${why.join(", ")}`);
+      }
+    }
+  }
 
   /* Soft negatives — penalize junior/transient markers on a senior search. */
   if (targetRank >= RANK.director) {

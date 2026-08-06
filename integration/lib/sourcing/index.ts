@@ -20,6 +20,13 @@ export {
   candidateKey, locationFromSnippet, type DiscoveryResult,
 } from "./discovery";
 export {
+  buildProofPlan, isSearchableEvidence, type ProofPlan,
+} from "./proofPlan";
+export {
+  detectVerticals, termsForVerticals, matchProofTerms, proofScore, proofQueryGroups,
+  PROOF_LIBRARY, VERTICAL_LABEL, type ProofTerm, type ProofVertical, type ProofHit,
+} from "./proofTerms";
+export {
   startBulkList, stepBulkList, bulkListStatus,
   DECISION_MAKER_TITLES, US_GEOS, HEADCOUNT_BANDS,
   type BulkListJob, type StartBulkOptions, type StepResult,
@@ -81,6 +88,7 @@ export {
 
 import { parseJobDescription } from "./parseJobDescription";
 import { generateQueries } from "./generateQueries";
+import { buildProofPlan } from "./proofPlan";
 import type { CandidateICP, SearchBreadth, SourcingQuery } from "./types";
 
 export interface SourcingPlan {
@@ -88,6 +96,10 @@ export interface SourcingPlan {
   queries: SourcingQuery[];
   /** Honest note when the role is narrow (qualified universe likely < target). */
   note?: string;
+  /** The long-tail evidence this role is being qualified on: which vertical vocabulary
+   *  applied, and which terms the JD itself contributed. Rides with the plan so a run
+   *  scores on the same evidence its queries searched for. */
+  proof?: { verticals: string[]; terms: number; fromJd: string[] };
 }
 
 export { pinIcpLocation } from "./pinLocation";
@@ -121,7 +133,12 @@ export async function planSourcing(
   // clear-out for a remote role. Running neither is what leaves the LLM's invented metro
   // list in place, which is the bug this mode exists to close.
   const icp = remote ? applyRemoteIcp(parsed) : pinIcpLocation(parsed, location, miles);
-  const queries = generateQueries(icp, { breadth, radiusMi: miles, remote });
+  // PRECISION PASS: work out what counts as proof for this role before building the
+  // queries, so the search set includes booleans that carry the evidence terms. The
+  // plan is rebuilt (cheaply, no model call) at run time from the same ICP, so a run
+  // always scores on exactly the evidence it searched for.
+  const proof = buildProofPlan(icp, jd);
+  const queries = generateQueries(icp, { breadth, radiusMi: miles, remote, proofGroups: proof.queryGroups });
   // Empty across the load-bearing fields means the profile couldn't be built from the
   // brief (e.g. the model returned unparseable output). Say so plainly rather than
   // silently handing back a profile of dashes that finds nobody.
@@ -134,5 +151,6 @@ export async function planSourcing(
     note: empty
       ? "Couldn't read the brief into a profile. Click Analyze again, or add a few concrete details to the brief: a clear job title, real example companies, and a location."
       : undefined,
+    proof: { verticals: proof.verticals, terms: proof.terms.length, fromJd: proof.fromJd },
   };
 }

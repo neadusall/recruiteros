@@ -85,6 +85,11 @@ export interface CandidateRow {
   fullName: string;
   title?: string;
   headline?: string;
+  /** The search result's snippet: a line or two of the profile's About/summary text.
+   *  Free evidence that used to be discarded whenever a headline existed, and the
+   *  place long-tail proof ("CPA", "ASC 740", "BCBA", "PointClickCare") actually
+   *  shows up. Read by proof scoring; never shown raw to a recruiter. */
+  snippet?: string;
   company?: string;
   location?: string;
   linkedinUrl?: string;
