@@ -122,6 +122,14 @@ function sanitizeRow(raw: unknown): CuratedProspect | null {
 
 export async function POST(req: Request) {
   if (!authed(req)) return fail("unauthorized", 401);
+
+  // Revive the supply engine on every worker call. The accumulator has no cron: it only starts
+  // on a request, so a deploy with no UI traffic afterward used to leave it dead — the fleet
+  // drained the queued book and then starved (16h outage overnight Aug 5-6). Workers poll this
+  // route every few minutes around the clock, which makes them the always-on heartbeat.
+  const { ensureAccumulator } = await import("../../../../lib/inmarket/accumulator");
+  ensureAccumulator();
+
   const b = await body<{ action?: string; limit?: number; rows?: unknown[]; leads?: unknown[]; results?: unknown[]; failures?: unknown[]; worker?: string; health?: unknown }>(req);
   const workerId = (s(b?.worker, 60) || "").replace(/[^\w.\-]/g, "").slice(0, 60); // sanitize id for telemetry
 
