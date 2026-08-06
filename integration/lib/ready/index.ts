@@ -293,6 +293,11 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 function skipReason(a: { workspaceId: string; name: string; plan: string; suspended: boolean; lastActiveAt?: string }): string | null {
   const pinned = (process.env.READY_AUDIT_WORKSPACES || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (pinned.length) return pinned.includes(a.workspaceId) ? null : "not in READY_AUDIT_WORKSPACES";
+  // The operator's own workspace is always watched. It carries the house keys
+  // every granted tenant borrows, so it is the last account that should fall
+  // out of the sweep on a plan label or a quiet month — which is exactly what
+  // the first scoped run did.
+  if (a.workspaceId === (process.env.HOUSE_WORKSPACE_ID || "").trim()) return null;
   if (a.suspended) return "suspended";
   // Self-signups sit on the demo plan until the owner activates them, and by
   // definition have nothing connected yet.
