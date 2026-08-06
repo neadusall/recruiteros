@@ -88,6 +88,12 @@ RestartSec=10
 # never bound, so the kernel OOM killer shot Chromium mid-batch and left the worker running
 # with a dead browser. Under the cap systemd restarts the unit cleanly instead.
 MemoryMax=${VIDEO_WORKER_MEMMAX:-1700M}
+# A stop must not wait out the default 90s: the worker leaves after the current batch, and
+# anything still holding on (a hung ffmpeg) gets killed promptly. KillMode=control-group is the
+# default but stated here because it is load-bearing: ffmpeg/Chromium children must die with the
+# unit, or an orphan keeps the CPU busy and the box never truly restarts.
+TimeoutStopSec=30
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target

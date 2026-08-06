@@ -34,6 +34,11 @@ const BATCH = Math.min(Math.max(Number(process.env.VIDEO_WORKER_BATCH) || 8, 1),
 const CONCURRENCY = Math.min(Math.max(Number(process.env.VIDEO_WORKER_CONCURRENCY) || 1, 1), 6);
 const IDLE_SLEEP_MS = Math.max(Number(process.env.VIDEO_WORKER_IDLE_SLEEP_MS) || 30_000, 5_000);
 const HTTP_TIMEOUT_MS = 30_000;
+/** Hard ceiling on a single compose. A wedged ffmpeg or Chromium has no timeout of its own, so
+ *  one stuck job silently parks the whole worker: measured 2026-08-06, worker-2 logged nothing
+ *  for 15 hours until systemd SIGKILLed a hung ffmpeg, and the box produced 42 videos in the
+ *  hour after the restart. A render benchmarks at ~42s, so this only ever fires on a wedge. */
+const JOB_TIMEOUT_MS = Math.max(60_000, (Number(process.env.VIDEO_JOB_TIMEOUT_SEC) || 300) * 1000);
 
 if (!MAIN || !TOKEN) {
   console.error("[video-worker] set WORKER_MAIN_URL and WORKER_TOKEN. Exiting.");
@@ -42,6 +47,27 @@ if (!MAIN || !TOKEN) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ts = () => new Date().toISOString();
+
+/** Sentinel resolved by the job watchdog. Distinct object so a slow-but-fine render is never
+ *  mistaken for a wedge. The stuck ffmpeg/Chromium cannot be reclaimed in-process, so the only
+ *  honest recovery is to exit and let systemd hand us a clean box. */
+const WEDGED = Symbol("wedged");
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | typeof WEDGED> {
+  let timer: NodeJS.Timeout;
+  const guard = new Promise<typeof WEDGED>((r) => { timer = setTimeout(() => r(WEDGED), ms); });
+  return Promise.race([work, guard]).finally(() => clearTimeout(timer));
+}
+
+/** Leave promptly when systemd stops us (auto-update restarts). Without this the process ignores
+ *  SIGTERM, systemd waits out its 90s stop timeout and then SIGKILLs mid-render. */
+let stopping = false;
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.on(sig, () => {
+    if (stopping) process.exit(0);        // second signal: go now
+    stopping = true;
+    console.log(`[video-worker] ${ts()} ${sig} received, finishing the current batch then exiting`);
+  });
+}
 
 let consecutiveFails = 0;
 
@@ -70,6 +96,8 @@ interface Composed {
   results: Array<{ company: string; role: string; videoKey: string }>;
   failures: Array<{ company: string; role: string; reason: string }>;
   browserDead: boolean;
+  /** A job blew the watchdog: the box is dirty (orphaned ffmpeg/Chromium), so restart. */
+  wedged: boolean;
 }
 
 /** Compose a batch of videos concurrently with THIS box's CPU. Per-job errors are skipped, never fatal. */
@@ -77,24 +105,29 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
   const out: Array<{ company: string; role: string; videoKey: string }> = [];
   const failures: Array<{ company: string; role: string; reason: string }> = [];
   let browserDead = false;
+  let wedged = false;
   let suspects = 0;
   let cursor = 0;
   async function w(): Promise<void> {
     while (cursor < jobs.length) {
       const j = jobs[cursor++];
       if (!j?.company || !j?.role) continue;
-      if (browserDead) continue;   // stop burning the rest of the batch on a dead browser
+      if (browserDead || wedged) continue;   // the box is unhealthy; stop burning the batch
       const t0 = Date.now();
       try {
-        const res = await composeRoleVideo(
+        const res = await withTimeout(composeRoleVideo(
           {
             company: j.company, roleTitle: j.role, roleUrl: j.jobUrl, domain: j.domain,
             location: j.location, postedAt: j.postedAt, industry: j.industry,
             signalReason: j.signalReason, relatedRoles: j.relatedRoles,
           },
           clipId, undefined, { durationSec, force: j.force === true },
-        );
-        if (res.ok && res.status === "ready" && res.key) {
+        ), JOB_TIMEOUT_MS);
+        if (res === WEDGED) {
+          console.error(`[video-worker] ${ts()} ${j.company} / ${j.role}: no result after ${Math.round(JOB_TIMEOUT_MS / 1000)}s, treating this box as wedged`);
+          wedged = true;
+        }
+        else if (res.ok && res.status === "ready" && res.key) {
           // Rebuild jobs carry the OLD videoKey (what the emailed links point at): mirror the
           // fresh render onto it so every link in the wild starts serving the smooth video, and
           // report the old key so the main's map entry leaves the rebuild sweep.
@@ -122,8 +155,8 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, w));
-  // A dead browser invalidates the whole batch's failures: they were never real attempts.
-  return { results: out, failures: browserDead ? [] : failures, browserDead };
+  // A dead browser or a wedge invalidates the batch's failures: they were never real attempts.
+  return { results: out, failures: browserDead || wedged ? [] : failures, browserDead, wedged };
 }
 
 async function loop(): Promise<void> {
@@ -152,17 +185,19 @@ async function loop(): Promise<void> {
         await primeClipCache(claim.clip as Parameters<typeof primeClipCache>[0]).catch(() => {});
       }
 
-      const { results, failures, browserDead } = await compose(jobs, clipId, durationSec);
+      const { results, failures, browserDead, wedged } = await compose(jobs, clipId, durationSec);
       // Always report BOTH. A failure the main never hears about is re-handed to a worker every
       // cycle forever, which is exactly how the fleet came to spend all its CPU on dead roles.
       if (results.length || failures.length) await callMain("submit_video", { results, failures });
       console.log(`[video-worker] ${ts()} claimed ${jobs.length} -> composed ${results.length}, failed ${failures.length}`);
-      if (browserDead) {
-        // Chromium is gone. Every further job would fast-fail and, four strikes in, bench a good
-        // posting for good. Exit instead; systemd restarts us with a fresh browser in ~10s.
-        console.error(`[video-worker] ${ts()} browser crash detected, exiting for a clean restart`);
+      if (browserDead || wedged) {
+        // Either Chromium is gone (every further job would fast-fail and, four strikes in, bench
+        // a good posting for good) or a job never returned and left orphaned processes behind.
+        // Exit; systemd restarts us on a clean box in ~10s.
+        console.error(`[video-worker] ${ts()} ${browserDead ? "browser crash" : "wedged job"} detected, exiting for a clean restart`);
         process.exit(1);
       }
+      if (stopping) { console.log(`[video-worker] ${ts()} stopping as requested`); process.exit(0); }
     } catch (e) {
       consecutiveFails++;
       const backoff = Math.min(60_000, 2_000 * 2 ** Math.min(consecutiveFails, 5));
