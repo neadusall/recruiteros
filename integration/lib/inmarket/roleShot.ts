@@ -551,31 +551,42 @@ const HIDE_CSS = `
 
 interface Browser { browser: import("playwright").Browser; idle: ReturnType<typeof setTimeout> | null }
 let shared: Browser | null = null;
+let launching: Promise<import("playwright").Browser> | null = null;
 
 /** One reused Chromium, auto-closed after a minute idle to free memory. */
 async function getBrowser(): Promise<import("playwright").Browser> {
-  const { chromium } = await import("playwright");
   if (shared?.browser?.isConnected()) {
     bumpIdle();
     return shared.browser;
   }
-  const browser = await chromium.launch({
-    // In prod (Alpine) we use the system Chromium (PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium-browser);
-    // locally the env is unset so Playwright's bundled browser is used.
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
-    args: [
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      // Disable site isolation so CROSS-ORIGIN embedded job boards (Greenhouse/Lever/Ashby
-      // iframes on a company's careers page) render INTO the screenshot. With isolation on they
-      // run out-of-process and capture blank. This is standard for a dedicated screenshot bot.
-      "--disable-features=IsolateOrigins,site-per-process,SitePerProcess",
-      "--disable-site-isolation-trials",
-    ],
-  });
-  shared = { browser, idle: null };
-  bumpIdle();
-  return browser;
+  // LAUNCH DEDUPE: a launch takes seconds, so two concurrent callers both sailed past the
+  // isConnected() check above and each started their own Chromium. Only the last one to finish
+  // landed in `shared`; the others became unreachable, so nothing ever idle-closed them and they
+  // leaked ~200 MB and a fistful of processes for the life of the container (measured: 4 stray
+  // browsers inside a 7-minute-old app container). Every caller now awaits the SAME launch.
+  if (!launching) {
+    launching = (async () => {
+      const { chromium } = await import("playwright");
+      const browser = await chromium.launch({
+        // In prod (Alpine) we use the system Chromium (PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium-browser);
+        // locally the env is unset so Playwright's bundled browser is used.
+        executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
+        args: [
+          "--no-sandbox",
+          "--disable-dev-shm-usage",
+          // Disable site isolation so CROSS-ORIGIN embedded job boards (Greenhouse/Lever/Ashby
+          // iframes on a company's careers page) render INTO the screenshot. With isolation on they
+          // run out-of-process and capture blank. This is standard for a dedicated screenshot bot.
+          "--disable-features=IsolateOrigins,site-per-process,SitePerProcess",
+          "--disable-site-isolation-trials",
+        ],
+      });
+      shared = { browser, idle: null };
+      bumpIdle();
+      return browser;
+    })().finally(() => { launching = null; });
+  }
+  return launching;
 }
 
 function bumpIdle() {
@@ -591,6 +602,9 @@ function bumpIdle() {
 /** Close the shared browser + cancel its idle timer. Call this for a clean CLI/batch exit
  *  (otherwise the idle timer keeps the process alive ~60s and leaves Chromium running). */
 export async function shutdownBrowser(): Promise<void> {
+  // A launch already in flight would otherwise land in `shared` AFTER we cleared it, leaving a
+  // browser nobody can close.
+  if (launching) await launching.catch(() => {});
   const b = shared?.browser;
   if (shared?.idle) clearTimeout(shared.idle);
   shared = null;

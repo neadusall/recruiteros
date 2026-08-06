@@ -99,8 +99,17 @@ const INFLOW_WATCHDOG_MS = 2 * 60 * 1000;   // 3-min inflow tick: abandon after 
 // the top CONTACTABLE prospects, so every contact carries a verified screenshot you can see + filter
 // by. Self-hosted Playwright is heavy (~20s/page), so this is bounded SMALL and runs at low
 // concurrency with one shared browser; it grinds the backlog over time without pinning the box. All
-// env-tunable — dial SHOT_BATCH/CONCURRENCY up once you see headroom. Set INMARKET_SHOTS=0 to disable.
-const SHOT_ENABLED = process.env.INMARKET_SHOTS !== "0";
+// env-tunable — dial SHOT_BATCH/CONCURRENCY up once you see headroom.
+//
+// OPT-IN ONLY (changed 2026-08-06 after a CRITICAL playback incident). This tick used to default ON,
+// which meant the box serving the public app also ran Playwright. Once `ensureAccumulator()` started
+// being revived by the render fleet's worker polls, the app server rendered ~4 pages every 2 minutes
+// forever: load on the 2-vCPU app box went from ~1 to 5-7, the Node event loop starved, and a WARM
+// video chunk (a plain local disk read) took 5.39s instead of ~0.014s, which freezes a prospect's
+// video while the audio keeps playing. Capturing is the render fleet's job and it has done it since
+// the role-card fallback shipped; the app server must never render. Set INMARKET_SHOTS=1 ONLY on a
+// dedicated validator box that serves no public traffic.
+const SHOT_ENABLED = process.env.INMARKET_SHOTS === "1";
 const SHOT_CYCLE_MS = envNum("INMARKET_SHOT_INTERVAL_SEC", 120) * 1000; // capture a small batch every N seconds
 const SHOT_BATCH = envNum("INMARKET_SHOT_BATCH", 4);                    // captures per tick (keep small — Playwright is heavy)
 const SHOT_CONCURRENCY = envNum("INMARKET_SHOT_CONCURRENCY", 1);        // parallel renders (1 shared Chromium → keep low)
