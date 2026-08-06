@@ -169,9 +169,17 @@ function message(spec: ToolSpec, blocked: ToolDep[], unverified: ToolDep[]): str
  * run and return nothing.
  */
 export async function toolReadiness(workspaceId: string, tool: ToolKey): Promise<ToolReadiness | null> {
+  if (!TOOLS[tool]) return null;
+  return readFrom(await listIntegrations(workspaceId), tool);
+}
+
+/** The same read against an already-loaded integration list. Every caller that
+ *  asks about more than one tool goes through here: the audit sweeps a whole
+ *  box, and re-reading the store once per tool turned that into 11 reads per
+ *  account for an answer that cannot change between them. */
+function readFrom(list: Awaited<ReturnType<typeof listIntegrations>>, tool: ToolKey): ToolReadiness | null {
   const spec = TOOLS[tool];
   if (!spec) return null;
-  const list = await listIntegrations(workspaceId);
   const byId = new Map(list.map((i) => [i.id, i]));
   const dep = (id: IntegrationId): ToolDep => {
     const found = byId.get(id);
@@ -203,13 +211,10 @@ export async function toolReadiness(workspaceId: string, tool: ToolKey): Promise
 
 /** Every tool's readiness for a workspace (the screen loads this once). */
 export async function allToolReadiness(workspaceId: string): Promise<ToolReadiness[]> {
-  const keys = Object.keys(TOOLS) as ToolKey[];
-  const out: ToolReadiness[] = [];
-  for (const k of keys) {
-    const r = await toolReadiness(workspaceId, k);
-    if (r) out.push(r);
-  }
-  return out;
+  const list = await listIntegrations(workspaceId);
+  return (Object.keys(TOOLS) as ToolKey[])
+    .map((k) => readFrom(list, k))
+    .filter((r): r is ToolReadiness => r !== null);
 }
 
 export function isToolKey(v: unknown): v is ToolKey {
