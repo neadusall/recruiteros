@@ -57,8 +57,20 @@ export function unsubUrl(workspaceId: string, email: string): string {
   return `${base}/api/unsubscribe?w=${encodeURIComponent(workspaceId)}&e=${e}&s=${unsubSignature(workspaceId, email)}`;
 }
 
-/** Headers for one outbound cold email. `mailtoAddr` (the sending inbox) adds the mailto variant. */
+/** OWNER DECISION (Aug 2026): cold outreach carries no unsubscribe affordance
+ *  at all; not the footer link and not this header (Gmail renders the header
+ *  as a visible "Unsubscribe" button next to the sender, which reads as bulk
+ *  mail). Opt-out is the reply itself, enforced by the response pipeline and
+ *  the DNC list. RECRUITEROS_UNSUB_LINK=1 restores link + header together. */
+export function unsubAffordancesEnabled(): boolean {
+  return ["1", "true", "yes", "on"].includes((process.env.RECRUITEROS_UNSUB_LINK || "").toLowerCase());
+}
+
+/** Headers for one outbound cold email. `mailtoAddr` (the sending inbox) adds the mailto variant.
+ *  Returns {} while unsubscribe affordances are disabled (the owner default), so
+ *  every send path that spreads these headers is covered by the one switch. */
 export function unsubscribeHeaders(workspaceId: string, email: string, mailtoAddr?: string): Record<string, string> {
+  if (!unsubAffordancesEnabled()) return {};
   const targets = [`<${unsubUrl(workspaceId, email)}>`];
   if (mailtoAddr) targets.push(`<mailto:${mailtoAddr}?subject=unsubscribe>`);
   return {

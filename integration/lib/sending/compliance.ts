@@ -18,7 +18,7 @@
  * missing address is surfaced to the operator via footerAddressMissing().
  */
 
-import { unsubUrl } from "./unsubscribe";
+import { unsubUrl, unsubAffordancesEnabled } from "./unsubscribe";
 
 export interface FooterBrand {
   name: string;
@@ -64,19 +64,33 @@ export interface ComplianceFooter {
   text: string;
 }
 
+/** OWNER DECISION (Aug 2026): cold outreach carries NO unsubscribe link; the
+ *  emails must read as personal 1:1 notes. The CAN-SPAM opt-out mechanism is
+ *  the reply itself (a "reply and I'll stop" line + a monitored reply address;
+ *  STOP/opt-out replies feed the DNC list through the response pipeline).
+ *  RECRUITEROS_UNSUB_LINK=1 restores the signed link (and the one-click
+ *  header, gated in lib/sending/unsubscribe) for anyone who wants them. */
+const unsubLinkEnabled = unsubAffordancesEnabled;
+
+const OPT_OUT_LINE = "Not the right person, or just don't want to hear from me? Reply and say so and I won't write again.";
+
 /** Render the footer for one recipient. Appended AFTER the message body on both
  *  the HTML and the text/plain parts. */
 export function complianceFooter(workspaceId: string, recipientEmail: string, brand: FooterBrand): ComplianceFooter {
-  const url = unsubUrl(workspaceId, recipientEmail);
   const address = postalAddressFor(workspaceId, brand);
   const identity = address ? `${brand.name} · ${address}` : brand.name;
+  const optOut = unsubLinkEnabled()
+    ? `<a href="${unsubUrl(workspaceId, recipientEmail)}" style="color:#8a8a8a;text-decoration:underline">Unsubscribe</a>`
+    : escapeHtml(OPT_OUT_LINE);
   const html =
     `<div style="margin-top:28px;padding-top:12px;border-top:1px solid #e6e6e6;` +
     `font-family:Helvetica,Arial,sans-serif;font-size:11px;line-height:1.6;color:#8a8a8a">` +
     escapeHtml(identity) +
-    `<br><a href="${url}" style="color:#8a8a8a;text-decoration:underline">Unsubscribe</a>` +
+    `<br>` + optOut +
     `</div>`;
-  const text = `\n\n--\n${identity}\nUnsubscribe: ${url}`;
+  const text = unsubLinkEnabled()
+    ? `\n\n--\n${identity}\nUnsubscribe: ${unsubUrl(workspaceId, recipientEmail)}`
+    : `\n\n--\n${identity}\n${OPT_OUT_LINE}`;
   return { html, text };
 }
 
