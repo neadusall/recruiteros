@@ -13713,6 +13713,39 @@
       // rank); no stage-by-stage narration, just the bar, the % and the time left.
       var etaCap = parseInt($("#jdCap") && $("#jdCap").value, 10) || 500;
       var needBrief = !(ta && ta.value.trim());
+      // The dials, read ONCE and sent from the very first request, so the server's
+      // crash net carries the recruiter's own settings no matter which step the
+      // connection dies on.
+      var cap = etaCap;
+      var minFit = parseInt($("#jdMinFit") && $("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
+      var fresh = !!($("#jdFresh") && $("#jdFresh").checked);
+      var strictGeo = !($("#jdAnywhere") && $("#jdAnywhere").checked);
+      var outsideGeo = !!($("#jdOutside") && $("#jdOutside").checked);
+      // CRASH NET FOR THE WHOLE PRESS, not just the search. Writing the brief and
+      // analyzing it are minutes of server work in FRONT of the search, and until
+      // 2026-08-06 they ran outside the net: a deploy swapping the container during
+      // Analyze answered 502 with nothing saved and nothing to recover, and the bar
+      // simply stopped (a Lume search died exactly that way at 67%). One token now
+      // covers all three requests: the server arms a durable checkpoint on the first
+      // one, the deploy holds its container swap while that checkpoint stands, and if
+      // this tab's connection dies at any point the run finishes server-side.
+      var recoveryToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      liveSearchTokens[recoveryToken] = 1;
+      var earlyName = ($("#jdName") && $("#jdName").value.trim()) || title || "Candidate search";
+      /** The dials + token every step of the chain carries, plus that step's own fields. */
+      function netFields(extra) {
+        var p = {
+          recoveryToken: recoveryToken, chain: true, name: earlyName,
+          cap: cap, minFit: minFit, freshOnly: fresh, breadth: jdBreadth(),
+          location: jdLocLabel(), radiusMi: jdbRadius(),
+          strictGeo: strictGeo, outsideGeo: outsideGeo,
+        };
+        for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) p[k] = extra[k];
+        return p;
+      }
+      /** The connection died rather than the server answering: recoverable, not a "no". */
+      function deadEnd(r) { return !r.ok && (r.status === 0 || r.status === 502 || r.status === 503 || r.status === 504); }
+      function deadRequest() { return { ok: false, status: 0, data: null }; }
       showProgress("Finding candidates", (needBrief ? 12 : 0) + 28 + findEta(etaCap), "Working… You can leave this page once the search is underway: it keeps running, and the finished list lands under Your saved candidate lists and is sent on automatically.");
       msg("");
       Promise.resolve().then(function () {
@@ -13721,10 +13754,15 @@
         var company = $("#jdbCompany") ? $("#jdbCompany").value.trim() : "";
         var notes = $("#jdbNotes") ? $("#jdbNotes").value.trim() : "";
         var loc = jdLocPhrase(); if (loc) notes = [notes, "Based in " + loc].filter(Boolean).join(". ");
-        return send("/sourcing", "POST", { action: "draft", title: title, company: company, companyUrl: company, notes: notes, base: "" }).then(function (r) {
-          if (!r.ok) throw { stage: "Writing the brief", r: r };
-          if (ta) ta.value = (r.data && r.data.jd) || "";
-        });
+        return send("/sourcing", "POST", netFields({ action: "draft", title: title, company: company, companyUrl: company, notes: notes, base: "" }))
+          .catch(function () { return deadRequest(); })
+          .then(function (r) {
+            // The checkpoint armed by this very request carries the brief spec, so a
+            // recovery writes the same brief and runs the search server-side.
+            if (deadEnd(r)) throw { recover: { token: recoveryToken, name: earlyName, cap: cap } };
+            if (!r.ok) throw { stage: "Writing the brief", r: r };
+            if (ta) ta.value = (r.data && r.data.jd) || "";
+          });
       }).then(function () {
         // 2) Analyze into the ideal-candidate profile. A Dive-deeper refinement
         // on the SAME JD text survives this step: re-planning would silently
@@ -13739,34 +13777,36 @@
           return;
         }
         state.jd = jdNow;
-        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, radiusMi: state.radiusMi, breadth: jdBreadth() }).then(function (r) {
-          if (!r.ok) throw { stage: "Analyze", r: r };
-          state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
-          renderPlan(); updateRunCost();
-        });
+        return send("/sourcing", "POST", netFields({ action: "plan", jd: jdWithLoc(state.jd), location: state.location, radiusMi: state.radiusMi }))
+          .catch(function () { return deadRequest(); })
+          .then(function (r) {
+            // THE step this net was rebuilt for: a container swap mid-analyze used to
+            // end the press with a 502 and no trace of the run anywhere. Now the
+            // checkpoint behind it finishes server-side and this tab watches that.
+            if (deadEnd(r)) throw { recover: { token: recoveryToken, name: earlyName, cap: cap } };
+            if (!r.ok) throw { stage: "Analyze", r: r };
+            state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
+            renderPlan(); updateRunCost();
+          });
       }).then(function () {
-        // 3) Search.
-        var cap = parseInt($("#jdCap") && $("#jdCap").value, 10) || 500;
-        var minFit = parseInt($("#jdMinFit") && $("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
-        var fresh = !!($("#jdFresh") && $("#jdFresh").checked);
+        // 3) Search. The dials were read once, up top, and have been riding along
+        // with the crash net since the first request.
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
         var refinedIcp = (state.refineNote && state.icp) ? state.icp : undefined;
-        // Crash net: the intended list name + a client token ride along, so the server
-        // can arm a durable checkpoint before searching. If a deploy kills the request
-        // mid-search, the search re-runs server-side and watchRecovery below finds it
-        // by this token instead of the bar dying at 95%.
+        // Crash net: the SAME token the brief and analyze steps carried, so the server
+        // adopts the checkpoint that has been covering this press since it started
+        // rather than arming a second one. The real list name is only knowable now
+        // (analyze supplies the label), so it is completed here.
         var nameEl0 = $("#jdName");
         var provisionalName = (nameEl0 && nameEl0.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
         if (state.location && provisionalName.indexOf(state.location) < 0) provisionalName += " · " + state.location;
-        var recoveryToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-        liveSearchTokens[recoveryToken] = 1;
-        return send("/sourcing", "POST", { action: "run", recoveryToken: recoveryToken, name: provisionalName, jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).catch(function () {
+        return send("/sourcing", "POST", { action: "run", recoveryToken: recoveryToken, name: provisionalName, jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: strictGeo, outsideGeo: outsideGeo }).catch(function () {
           // fetch itself rejected: the connection died mid-request (a deploy
           // recreating the server is the everyday cause). Not a server "no".
-          return { ok: false, status: 0, data: null };
+          return deadRequest();
         }).then(function (r) {
-          if (!r.ok && (r.status === 0 || r.status === 502 || r.status === 503 || r.status === 504)) {
+          if (deadEnd(r)) {
             // The server (or the connection to it) died mid-search. The checkpoint
             // armed above survives in the durable store, so the search finishes
             // server-side; hand this tab over to the recovery watch.

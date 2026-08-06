@@ -44,6 +44,7 @@ import {
   startCompanyFirst, stepCompanyFirst, companyFirstStatus,
   mergeSourcingRuns, getRapidQuota, runSalesNavSourcing, searchKindOf, applySalesNavResult,
   gapFillContacts, listNightItems, addNightItem, removeNightItem, failNightItem, attachNightIcp,
+  findRecoveryCheckpoint, updateRecoveryCheckpoint,
   landlineDbReady,
   premiumPhoneQuote, runPremiumPhoneBoost,
 } from "../../../lib/sourcing";
@@ -131,6 +132,88 @@ export async function GET(req: Request) {
   });
 }
 
+/**
+ * CRASH NET, ARMED FROM THE FIRST PRESS.
+ *
+ * One press of Initiate Search is THREE requests: write the brief (only when the JD box
+ * is empty), analyze it into a profile, then search. Only the third one used to arm the
+ * durable checkpoint, so the first two ran with no net and — worse — invisible to the
+ * deploy gate, which asks "is a search running?" by counting checkpoints. On 2026-08-06
+ * a container swap landed 26 seconds into Analyze: Caddy answered 502, there was no
+ * checkpoint to recover from, and the run existed nowhere. The recruiter saw a progress
+ * bar stop at 67%.
+ *
+ * So the browser now arms the net before the FIRST of the three, and all three carry the
+ * same `recoveryToken`: this finds that checkpoint instead of arming a second one. While
+ * it stands, the deploy gate holds the container swap, and if the process dies anyway the
+ * queue re-runs the whole chain server-side (brief included, see NightItem.brief).
+ *
+ * `chain: true` is what separates the one-press flow from the standalone Analyze and
+ * "write me a JD" buttons: those are previews the recruiter may never run a search from,
+ * and auto-running a paid search behind them would be its own kind of broken.
+ */
+async function armChainCheckpoint(ws: string, b: any, actor: { userId: string; name: string; email: string }): Promise<string> {
+  const token = typeof b?.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "";
+  if (!token || b?.chain !== true) return "";
+  try {
+    const existing = await findRecoveryCheckpoint(ws, token);
+    if (existing) {
+      // A later step of the same chain: re-stamp it (the fuse measures silence from the
+      // driving tab) and keep going. Never a second checkpoint for one press.
+      await updateRecoveryCheckpoint(ws, existing.id, {}, "chain");
+      return existing.id;
+    }
+    const radiusMi = parseRadiusMi(b?.radiusMi, b?.location);
+    const item = await addNightItem(ws, {
+      kind: "search",
+      name: (typeof b?.name === "string" && b.name.trim()) || "Candidate search",
+      jd: typeof b?.jd === "string" && b.jd.trim() ? b.jd : undefined,
+      location: (b?.location as string) || undefined,
+      breadth: parseBreadth(b?.breadth),
+      outsideGeo: b?.outsideGeo === true,
+      createdBy: actor,
+      cap: typeof b?.cap === "number" ? b.cap : undefined,
+      minFit: typeof b?.minFit === "number" ? b.minFit : undefined,
+      freshOnly: b?.freshOnly === true,
+      radiusMi,
+      strictGeo: b?.strictGeo !== false && Boolean(((b?.location as string) || "").trim()),
+      // No JD yet means the chain's first step is writing one; carry what it needs so a
+      // recovery can write the same brief rather than stop on a missing JD.
+      brief: (!(typeof b?.jd === "string" && b.jd.trim()) && (b?.title || b?.notes))
+        ? { title: b?.title, company: b?.company, companyUrl: b?.companyUrl, notes: b?.notes }
+        : undefined,
+      recoveryToken: token,
+      recoveryPhase: "chain",
+    });
+    return item.id;
+  } catch (err) {
+    // The net failing to arm must never stop the search the recruiter asked for.
+    console.warn("[sourcing] chain checkpoint not armed:", (err as Error).message);
+    return "";
+  }
+}
+
+/**
+ * Stand the chain's net down with a REASON on it.
+ *
+ * A request that refuses outright (no people-search connection behind the tool, a
+ * missing JD) answers the recruiter and ends the press — but the checkpoint armed a
+ * step earlier is still standing, and a checkpoint nobody stands down eventually gets
+ * taken over by the queue, i.e. the platform would run and BILL for the very search it
+ * just refused. Parking it instead ends the press honestly and leaves the reason on the
+ * queue card for a recruiter who has already walked away.
+ */
+async function stopChainCheckpoint(ws: string, b: any, reason: string): Promise<void> {
+  const token = typeof b?.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "";
+  if (!token) return;
+  try {
+    const held = await findRecoveryCheckpoint(ws, token);
+    if (held) await failNightItem(ws, held.id, reason);
+  } catch (err) {
+    console.warn("[sourcing] chain checkpoint not stood down:", (err as Error).message);
+  }
+}
+
 export async function POST(req: Request) {
   const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
@@ -144,8 +227,32 @@ export async function POST(req: Request) {
 
   try {
     if (action === "plan") {
-      if (!b?.jd) return fail("missing_jd", 422);
-      return ok(await planSourcing(b.jd, b.location, parseBreadth(b.breadth), b.radiusMi as number));
+      if (!b?.jd) {
+        await stopChainCheckpoint(ws, b, "The search was not started: there was no job description to analyze. Nothing was saved.");
+        return fail("missing_jd", 422);
+      }
+      // Inside the one-press chain this is the step that used to be uncovered (see
+      // armChainCheckpoint). Standalone Analyze presses send no token and arm nothing.
+      const chainId = await armChainCheckpoint(ws, b, actor);
+      try {
+        const plan = await planSourcing(b.jd, b.location, parseBreadth(b.breadth), b.radiusMi as number);
+        // Hand the profile over so a recovery searches THIS profile instead of paying
+        // to derive a second one that may not agree. Best-effort, never fatal.
+        if (chainId) {
+          await updateRecoveryCheckpoint(ws, chainId, { jd: b.jd }).catch(() => {});
+          await attachNightIcp(ws, chainId, plan.icp).catch(() => {});
+        }
+        return ok(plan);
+      } catch (err) {
+        // The recruiter may be gone. Park the reason on the queue card rather than let
+        // the checkpoint sit armed behind an answered request.
+        if (chainId) {
+          await failNightItem(ws, chainId,
+            "The analyze step stopped (" + ((err as Error).message || "no reason given") +
+            "). Nothing was saved, so running it again is safe.").catch(() => {});
+        }
+        throw err;
+      }
     }
 
     /* Which discovery sources will actually run right now — the UI's "Search power"
@@ -200,8 +307,23 @@ export async function POST(req: Request) {
 
     if (action === "draft") {
       if (!b?.title && !b?.base) return fail("missing_input", 422, { detail: "title or base required" });
-      const jd = await draftJobDescription({ title: b.title, company: b.company, companyUrl: b.companyUrl, notes: b.notes, base: b.base });
-      return ok({ jd });
+      // First step of the one-press chain when the JD box was left empty; the standalone
+      // "write me a JD" button sends no token and arms nothing.
+      const chainId = await armChainCheckpoint(ws, b, actor);
+      try {
+        const jd = await draftJobDescription({ title: b.title, company: b.company, companyUrl: b.companyUrl, notes: b.notes, base: b.base });
+        // The brief is written: a recovery from here on searches this text rather than
+        // paying to write a second (different) brief.
+        if (chainId) await updateRecoveryCheckpoint(ws, chainId, { jd }).catch(() => {});
+        return ok({ jd });
+      } catch (err) {
+        if (chainId) {
+          await failNightItem(ws, chainId,
+            "The job brief could not be written (" + ((err as Error).message || "no reason given") +
+            "). Nothing was saved, so running it again is safe.").catch(() => {});
+        }
+        throw err;
+      }
     }
 
     if (action === "refine") {
@@ -221,12 +343,20 @@ export async function POST(req: Request) {
     }
 
     if (action === "run") {
-      if (!b?.jd) return fail("missing_jd", 422);
+      if (!b?.jd) {
+        await stopChainCheckpoint(ws, b, "The search was not started: there was no job description to search from. Nothing was saved.");
+        return fail("missing_jd", 422);
+      }
       // Readiness gate: a search with no people-search connection can only ever
       // finish with nothing found, which reads exactly like "no one matched" and
       // sends the recruiter back to widen filters that were never the problem.
       const gate = await toolGate(ws, "jdsourcing");
-      if (gate) return gate;
+      if (gate) {
+        // The chain's net must not outlive a refusal (see stopChainCheckpoint): the
+        // queue would otherwise run the paid search this gate exists to prevent.
+        await stopChainCheckpoint(ws, b, "The search was not started: JD Sourcing has no people-search connection behind it. Nothing was saved.");
+        return gate;
+      }
       // A typed hiring location is ground truth: it pins the ICP's geos (the LLM parse
       // otherwise drifts to a national metro list) and turns on the strict-location drop.
       // A client-supplied ICP (a Dive-deeper refinement) wins over re-parsing the JD,
@@ -255,9 +385,39 @@ export async function POST(req: Request) {
       // there was nothing to recover and the recruiter's search vanished silently
       // (2026-07-31, a Lume run lost exactly this way at 5.7s in). Everything below is
       // derived from the request body alone, so there is nothing left to wait for here.
+      //
+      // The chain arms this net one step earlier still (armChainCheckpoint, from the
+      // recruiter's first press), so the usual case here is ADOPTING the checkpoint that
+      // already covered the brief and analyze steps: completing it with the dials only
+      // this request knows, and moving it onto the long search fuse. A search started
+      // any other way (an older cached tab, a re-run from a saved list) still arms here.
       const recoveryToken = typeof b.recoveryToken === "string" ? b.recoveryToken.trim().slice(0, 64) : "";
       let recoveryId = "";
       if (recoveryToken) {
+        try {
+          const held = await findRecoveryCheckpoint(ws, recoveryToken);
+          if (held) {
+            await updateRecoveryCheckpoint(ws, held.id, {
+              name: (typeof b.name === "string" && b.name.trim()) || held.name,
+              jd: b.jd,
+              location: (b.location as string) || undefined,
+              breadth,
+              outsideGeo: b.outsideGeo === true,
+              createdBy: actor,
+              cap: typeof b.cap === "number" ? b.cap : undefined,
+              minFit: typeof b.minFit === "number" ? b.minFit : undefined,
+              freshOnly: b.freshOnly === true,
+              radiusMi,
+              strictGeo,
+              icp: clientIcp ? pinIcpLocation(clientIcp, b.location, radiusMi) : undefined,
+            }, "search");
+            recoveryId = held.id;
+          }
+        } catch (err) {
+          console.warn("[sourcing] recovery checkpoint not adopted:", (err as Error).message);
+        }
+      }
+      if (recoveryToken && !recoveryId) {
         try {
           const checkpoint = await addNightItem(ws, {
             kind: "search",

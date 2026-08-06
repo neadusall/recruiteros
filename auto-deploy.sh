@@ -441,27 +441,79 @@ docker compose build >> "$LOG" 2>&1 || true
 # >>> deploy-hold
 HOLD_MAX_SEC="${DEPLOY_HOLD_MAX_SEC:-900}"
 HOLD_STEP_SEC="${DEPLOY_HOLD_STEP_SEC:-15}"
+# An unreadable probe is usually a container mid-restart, i.e. a state that clears in
+# seconds — so re-ask a few times, quickly, before giving up on the app's own answer.
+HOLD_PROBE_TRIES="${DEPLOY_HOLD_PROBE_TRIES:-3}"
+HOLD_PROBE_STEP_SEC="${DEPLOY_HOLD_PROBE_STEP_SEC:-5}"
+# The queue's durable snapshot, read straight off the volume on the HOST. This is the
+# second opinion for when the app cannot answer at all: on 2026-08-06 the probe came
+# back unreadable, the gate failed open exactly as designed, and the swap it let
+# through killed a recruiter's search anyway. Failing open is still the last word — a
+# gate must never block a deploy — but it should be the last word, not the first.
+HOLD_SNAP="${DEPLOY_NIGHT_SNAP:-/var/lib/docker/volumes/recruiteros_app_data/_data/snap_sourcing_night_queue_v1.json}"
 HOLD_WAITED=0
+HOLD_UNREADABLE=0
+
+# Is a search running, according to the durable snapshot alone? Echoes yes/no/unknown.
+# Boot ids mean nothing out here, so this reads time instead: an item in the search
+# stage, or a crash-net checkpoint armed within the dead-man window, counts as busy.
+# Deliberately generous — over-holding costs a bounded wait, under-holding costs a
+# paid search — and any parse trouble answers "unknown" rather than guessing.
+snapshot_busy() {
+  [ -r "$HOLD_SNAP" ] || { echo unknown; return; }
+  command -v jq >/dev/null 2>&1 || { echo unknown; return; }
+  SNAP_CUTOFF=$(( $(date -u +%s) - 2700 ))
+  SNAP_N="$(jq -r --argjson cutoff "$SNAP_CUTOFF" '
+      [ .[]
+        | select(.stage != "done" and .stage != "error")
+        | select(.stage == "search"
+                 or ((((.recovery.armedAt // "") | sub("\\.[0-9]+Z$"; "Z"))
+                       | fromdateiso8601? // 0) > $cutoff)) ]
+      | length' "$HOLD_SNAP" 2>/dev/null)"
+  case "$SNAP_N" in
+    ''|*[!0-9]*) echo unknown ;;
+    0)           echo no ;;
+    *)           echo yes ;;
+  esac
+}
+
 while [ "$HOLD_WAITED" -lt "$HOLD_MAX_SEC" ]; do
   # The secret is expanded INSIDE the container (single quotes), where it lives —
   # same trick the nightqueue timer uses.
   INFLIGHT="$(docker exec recruiteros-app-1 sh -c 'wget -qO- --timeout=5 "http://localhost:3000/api/sourcing/night?inflight=1&secret=$RECRUITEROS_CRON_SECRET"' 2>/dev/null || echo '')"
+  STEP_SEC="$HOLD_STEP_SEC"
   case "$INFLIGHT" in
-    *'"busy":true'*) : ;;
+    *'"busy":true'*) HOLD_UNREADABLE=0 ;;
     *'"busy":false'*) break ;;
     *)
       # No readable answer (app down mid-deploy, secret unset, endpoint older than
-      # this script). Fail open, but SAY SO: a gate that silently stopped gating
-      # would otherwise look exactly like a quiet box.
-      echo "$(date -u) deploy-gate: no readable in-flight answer, swapping without a hold" >> "$LOG"
-      break
+      # this script). Ask the durable snapshot, then re-ask the app a few times.
+      HOLD_UNREADABLE=$((HOLD_UNREADABLE + 1))
+      SNAP="$(snapshot_busy)"
+      if [ "$SNAP" = "no" ]; then
+        echo "$(date -u) deploy-gate: app unreachable, but the durable queue shows no search running — swapping" >> "$LOG"
+        break
+      fi
+      if [ "$SNAP" != "yes" ] && [ "$HOLD_UNREADABLE" -ge "$HOLD_PROBE_TRIES" ]; then
+        # Fail open, but SAY SO: a gate that silently stopped gating would otherwise
+        # look exactly like a quiet box.
+        echo "$(date -u) deploy-gate: no readable in-flight answer after $HOLD_UNREADABLE tries and no readable queue snapshot, swapping without a hold" >> "$LOG"
+        break
+      fi
+      if [ "$SNAP" = "yes" ]; then
+        INFLIGHT="durable queue snapshot: a search is in flight (the app itself did not answer)"
+        HOLD_UNREADABLE=0
+      else
+        # Still hoping for the app's own answer: re-ask sooner than a full hold step.
+        STEP_SEC="$HOLD_PROBE_STEP_SEC"
+      fi
       ;;
   esac
   if [ "$HOLD_WAITED" -eq 0 ]; then
     echo "$(date -u) holding the container swap: a candidate search is running ($INFLIGHT)" >> "$LOG"
   fi
-  sleep "$HOLD_STEP_SEC"
-  HOLD_WAITED=$((HOLD_WAITED + HOLD_STEP_SEC))
+  sleep "$STEP_SEC"
+  HOLD_WAITED=$((HOLD_WAITED + STEP_SEC))
 done
 if [ "$HOLD_WAITED" -ge "$HOLD_MAX_SEC" ]; then
   echo "$(date -u) hold expired after ${HOLD_MAX_SEC}s — swapping anyway; the search crash net recovers what it interrupts" >> "$LOG"

@@ -59,11 +59,16 @@ function makeVisit() {
   // One call = one renderJdSourcing render (fresh closure over a fresh prog).
   const $ = (id: string) => (id === "#jdProgress" ? hostEl : (hostEl ? hostEl.querySelector(id) : null));
   const esc = (s: any) => String(s == null ? "" : s);
+  // The break layer (assets/js/command.js) hands the live bar a way to fail it when a
+  // request breaks; the block under test assigns to it. Module scope is strict, so an
+  // undeclared assignment is a ReferenceError rather than an implicit global — declare
+  // it here or this whole suite dies on the first eval.
+  let activeProgressFail: any = null;
   const api: any = {};
   // eslint-disable-next-line no-eval
   eval(block + "\napi.showProgress = showProgress; api.finishProgress = finishProgress;" +
     " api.setProgPhase = setProgPhase; api.hideProgress = hideProgress; api.prog = prog;");
-  void $; void esc; void viewTimers; // referenced from inside the eval'd block
+  void $; void esc; void viewTimers; void activeProgressFail; // referenced from inside the eval'd block
   return api;
 }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));

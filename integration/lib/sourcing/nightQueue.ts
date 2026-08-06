@@ -33,6 +33,7 @@ import { loadSnapshot, saveSnapshot } from "../db";
 import type { CandidateICP, CandidateRow, SearchBreadth, SourcingRun } from "./types";
 import { getSourcingRun, saveSourcingRun } from "./store";
 import { parseJobDescription } from "./parseJobDescription";
+import { draftJobDescription } from "./draftJd";
 import { pinIcpLocation } from "./pinLocation";
 import { parseRadiusMi } from "./geoRadius";
 import { generateQueries } from "./generateQueries";
@@ -62,6 +63,16 @@ const BOOT_ID = rid("boot");
  *  still alive this long after starting, something is deeply wrong anyway — take the
  *  search over rather than hold the recovery net shut forever. */
 const RECOVERY_DEADMAN_MS = 45 * 60 * 1000;
+
+/** Dead-man for a checkpoint still in the CHAIN phase — armed by the first press, but
+ *  the search request itself has not arrived yet (the browser is between the brief,
+ *  analyze and search calls). Those steps are a couple of minutes at the very most, so
+ *  a checkpoint sitting here longer means the tab that was driving the chain is gone
+ *  (closed, navigated away, or its request died against a container that outlived it).
+ *  The recruiter pressed Initiate Search and was told the run continues without them,
+ *  so the queue takes it over — but on a MUCH shorter fuse than a real in-flight
+ *  search, which legitimately runs for tens of minutes. */
+const CHAIN_DEADMAN_MS = 4 * 60 * 1000;
 
 /** How many times the search stage may be attempted before the item gives up.
  *  The search stage is the one rung with no partial state: a kill mid-pull leaves
@@ -100,6 +111,11 @@ export interface NightItem {
   /** A Dive-deeper refined profile (or the one the dead request already derived),
    *  so recovery searches the refined profile instead of re-parsing the JD. */
   icp?: CandidateICP;
+  /** The recruiter pressed Initiate Search with an EMPTY job-description box, so the
+   *  chain writes the brief first. Carried on the checkpoint because a checkpoint can
+   *  now be armed before that brief exists (see recovery.phase): with this, a recovery
+   *  writes the same brief server-side instead of dying on "no job description". */
+  brief?: { title?: string; company?: string; companyUrl?: string; notes?: string };
   /** kind:"search" driven by a pasted LinkedIn search URL rather than a JD. Set
    *  only by the salesNav crash net: a recovery re-pulls THIS search and lands it
    *  on the same destination list the dead request was writing to. */
@@ -120,8 +136,17 @@ export interface NightItem {
    *  store, the next boot's tick sees a foreign boot id, and the queue re-runs the
    *  search server-side: the list saves, enriches, and delivers with no tab needed.
    *  The token is client-generated so the tab that lost its request can find this
-   *  item in GET /sourcing and narrate the recovery on its progress bar. */
-  recovery?: { token: string; bootId: string; armedAt: string };
+   *  item in GET /sourcing and narrate the recovery on its progress bar.
+   *
+   *  `phase` says WHICH request is holding it. Until 2026-08-06 the net was armed by
+   *  the search request only, which left the two AI steps in front of it — writing the
+   *  brief and analyzing the JD — outside the net AND invisible to the deploy gate: a
+   *  container swap during Analyze answered 502 with no checkpoint behind it and the
+   *  search vanished (a Lume run lost exactly this way at 19:30 UTC that day, 26s into
+   *  Analyze). The browser now arms the net on the FIRST press and every step of the
+   *  chain runs inside it. "chain" = the brief/analyze steps (short fuse, see
+   *  CHAIN_DEADMAN_MS); "search" = the search request itself (the long fuse). */
+  recovery?: { token: string; bootId: string; armedAt: string; phase?: "chain" | "search" };
   stage: NightStage;
   /** Plain-English progress line for the queue card. */
   note?: string;
@@ -227,10 +252,15 @@ export interface NightAddInput {
   radiusMi?: number;
   strictGeo?: boolean;
   icp?: CandidateICP;
+  /** The brief to write when there is no JD yet (see NightItem.brief). */
+  brief?: NightItem["brief"];
   /** kind:"search" from a pasted LinkedIn search URL (salesNav crash net only). */
   salesNav?: NightItem["salesNav"];
   /** Arms the item as a held recovery checkpoint for a live interactive request. */
   recoveryToken?: string;
+  /** Which request is holding the checkpoint (see NightItem.recovery.phase).
+   *  Defaults to "search": the long-running search request. */
+  recoveryPhase?: "chain" | "search";
   /** kind:"boost" only: approved lookup count + the recruiter the spend bills to. */
   boost?: { wanted: number; actorUserId?: string; actorEmail: string };
 }
@@ -254,9 +284,10 @@ export async function addNightItem(workspaceId: string, input: NightAddInput): P
     radiusMi: input.radiusMi,
     strictGeo: input.strictGeo,
     icp: input.icp,
+    brief: input.brief,
     salesNav: input.salesNav,
     recovery: input.recoveryToken
-      ? { token: input.recoveryToken, bootId: BOOT_ID, armedAt: nowIso() }
+      ? { token: input.recoveryToken, bootId: BOOT_ID, armedAt: nowIso(), phase: input.recoveryPhase ?? "search" }
       : undefined,
     boost: input.kind === "boost" && input.boost ? {
       wanted: Math.max(1, Math.round(input.boost.wanted)),
@@ -299,6 +330,62 @@ export async function attachNightIcp(
   // generic placeholder name. A recovered list should read like the one the recruiter
   // was watching, not "Candidate search".
   if (item.name === "Candidate search" && icp.label) item.name = icp.label;
+  touch(item);
+  await save();
+  return true;
+}
+
+/**
+ * The checkpoint a live chain armed under this token, if it is still standing.
+ *
+ * The whole chain (brief -> analyze -> search) is three separate browser requests
+ * sharing ONE token, so each one has to find the net the first press armed instead of
+ * arming another. Finished/parked items are deliberately excluded: a token whose item
+ * already stopped ("nobody matched") must never be re-adopted and quietly restarted.
+ */
+export async function findRecoveryCheckpoint(
+  workspaceId: string,
+  token: string,
+): Promise<NightItem | undefined> {
+  if (!token) return undefined;
+  await hydrate();
+  return store.find((x) =>
+    x.workspaceId === workspaceId &&
+    x.recovery?.token === token &&
+    x.stage !== "done" && x.stage !== "error");
+}
+
+/**
+ * Hand a chain-phase checkpoint over to the search request that is now driving it.
+ *
+ * The dials only exist in full once the recruiter's search request arrives (list name,
+ * cap, min fit, fresh-only, the profile analyze derived), so the checkpoint armed at
+ * the first press carries what was knowable then and is completed here. Re-stamping
+ * `armedAt` matters as much as the dials: the chain fuse is minutes and a real search
+ * legitimately runs far longer than that, so a checkpoint that stayed on the chain's
+ * clock would be "taken over" by the queue while the recruiter's own search was still
+ * running — the one thing this net must never do (it would pay for the search twice).
+ */
+export async function updateRecoveryCheckpoint(
+  workspaceId: string,
+  id: string,
+  patch: Partial<Pick<NightItem,
+    "name" | "jd" | "location" | "breadth" | "outsideGeo" | "cap" | "minFit" |
+    "freshOnly" | "radiusMi" | "strictGeo" | "icp" | "brief" | "createdBy">>,
+  phase?: "chain" | "search",
+): Promise<boolean> {
+  await hydrate();
+  const item = store.find((x) => x.id === id && x.workspaceId === workspaceId);
+  if (!item) return false;
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) (item as unknown as Record<string, unknown>)[k] = v;
+  }
+  if (item.recovery) {
+    if (phase) item.recovery.phase = phase;
+    // Every step of the chain re-stamps: the fuse measures time since the last sign of
+    // life from the tab that is driving, not time since the first press.
+    item.recovery.armedAt = nowIso();
+  }
   touch(item);
   await save();
   return true;
@@ -409,9 +496,14 @@ export function recoveryHeld(
   if (!i.recovery) return false;
   if (i.recovery.bootId !== bootId) return false;
   const age = now - Date.parse(i.recovery.armedAt);
+  // The brief/analyze steps get a much shorter fuse than a running search: they take
+  // a couple of minutes at most, so a checkpoint parked there is a tab that is gone,
+  // not work in progress. A search request holding the net can legitimately run for
+  // tens of minutes and must not be taken over underneath itself.
+  const fuse = i.recovery.phase === "chain" ? CHAIN_DEADMAN_MS : RECOVERY_DEADMAN_MS;
   // An unparseable stamp counts as expired: better a rare double-run risk than a
   // recovery net a corrupt row holds shut forever.
-  return Number.isFinite(age) && age <= RECOVERY_DEADMAN_MS;
+  return Number.isFinite(age) && age <= fuse;
 }
 
 /**
@@ -423,7 +515,10 @@ export function recoveryHeld(
  * a checkpoint and has to be paid for again. Two things count:
  *
  *  - `live`:   a checkpoint held by THIS process, i.e. an interactive search whose
- *              request is in flight this second (the recruiter is watching the bar);
+ *              request is in flight this second (the recruiter is watching the bar).
+ *              Since 2026-08-06 that includes the chain phase — the brief and analyze
+ *              steps that run BEFORE the search request — because a swap during those
+ *              is exactly as destructive and used to sail straight through this gate;
  *  - `queued`: an item actually in the search stage, i.e. a server-side search
  *              already running (an overnight search, or a recovery re-running one).
  *
@@ -714,6 +809,24 @@ async function step(item: NightItem): Promise<void> {
       item.stage = "kold";
       touch(item, `found ${applied.added} candidate(s), enriching…`);
       return;
+    }
+    // The recruiter pressed Initiate Search with an empty JD box and the chain died
+    // before (or during) the brief. Write it here, exactly as the live chain's first
+    // step would have, so the search continues instead of stopping on a missing JD.
+    if (!item.jd && item.brief && (item.brief.title || item.brief.notes)) {
+      touch(item, "writing the job brief, then searching…");
+      try {
+        item.jd = await draftJobDescription({
+          title: item.brief.title, company: item.brief.company,
+          companyUrl: item.brief.companyUrl, notes: item.brief.notes, base: "",
+        });
+        await save().catch(() => {});
+      } catch (err) {
+        finish(item, "error",
+          "the job brief could not be written (" + ((err as Error).message || "no reason given") +
+          "), so the search was not started. Nothing was saved.");
+        return;
+      }
     }
     if (!item.jd) { finish(item, "error", "no job description on the queued search"); return; }
     // The queued label carries the recruiter's radius ("Howell, NJ +25mi"), so read it

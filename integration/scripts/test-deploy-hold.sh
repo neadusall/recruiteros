@@ -49,11 +49,18 @@ run_gate() { # answers..., writes log to $WORK/log, echoes elapsed seconds
   (
     export WORK PATH="$WORK/bin:$PATH"
     export LOG="$WORK/log" DEPLOY_HOLD_MAX_SEC="${MAX:-6}" DEPLOY_HOLD_STEP_SEC=1
+    export DEPLOY_HOLD_PROBE_TRIES="${TRIES:-2}" DEPLOY_HOLD_PROBE_STEP_SEC=1
+    # The durable-snapshot second opinion reads this instead of the real volume.
+    export DEPLOY_NIGHT_SNAP="${SNAP:-$WORK/no-such-snapshot.json}"
     # shellcheck disable=SC1091
     . "$WORK/hold.sh"
   ) >/dev/null 2>&1
   echo $((SECONDS - start))
 }
+
+# A night-queue snapshot on disk, as the app writes it. $1 = jq-ready JSON array.
+write_snap() { printf '%s' "$1" > "$WORK/snap.json"; }
+iso_ago() { date -u -d "@$(( $(date -u +%s) - ${1:-0} ))" +%Y-%m-%dT%H:%M:%S.000Z; }
 
 # 1. A quiet box is not held at all.
 took=$(run_gate '{"ok":true,"busy":false,"live":0,"queued":0}')
@@ -74,16 +81,55 @@ MAX=3 took=$(MAX=3 run_gate '{"ok":true,"busy":true,"live":1,"queued":0}')
 check "an endless search stops holding at the bound" "$(grep -q "hold expired" "$WORK/log" && echo 0 || echo 1)"
 check "and the deploy goes ahead promptly after it" "$([ "$took" -le 6 ] && echo 0 || echo 1)"
 
-# 4. An unreadable probe (app down, secret unset, older endpoint) fails OPEN, loudly.
-took=$(run_gate '')
-check "an unreadable probe never blocks the deploy" "$([ "$took" -le 1 ] && echo 0 || echo 1)"
+# 4. An unreadable probe (app down, secret unset, older endpoint) fails OPEN, loudly —
+#    but only after re-asking, since the everyday cause is a container mid-restart.
+took=$(run_gate '' '' '')
+check "an unreadable probe never blocks the deploy" "$([ "$took" -le 4 ] && echo 0 || echo 1)"
 check "and it is logged rather than silently skipped" \
   "$(grep -q "no readable in-flight answer" "$WORK/log" && echo 0 || echo 1)"
+check "and it re-asked the app before giving up" \
+  "$([ "$(wc -l < "$WORK/calls" | tr -d ' ')" -ge 2 ] && echo 0 || echo 1)"
+
+# 4b. An unreadable probe that clears on the retry uses the app's real answer.
+took=$(run_gate '' '{"ok":true,"busy":false,"live":0,"queued":0}')
+check "a probe that recovers on retry does not report failing open" \
+  "$(grep -q "no readable in-flight answer" "$WORK/log" && echo 1 || echo 0)"
 
 # 5. A garbage answer is treated as unreadable, not as "quiet".
-took=$(run_gate '<html>502 Bad Gateway</html>')
+took=$(run_gate '<html>502 Bad Gateway</html>' '<html>502 Bad Gateway</html>')
 check "a non-JSON answer fails open and is logged" \
   "$(grep -q "no readable in-flight answer" "$WORK/log" && echo 0 || echo 1)"
+
+# 6. THE 2026-08-06 HOLE: the app cannot answer, but the durable queue shows a search
+#    in flight. The gate used to swap regardless and kill it.
+if command -v jq >/dev/null 2>&1; then
+  write_snap "[{\"id\":\"nq_1\",\"stage\":\"queued\",\"recovery\":{\"token\":\"t\",\"bootId\":\"b\",\"armedAt\":\"$(iso_ago 30)\",\"phase\":\"chain\"}}]"
+  MAX=3 SNAP="$WORK/snap.json" took=$(MAX=3 SNAP="$WORK/snap.json" run_gate '' '' '' '' '')
+  check "an unreachable app + a live checkpoint in the snapshot HOLDS the swap" \
+    "$(grep -q "durable queue snapshot" "$WORK/log" && echo 0 || echo 1)"
+  check "and that hold is still bounded" "$(grep -q "hold expired" "$WORK/log" && echo 0 || echo 1)"
+
+  # 7. Same, but the snapshot proves nothing is running: swap at once, and say why.
+  write_snap '[]'
+  SNAP="$WORK/snap.json" took=$(SNAP="$WORK/snap.json" run_gate '' '')
+  check "an unreachable app + an idle snapshot swaps immediately" "$([ "$took" -le 1 ] && echo 0 || echo 1)"
+  check "and says the snapshot is what cleared it" \
+    "$(grep -q "durable queue shows no search running" "$WORK/log" && echo 0 || echo 1)"
+
+  # 8. A finished item is not a running search, and neither is a stale checkpoint.
+  write_snap "[{\"id\":\"nq_2\",\"stage\":\"done\",\"recovery\":{\"armedAt\":\"$(iso_ago 10)\"}},{\"id\":\"nq_3\",\"stage\":\"queued\",\"recovery\":{\"armedAt\":\"$(iso_ago 9000)\"}}]"
+  SNAP="$WORK/snap.json" took=$(SNAP="$WORK/snap.json" run_gate '' '')
+  check "finished items and stale checkpoints do not hold a deploy" \
+    "$(grep -q "durable queue shows no search running" "$WORK/log" && echo 0 || echo 1)"
+
+  # 9. A corrupt snapshot must not hold, and must not be mistaken for "idle" either.
+  write_snap 'not json at all'
+  SNAP="$WORK/snap.json" took=$(SNAP="$WORK/snap.json" run_gate '' '')
+  check "a corrupt snapshot falls back to failing open" \
+    "$(grep -q "no readable in-flight answer" "$WORK/log" && echo 0 || echo 1)"
+else
+  echo "skip  durable-snapshot checks (no jq on this machine)"
+fi
 
 if [ "$failed" -gt 0 ]; then echo; echo "$failed FAILED"; exit 1; fi
 echo; echo "all checks passed"
