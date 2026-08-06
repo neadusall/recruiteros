@@ -69,11 +69,20 @@ const MAX_BACKOFF_MS = 24 * 60 * 60 * 1000;
 /** Reasons that can never change on a retry — bench immediately instead of burning 4 attempts. */
 const TERMINAL = /staffing|recruiting intermediary|aggregator|no verified company domain|no job url/i;
 
+/** Reasons that say the WORKER broke, not the posting: a crashed/OOM-killed Chromium fast-fails
+ *  every remaining job on that box. Four of those would bench a perfectly good posting forever,
+ *  so they are never counted as strikes. Workers withhold these too; this is the server-side
+ *  backstop for a box still running older worker code. */
+const WORKER_FAULT = /has been closed|has been disconnected|browserType\.launch|Protocol error|Target (?:page|closed)|ENOMEM|out of memory|ffmpeg exited/i;
+
 async function loadFails(): Promise<FailMap> { return (await loadSnapshot<FailMap>(FAIL_KEY).catch(() => null)) || {}; }
 
 /** True when this key should be skipped right now (benched, or still inside its backoff window). */
 function isBenched(f: FailEntry | undefined, nowMs: number): boolean {
   if (!f) return false;
+  // Self-heal: strikes recorded before the worker-fault guard shipped can be sitting on good
+  // rows. A worker-fault reason never holds a row back, whatever its try count.
+  if (WORKER_FAULT.test(f.reason || "")) return false;
   if (f.benched || f.tries >= MAX_TRIES) return true;
   const waited = nowMs - Date.parse(f.at || "");
   if (!Number.isFinite(waited)) return false;
@@ -95,6 +104,8 @@ export async function recordVideoFailures(
   let n = 0;
   for (const f of failures) {
     if (!f.company || !f.role) continue;
+    // Our own box breaking is not evidence about this posting: drop it rather than strike a row.
+    if (WORKER_FAULT.test(f.reason || "")) continue;
     const key = shotKey(f.company, f.role);
     const prev = fails[key];
     const tries = (prev?.tries || 0) + 1;

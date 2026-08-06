@@ -84,7 +84,10 @@ EnvironmentFile=$ENVF
 ExecStart=$(command -v npx) tsx scripts/video-worker.ts
 Restart=always
 RestartSec=10
-MemoryMax=3000M
+# Must sit BELOW the box's physical RAM (the render boxes are 2GB CPX11s). At 3000M the cap
+# never bound, so the kernel OOM killer shot Chromium mid-batch and left the worker running
+# with a dead browser. Under the cap systemd restarts the unit cleanly instead.
+MemoryMax=${VIDEO_WORKER_MEMMAX:-1700M}
 
 [Install]
 WantedBy=multi-user.target

@@ -56,17 +56,35 @@ async function callMain(action: string, payload: Record<string, unknown>): Promi
   return (await res.json()) as Record<string, unknown>;
 }
 
-interface Composed { results: Array<{ company: string; role: string; videoKey: string }>; failures: Array<{ company: string; role: string; reason: string }> }
+/** Chromium-is-dead signatures. On the 2GB render boxes the browser gets OOM-killed mid-batch;
+ *  from then on EVERY job fast-fails with one of these until the service restarts. Those are
+ *  facts about this box, not about the row, so they must never reach the failure ledger: four
+ *  of them bench a perfectly good posting permanently. Detect, withhold, exit for a clean
+ *  restart (systemd brings the worker back in ~10s with a fresh browser). */
+const BROWSER_DEAD_RE = /has been closed|has been disconnected|browserType\.launch|Protocol error|Target (?:page|closed)/i;
+/** A real capture navigates pages (12s goto timeouts); a sub-2s "role not found" means the
+ *  browser was already dead and the probes never actually ran. Withheld, never reported. */
+const SUSPECT_FAST_MS = 2_000;
+
+interface Composed {
+  results: Array<{ company: string; role: string; videoKey: string }>;
+  failures: Array<{ company: string; role: string; reason: string }>;
+  browserDead: boolean;
+}
 
 /** Compose a batch of videos concurrently with THIS box's CPU. Per-job errors are skipped, never fatal. */
 async function compose(jobs: Job[], clipId: string, durationSec: number): Promise<Composed> {
   const out: Array<{ company: string; role: string; videoKey: string }> = [];
   const failures: Array<{ company: string; role: string; reason: string }> = [];
+  let browserDead = false;
+  let suspects = 0;
   let cursor = 0;
   async function w(): Promise<void> {
     while (cursor < jobs.length) {
       const j = jobs[cursor++];
       if (!j?.company || !j?.role) continue;
+      if (browserDead) continue;   // stop burning the rest of the batch on a dead browser
+      const t0 = Date.now();
       try {
         const res = await composeRoleVideo(
           {
@@ -89,18 +107,23 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
           out.push({ company: j.company, role: j.role, videoKey: reportKey });
         }
         else {
+          const reason = res.reason || res.status;
           console.error(`[video-worker] ${ts()} ${j.company} / ${j.role}: ${res.status}${res.reason ? ` (${res.reason})` : ""}`);
-          failures.push({ company: j.company, role: j.role, reason: res.reason || res.status });
+          if (BROWSER_DEAD_RE.test(reason)) browserDead = true;
+          else if (Date.now() - t0 < SUSPECT_FAST_MS && ++suspects >= 2) browserDead = true;
+          else failures.push({ company: j.company, role: j.role, reason });
         }
       } catch (e) {
         const msg = (e as Error).message;
         console.error(`[video-worker] ${ts()} compose ${j.company} / ${j.role}: ${msg}`);
-        failures.push({ company: j.company, role: j.role, reason: msg });
+        if (BROWSER_DEAD_RE.test(msg)) browserDead = true;
+        else failures.push({ company: j.company, role: j.role, reason: msg });
       }
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, w));
-  return { results: out, failures };
+  // A dead browser invalidates the whole batch's failures: they were never real attempts.
+  return { results: out, failures: browserDead ? [] : failures, browserDead };
 }
 
 async function loop(): Promise<void> {
@@ -129,11 +152,17 @@ async function loop(): Promise<void> {
         await primeClipCache(claim.clip as Parameters<typeof primeClipCache>[0]).catch(() => {});
       }
 
-      const { results, failures } = await compose(jobs, clipId, durationSec);
+      const { results, failures, browserDead } = await compose(jobs, clipId, durationSec);
       // Always report BOTH. A failure the main never hears about is re-handed to a worker every
       // cycle forever, which is exactly how the fleet came to spend all its CPU on dead roles.
       if (results.length || failures.length) await callMain("submit_video", { results, failures });
       console.log(`[video-worker] ${ts()} claimed ${jobs.length} -> composed ${results.length}, failed ${failures.length}`);
+      if (browserDead) {
+        // Chromium is gone. Every further job would fast-fail and, four strikes in, bench a good
+        // posting for good. Exit instead; systemd restarts us with a fresh browser in ~10s.
+        console.error(`[video-worker] ${ts()} browser crash detected, exiting for a clean restart`);
+        process.exit(1);
+      }
     } catch (e) {
       consecutiveFails++;
       const backoff = Math.min(60_000, 2_000 * 2 ** Math.min(consecutiveFails, 5));
