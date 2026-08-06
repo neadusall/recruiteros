@@ -28,16 +28,21 @@ import {
   type ProofTerm, type ProofVertical,
   detectVerticals, termsForVerticals, proofQueryGroups,
 } from "./proofTerms";
+import { applyTermStats } from "./proofStats";
 
 export interface ProofPlan {
   /** Which shelves of the library this role drew on (may be empty for an off-book role). */
   verticals: ProofVertical[];
-  /** Everything that counts as evidence for this role: library plus JD-specific. */
+  /** Everything that counts as evidence for this role: library, JD, and derived. */
   terms: ProofTerm[];
   /** Ready-to-drop X-ray fragments: ("CPA" OR "ASC 740" OR ...). */
   queryGroups: string[];
   /** Terms that came from the JD rather than the library, for the UI's "searching for" line. */
   fromJd: string[];
+  /** Terms derived for this role because no curated shelf covered it. */
+  derived?: string[];
+  /** Terms measured as absent from this market and retired, for an honest readout. */
+  dropped?: string[];
 }
 
 /** Soft-skill and filler language that shows up in niceToHave and must never steer a search. */
@@ -74,7 +79,10 @@ export function isSearchableEvidence(raw: string): boolean {
   // Named products and proper nouns: NetSuite, PointClickCare, Epic, CentralReach.
   if (/^[A-Z][A-Za-z0-9]+( [A-Z][A-Za-z0-9]+)?$/.test(s) && words.length <= 2) return true;
   // Short specific domain phrases: "transfer pricing", "skilled nursing", "month-end close".
-  if (words.length >= 2 && words.length <= 3 && !/^(the|a|an|and|or|of|in|with|for)\b/.test(low)) return true;
+  // The article guard requires actual whitespace, not \b: a word boundary sits between
+  // "a" and "&", so \b silently rejected every term beginning "A&" ("A&P License", the
+  // aviation mechanic's licence, and anything else shaped like it).
+  if (words.length >= 2 && words.length <= 3 && !/^(the|a|an|and|or|of|in|with|for)\s/.test(low)) return true;
   return false;
 }
 
@@ -90,7 +98,17 @@ export function isSearchableEvidence(raw: string): boolean {
 export function buildProofPlan(
   icp: CandidateICP,
   jdText = "",
-  opts: { maxGroups?: number; perGroup?: number } = {},
+  opts: {
+    maxGroups?: number;
+    perGroup?: number;
+    /** Vocabulary derived for this role by proofExtract, for markets the curated library
+     *  does not cover. Ranked BELOW curated terms of the same name: a human who knows the
+     *  vertical beats a general model on the same question. */
+    derived?: ProofTerm[];
+    /** Measured yield from proofStats, which retires terms this market does not actually
+     *  use and keeps saturated ones out of the query matrix. */
+    stats?: Record<string, { seen: number; hits: number }>;
+  } = {},
 ): ProofPlan {
   // Vertical detection reads the JD plus the parsed role language, so a thin JD still
   // lands on the right shelf via its titles and industries.
@@ -136,6 +154,32 @@ export function buildProofPlan(
   takeJdTerms(icp.mustHave, 3);
   takeJdTerms(icp.niceToHave, 2);
 
-  const queryGroups = proofQueryGroups(terms, opts.perGroup ?? 6, opts.maxGroups ?? 4);
-  return { verticals, terms, queryGroups, fromJd };
+  // DERIVED VOCABULARY (any industry). Added last and never allowed to override a term
+  // the library or the JD already established: curation and the client's own words both
+  // outrank a general model's guess about the same market.
+  const derived: string[] = [];
+  for (const t of opts.derived || []) {
+    const k = t.term.toLowerCase();
+    if (seen.has(k) || bySurface.has(k)) continue;
+    seen.add(k);
+    terms.push(t);
+    derived.push(t.term);
+  }
+
+  // MEASURED YIELD. Curated and JD-stated terms are protected: a thin sample must not
+  // retire vocabulary a human asserted. Everything derived has to survive real profiles.
+  const protectedTerms = new Set<string>();
+  for (const t of library) protectedTerms.add(t.term.toLowerCase());
+  for (const t of fromJd) protectedTerms.add(t.toLowerCase());
+  const ranked = applyTermStats(terms, (opts.stats as any) || {}, protectedTerms);
+
+  const queryGroups = proofQueryGroups(ranked.queryTerms, opts.perGroup ?? 6, opts.maxGroups ?? 4);
+  return {
+    verticals,
+    terms: ranked.terms,
+    queryGroups,
+    fromJd,
+    derived: derived.length ? derived : undefined,
+    dropped: ranked.dropped.length ? ranked.dropped : undefined,
+  };
 }

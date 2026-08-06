@@ -776,6 +776,7 @@ async function step(item: NightItem): Promise<void> {
     // interactive search honors its own Fresh-only checkbox instead.
     const excludeKeys = item.freshOnly === false ? undefined : await getSeenKeys(ws);
     const result = await withWorkspaceCreds(ws, () => runDiscovery(queries, icp, {
+      workspaceId: ws,
       cap: item.cap ?? 500,
       minFit: item.minFit ?? 10,
       breadth,

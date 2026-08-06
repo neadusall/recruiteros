@@ -423,6 +423,10 @@ export interface VetBatchRef {
 export interface DiscoveryOptions {
   /** Stop once this many ranked, deduped rows are collected. Default 3000. */
   cap?: number;
+  /** Whose evidence ledger this run reads and writes (lib/sourcing/proofStats). Omitted
+   *  means the run still uses proof scoring, it just neither learns from nor benefits
+   *  from measured yield, which is the correct behaviour for a workspace-less caller. */
+  workspaceId?: string;
   /** Drop rows scoring below this fit threshold (0..100). Default 45. */
   minFit?: number;
   /** Which engines to use, in cheapest-first order. Defaults to whatever is configured.

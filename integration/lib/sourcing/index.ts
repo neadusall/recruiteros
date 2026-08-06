@@ -22,6 +22,11 @@ export {
 export {
   buildProofPlan, isSearchableEvidence, type ProofPlan,
 } from "./proofPlan";
+export { extractProofTerms, roleSignature, normalizeExtracted } from "./proofExtract";
+export {
+  recordTermYield, termStatsFor, applyTermStats, isUnbiasedRow,
+  type TermStat, type RankedTerms,
+} from "./proofStats";
 export {
   detectVerticals, termsForVerticals, matchProofTerms, proofScore, proofQueryGroups,
   PROOF_LIBRARY, VERTICAL_LABEL, type ProofTerm, type ProofVertical, type ProofHit,

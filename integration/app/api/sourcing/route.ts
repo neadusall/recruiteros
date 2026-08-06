@@ -364,6 +364,7 @@ export async function POST(req: Request) {
         // Setup-pasted (workspace-store) keys inside this wrapper. Without it a Serper/
         // RapidAPI key saved in Setup was invisible to the actual search (env-only).
         const result = await withWorkspaceCreds(ws, () => runDiscovery(queries, icp, {
+          workspaceId: ws,
           cap: typeof b.cap === "number" ? b.cap : 500,
           minFit: typeof b.minFit === "number" ? b.minFit : 10,
           breadth,

@@ -46,6 +46,9 @@
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SearchBreadth, SourcingQuery } from "./types";
 import { scoreCandidate, inTargetGeo, US_STATE_FULL, type ScoreOptions } from "./score";
 import { buildProofPlan } from "./proofPlan";
+import { extractProofTerms, roleSignature } from "./proofExtract";
+import { recordTermYield, termStatsFor } from "./proofStats";
+import type { ProofTerm } from "./proofTerms";
 import {
   distanceFromCenter, enforcedRadiusMi, geocodeUsPlace, stateOfPlace, statesWithinRadius,
   stripRadiusSuffix, withinRadius,
@@ -865,11 +868,21 @@ export async function runDiscovery(
   // What the FILTER enforces (Exact = 15mi) vs what the recruiter picked (0 for Exact).
   const filterRadiusMi = remote ? 0 : enforcedRadiusMi(radiusMi);
   const geoCenter = geoLabel ? geocodeUsPlace(geoLabel) : null;
-  // PROOF EVIDENCE for this run. Built here rather than passed in so EVERY caller gets
-  // it (interactive run, overnight queue, Sales Nav import, crash recovery) with no
-  // wiring of its own, and so a row is always scored on the same vocabulary the plan
-  // searched with. Pure and cheap: no model call, no I/O.
-  const proofTerms = buildProofPlan(icp).terms;
+  // PROOF EVIDENCE for this run, assembled from all three layers: the curated library,
+  // vocabulary derived for this role when no shelf covers its industry, and the measured
+  // yield that retires terms this market does not actually use. Built here rather than
+  // passed in so EVERY caller gets it (interactive run, overnight queue, Sales Nav import,
+  // crash recovery) with no wiring of its own.
+  //
+  // Both enrichments are best-effort by design: a model hiccup or a cold stats ledger
+  // must never stop a search, so each degrades to the layer beneath it.
+  const roleSig = roleSignature(icp);
+  const derived = await extractProofTerms(icp, "").catch(() => [] as ProofTerm[]);
+  const termStats = opts.workspaceId
+    ? await termStatsFor(opts.workspaceId, roleSig).catch(() => ({}))
+    : {};
+  const proofPlan = buildProofPlan(icp, "", { derived, stats: termStats });
+  const proofTerms = proofPlan.terms;
   // Score against the ENFORCED radius, so an Exact search ranks by real miles too
   // instead of dropping to name matching the moment the dropdown says "Exact".
   const scoreOpts: ScoreOptions = {
@@ -1214,6 +1227,19 @@ export async function runDiscovery(
   }
 
   const candidates = inList.concat(outList);
+
+  // LEARN FROM THIS RUN. Fold how often each term actually appeared into the evidence
+  // ledger, so the next run for this role ranks its vocabulary on measured reality rather
+  // than on anyone's opinion, and terms that describe no real person get retired.
+  // Deliberately counts the WHOLE harvest, not just the rows that survived the fit bar:
+  // the question is what this market's people write on their profiles, and rows we
+  // discarded are just as good evidence of that as rows we kept. Rows found BY a proof
+  // query are excluded inside recordTermYield, since their evidence was guaranteed by the
+  // boolean that found them. Fire-and-forget: a ledger write must never fail a search.
+  if (opts.workspaceId && proofTerms.length) {
+    const harvest = candidates.concat(geoBuffer, fitBuffer);
+    void recordTermYield(opts.workspaceId, roleSig, proofTerms, harvest).catch(() => {});
+  }
 
   if (geoDropped && !rescued) {
     warnings.push(`${geoDropped} matching people outside the target area were left out to keep this run geo-only (turn on "Also list out-of-area (separate list)" in Advanced controls to see them next run)`);
