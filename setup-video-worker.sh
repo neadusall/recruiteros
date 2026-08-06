@@ -84,10 +84,13 @@ EnvironmentFile=$ENVF
 ExecStart=$(command -v npx) tsx scripts/video-worker.ts
 Restart=always
 RestartSec=10
-# Must sit BELOW the box's physical RAM (the render boxes are 2GB CPX11s). At 3000M the cap
-# never bound, so the kernel OOM killer shot Chromium mid-batch and left the worker running
-# with a dead browser. Under the cap systemd restarts the unit cleanly instead.
-MemoryMax=${VIDEO_WORKER_MEMMAX:-1700M}
+# Memory, as tuned against the live 2GB CPX11 boxes (which run 4GB of swap). Chromium+ffmpeg
+# peak around 1.5G combined: MemoryHigh throttles into swap before anything dies, MemoryMax sits
+# above the peak but far under RAM+swap so neither the cgroup nor the kernel kills a composite.
+# Do NOT tighten these without swap in place: a 1400M cap OOM-killed every composite, and the
+# old 3000M sat above physical RAM so it never bound at all.
+MemoryHigh=${VIDEO_WORKER_MEMHIGH:-1200M}
+MemoryMax=${VIDEO_WORKER_MEMMAX:-2600M}
 # A stop must not wait out the default 90s: the worker leaves after the current batch, and
 # anything still holding on (a hung ffmpeg) gets killed promptly. KillMode=control-group is the
 # default but stated here because it is load-bearing: ffmpeg/Chromium children must die with the
