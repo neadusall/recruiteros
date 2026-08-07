@@ -293,8 +293,13 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       }
 
       try {
+        // The engine get-or-creates its campaign BY EXACT NAME, so a renamed run
+        // pushes top-ups under the name its campaign was created with (pinned in
+        // ostextName by the rename) — otherwise the rename would fork a second,
+        // near-empty campaign and split the same list's texts across two.
+        const pushName = run.ostextName || run.name;
         const imported = await ostextImport({
-          name: run.name,
+          name: pushName,
           template,
           positionSummary: `Pushed from JD Sourcing list "${run.name}" (${contacts.length} contacts, server auto-send).`,
           recruiterName: recruiter?.name || "",
@@ -311,6 +316,10 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
         // Keep the engine's answer on the run: "list shows N phones but the
         // campaign holds fewer" is almost always knownNonMobile (Telnyx already
         // judged those numbers not cells), and this stamp makes that checkable.
+        // Remember the name the campaign actually lives under, so a later rename
+        // keeps topping THAT campaign up (the engine answers with its own name,
+        // which is authoritative when it reused an existing campaign).
+        run.ostextName = (typeof imported.campaignName === "string" && imported.campaignName) || pushName;
         stamp.lastImport = {
           at: nowIso(),
           added: Number(imported.added) || 0,

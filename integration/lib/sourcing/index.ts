@@ -45,8 +45,9 @@ export {
 } from "./deepVet";
 export {
   listSourcingRuns, getSourcingRun, saveSourcingRun, deleteSourcingRun,
-  purgeWorkspaceSourcingRuns, type SaveRunInput,
+  renameSourcingRun, purgeWorkspaceSourcingRuns, type SaveRunInput,
 } from "./store";
+export { renameSourcingList, MAX_RUN_NAME, type RenameRunResult } from "./rename";
 export {
   laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv, parseCsv,
   submitLaxisJob, getLaxisJob, mergeEnrichedCsv, laxisCandKey, jobRowsDone,

@@ -138,6 +138,30 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
   return run;
 }
 
+/**
+ * Rename a saved run in place — name only, nothing else on the run is touched.
+ * Kept separate from saveSourcingRun because that one replaces the candidate set
+ * from its input, and a rename must never be able to rewrite a list's people.
+ * Downstream propagation (Candidates list, campaign, tags) lives in ./rename.
+ */
+export async function renameSourcingRun(
+  workspaceId: string, id: string, name: string,
+): Promise<SourcingRun | undefined> {
+  await hydrate();
+  const run = store.find((r) => r.id === id && r.workspaceId === workspaceId);
+  if (!run) return undefined;
+  const next = (name || "").trim();
+  if (!next || next === run.name) return run;
+  // Pin the OS Text campaign name on the FIRST rename of an already-pushed run:
+  // top-ups keep landing in the campaign the engine created under the old name
+  // instead of forking a second one under the new one.
+  if (!run.ostextName && (run.autoflow?.sentAt || run.promotedCampaignId)) run.ostextName = run.name;
+  run.name = next;
+  run.updatedAt = nowIso();
+  await save();
+  return run;
+}
+
 export async function deleteSourcingRun(workspaceId: string, id: string): Promise<boolean> {
   await hydrate();
   const i = store.findIndex((r) => r.id === id && r.workspaceId === workspaceId);

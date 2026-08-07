@@ -12770,6 +12770,22 @@
         '.jd-ttxt{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
       '.jd-run-main{display:flex;align-items:center;gap:10px;min-width:0}' +
+      /* Rename in place: the list name is a click target, with a pencil beside it.
+         The pencil stays visible (dimmed) rather than hover-only — hover-only
+         affordances are invisible on touch and undiscoverable everywhere else. */
+      '.jd-runname{cursor:text;border-radius:5px;padding:1px 3px;margin-left:-3px;transition:background .12s ease}' +
+      '.jd-runname:hover{background:var(--bg-soft);box-shadow:inset 0 0 0 1px var(--border-strong)}' +
+      '.jd-rename{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;margin-left:3px;border:0;border-radius:6px;background:transparent;color:var(--text-dim);cursor:pointer;opacity:.55;transition:opacity .12s ease,background .12s ease,color .12s ease;vertical-align:middle}' +
+      '.jd-rename .isvg{width:13px;height:13px;pointer-events:none}' +
+      '.jd-run:hover .jd-rename{opacity:.9}' +
+      '.jd-rename:hover,.jd-rename:focus-visible{opacity:1;background:var(--bg-soft);color:var(--text)}' +
+      '.jd-rename:focus-visible{outline:none;box-shadow:var(--focus-ring)}' +
+      // Wraps rather than overflows: on a narrow screen the hint drops under the
+      // field instead of running off the edge of the card.
+      '.jd-renamebox{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 8px;max-width:100%;vertical-align:middle}' +
+      '.jd-renamebox input{font:inherit;font-weight:700;padding:3px 8px;width:min(420px,100%);min-width:0;border:1px solid var(--accent,#2e5bd7);border-radius:7px;background:var(--bg);color:var(--text)}' +
+      '.jd-renamebox input:focus{outline:none;box-shadow:var(--focus-ring)}' +
+      '.jd-renamebox .jd-renamehint{font-size:11.5px;font-weight:500;color:var(--text-dim)}' +
       '.jd-reach{display:inline-flex;flex-wrap:wrap;row-gap:4px;gap:6px;margin:0 4px 0 2px;vertical-align:middle;max-width:100%}' +
       '.jd-reach span{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.jd-reach .isvg{width:12px;height:12px}' +
@@ -13162,6 +13178,86 @@
       }).catch(function () { qBtn.disabled = false; msg("Could not reach the server."); });
     }
 
+    /* ---- Rename a saved list, in place ----
+       The name is not decoration: it is the Candidates list's name, its campaign's
+       name and every promoted candidate's tag, so the server moves all of them
+       together (lib/sourcing/rename). The OS Text campaign keeps the name it was
+       created under on purpose — that engine finds campaigns BY NAME, and renaming
+       there would fork a second, near-empty campaign.
+       renamingId is read by loadRuns: the overnight-queue poll re-renders this list
+       every 8-30s and would otherwise wipe the half-typed name mid-edit. */
+    var renamingId = null;
+    function startRunRename(id) {
+      var host = $("#jdRuns"); if (!host || !id) return;
+      var nameEl = host.querySelector('b.jd-runname[data-rename="' + id + '"]');
+      if (!nameEl || renamingId === id) return;
+      var run = (state.runs || []).find(function (r) { return r.id === id; });
+      var current = (run && run.name) || nameEl.textContent || "";
+      renamingId = id;
+
+      var box = document.createElement("span");
+      box.className = "jd-renamebox";
+      var input = document.createElement("input");
+      input.type = "text"; input.value = current; input.maxLength = 120;
+      input.setAttribute("aria-label", "List name");
+      var hint = document.createElement("span");
+      hint.className = "jd-renamehint";
+      hint.textContent = "Enter to save · Esc to cancel";
+      box.appendChild(input); box.appendChild(hint);
+      // The name and its pencil both step aside while the field is open.
+      var pencil = host.querySelector('button.jd-rename[data-rename="' + id + '"]');
+      nameEl.style.display = "none";
+      if (pencil) pencil.style.display = "none";
+      nameEl.parentNode.insertBefore(box, nameEl);
+      input.focus(); input.select();
+
+      // open -> saving -> closed. Only "open" accepts a commit, so a blur that
+      // lands on top of an Enter can never fire the same rename twice.
+      var phase = "open";
+      function close() {
+        if (phase === "closed") return;
+        phase = "closed"; renamingId = null;
+        if (box.parentNode) box.parentNode.removeChild(box);
+        nameEl.style.display = "";
+        if (pencil) pencil.style.display = "";
+        // The poll that was skipped while editing picks the list back up.
+        loadRuns();
+      }
+      function commit() {
+        if (phase !== "open") return;
+        var next = input.value.replace(/\s+/g, " ").trim();
+        if (!next || next === current.trim()) { close(); return; }
+        phase = "saving";
+        input.disabled = true; hint.textContent = "Renaming…";
+        send("/sourcing", "POST", { action: "rename", id: id, name: next }).then(function (r) {
+          if (!r.ok) {
+            phase = "open";
+            input.disabled = false; input.focus();
+            hint.textContent = (r.data && r.data.detail) || "Could not rename this list.";
+            return;
+          }
+          // Say what moved with the name, so nobody has to go and check.
+          var d = r.data || {};
+          var also = [];
+          if (d.renamedList || d.renamedCampaign) also.push("the Candidates list moved with it");
+          if (d.retagged) also.push(d.retagged + " candidate tag" + (d.retagged === 1 ? "" : "s") + " updated");
+          close();
+          toast('Renamed to "' + next + '"' + (also.length ? " · " + also.join(" · ") : ""));
+        }).catch(function () {
+          phase = "open";
+          input.disabled = false; input.focus();
+          hint.textContent = "Could not reach the server.";
+        });
+      }
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); commit(); }
+        else if (e.key === "Escape") { e.preventDefault(); close(); }
+      });
+      // A click away saves rather than discards (the same rule the rest of the
+      // tab's inline fields follow); the delay lets Enter/Esc win the race.
+      input.addEventListener("blur", function () { setTimeout(commit, 120); });
+    }
+
     function loadRuns() {
       return api("/sourcing").then(function (d) {
         var host = $("#jdRuns"); if (!host) return;
@@ -13171,6 +13267,9 @@
         renderNight((d && d.nightQueue) || []);
         resumeInflightSearches((d && d.nightQueue) || []);
         renderSnavTargets();
+        // Never re-render the list out from under someone typing a new name. The
+        // queue poll above still runs, and closing the editor re-renders.
+        if (renamingId) return;
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
         var warn = (d && d.durable === false)
@@ -13496,7 +13595,11 @@
             '</span>';
           return '<div class="jd-run"><div class="jd-run-top"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
-            '<div><b>' + esc(r.name) + '</b> ' + reach + '<span class="muted">· ' +
+            // The list name is editable in place (click the name or the pencil).
+            // Renaming moves the Candidates list, its campaign and everyone's tag
+            // with it, so one list never ends up living under two names.
+            '<div><b class="jd-runname" data-rename="' + esc(r.id) + '" title="Click to rename this list">' + esc(r.name) + '</b>' +
+            '<button type="button" class="jd-rename" data-rename="' + esc(r.id) + '" title="Rename this list. The Candidates list, its campaign and every tagged candidate are renamed with it."><svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg></button> ' + reach + '<span class="muted">· ' +
             (r.location ? (esc(r.location) + ' · ') : '') +
             (outN ? ((n - outN) + ' in area + ' + outN + ' out of area') : (n + ' candidates')) + ' · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') + '</span></div></div>' +
@@ -14380,7 +14483,14 @@
         try { sessionStorage.setItem("ros_open_list", openA.getAttribute("data-openlist") || ""); } catch (err) {}
         return;
       }
-      if (t.tagName !== "BUTTON") return;
+      // Rename in place: the list name itself and its pencil both open the editor.
+      var renameEl = t.closest ? t.closest("[data-rename]") : null;
+      if (renameEl) { startRunRename(renameEl.getAttribute("data-rename")); return; }
+      // closest("button"), not t.tagName: clicks on a button's inner <svg> land on
+      // the icon, not the button, and used to fall straight through this guard.
+      var btn = t.closest ? t.closest("button") : (t.tagName === "BUTTON" ? t : null);
+      if (!btn) return;
+      t = btn;
       var id;
       // Send to Candidates + Send to OS Text run automatically when a search finishes
       // (runAutoPipeline). Enrich here is the manual RESUME for a chain that stopped

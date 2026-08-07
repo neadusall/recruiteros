@@ -22,6 +22,7 @@
  *   { action: "ostext", id, name?, validate? }     -> push the run's phone-holding candidates into an OS Text SMS campaign
  *   { action: "merge", ids, name?, deleteSources? } -> combine 2+ saved runs into one deduped list (fills blanks, keeps best row)
  *   { action: "salesNav", url, name?, targetRunId?, limit?, expand?, breadth? } -> pull a pasted Sales Navigator search + waterfall expansion into a new or existing list (deduped)
+ *   { action: "rename", id, name }                 -> rename a saved run (moves the Candidates list, campaign and tags with it)
  *   { action: "delete", id }                       -> remove a saved run
  *
  * Discovery-only until promote; contact lookup and deep-vet are on demand. Session-gated.
@@ -33,6 +34,7 @@ import {
   planSourcing, pinIcpLocation, parseJobDescription, generateQueries, runDiscovery, parseRadiusMi,
   googleSearchConfigured, searxSearchConfigured, serperSearchConfigured, dataforseoSearchConfigured, rapidApiSearchConfigured,
   listSourcingRuns, saveSourcingRun, deleteSourcingRun, getSourcingRun, promoteSourcingRun,
+  renameSourcingList, MAX_RUN_NAME,
   profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
   fetchFullProfileCached, getCachedContact, putCachedContact,
@@ -1140,7 +1142,10 @@ export async function POST(req: Request) {
       if (!b?.id) return fail("missing_id", 422);
       const run = await getSourcingRun(ws, b.id);
       if (!run) return fail("run_not_found", 404);
-      const name = ((b.name as string) || run.name || "").trim();
+      // Default to the name this run's campaign already lives under (pinned when
+      // the list was renamed): the engine get-or-creates by exact name, so a
+      // rename must top the SAME campaign up, not fork a near-empty twin.
+      const name = ((b.name as string) || run.ostextName || run.name || "").trim();
       if (!name) return fail("missing_name", 422);
       // Re-measure against the list's own location + mileage before anyone is queued
       // for a text. This is the last gate before real outbound, and the list may have
@@ -1211,6 +1216,12 @@ export async function POST(req: Request) {
         const err = e as Error & { code?: string };
         const code = err.code || "ostext_import_failed";
         return fail(code, code === "ostext_not_connected" ? 503 : 502, { detail: err.message });
+      }
+      // Pin the campaign name this run pushes under, so a later rename keeps
+      // topping up the campaign that already holds these people.
+      if (!run.ostextName) {
+        run.ostextName = (typeof data.campaignName === "string" && data.campaignName) || name;
+        await saveSourcingRun(ws, { ...run });
       }
       const guarded = (Number(data.protectedDnc) || 0) + (Number(data.protectedRecent) || 0);
       // Job Library: an OS Text push is a candidate-JD tie too; pair everyone
@@ -1304,6 +1315,21 @@ export async function POST(req: Request) {
           console.warn(`[sourcing] combined-list auto-send of "${mergedRun.name}" failed (sweeper will retry): ${(e as Error).message}`));
       }
       return ok({ run: mergedRun, total: candidates.length, overlap, sources: runs.length, deleted, keptBusy, autoSend, tag: name });
+    }
+
+    // Rename a saved list. The name is written on more than this tab (the
+    // Candidates campaign, the saved Candidates list, every promoted person's
+    // tag), so the rename moves all of them together — see lib/sourcing/rename.
+    if (action === "rename") {
+      if (!b?.id) return fail("missing_id", 422);
+      const name = typeof b.name === "string" ? b.name.replace(/\s+/g, " ").trim() : "";
+      if (!name) return fail("missing_name", 422, { detail: "Give the list a name." });
+      if (name.length > MAX_RUN_NAME) {
+        return fail("name_too_long", 422, { detail: `Keep the name under ${MAX_RUN_NAME} characters.` });
+      }
+      const res = await renameSourcingList(ws, b.id, name);
+      if (!res) return fail("run_not_found", 404);
+      return ok(res);
     }
 
     if (action === "delete") {

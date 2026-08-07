@@ -210,6 +210,14 @@ export interface SourcingRun {
   /** Quota'd search-API requests the discovery run spent building this list, by
    *  engine (rapidapi = the paid people-search listing's monthly credits). */
   apiUsage?: { rapidapi?: number; serper?: number; google?: number; dataforseo?: number };
+  /**
+   * The name this run's OS Text campaign was actually created under. The engine's
+   * /api/import get-or-creates a campaign BY EXACT NAME, so a renamed list must
+   * keep pushing top-ups under the original name or the rename would fork a
+   * second, half-empty campaign. Stamped from the engine's answer on first push;
+   * absent on runs that have never been pushed (they use the current name).
+   */
+  ostextName?: string;
   /** Set once promoted into Candidates, with the created campaign + list ids.
    *  promotedCount = everyone delivered (new + already-in-pipeline), not net-new. */
   promotedCampaignId?: string;
