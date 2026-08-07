@@ -517,7 +517,100 @@ export function inferRoles(headline: string, facts: NewsFacts, targetRoles?: str
 
 const RSS_TIMEOUT_MS = 12_000;
 
+/* ------------------------------------------------------------------ */
+/* Circuit breaker + politeness                                        */
+/* ------------------------------------------------------------------ */
+/*
+ * Google News RSS is free and unauthenticated, which means the only thing standing
+ * between us and a block is our own manners. Every news watchlist fires up to five
+ * queries per poll, and the tick runs every 15 minutes, so a handful of lists is
+ * thousands of requests a day from ONE server IP. Two guards:
+ *
+ *   1. A minimum gap between requests, so a tick never bursts.
+ *   2. A breaker that OPENS on a block (429/403) or a run of failures, and stays open
+ *      for an escalating cooldown. Without it, the failure mode is the worst kind: we
+ *      keep hammering an endpoint that is already refusing us, guaranteeing the block
+ *      sticks, while every list quietly records zero.
+ *
+ * While open, discovery returns immediately with a warning naming the reopen time, so
+ * the list's lastError says "blocked until 14:35" rather than showing an innocent zero.
+ */
+
+const MIN_REQUEST_GAP_MS = 400;
+const COOLDOWNS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000];
+const FAILURES_BEFORE_OPEN = 3;
+
+const breaker = {
+  consecutiveFailures: 0,
+  trips: 0,
+  openUntil: 0,
+  lastError: "",
+  lastOkAt: 0,
+};
+let lastRequestAt = 0;
+
+export interface NewsFeedHealth {
+  open: boolean;
+  openUntil?: string;
+  consecutiveFailures: number;
+  trips: number;
+  lastError?: string;
+  lastOkAt?: string;
+}
+
+/** Feed health, for the watch status endpoint and any monitor that wants it. */
+export function newsFeedHealth(): NewsFeedHealth {
+  return {
+    open: Date.now() < breaker.openUntil,
+    openUntil: breaker.openUntil ? new Date(breaker.openUntil).toISOString() : undefined,
+    consecutiveFailures: breaker.consecutiveFailures,
+    trips: breaker.trips,
+    lastError: breaker.lastError || undefined,
+    lastOkAt: breaker.lastOkAt ? new Date(breaker.lastOkAt).toISOString() : undefined,
+  };
+}
+
+/** Test hook: clear breaker state so suites stay deterministic. */
+export function __resetNewsFeedBreaker(): void {
+  breaker.consecutiveFailures = 0;
+  breaker.trips = 0;
+  breaker.openUntil = 0;
+  breaker.lastError = "";
+  breaker.lastOkAt = 0;
+  lastRequestAt = 0;
+}
+
+/** A refusal, as opposed to a transient blip. These open the breaker immediately. */
+function isBlock(message: string): boolean {
+  return /rss_(429|403|401|451)/.test(message);
+}
+
+function tripBreaker(message: string): void {
+  breaker.lastError = message.slice(0, 160);
+  breaker.consecutiveFailures += 1;
+  const shouldOpen = isBlock(message) || breaker.consecutiveFailures >= FAILURES_BEFORE_OPEN;
+  if (!shouldOpen) return;
+  const cooldown = COOLDOWNS_MS[Math.min(breaker.trips, COOLDOWNS_MS.length - 1)];
+  breaker.trips += 1;
+  breaker.openUntil = Date.now() + cooldown;
+}
+
+function clearBreaker(): void {
+  breaker.consecutiveFailures = 0;
+  breaker.trips = 0;
+  breaker.openUntil = 0;
+  breaker.lastError = "";
+  breaker.lastOkAt = Date.now();
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function getFeed(query: string): Promise<string> {
+  // Politeness gap. Cheap insurance against becoming the reason we get blocked.
+  const wait = lastRequestAt + MIN_REQUEST_GAP_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastRequestAt = Date.now();
+
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), RSS_TIMEOUT_MS);
@@ -527,7 +620,12 @@ async function getFeed(query: string): Promise<string> {
       signal: ctl.signal,
     });
     if (!res.ok) throw new Error(`rss_${res.status}`);
-    return await res.text();
+    const text = await res.text();
+    clearBreaker();
+    return text;
+  } catch (e) {
+    tripBreaker((e as Error)?.message || "rss_failed");
+    throw e;
   } finally {
     clearTimeout(timer);
   }
@@ -629,6 +727,15 @@ export async function discoverFromNews(opts: NewsDiscoverOpts): Promise<NewsDisc
     return result;
   }
 
+  // Breaker open: do not touch the endpoint that is already refusing us. Say so
+  // explicitly, so the list shows "news feed blocked until HH:MM" instead of a zero
+  // that looks like a quiet market.
+  if (Date.now() < breaker.openUntil) {
+    const until = new Date(breaker.openUntil).toISOString().slice(11, 16);
+    result.warnings.push(`news feed backing off until ${until} UTC (${breaker.lastError || "repeated failures"})`);
+    return result;
+  }
+
   const signals = (opts.signals?.length ? opts.signals : (["funding_round", "exec_hire"] as NewsSignal[]))
     .filter((s) => NEWS_SIGNALS.includes(s));
   const windowDays = Math.min(Math.max(Math.round(opts.windowDays ?? 7), 1), 90);
@@ -642,6 +749,12 @@ export async function discoverFromNews(opts: NewsDiscoverOpts): Promise<NewsDisc
 
   for (const signal of signals) {
     if (Date.now() >= deadline) { result.warnings.push("timebox reached"); break; }
+    // The breaker can trip mid-sweep: stop this list's remaining queries rather than
+    // spending them all against an endpoint that just started refusing us.
+    if (Date.now() < breaker.openUntil) {
+      result.warnings.push(`news feed started refusing mid-sweep (${breaker.lastError || "blocked"})`);
+      break;
+    }
     const query = QUERY[signal].replace("{seg}", `"${segment}"`).replace("{win}", `${windowDays}d`);
     let items: Headline[];
     try {

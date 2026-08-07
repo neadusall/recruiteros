@@ -22,7 +22,7 @@ process.env.SIGNAL_PITCH_AI = "0";   // keep the pitch tests deterministic and o
 const {
   extractCompany, extractFacts, parseAmount, buildReason, inferRoles,
   cleanHeadline, parseFeed, discoverFromNews, NEWS_SIGNALS, isRealRaise,
-  isTitleCase, deTitleCase,
+  isTitleCase, deTitleCase, newsFeedHealth, __resetNewsFeedBreaker,
 } = await import("../lib/signals/watch/newsDiscover");
 const {
   composePitch, checkPitch, listPhrase, seatFor, observation, stakes,
@@ -222,13 +222,88 @@ eq(parseFeed("<html>not rss</html>").length, 0, "non-RSS yields no items");
 /* 9. Discovery guards (no network)                                    */
 /* ------------------------------------------------------------------ */
 
+__resetNewsFeedBreaker();
+
 const noSeg = await discoverFromNews({ segment: "  " });
 eq(noSeg.leads.length, 0, "an empty segment discovers nothing");
 ok(noSeg.warnings.length > 0, "an empty segment explains itself");
 
-const timeboxed = await discoverFromNews({ segment: "supply chain software", timeboxMs: 3_000, limit: 1 });
-ok(Array.isArray(timeboxed.leads), "discovery always returns an array, even when the feed is unreachable");
-ok(timeboxed.leads.length <= 1, "limit is honored");
+// Stubbed, NOT a real network call: a suite that reaches the internet is a suite that
+// fails on a plane. Live behavior is covered by scripts/live-news-check.mts.
+{
+  const realFetch0 = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(
+    `<rss><channel>
+      <item><title>Alpha raises $10M seed round</title><link>https://x.test/a</link></item>
+      <item><title>Beta raises $20M Series A</title><link>https://x.test/b</link></item>
+     </channel></rss>`, { status: 200 },
+  )) as typeof fetch;
+  const limited = await discoverFromNews({ segment: "supply chain software", signals: ["funding_round"], limit: 1 });
+  ok(Array.isArray(limited.leads), "discovery always returns an array");
+  eq(limited.leads.length, 1, "limit is honored even when the feed returns more");
+
+  globalThis.fetch = (async () => { throw new Error("ENOTFOUND"); }) as typeof fetch;
+  const dead = await discoverFromNews({ segment: "supply chain software", signals: ["funding_round"] });
+  eq(dead.leads.length, 0, "an unreachable feed yields no leads and does not throw");
+  ok(dead.warnings.length > 0, "and explains itself");
+  globalThis.fetch = realFetch0;
+  __resetNewsFeedBreaker();
+}
+
+/* ------------------------------------------------------------------ */
+/* 9b. The circuit breaker — a block must not become a quiet zero      */
+/* ------------------------------------------------------------------ */
+/*
+ * Google News is free and unauthenticated, so the whole feed can be taken away from us
+ * at any moment. The dangerous failure is not the block itself, it is a block that
+ * looks like "no news this week" while we keep hammering the endpoint that refused us.
+ */
+
+__resetNewsFeedBreaker();
+eq(newsFeedHealth().open, false, "breaker starts closed");
+eq(newsFeedHealth().consecutiveFailures, 0, "and with a clean count");
+
+// A hard refusal opens it immediately: one 429 is enough, we do not need three.
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async () => new Response("nope", { status: 429 })) as typeof fetch;
+const blocked = await discoverFromNews({ segment: "supply chain software", signals: ["funding_round"] });
+eq(blocked.leads.length, 0, "a blocked feed yields no leads");
+ok(newsFeedHealth().open, "a 429 opens the breaker on the FIRST hit");
+ok((newsFeedHealth().lastError ?? "").includes("429"), "and records why", newsFeedHealth().lastError);
+
+// While open we must not touch the endpoint at all.
+let calls = 0;
+globalThis.fetch = (async () => { calls++; return new Response("nope", { status: 429 }); }) as typeof fetch;
+const whileOpen = await discoverFromNews({ segment: "supply chain software", signals: ["funding_round", "exec_hire"] });
+eq(calls, 0, "an open breaker makes ZERO requests, it does not keep hammering");
+eq(whileOpen.queries, 0, "and reports no queries run");
+ok(whileOpen.warnings.some((w) => w.includes("backing off")), "and says it is backing off, with a reopen time", whileOpen.warnings);
+ok(!whileOpen.warnings.some((w) => w === "no segment set"), "the warning is about the block, not a phantom config problem");
+
+// A transient blip must NOT open it on the first failure, only a run of them.
+__resetNewsFeedBreaker();
+globalThis.fetch = (async () => { throw new Error("socket hang up"); }) as typeof fetch;
+await discoverFromNews({ segment: "x", signals: ["funding_round"] });
+eq(newsFeedHealth().open, false, "one transient failure does not open the breaker");
+await discoverFromNews({ segment: "x", signals: ["funding_round"] });
+await discoverFromNews({ segment: "x", signals: ["funding_round"] });
+ok(newsFeedHealth().open, "but three in a row does");
+
+// Recovery: a success clears everything, so a blip never leaves it stuck open.
+__resetNewsFeedBreaker();
+globalThis.fetch = (async () => new Response(
+  `<rss><channel><item><title>Nimbus raises $9M seed round</title><link>https://x.test/1</link></item></channel></rss>`,
+  { status: 200 },
+)) as typeof fetch;
+const recovered = await discoverFromNews({ segment: "logistics", signals: ["funding_round"] });
+eq(recovered.leads.length, 1, "a healthy feed produces leads again");
+eq(recovered.leads[0].company, "Nimbus", "and parses them");
+eq(newsFeedHealth().open, false, "breaker closed after a success");
+eq(newsFeedHealth().consecutiveFailures, 0, "failure count reset");
+ok(newsFeedHealth().lastOkAt !== undefined, "and a last-good timestamp is recorded");
+
+globalThis.fetch = realFetch;
+__resetNewsFeedBreaker();
 
 /* ------------------------------------------------------------------ */
 /* 10. The pitch — the five beats                                      */

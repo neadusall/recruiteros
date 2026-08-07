@@ -49,13 +49,19 @@ async function cronBranch(req: Request): Promise<NextResponse> {
     const lists = await listWatchlists();
     const remaining = await fetchBudgetRemaining(nowIso());
     const health = await getWatchHealth();
+    // News-feed breaker state. A watchdog should treat `newsFeed.open` as a real
+    // outage: while it is open every news list reports zero, and a zero that is
+    // actually a block must never read as a quiet market.
+    const { newsFeedHealth } = await import("../../../../lib/signals/watch/newsDiscover");
     return NextResponse.json({
       ok: true,
       health,
+      newsFeed: newsFeedHealth(),
       budget: { remaining, cap: dailyFetchCap() },
       activeWatchlists: lists.filter((w) => w.active).length,
+      newsWatchlists: lists.filter((w) => w.source === "news" && w.active).length,
       watchlists: lists.map((w) => ({
-        id: w.id, name: w.name, active: w.active, everyMinutes: w.everyMinutes,
+        id: w.id, name: w.name, source: w.source, active: w.active, everyMinutes: w.everyMinutes,
         lastPolledAt: w.lastPolledAt, stats: w.stats,
       })),
     });
