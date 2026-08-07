@@ -1,9 +1,10 @@
 /**
  * /api/owner/portal-spend  (OWNER ONLY)
  *
- * The owner's approval desk for what shows on a client's app.lumesp "Spending"
- * tab. The owner stages a month-to-month charge here, reviews it, and approves
- * it; only then does the client portal ever return it.
+ * What shows on a client's app.lumesp "Spending" tab. Staging a charge here
+ * (a monthly charge or a real usage row) sends it live to the client's Spending
+ * page in one step — picking the charge IS the approval. The owner can Pull back
+ * (unapprove) or Remove it afterward via PATCH/DELETE.
  *
  *   GET    ?workspaceId=   -> { charges }  every row for the account, any status
  *   POST   { workspaceId, label?, source:"monthly_price" }
@@ -81,7 +82,11 @@ export async function POST(req: Request) {
     if (u.error === "missing_label") return fail("missing_label", 422, { message: "This row has no label to send." });
     if (u.error === "no_amount") return fail("no_amount", 422, { message: "This row has no cost to send." });
     if (!u.charge) return fail(u.error || "could_not_stage", 400);
-    return ok({ staged: true, charge: u.charge });
+    // One step: the usage row goes live on the client's Spending page at once.
+    // Picking a specific cost row IS the deliberate act; the owner can Pull back
+    // or Remove it afterward. (Grid pushes also re-approve — idempotent.)
+    const uLive = approveCharge(b.workspaceId, u.charge.id) || u.charge;
+    return ok({ staged: true, sent: true, charge: uLive });
   }
 
   // Recurring charge: the only sendable amount is the account's month-to-month
@@ -95,7 +100,9 @@ export async function POST(req: Request) {
     });
   }
   if (!res.charge) return fail(res.error || "could_not_stage", 400);
-  return ok({ staged: true, charge: res.charge });
+  // One step: the monthly charge goes live on the client's Spending page at once.
+  const live = approveCharge(b.workspaceId, res.charge.id) || res.charge;
+  return ok({ staged: true, sent: true, charge: live });
 }
 
 export async function PATCH(req: Request) {
