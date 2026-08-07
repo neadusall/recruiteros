@@ -23,7 +23,13 @@ export async function POST(req: Request) {
   const isAdmin = g.ctx.capabilities.includes("telnyx:manage");
 
   // Resolve the line: explicit, else the user's active line, else their only line.
-  const mine = linesForUser(ws, g.ctx.user.id, isAdmin, motion);
+  // A recruiter carries ONE number: it is their BD line, the number candidates
+  // see, and their OS Text sender. Numbers are connected under one motion, so a
+  // motion with no line of its own borrows the recruiter's other line rather
+  // than refusing the call. The call record keeps the REQUESTED motion, so a
+  // recruiting call still gets recruiting analysis off a bd-connected number.
+  const forMotion = linesForUser(ws, g.ctx.user.id, isAdmin, motion);
+  const mine = forMotion.length ? forMotion : linesForUser(ws, g.ctx.user.id, isAdmin);
   let lineId = b.lineId;
   if (!lineId) {
     const st = getUserState(ws, g.ctx.user.id);
