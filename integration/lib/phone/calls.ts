@@ -31,9 +31,10 @@ import {
   logCallEvent, getLine, findLineByNumber, getUserState, getPhoneSettings,
   callsInPipeline, getInfra, ensurePhoneReady,
 } from "./store";
-import { shouldRecord, type CallRecord, type CallTurn } from "./types";
+import { shouldRecord, type CallRecord, type CallTurn, type CallFailureStage } from "./types";
 import { greetingUrl } from "./voicemail";
 import { sipUriFor } from "./infra";
+import { phoneAlert } from "./alerts";
 import { matchByPhone } from "./contacts";
 import { analysisForMotion } from "./analysis";
 
@@ -263,8 +264,14 @@ async function handleAnswered(ccid: string, ev: any, state: LegState): Promise<s
           timeoutSecs: 45,
         }),
       ).catch((e: any) => {
-        logCallEvent(call, "transfer_error", String(e?.message ?? e).slice(0, 160));
-        updateCall(call, { status: "failed", hangupCause: "transfer_failed", endedAt: nowIso() });
+        const why = String(e?.message ?? e).slice(0, 160);
+        logCallEvent(call, "transfer_error", why);
+        updateCall(call, {
+          status: "failed", hangupCause: "transfer_failed", endedAt: nowIso(), failureStage: "transfer",
+        });
+        void phoneAlert(call.workspaceId, "PHONE-TRANSFER-REFUSED",
+          "Calls are connecting to the browser but Telnyx will not dial out.",
+          `The browser leg answered and Telnyx then refused to dial ${call.externalNumber} from ${call.lineNumber}: ${why}. Check that the phone's Call Control application has an outbound voice profile attached.`);
       });
       return "transferring";
     }
@@ -315,7 +322,9 @@ async function handleAnswered(ccid: string, ev: any, state: LegState): Promise<s
   }
 
   if (state.role === "pstn" && call.direction === "outbound") {
-    // The destination answered the transferred leg.
+    // The destination answered the transferred leg. A call that reaches here
+    // proves the whole path works, so the browser-leg failure run resets.
+    browserLegFails.delete(call.workspaceId);
     updateCall(call, {
       status: "active",
       answeredAt: nowIso(),
@@ -511,10 +520,25 @@ async function handleHangup(ccid: string, ev: any, state: LegState): Promise<str
   // Outbound.
   const isPstnLeg = ccid === call.telnyxCallControlId;
   if (call.status === "ringing") {
-    // Never connected: the user abandoned, the destination rejected, or the
-    // agent leg failed. timeout/rejection causes read better as "failed".
+    // Three different stories end here and they are not interchangeable. If our
+    // own browser leg never came up, the candidate was never dialed and their
+    // number is not the problem — that is a broken phone, and it says so. If
+    // the browser was up, the far end really did ring: the recruiter hung up
+    // (canceled) or nobody answered (missed). Only the first is our fault, and
+    // it used to be indistinguishable from all the rest.
+    // Read this from the event log, not from agentLegs: the leg that is hanging
+    // up has already been marked "done" a few lines above, so the live status
+    // cannot tell us whether it ever answered. "agent_ready" is only logged
+    // when the browser picked up its own leg, and it is durable.
+    const agentUp = (call.events ?? []).some((e) => e.type === "agent_ready")
+      || (call.agentLegs ?? []).some((l) => l.status === "answered");
+    if (!agentUp) {
+      finalizeCall(call, "failed", cause, undefined, "browser");
+      void alertBrowserLegDead(call, cause);
+      return "outbound_browser_never_up";
+    }
     const abandoned = state.role === "agent" && (cause === "normal_clearing" || cause === "originator_cancel");
-    finalizeCall(call, abandoned ? "canceled" : "failed", cause);
+    finalizeCall(call, abandoned ? "canceled" : "missed", cause, undefined, "candidate");
     return "outbound_unanswered";
   }
   if (call.status === "active" || call.status === "held") {
@@ -528,7 +552,13 @@ async function handleHangup(ccid: string, ev: any, state: LegState): Promise<str
   return "outbound_final";
 }
 
-function finalizeCall(call: CallRecord, status: CallRecord["status"], cause?: string, ev?: any): void {
+function finalizeCall(
+  call: CallRecord,
+  status: CallRecord["status"],
+  cause?: string,
+  ev?: any,
+  stage?: CallFailureStage,
+): void {
   const endedAt = nowIso();
   const durationSec = call.answeredAt
     ? Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(call.answeredAt)) / 1000))
@@ -538,11 +568,30 @@ function finalizeCall(call: CallRecord, status: CallRecord["status"], cause?: st
     endedAt,
     durationSec,
     hangupCause: cause || call.hangupCause,
+    failureStage: stage ?? call.failureStage,
     // A recorded, answered call now waits for Telnyx to hand us the audio.
     pipeline: status === "completed" && call.recording.enabled ? "recording" : call.pipeline,
   });
   logCallEvent(call, "ended", `${status}${cause ? ` (${cause})` : ""}`);
   meterCall(call, ev);
+}
+
+/**
+ * The signature of a phone that cannot ring: the server dialed the recruiter's
+ * own browser and the leg came back down without ever answering. One of these
+ * is a closed tab; a run of them is the failure that went unnoticed for
+ * eighteen days in July 2026, so the second one in a row tells the owner.
+ * Cleared by any call that connects (see the pstn-answered branch above).
+ */
+const browserLegFails = new Map<string, number>();
+
+async function alertBrowserLegDead(call: CallRecord, cause: string): Promise<void> {
+  const runs = (browserLegFails.get(call.workspaceId) ?? 0) + 1;
+  browserLegFails.set(call.workspaceId, runs);
+  if (runs < 2) return;
+  await phoneAlert(call.workspaceId, "PHONE-BROWSER-LEG-DEAD",
+    "Calls are failing before they reach anyone: the browser phone is not taking its own leg.",
+    `${runs} calls in a row ended without the recruiter's browser leg ever answering (last: ${call.externalNumber} from ${call.lineNumber}, cause "${cause || "unknown"}"). Nobody was dialed, so this is not the candidates' numbers. The usual cause is SIP URI calling being off on the workspace's Telnyx credential connection; the app re-checks and repairs that every few hours, and this alert means the repair has not taken hold.`);
 }
 
 function meterCall(call: CallRecord, ev?: any): void {

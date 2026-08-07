@@ -36,10 +36,13 @@ export interface PhoneInfra {
   credentialConnectionId?: string;
   /** Where this app's webhooks point (recorded for drift detection). */
   webhookUrl?: string;
-  /** SIP URI calling preference last applied to the credential connection.
+  /** SIP URI calling preference last proven on the credential connection.
    *  Browser legs are dialed to a SIP URI, and Telnyx refuses them until this
    *  is set, so an empty value means "not reconciled yet", not "off". */
   sipUriCalling?: string;
+  /** When that was last proven against Telnyx (it is re-checked, not trusted
+   *  forever: someone can turn it off in the Telnyx portal). */
+  sipUriCallingAt?: string;
   provisionedAt?: string;
   lastError?: string;
   updatedAt: string;
@@ -109,10 +112,20 @@ export type CallStatus =
   | "active"     // media up
   | "held"       // active but on hold
   | "completed"  // ended after being answered
-  | "missed"     // inbound, never answered
+  | "missed"     // rang, never answered (inbound, or an outbound ring-out)
   | "declined"   // inbound, explicitly declined
   | "canceled"   // outbound, abandoned before answer
   | "failed";    // signaling/network error
+
+/**
+ * How far an unsuccessful call actually got. The difference matters to the
+ * person: "browser" is our phone failing and the far end never hearing a ring,
+ * "candidate" is a normal unanswered call and nothing to fix.
+ */
+export type CallFailureStage =
+  | "browser"    // the recruiter's own browser leg never answered
+  | "transfer"   // browser was up, but Telnyx refused to dial the destination
+  | "candidate"; // the far end rang and did not pick up
 
 /** Post-call intelligence pipeline, status-driven so the UI never blocks. */
 export type PipelineStage =
@@ -187,6 +200,9 @@ export interface CallRecord {
   telnyxSessionId?: string;
   telnyxLegId?: string;
   hangupCause?: string;
+  /** For a call that never connected: how far it got. Set on the record so the
+   *  history can say whose problem it was without re-deriving it. */
+  failureStage?: CallFailureStage;
   /** True when the unanswered call was sent to voicemail (greeting played).
    *  The caller's message, if left, lands in `recording` + `transcript`. */
   voicemail?: boolean;

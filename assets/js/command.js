@@ -16391,6 +16391,7 @@
         active: ["On the call", "var(--ok)"],
         held: ["On hold", "var(--warn)"],
         missed: ["Missed", "var(--warn)"],
+        noanswer: ["No answer", "var(--warn)"],
         declined: ["Declined", "var(--warn)"],
         canceled: ["Canceled", "var(--text-dim)"],
         failed: ["Not connected", "var(--danger)"]
@@ -16756,16 +16757,22 @@
     }
 
     /* ---- call history + detail (GET /phone/calls, GET /phone/calls/:id) ---- */
-    /* Why a call never happened, in terms of what to do about it. An outbound
-       call with no PSTN leg never reached the candidate at all: the recruiter's
-       own browser leg is what failed, so pointing at the number would be
-       wrong. */
+    /* Why a call never happened, in terms of what to do about it. The server
+       records how far it got; older records are read from their event log,
+       where "agent_ready" is the proof that this browser answered its own leg
+       and the candidate really was dialed. Getting this backwards sends a
+       recruiter after a candidate's number when the phone is what broke. */
+    function failStage(c) {
+      if (c.failureStage) return c.failureStage;
+      var agentUp = (c.events || []).some(function (e) { return e.type === "agent_ready"; });
+      return agentUp ? "candidate" : "browser";
+    }
     function failNote(c) {
-      if (c.status === "canceled") return "Ended before it connected.";
+      if (c.status === "canceled") return "You ended this call before it connected.";
       if (c.status !== "failed") return "";
-      if (c.direction === "outbound" && !c.telnyxCallControlId) {
-        return "Your browser phone never picked up, so the candidate was not dialed. Check your phone status at the top of this page.";
-      }
+      var stage = failStage(c);
+      if (stage === "browser") return "Your browser phone never picked up, so the candidate was not dialed. Check your phone status at the top of this page.";
+      if (stage === "transfer") return "Your phone answered, but the call could not be dialed out. Your admin can check the calling setup.";
       return "This call did not connect.";
     }
     function callRow(c) {
@@ -16782,7 +16789,9 @@
             '<div class="vt-call-sub" style="color:var(--text-muted)">' + esc(when) + (dur ? (" &middot; " + esc(dur)) : "") + "</div>" +
             (why ? '<div class="vt-call-sub" style="color:var(--text-muted);margin-top:2px">' + esc(why) + "</div>" : "") +
           "</div>" +
-          statusBadge(c.status) +
+          // "Missed" is the word for a call that came to you; one you placed
+          // that nobody picked up is a no answer.
+          statusBadge(c.status === "missed" && c.direction === "outbound" ? "noanswer" : c.status) +
         "</div>" +
         '<div class="vt-call-detail vt-detail" data-detail="' + esc(String(c.id)) + '" style="display:none;margin-top:12px"></div></div>';
     }
@@ -24276,9 +24285,14 @@
     function bdpHistRow(c) {
       var opp = bdpEff(c, "opportunity").value;
       var missed = c.status === "missed" || c.status === "declined";
-      var statusTxt = missed ? (c.voicemail ? "Voicemail" : c.status === "declined" ? "Declined" : "Missed") :
-        c.status === "failed" ? "Failed" : c.status === "canceled" ? "Canceled" :
-        c.durationSec ? bdpFmtDur(c.durationSec) : "";
+      // A call you placed that nobody picked up is a no answer, not a missed
+      // call, and "Failed" is only honest when the phone itself is what failed.
+      var statusTxt = missed
+        ? (c.voicemail ? "Voicemail" : c.status === "declined" ? "Declined"
+          : c.direction === "outbound" ? "No answer" : "Missed")
+        : c.status === "failed" ? (c.failureStage === "candidate" ? "No answer" : "Phone failed")
+        : c.status === "canceled" ? "Canceled"
+        : c.durationSec ? bdpFmtDur(c.durationSec) : "";
       return '<div class="list-row clickable" data-call="' + esc(c.id) + '" style="display:flex;align-items:center;gap:12px;padding:10px 4px">' +
         bdpDirIcon(c) +
         '<div style="min-width:0;flex:2"><div style="font:500 13px var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
@@ -24287,7 +24301,7 @@
           esc([bdpFmtNum(c.externalNumber), c.companyName].filter(Boolean).join(" · ")) + "</div></div>" +
         '<div style="flex:1;font:400 12px var(--font);color:var(--text-muted);white-space:nowrap">' + esc(c.userName || "") + "</div>" +
         '<div style="flex:none;width:130px;font:400 12px var(--font);color:var(--text-muted)">' + bdpFmtWhen(c.startedAt) + "</div>" +
-        '<div style="flex:none;width:70px;font:500 12px var(--mono);color:' + (missed || c.status === "failed" ? "var(--danger)" : "var(--text-muted)") + ';text-align:right">' + esc(statusTxt) + "</div>" +
+        '<div style="flex:none;width:92px;font:500 12px var(--mono);color:' + (missed || c.status === "failed" ? "var(--danger)" : "var(--text-muted)") + ';text-align:right;white-space:nowrap">' + esc(statusTxt) + "</div>" +
         '<div style="flex:none;width:96px;text-align:right">' + (bdpOppPill(opp) || bdpPipeBadge(c) || "") + "</div>" +
       "</div>";
     }
