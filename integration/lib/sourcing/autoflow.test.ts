@@ -228,6 +228,31 @@ check("no promotedCount at all -> not treated as behind",
     autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
   }), NOW), null);
 
+// THE BAR IS NOT A SHORTFALL. Delivery deliberately holds back out-of-area rows
+// and rows under the outreach quality bar, so promotedCount is SUPPOSED to trail
+// the raw list. Measuring the gap against candidates.length instead of the
+// deliverable set would top up every 10 minutes forever chasing people the bar is
+// keeping out on purpose.
+check("below-bar row held back -> not behind",
+  due(run({
+    candidates: [enriched(), cand({ fitScore: 10 })], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
+  }), NOW), null);
+check("out-of-area row held back -> not behind",
+  due(run({
+    candidates: [enriched(), cand({ outOfArea: true })], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
+  }), NOW), null);
+// ...but a QUALIFIED person missing from Candidates still counts, bar or no bar.
+check("one below-bar row plus a qualified one never delivered -> topup",
+  due(run({
+    candidates: [enriched(), cand({ fitScore: 10 }), cand({ fitScore: 90 })], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 3, attempts: 1 },
+  }), NOW), "topup");
+
 // Membership churn with IDENTICAL totals: a combine that deduped one person away
 // and added a different one. Both counters match; the signature doesn't.
 check("same counts, different people -> topup",

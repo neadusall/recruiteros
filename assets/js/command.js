@@ -13561,9 +13561,21 @@
           // "1,762 delivered", four ticks, "campaign ready to launch"). The sweeper
           // tops these up by itself, so it is a catching-up state, not an error — but
           // it must never read as done.
-          var behindN = candN && n > candN ? n - candN : 0;
+          // ...measured against the DELIVERABLE set, never the raw list. Delivery
+          // holds back out-of-area rows and rows under the outreach quality bar on
+          // purpose, so "fewer delivered than found" is normal and must not read as
+          // a shortfall. Mirrors qualifiedForOutreach: an unscored row is kept, and
+          // a zero bar keeps everyone. With no barUsed stamp (nothing sent under a
+          // build that records it) we don't know the target, so we claim nothing.
+          var jBar = (r.autoflow && typeof r.autoflow.barUsed === "number") ? r.autoflow.barUsed : null;
+          var wantN = jBar === null ? null : (r.candidates || []).filter(function (c) {
+            if (c.outOfArea) return false;
+            if (jBar <= 0) return true;
+            return typeof c.fitScore !== "number" || !isFinite(c.fitScore) || c.fitScore >= jBar;
+          }).length;
+          var behindN = (candN && wantN !== null && wantN > candN) ? wantN - candN : 0;
           var sCand = behindN
-            ? jStop("jt-live", jIcons.users, "In Candidates", candN + " of " + n + " delivered",
+            ? jStop("jt-live", jIcons.users, "In Candidates", candN + " of " + wantN + " delivered",
               behindN + " people were added to this list after the last push and have not reached Candidates yet. The automatic sweep tops the list up within a few minutes — no button to press. Click to open the ones already there.", r.promotedListId || "")
             : candN
             ? jStop("jt-done", jIcons.check, "In Candidates", candN + " delivered · open",
@@ -13586,8 +13598,8 @@
           if (!jNote) {
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
             else if (afErr) jNote = "The automatic send hit a problem and keeps retrying on its own. If this stays up for more than an hour, ask your admin.";
-            else if (behindN) jNote = "<b>Catching up:</b> " + behindN + " of the " + n +
-              " people on this list were added after the last push and have not gone over to Candidates and OS Text yet. The sweep picks them up within a few minutes on its own — hold off launching the campaign until this reads " + n + ".";
+            else if (behindN) jNote = "<b>Catching up:</b> " + behindN + " of the " + wantN +
+              " people this list would contact were added after the last push and have not gone over to Candidates and OS Text yet. The sweep picks them up within a few minutes on its own — hold off launching the campaign until this reads " + wantN + ".";
             else if (sentOk && candN) jNote = phs > 0
               ? ("<b>Done:</b> everyone is in Candidates. Next: open OS Text to review and launch the text campaign." +
                 (boostable ? " Texts reach " + phs + " of " + n + " so far; Boost phones can find numbers for up to " + boostable + " more." : ""))

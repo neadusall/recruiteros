@@ -69,15 +69,27 @@ function hash32(s: string): number {
 }
 
 /**
- * Order-independent signature of WHO is on the list right now, and which of them
- * hold a phone. Summed (not sequenced) on purpose: every merge re-ranks the rows
- * verified-first, and a reorder must not read as a membership change. Built from
- * the stable person key, so enrichment filling in an email or a phone doesn't
- * move the people half of it.
+ * The rows a delivery would actually carry — the SAME two exclusions both legs
+ * apply (promote skips out-of-area and below-bar; toOsTextContacts skips the
+ * identical pair). Measuring the gap against the raw candidate count instead
+ * would read every held-back row as "missing" and top up forever chasing people
+ * the bar is deliberately keeping out of outreach.
+ */
+function deliverableRows(run: SourcingRun): CandidateRow[] {
+  const bar = deliverMinFit();
+  return run.candidates.filter((c) => !c.outOfArea && qualifiedForOutreach(c, bar));
+}
+
+/**
+ * Order-independent signature of WHO a delivery would carry right now, and which
+ * of them hold a phone. Summed (not sequenced) on purpose: every merge re-ranks
+ * the rows verified-first, and a reorder must not read as a membership change.
+ * Built from the stable person key, so enrichment filling in an email or a phone
+ * doesn't move the people half of it.
  */
 function deliverySignature(run: SourcingRun): string {
   let people = 0, phones = 0, n = 0, p = 0;
-  for (const c of run.candidates) {
+  for (const c of deliverableRows(run)) {
     const h = hash32(personKey(c));
     people = (people + h) >>> 0; n++;
     if (c.phone) { phones = (phones + h) >>> 0; p++; }
@@ -100,15 +112,21 @@ function deliverySignature(run: SourcingRun): string {
  *
  * These two reads don't care about the counters. promotedCount is what promote
  * actually delivered to Candidates, and the signature is who the last push
- * carried — either falling behind the live list means someone is missing, and
- * one top-up (which re-promotes everyone and re-sends the full contact set) puts
- * them back. Both converge: the top-up rewrites both stamps.
+ * carried — either falling behind the DELIVERABLE set means someone is missing,
+ * and one top-up (which re-promotes and re-sends the full contact set) puts them
+ * back. Both converge: the top-up rewrites both stamps.
+ *
+ * Both reads measure against deliverableRows(), never the raw list, so the rows
+ * the quality bar and the radius hold back on purpose are not mistaken for a
+ * shortfall. Raising the bar can only shrink the target (promotedCount ends up
+ * ahead, which is not "behind"); lowering it grows the target and correctly tops
+ * up the people who just became eligible.
  */
 export function deliveryBehind(run: SourcingRun): boolean {
   // An ABSENT promotedCount means "never recorded", not "delivered nobody" — a
   // run predating the stamp must not read as behind and drag every old list into
   // a re-send. Only a number we actually have gets compared.
-  if (typeof run.promotedCount === "number" && run.promotedCount < run.candidates.length) return true;
+  if (typeof run.promotedCount === "number" && run.promotedCount < deliverableRows(run).length) return true;
   const sig = run.autoflow?.sentSignature;
   return Boolean(sig) && sig !== deliverySignature(run);
 }
