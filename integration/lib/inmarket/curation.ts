@@ -590,7 +590,10 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     if (isContactable) contactableOrBetter++;
     // Exclusive gate attribution, most-decisive gate first: a row with no NAME is stuck on naming
     // regardless of what its domain looks like, so it is only ever counted once.
-    if (r.status === "suppressed") blocked.suppressed++;
+    // A row suppressed only because its guessed address was rejected is NOT "deliberately out" — it
+    // is a named, never-contacted person waiting on a better finder, so it belongs in invalidParked
+    // where it is visible and countable. Counting it as suppressed hid the largest stuck pool.
+    if (r.status === "suppressed") { if (rescuableInvalid(r)) blocked.invalidParked++; else blocked.suppressed++; }
     else if (isContactable && r.likelyEmail) blocked.renderable++;
     else if (!r.managerName) blocked.noName++;
     else if (!r.domain) blocked.noDomain++;
@@ -1240,6 +1243,23 @@ export async function promoteCatchAllParked(limit = 2000): Promise<{ promoted: n
 }
 
 /**
+ * A row suppressed ONLY because the address we guessed was rejected — the person is still a real,
+ * never-contacted decision-maker with a domain, and a better finder may well resolve them.
+ *
+ * This distinction matters because `suppressed` in this store has exactly two writers, both
+ * email-validity driven (the external validator and the Reoon find pass); no opt-out, bounce or
+ * dupe path writes here. So "suppressed" has quietly come to mean "this ADDRESS failed", while
+ * reading as "this PERSON is out" — and it was being treated as the second everywhere.
+ *
+ * Guarded on never-having-been-contacted (no send, no bounce, no reply) so that if a future writer
+ * ever does suppress for a real reason, those rows can never be pulled back into outreach.
+ */
+export function rescuableInvalid(r: CuratedProspect): boolean {
+  return !!r.emailInvalid && !!r.managerName && !!r.domain
+    && !r.sentAt && !r.bouncedAt && !r.repliedAt;
+}
+
+/**
  * RESIDUAL finder (paid, only-on-the-misses). For people the free path (permutation + Reoon) could
  * NOT resolve, resolve a real address via Icypeas, then RE-VERIFY it through the Reoon credits we
  * already own before trusting it. Targets misses only (emailInvalid, or named-but-no-email); never
@@ -1263,10 +1283,15 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
   // catch-all alone (it can't reliably crack it).
   const isMiss = (r: CuratedProspect) => (r.emailInvalid || !r.likelyEmail) && !r.emailCatchAll;
   const isCrackableCatchAll = (r: CuratedProspect) => useService && !!r.emailCatchAll;
+  // `suppressed` is allowed back in ONLY when it means "the guessed address was rejected and this
+  // person was never contacted" — otherwise isMiss()'s emailInvalid branch is unreachable, since a
+  // row marked invalid is moved to suppressed in the same breath. That contradiction is what left
+  // the rejected pile permanently stranded: the one pass written to rescue it filtered it out.
   const targets = rows
     .filter((r) => r.managerName && r.domain && !r.emailValidated
       && (isMiss(r) || isCrackableCatchAll(r))
-      && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
+      && r.status !== "enrolled" && r.status !== "queued"
+      && (r.status !== "suppressed" || rescuableInvalid(r)))
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(0, limit));
   if (!targets.length) return { checked: 0, found: 0, missed: 0 };
@@ -1318,11 +1343,14 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
     for (const r of current) {
       const hit = results.get(r.id);
       if (!hit) continue;
-      if (r.status === "enrolled" || r.status === "queued" || r.status === "suppressed") continue;
+      if (r.status === "enrolled" || r.status === "queued") continue;
+      if (r.status === "suppressed" && !rescuableInvalid(r)) continue;   // genuinely out — leave it out
       if (hit.accept) {
         r.likelyEmail = hit.email; if (hit.pattern) r.emailPattern = hit.pattern;
         r.emailSource = hit.source; r.emailValidated = true; r.emailInvalid = false; r.emailCatchAll = false; r.validatedAt = nowIso;
-        if (r.status === "sourced" || r.status === "named") r.status = "contactable";
+        // A rescued row rejoins the sendable pool: the address that got it suppressed has been
+        // replaced by a confirmed one, so leaving it suppressed would discard the rescue.
+        if (r.status === "sourced" || r.status === "named" || r.status === "suppressed") r.status = "contactable";
         found++;
         await learnFromConfirmedEmail(r.managerName, hit.email, hit.source).catch(() => {});
       } else { missed++; }
