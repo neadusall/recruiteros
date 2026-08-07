@@ -104,6 +104,28 @@ check("note has no em-dash", !note.includes("—"));
 check("singular reads correctly", (qualityBarNote(1, 45) ?? "").includes("1 person"));
 check("plural reads correctly", (qualityBarNote(2, 45) ?? "").includes("2 people"));
 
+/* --- the bar must not disturb the top-up rule ------------------------------ */
+
+// SUBTLE INVARIANT, worth pinning. The autoflow sweeper decides a list needs a
+// TOP-UP send by comparing what the run holds now against what it held at the last
+// send. Both sides count the WHOLE run. If either side were ever changed to count
+// only what was DELIVERED, the quality bar would make the two disagree permanently
+// (held-back people would look like people who still need sending) and the list
+// would re-send on every tick, forever.
+import { readFileSync } from "node:fs";
+const autoflowSrc = readFileSync(new URL("../lib/sourcing/autoflow.ts", import.meta.url), "utf8");
+check("top-up compares whole-run people, not delivered people",
+  /run\.candidates\.length > \(run\.autoflow\.peopleAtSend/.test(autoflowSrc));
+check("top-up compares whole-run phones, not delivered phones",
+  /phoneCount\(run\) > run\.autoflow\.phonesAtSend/.test(autoflowSrc));
+check("the send stamp records the whole-run people count",
+  /stamp\.peopleAtSend = run\.candidates\.length/.test(autoflowSrc));
+check("phoneCount counts the whole run",
+  /function phoneCount[\s\S]{0,160}run\.candidates\.reduce/.test(autoflowSrc));
+// And the bar IS actually applied on the texting lane, next to the radius rule.
+check("the OS Text contact builder applies the bar",
+  /qualifiedForOutreach\(c, deliverMinFit\(\)\)/.test(autoflowSrc));
+
 console.log(`\nquality-bar suite: ${passed}/${passed + failed} checks passed`);
 if (failed) { console.error(`${failed} FAILED`); process.exit(1); }
 console.log("all green");
