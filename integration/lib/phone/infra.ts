@@ -17,6 +17,15 @@ import type { PhoneInfra } from "./types";
 
 const APP_NAME = "RecruitersOS Phone";
 const CRED_CONN_NAME = "RecruitersOS Phone WebRTC";
+/**
+ * Every browser leg in this system is dialed to `sip:<credential>@sip.telnyx.com`
+ * (see sipUriFor). Telnyx creates credential connections with SIP URI calling
+ * DISABLED, and then refuses those legs outright: the call dies in about a
+ * second with no ring, no answer, and a hangup cause that reads like the far
+ * end was busy. "internal" accepts only calls originated by connections on the
+ * same Telnyx account, which is exactly our own Call Control application.
+ */
+const SIP_URI_CALLING = "internal";
 
 function appUrl(): string {
   return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
@@ -34,7 +43,17 @@ export function phoneWebhookUrl(): string {
  */
 export async function ensureInfra(workspaceId: string): Promise<PhoneInfra> {
   const infra = getInfra(workspaceId);
-  if (infra.appId && infra.credentialConnectionId) return infra;
+  if (infra.appId && infra.credentialConnectionId) {
+    // Provisioned, but workspaces set up before this reconcile exists carry a
+    // credential connection that silently refuses every browser leg. One PATCH,
+    // once, on the next connect — it is what makes an existing phone start
+    // working without anyone having to touch the Telnyx portal.
+    if (infra.sipUriCalling !== SIP_URI_CALLING) {
+      await ensureSipUriCalling(workspaceId, infra.credentialConnectionId);
+      return getInfra(workspaceId);
+    }
+    return infra;
+  }
 
   try {
     if (!infra.appId) {
@@ -45,10 +64,38 @@ export async function ensureInfra(workspaceId: string): Promise<PhoneInfra> {
       const credentialConnectionId = await findOrCreateCredentialConnection();
       patchInfra(workspaceId, { credentialConnectionId });
     }
+    const connId = getInfra(workspaceId).credentialConnectionId;
+    if (connId) await ensureSipUriCalling(workspaceId, connId);
     return patchInfra(workspaceId, { provisionedAt: nowIso(), lastError: undefined });
   } catch (e: any) {
     patchInfra(workspaceId, { lastError: String(e?.message ?? e) });
     throw e;
+  }
+}
+
+/**
+ * Let this account's own connections dial the browsers' SIP URIs. Idempotent,
+ * and deliberately verified from the response rather than assumed: the marker
+ * is only written when Telnyx echoes the value back, so a rejected PATCH is
+ * retried on the next connect instead of being remembered as done. Never
+ * throws — a phone that is otherwise fine must not fail to hand out a token.
+ */
+async function ensureSipUriCalling(workspaceId: string, connectionId: string): Promise<void> {
+  try {
+    const res = await telnyx.updateCredentialConnection(connectionId, {
+      sip_uri_calling_preference: SIP_URI_CALLING,
+    });
+    if (res?.dryRun) return;
+    const applied = String(res?.data?.sip_uri_calling_preference ?? "");
+    if (applied === SIP_URI_CALLING || applied === "unrestricted") {
+      patchInfra(workspaceId, { sipUriCalling: applied, lastError: undefined });
+      return;
+    }
+    patchInfra(workspaceId, {
+      lastError: "telnyx_provision: Telnyx did not accept SIP URI calling on the browser connection, so browser calls will not connect",
+    });
+  } catch (e: any) {
+    patchInfra(workspaceId, { lastError: `telnyx_provision: ${String(e?.message ?? e)}`.slice(0, 300) });
   }
 }
 

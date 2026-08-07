@@ -16277,7 +16277,13 @@
         complete: ["Complete", "var(--ok)"],
         completed: ["Complete", "var(--ok)"],
         scored: ["Complete", "var(--ok)"],
-        failed: ["Failed", "var(--danger)"]
+        ringing: ["Ringing", "var(--warn)"],
+        active: ["On the call", "var(--ok)"],
+        held: ["On hold", "var(--warn)"],
+        missed: ["Missed", "var(--warn)"],
+        declined: ["Declined", "var(--warn)"],
+        canceled: ["Canceled", "var(--text-dim)"],
+        failed: ["Not connected", "var(--danger)"]
       };
       var m = map[v] || [(status ? (String(status).charAt(0).toUpperCase() + String(status).slice(1)) : "Pending"), "var(--text-dim)"];
       return '<span style="display:inline-flex;align-items:center;gap:6px;flex:none;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:4px;color:' + m[1] + ';border:1px solid ' + m[1] + '">' +
@@ -16291,32 +16297,66 @@
       return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:4px;color:' + color + ';border:1px solid ' + color + '">Fit: ' + esc(String(fit)) + "</span>";
     }
 
-    /* ---- softphone status (POST /phone/token) ---- */
+    /* ---- softphone status ---------------------------------------------------
+       Whether a call can actually be placed is known by the browser phone
+       engine, not by the token endpoint: a token mints fine while the calling
+       client sits unregistered, and a card that says "ready" over a phone that
+       cannot ring is how a recruiter ends up blaming the candidate's number.
+       So this reports the engine's own state, and falls back to the token probe
+       only on a page where the engine never mounted. */
+    function softCard(st) {
+      var host = $("#clSoft"); if (!host) return;
+      var phase = (st && st.phase) || "";
+      var live = phase === "dialing" || phase === "active" || phase === "held" || phase === "incoming";
+      var v;
+      if (live) v = ["var(--ok)", "On a call", "Your call controls are in the bar at the bottom of the screen.", ""];
+      else if (phase === "ready" || phase === "ended") v = ["var(--ok)", "Phone ready", "You can call candidates from this browser.", ""];
+      else if (phase === "nolines") v = ["var(--warn)", "No calling number yet", "You have no number assigned to you. Ask your admin to assign one on the Numbers page.", ""];
+      else if (phase === "error-mic") v = ["var(--warn)", "Microphone blocked", "Your browser is blocking the microphone for this site. Allow it in the padlock menu in the address bar, then reconnect.", "reconnect"];
+      else if (phase === "error-conn") v = ["var(--danger)", "Phone not connected", (st && st.error) || "The calling client could not connect, so calls cannot be placed yet.", "reconnect"];
+      else if (phase === "leaderelse") v = ["var(--warn)", "Phone active in another tab", "Your browser phone is running in another tab. Move it here to call from this page.", "take"];
+      else if (phase === "reconnecting") v = ["var(--warn)", "Reconnecting your phone", "The connection dropped and is being restored. This usually takes a few seconds.", ""];
+      else v = ["var(--text-dim)", "Connecting your phone...", "This takes a moment after the page loads.", ""];
+      var btn = v[3] === "reconnect" ? '<button class="vt-btn" id="clSoftAct" type="button">Reconnect</button>'
+        : v[3] === "take" ? '<button class="vt-btn" id="clSoftAct" type="button">Use the phone here</button>' : "";
+      host.innerHTML = '<div class="vt-card" style="display:flex;align-items:center;gap:12px">' +
+        '<span style="width:10px;height:10px;border-radius:50%;background:' + v[0] + ';flex:none"></span>' +
+        '<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">' + esc(v[1]) + "</div>" +
+        '<div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">' + esc(v[2]) + "</div></div>" + btn + "</div>";
+      var act = $("#clSoftAct");
+      if (act) act.addEventListener("click", function () {
+        var eng = audioEngine(); if (!eng) return;
+        if (v[3] === "take" && eng.takeLeader) eng.takeLeader();
+        else if (eng.reconnect) eng.reconnect();
+      });
+    }
+    /* Engine-less page (it failed to load, or an old cached copy): say what is
+       known from the server instead of pretending to know the client state. */
     function loadToken() {
       var host = $("#clSoft"); if (!host) return;
       host.innerHTML = '<div class="vt-card" style="display:flex;align-items:center;gap:12px">' +
         '<span id="clSoftDot" style="width:10px;height:10px;border-radius:50%;background:var(--text-dim);flex:none"></span>' +
-        '<div><div id="clSoftTitle" style="font-weight:600;font-size:14px">Connecting softphone...</div>' +
+        '<div><div id="clSoftTitle" style="font-weight:600;font-size:14px">Checking your phone...</div>' +
         '<div id="clSoftSub" style="font-size:12.5px;color:var(--text-muted);margin-top:2px"></div></div></div>';
       send("/phone/token", "POST").then(function (r) {
         var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
         if (!dot) return;
         if (r.ok && r.data && r.data.token) {
-          dot.style.background = "var(--ok)";
-          title.textContent = "Softphone ready";
-          sub.textContent = "Connected. In-browser audio uses the in-browser calling client, which loads automatically once calling is fully configured.";
+          dot.style.background = "var(--warn)";
+          title.textContent = "Phone not loaded on this page";
+          sub.textContent = "Calling is set up for you, but the browser phone did not load here. Reload the page before you call.";
         } else if (r.status === 404 || r.status === 409) {
           dot.style.background = "var(--warn)";
           title.textContent = "Calling not configured yet";
           sub.innerHTML = 'Connect telephony to place calls from the browser. <a href="#setup" style="color:var(--brand)">Open Setup</a>.';
         } else {
           dot.style.background = "var(--warn)";
-          title.textContent = "Softphone unavailable";
-          sub.textContent = "Could not obtain a softphone token right now. Try again shortly.";
+          title.textContent = "Phone unavailable";
+          sub.textContent = "Your phone could not be reached right now. Try again shortly.";
         }
       }).catch(function () {
         var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
-        if (dot) { dot.style.background = "var(--warn)"; title.textContent = "Softphone unavailable"; if (sub) sub.textContent = "Could not reach the server."; }
+        if (dot) { dot.style.background = "var(--warn)"; title.textContent = "Phone unavailable"; if (sub) sub.textContent = "Could not reach the server."; }
       });
     }
 
@@ -16471,6 +16511,10 @@
        to do next. Engine codes stay in the network log, never on screen. */
     function dialProblem(r) {
       var code = String((r && r.data && (r.data.error || r.data.message)) || "");
+      // The browser phone refuses in the recruiter's own terms already ("still
+      // connecting", "active in another tab"): pass that through rather than
+      // re-guessing it from a pattern match.
+      if (r && r.fromEngine && code) return { tone: "var(--warn)", text: code };
       if (/invalid_number|missing_number/.test(code)) {
         return { tone: "var(--danger)", text: "That number could not be dialed. Enter it in full, with the country code (for example, +14155550123)." };
       }
@@ -16514,7 +16558,7 @@
       var engine = window.__bdPhone;
       var started = (engine && engine.dial)
         ? engine.dial(to, null, "recruiting").then(function (call) { return { ok: true, status: 200, data: { call: call } }; },
-            function (e) { return { ok: false, status: 0, data: { error: (e && e.message) || "" } }; })
+            function (e) { return { ok: false, status: 0, fromEngine: true, data: { error: (e && e.message) || "" } }; })
         : send("/phone/dial", "POST", payload);
       started.then(function (r) {
         btn.disabled = false; btn.innerHTML = orig;
@@ -16529,9 +16573,15 @@
         // "not recorded" on a call the policy is already recording.
         var call = r.data && r.data.call;
         if (!consent && call && call.id) send("/phone/calls/" + call.id, "POST", { action: "record", on: false }).catch(function () {});
-        msg.style.color = "var(--ok)";
-        msg.textContent = "Call started" + (consent ? " (recording requested)." : ".");
+        // The repaint (to collapse the consent banner) replaces the message
+        // node, so the confirmation has to be written to the NEW one.
         paintDialer();
+        var live = $("#clDialMsg");
+        if (live) {
+          live.style.color = "var(--ok)";
+          live.textContent = "Dialing. Your call controls are in the bar at the bottom of the screen."
+            + (consent ? " Recording was requested for this call." : "");
+        }
         loadHistory();
       }).catch(function () {
         btn.disabled = false; btn.innerHTML = orig;
@@ -16596,17 +16646,31 @@
     }
 
     /* ---- call history + detail (GET /phone/calls, GET /phone/calls/:id) ---- */
+    /* Why a call never happened, in terms of what to do about it. An outbound
+       call with no PSTN leg never reached the candidate at all: the recruiter's
+       own browser leg is what failed, so pointing at the number would be
+       wrong. */
+    function failNote(c) {
+      if (c.status === "canceled") return "Ended before it connected.";
+      if (c.status !== "failed") return "";
+      if (c.direction === "outbound" && !c.telnyxCallControlId) {
+        return "Your browser phone never picked up, so the candidate was not dialed. Check your phone status at the top of this page.";
+      }
+      return "This call did not connect.";
+    }
     function callRow(c) {
-      var nm = c.candidateName || c.prospectName || (c.prospect && prospectName(c.prospect)) || c.toNumber || c.number || "Candidate";
-      var num = c.toNumber || c.number || (c.prospect && c.prospect.phone) || "";
+      var nm = c.contactName || c.candidateName || c.prospectName || (c.prospect && prospectName(c.prospect)) || c.externalNumber || "Candidate";
+      var num = c.externalNumber || c.toNumber || c.number || (c.prospect && c.prospect.phone) || "";
       var when = fmtWhen(c.createdAt || c.startedAt || c.date);
       var dur = (c.durationSec != null) ? fmtDur(c.durationSec) : (c.duration || "");
+      var why = failNote(c);
       return '<div class="vt-call" data-call="' + esc(String(c.id)) + '">' +
         '<div class="vt-call-top">' +
           '<svg class="isvg" aria-hidden="true" style="color:var(--brand);flex:none"><use href="#i-phone"/></svg>' +
           '<div style="flex:1;min-width:0">' +
-            '<div class="vt-call-name">' + esc(nm) + (num ? ' <span>&middot; ' + esc(num) + "</span>" : "") + "</div>" +
+            '<div class="vt-call-name">' + esc(nm) + (num !== nm && num ? ' <span>&middot; ' + esc(num) + "</span>" : "") + "</div>" +
             '<div class="vt-call-sub" style="color:var(--text-muted)">' + esc(when) + (dur ? (" &middot; " + esc(dur)) : "") + "</div>" +
+            (why ? '<div class="vt-call-sub" style="color:var(--text-muted);margin-top:2px">' + esc(why) + "</div>" : "") +
           "</div>" +
           statusBadge(c.status) +
         "</div>" +
@@ -16720,7 +16784,30 @@
         paintDialer();
       }).catch(function () {});
     }
-    loadToken();
+    /* The phone engine mounts on the page independently of this view (it has to
+       outlive navigation), so wait briefly for it before falling back to the
+       server-only status card. */
+    function watchPhone(tries) {
+      var eng = audioEngine();
+      if (!eng || !eng.subscribe) {
+        if (tries > 40) { loadToken(); return; }
+        setTimeout(function () { watchPhone(tries + 1); }, 125);
+        return;
+      }
+      var lastPhase = null;
+      var unsub = eng.subscribe(function (st) {
+        if (!document.body.contains(el)) { unsub(); stopMicTest(); return; }
+        if (st.phase === lastPhase) return;
+        var was = lastPhase;
+        lastPhase = st.phase;
+        softCard(st);
+        // A call that just ended, however it ended, belongs in the history now.
+        if (was && st.phase === "ended") loadHistory();
+      });
+      softCard(eng.getState ? eng.getState() : null);
+    }
+
+    watchPhone(0);
     loadAudio();
     paintDialer();
     loadSettings();

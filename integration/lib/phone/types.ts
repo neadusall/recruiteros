@@ -36,6 +36,10 @@ export interface PhoneInfra {
   credentialConnectionId?: string;
   /** Where this app's webhooks point (recorded for drift detection). */
   webhookUrl?: string;
+  /** SIP URI calling preference last applied to the credential connection.
+   *  Browser legs are dialed to a SIP URI, and Telnyx refuses them until this
+   *  is set, so an empty value means "not reconciled yet", not "off". */
+  sipUriCalling?: string;
   provisionedAt?: string;
   lastError?: string;
   updatedAt: string;

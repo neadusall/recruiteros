@@ -308,6 +308,7 @@
     stopRingtone();
     stopTimer();
     stopMicMeter();
+    clearDialGuard();
     var ended = S.call;
     S.sdkCall = null;
     pendingOutbound = null;
@@ -539,11 +540,62 @@
   }
 
   /* ---------------- public actions ---------------- */
+  /**
+   * Why this phone cannot place a call right now, in words the caller can act
+   * on — empty when it can. Every not-ready phase used to answer "a call is
+   * already in progress", which sent people hunting for a call that did not
+   * exist while the real problem was a phone that never finished connecting.
+   */
+  function blockReason() {
+    if (!S.leader || S.phase === "leaderelse") {
+      return "Your phone is active in another tab. Switch to that tab to call, or close it and try again here.";
+    }
+    switch (S.phase) {
+      case "ready":
+      case "ended":
+        return "";
+      case "dialing":
+      case "incoming":
+      case "active":
+      case "held":
+        return "A call is already in progress. Finish that call first.";
+      case "nolines":
+        return "You do not have a calling number yet. Ask your admin to assign you one on the Numbers page.";
+      case "error-mic":
+        return "Your browser is blocking the microphone. Allow it for this site, then try again.";
+      case "error-conn":
+        return S.error || "Your browser phone is not connected. Reconnect it and try again.";
+      case "reconnecting":
+        return "Your browser phone lost its connection and is reconnecting. Try again in a moment.";
+      default:
+        return "Your browser phone is still connecting. Try again in a moment.";
+    }
+  }
+
+  /**
+   * A dial that never reaches the browser must not strand the phone in
+   * "dialing". The server tells us a call died only if the poll reaches it, so
+   * an unreachable server would otherwise wedge every later call behind one
+   * that is long over. Armed only while our own leg has yet to ring: once the
+   * browser leg is up the call is genuinely in progress, however long the far
+   * end takes to answer.
+   */
+  var dialGuard = null;
+  function clearDialGuard() { if (dialGuard) { clearTimeout(dialGuard); dialGuard = null; } }
+  function armDialGuard() {
+    clearDialGuard();
+    dialGuard = setTimeout(function () {
+      dialGuard = null;
+      if (S.phase !== "dialing" || S.sdkCall) return;
+      onSdkEnded();
+    }, 45000);
+  }
+
   // motion picks which of the recruiter's lines answers: "bd" (default) for the
   // BD Phone, "recruiting" for the candidate Calls console.
   function dial(number, lineId, motion) {
-    if (!S.leader) return Promise.reject(new Error("Phone is active in another tab."));
-    if (S.phase !== "ready" && S.phase !== "ended") return Promise.reject(new Error("A call is already in progress."));
+    var blocked = blockReason();
+    if (blocked) return Promise.reject(new Error(blocked));
     var m = motion === "recruiting" ? "recruiting" : "bd";
     // The cached active line belongs to the BD motion, so a recruiting call
     // leaves lineId unset and lets the server pick that motion's own line.
@@ -557,6 +609,7 @@
         pendingOutbound = { callId: d.call.id, until: Date.now() + 45000 };
         setPhase("dialing");
         pollLiveCall();
+        armDialGuard();
         return d.call;
       });
   }
@@ -803,6 +856,7 @@
       return function () { var i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); };
     },
     dial: dial,
+    blockReason: blockReason,
     answer: answer,
     decline: decline,
     hangup: hangup,
