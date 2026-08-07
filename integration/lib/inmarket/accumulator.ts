@@ -77,6 +77,7 @@ const VERIFY_BATCH = envNum("INMARKET_VERIFY_BATCH", 800);        // curated ema
 const REOON_BATCH = envNum("REOON_VERIFY_BATCH", 30);            // leftover curated emails verified via Reoon (real mailbox check, no port 25) per tick
 const REOON_FIND_BATCH = envNum("REOON_FIND_BATCH", 20);         // pending PEOPLE whose email syntaxes Reoon walks to FIND a valid mailbox per tick (each = up to REOON_MAX_CANDIDATES calls)
 const FINDER_BATCH = 40;               // pending people SMTP-verified per tick (opt-in; bounded — slow)
+const PAID_FIND_BATCH = envNum("INMARKET_PAID_FIND_BATCH", 25);  // misses sent to the residual (paid) finder per tick — bills on a hit, so bounded
 // FAST INFLOW — brand-new hiring companies/postings flow in on their OWN fast tick (every few
 // minutes) so prospects appear as they're posted, not once an hour. It runs ONLY the cheap,
 // high-yield breadth vacuum (+ a couple of rotating sectors) — never the expensive board
@@ -537,6 +538,28 @@ async function runCurationTickInner(): Promise<void> {
       const { findEmailsBySmtp } = await import("./curation");
       await findEmailsBySmtp(FINDER_BATCH, new Date().toISOString());
     }
+  } catch { /* best-effort; the next tick retries */ }
+
+  // RESIDUAL FINDER — the last rung, on the misses only. The free path above leaves two dead ends
+  // behind: a row whose every syntax Reoon rejected, and a catch-all domain it cannot crack. Both
+  // are then excluded from every free finder's target set, so without this pass they are stuck for
+  // good — a named decision-maker that outreach can never use, accumulating tick after tick. This
+  // is the pass that rescues them (finder-of-record service: Findymail -> Reoon -> pool verify;
+  // Icypeas + Reoon re-verify as the fallback). Was written but never called, which is why the
+  // backlog only ever grew. No-op unless INMARKET_FINDER_URL or ICYPEAS_API_KEY is set, so the lean
+  // (free-only) model is unaffected; bounded per tick because these rungs bill on a hit.
+  try {
+    const { residualFinderEnabled, findEmailsByPaid } = await import("./curation");
+    if (await residualFinderEnabled()) {
+      await findEmailsByPaid(PAID_FIND_BATCH, new Date().toISOString());
+    }
+  } catch { /* best-effort; the next tick retries */ }
+
+  // CATCH-ALL POLICY SWEEP — promote already-parked catch-all rows into supply when the operator
+  // has armed that tier. No-op while the flag is off, and a no-op once the backlog is drained.
+  try {
+    const { promoteCatchAllParked } = await import("./curation");
+    await promoteCatchAllParked();
   } catch { /* best-effort; the next tick retries */ }
 }
 
