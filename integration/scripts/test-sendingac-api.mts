@@ -129,11 +129,43 @@ async function main() {
       assert.equal(api.sendingAcIsSandbox(), false);
     });
 
+    // The key Sending.ac actually issued was `sk_sandbox_…`, not the `sac_test_…` the
+    // published spec describes. Matching one literal prefix sent it to the LIVE host.
+    await test("an undocumented sandbox prefix is still recognised as sandbox", () => {
+      process.env.SENDINGAC_API_KEY = "sk_sandbox_EoLN4hlKirgtgtVP";
+      assert.equal(api.sendingAcIsSandbox(), true);
+      assert.equal(api.sendingAcBase(), "https://sandbox-api.customers.ac/v1");
+      process.env.SENDINGAC_API_KEY = "sk_live_abc1234";
+      assert.equal(api.sendingAcIsSandbox(), false);
+      assert.equal(api.sendingAcBase(), "https://live-api.customers.ac/v1");
+    });
+
+    await test("a key in no known format is assumed NOT live", () => {
+      // Guessing "live" for a key we cannot classify is the only guess that can point
+      // a non-production key at production infrastructure.
+      process.env.SENDINGAC_API_KEY = "someopaquetoken123456";
+      assert.equal(api.sendingAcIsSandbox(), true);
+      assert.equal(api.sendingAcBase(), "https://sandbox-api.customers.ac/v1");
+    });
+
+    await test("SENDINGAC_API_BASE overrides the host for either key kind", () => {
+      // Neither documented host resolves in DNS, so this override is the mechanism
+      // that points at whatever Sending.ac actually ships, with no code change.
+      process.env.SENDINGAC_API_BASE = "https://api.customers.ac/v1/";
+      process.env.SENDINGAC_API_KEY = "sac_live_abc1234";
+      assert.equal(api.sendingAcBase(), "https://api.customers.ac/v1");
+      process.env.SENDINGAC_API_KEY = "sk_sandbox_abc1234";
+      assert.equal(api.sendingAcBase(), "https://api.customers.ac/v1");
+      delete process.env.SENDINGAC_API_BASE;
+    });
+
     await test("the key hint never exposes the secret", () => {
       process.env.SENDINGAC_API_KEY = "sac_live_supersecretvalue9999";
-      const hint = api.sendingAcKeyHint();
-      assert.equal(hint, "sac_live_…9999");
-      assert.ok(!hint.includes("supersecret"));
+      assert.equal(api.sendingAcKeyHint(), "sac_live_…9999");
+      assert.ok(!api.sendingAcKeyHint().includes("supersecret"));
+      process.env.SENDINGAC_API_KEY = "sk_sandbox_supersecretvalue8888";
+      assert.equal(api.sendingAcKeyHint(), "sk_sandbox_…8888");
+      assert.ok(!api.sendingAcKeyHint().includes("supersecret"));
     });
   }
 

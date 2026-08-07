@@ -41,9 +41,14 @@ if (!KEY) {
   process.exit(2);
 }
 
+// The published spec says keys look like `sac_live_…` / `sac_test_…`, but the key
+// Sending.ac actually issued was `sk_sandbox_…`. Match the environment word rather than
+// one literal prefix, and treat anything unclassifiable as NOT live: guessing "live" is
+// the only guess that can aim a non-production key at production infrastructure.
+const LIVE_KEY = /^[a-z]+_(live|prod|production)_/i.test(KEY);
+const SANDBOX = !LIVE_KEY;
 const BASE = (process.env.SENDINGAC_API_BASE || "").trim().replace(/\/+$/, "")
-  || (KEY.startsWith("sac_test_") ? "https://sandbox-api.customers.ac/v1" : "https://live-api.customers.ac/v1");
-const SANDBOX = BASE.includes("sandbox") || KEY.startsWith("sac_test_");
+  || (LIVE_KEY ? "https://live-api.customers.ac/v1" : "https://sandbox-api.customers.ac/v1");
 
 // Upstream allows 120 req/min/token; pace under it so a full pull never trips 429.
 const GAP_MS = 550;
@@ -59,10 +64,27 @@ async function api(path, params = {}) {
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     lastAt = Date.now();
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json" },
-      signal: AbortSignal.timeout(30_000),
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (e) {
+      // A host that does not resolve is not a transient network blip and retrying it
+      // just burns two minutes. As of 2026-08-07 BOTH hosts the spec advertises are
+      // NXDOMAIN, so this is the likely first failure and it deserves a real answer
+      // rather than "fetch failed".
+      const cause = String(e?.cause?.code || e?.code || "");
+      if (/ENOTFOUND|EAI_AGAIN/.test(cause)) {
+        const err = new Error(`the API host ${new URL(BASE).hostname} does not resolve (${cause})`);
+        err.code = "host.unresolved";
+        throw err;
+      }
+      if (attempt === 4) throw e;
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      continue;
+    }
     if (res.ok) return res.json();
 
     let code = `http.${res.status}`, message = res.statusText;
@@ -70,6 +92,7 @@ async function api(path, params = {}) {
       const b = await res.json();
       if (b?.error?.code) code = b.error.code;
       if (b?.error?.message) message = b.error.message;
+      else if (b?.message) message = b.message; // Laravel-style envelope, seen live
     } catch { /* non-JSON error body */ }
 
     if (res.status === 429 || res.status >= 500) {
@@ -108,6 +131,15 @@ async function main() {
     senders = await listAll("/senders");
   } catch (e) {
     console.error(`FAILED to list senders -> ${e.message}`);
+    if (e.code === "host.unresolved") {
+      console.error("\nThat is Sending.ac's side, not yours and not a key problem.");
+      console.error("Both hosts their spec advertises were NXDOMAIN when this was written:");
+      console.error("  live-api.customers.ac       sandbox-api.customers.ac");
+      console.error("The only host that resolves, api.customers.ac, serves the dashboard and");
+      console.error("openapi.json but has no API routes deployed (every path 404s route-not-found).");
+      console.error("\nAsk Sending.ac for the real base URL, then re-run with:");
+      console.error("  SENDINGAC_API_BASE=https://<their-host>/<prefix> node integration/scripts/sendingac-probe.mjs");
+    }
     if (String(e.code).startsWith("auth.")) {
       console.error("\nThat is an authentication problem, not a network one:");
       console.error("  auth.invalid_key        the key is wrong, revoked, or for the other environment");

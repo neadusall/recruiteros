@@ -90,28 +90,56 @@ export function sendingAcConfigured(): boolean {
 }
 
 /**
+ * Is this a non-production key?
+ *
+ * The published spec says keys look like `sac_live_…` / `sac_test_…`, but the key
+ * Sending.ac actually issued was `sk_sandbox_…`. Trusting the documented prefix alone
+ * meant an unrecognised key fell through to the DEFAULT, and the default is live: a
+ * sandbox key would have been aimed at production infrastructure. So match on the
+ * environment word anywhere in the prefix rather than on one exact literal, and treat
+ * anything unrecognised as non-live below.
+ */
+function keyLooksSandbox(k: string): boolean {
+  return /^[a-z]+_(test|sandbox|dev)_/i.test(k) || /sandbox/i.test(k.split("_").slice(0, 2).join("_"));
+}
+
+/** Is this key unambiguously a production key? */
+function keyLooksLive(k: string): boolean {
+  return /^[a-z]+_(live|prod|production)_/i.test(k);
+}
+
+/**
  * Base URL for the configured key.
  *
- * The key prefix decides it: `sac_test_` is a sandbox key and sandbox keys only work
- * against the sandbox host. SENDINGAC_API_BASE overrides for an unforeseen host, but
- * the prefix rule is what keeps a test key from being aimed at live infrastructure.
+ * SENDINGAC_API_BASE is the authority when set, and it is not optional in practice:
+ * as of 2026-08-07 NEITHER documented host resolves in DNS (both NXDOMAIN) and the one
+ * host that does, api.customers.ac, serves the dashboard and the spec but has no API
+ * routes deployed. The constants below are what the spec advertises; the env var is how
+ * this points at whatever Sending.ac actually ships without a code change.
+ *
+ * Absent an override, an unrecognised key is treated as sandbox. Guessing "live" for a
+ * key we cannot classify is the one guess with a real downside.
  */
 export function sendingAcBase(): string {
   const override = (process.env.SENDINGAC_API_BASE || "").trim();
   if (override) return override.replace(/\/+$/, "");
-  return sendingAcKey().startsWith("sac_test_") ? SANDBOX_BASE : LIVE_BASE;
+  return keyLooksLive(sendingAcKey()) ? LIVE_BASE : SANDBOX_BASE;
 }
 
-/** True when the configured key targets the sandbox (no real infrastructure). */
+/** True when the configured key is not a production key (so: no real infrastructure). */
 export function sendingAcIsSandbox(): boolean {
-  return sendingAcBase() === SANDBOX_BASE || sendingAcKey().startsWith("sac_test_");
+  const k = sendingAcKey();
+  if (keyLooksLive(k)) return false;
+  return keyLooksSandbox(k) || !!k; // unclassifiable but present: assume not live
 }
 
 /** Key fingerprint safe to render in the UI: prefix + last 4, never the secret. */
 export function sendingAcKeyHint(): string {
   const k = sendingAcKey();
   if (!k) return "";
-  const m = /^(sac_(?:live|test)_)(.*)$/.exec(k);
+  // Any `<word>_<env>_` prefix, not just the two the spec named, so a key in an
+  // unforeseen format still fingerprints readably instead of being sliced mid-secret.
+  const m = /^([a-z]+_[a-z]+_)/i.exec(k);
   const prefix = m ? m[1] : k.slice(0, 4);
   return `${prefix}…${k.slice(-4)}`;
 }

@@ -32,17 +32,53 @@ the mailboxes simply stop being credential-less.
 
 | | |
 |---|---|
-| Live host | `https://live-api.customers.ac/v1` |
+| Live host | `https://live-api.customers.ac/v1` *(advertised; see below)* |
 | Sandbox host | `https://sandbox-api.customers.ac/v1` (no real infrastructure) |
-| Auth | `Authorization: Bearer sac_live_…` (or `sac_test_…` for sandbox) |
+| Auth | `Authorization: Bearer <key>` |
 | Rate limit | 120 requests/minute/token, `429 rate.quota_exceeded` + `Retry-After` |
 | Pagination | cursor: `page[size]` (max 100) + `page[after]` |
 | Scopes needed | `senders:read`, `mailboxes:read` |
 
-The key prefix picks the host, so a `sac_test_` key can never be pointed at live
-infrastructure by a stale env var.
+## Blocked: the API is not reachable yet (checked 2026-08-07)
+
+Two things the published spec says are not true of the running service, so verify both
+before assuming a key is broken:
+
+1. **Neither advertised host exists.** `live-api.customers.ac` and
+   `sandbox-api.customers.ac` are both **NXDOMAIN**. The only host that resolves is
+   `api.customers.ac`, which serves the dashboard and `openapi.json` but has **no API
+   routes deployed** - every path returns Laravel's `"The route ... could not be found."`,
+   which is route-not-found, not an auth failure.
+2. **Key format differs.** The spec documents `sac_live_…` / `sac_test_…`; the key
+   actually issued was `sk_sandbox_…`.
+
+Consequences for this code, both handled:
+
+- `SENDINGAC_API_BASE` overrides the host and is the mechanism for pointing at whatever
+  Sending.ac actually ships, with no code change. It is not optional today.
+- Key classification matches the environment **word** (`live|prod|production` vs
+  `test|sandbox|dev`) anywhere in the prefix, not one literal. Anything unclassifiable is
+  treated as **sandbox**: guessing "live" for an unrecognised key is the only guess that
+  can aim a non-production key at production infrastructure. Matching only `sac_test_`
+  would have sent the real `sk_sandbox_` key to the live host.
+
+A **sandbox** key is not enough for the real goal either way. Per the spec's own words,
+sandbox provisions no real infrastructure, so it can never return the real fleet or its
+passwords. **A live key is required.**
 
 ## Steps
+
+### 0. Get a working base URL and a LIVE key from Sending.ac
+
+Blocked on them, per the section above. What to ask for:
+
+- the real base URL for the Partner API, since neither host in their spec resolves;
+- a **live** key (`sk_live_…` or whatever they issue), not sandbox;
+- confirmation that the key carries `senders:read` and `mailboxes:read`.
+
+The "Production Server name" their key form asks for is a label on their side. The API
+has no allowlist, IP binding or host field anywhere in the spec, so it does not restrict
+where the key can be called from.
 
 ### 1. Generate the key (only a person can do this)
 
