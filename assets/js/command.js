@@ -16365,6 +16365,33 @@
       $("#clCall").addEventListener("click", placeCall);
       updateRecState();
     }
+    /* A failed dial is explained in the recruiter's terms and in terms of what
+       to do next. Engine codes stay in the network log, never on screen. */
+    function dialProblem(r) {
+      var code = String((r && r.data && (r.data.error || r.data.message)) || "");
+      if (/invalid_number|missing_number/.test(code)) {
+        return { tone: "var(--danger)", text: "That number could not be dialed. Enter it in full, with the country code (for example, +14155550123)." };
+      }
+      if (/no_line/.test(code)) {
+        return { tone: "var(--warn)", text: "You do not have a calling number yet. Ask your admin to assign you one on the Numbers page, then try again." };
+      }
+      if (/line_not_assigned|line_not_found/.test(code)) {
+        return { tone: "var(--warn)", text: "Your calling number is not assigned to you for candidate calls. Ask your admin to check it on the Numbers page." };
+      }
+      if (/in progress/i.test(code)) {
+        return { tone: "var(--warn)", text: "A call is already in progress. Finish that call first." };
+      }
+      if (/another tab/i.test(code)) {
+        return { tone: "var(--warn)", text: "Your phone is active in another tab. Switch to that tab to call, or close it and try again here." };
+      }
+      if (/phone_not_ready/.test(code)) {
+        return { tone: "var(--warn)", text: "Your browser phone is still connecting. Wait a moment and try again." };
+      }
+      if (r && (r.status === 404 || r.status === 409)) {
+        return { tone: "var(--warn)", text: "Calling is not fully set up for your workspace yet. Open Setup to connect it." };
+      }
+      return { tone: "var(--danger)", text: "The call could not be placed. Please try again." };
+    }
     function placeCall() {
       var msg = $("#clDialMsg"), btn = $("#clCall");
       var to = (($("#clPhone") || {}).value || "").trim();
@@ -16377,21 +16404,29 @@
       var orig = btn.innerHTML;
       btn.disabled = true; btn.innerHTML = "Calling...";
       msg.style.color = "var(--text-dim)"; msg.textContent = "";
-      var payload = { toNumber: to, consentAcknowledged: consent };
+      var payload = { to: to, motion: "recruiting" };
       if (cs.prospect) payload.prospectId = cs.prospect.id;
-      send("/phone/dial", "POST", payload).then(function (r) {
+      // The softphone engine owns the browser leg, so dial through it when it is
+      // loaded: that attaches the in-call controls to this call. The direct POST
+      // is the fallback for a page where the engine did not mount.
+      var engine = window.__bdPhone;
+      var started = (engine && engine.dial)
+        ? engine.dial(to, null, "recruiting").then(function (call) { return { ok: true, status: 200, data: { call: call } }; },
+            function (e) { return { ok: false, status: 0, data: { error: (e && e.message) || "" } }; })
+        : send("/phone/dial", "POST", payload);
+      started.then(function (r) {
         btn.disabled = false; btn.innerHTML = orig;
-        if (r.status === 409) {
-          msg.style.color = "var(--warn)";
-          msg.textContent = (r.data && r.data.message) || "Calling is not fully configured, or recording consent has not been attested for this workspace. Open Recording settings below to attest consent, or connect telephony under Setup.";
-          return;
-        }
         if (!r.ok) {
-          msg.style.color = "var(--danger)";
-          msg.textContent = (r.data && (r.data.error || r.data.message)) || "Could not place the call. Please try again.";
+          var why = dialProblem(r);
+          msg.style.color = why.tone; msg.textContent = why.text;
           return;
         }
         if (consent) cs.consentAck = true; // banner collapses for the rest of the session once consent is given
+        // Workspace policy is what starts a recording, so an unconfirmed consent
+        // box has to actively stop it. Otherwise the notice below would promise
+        // "not recorded" on a call the policy is already recording.
+        var call = r.data && r.data.call;
+        if (!consent && call && call.id) send("/phone/calls/" + call.id, "POST", { action: "record", on: false }).catch(function () {});
         msg.style.color = "var(--ok)";
         msg.textContent = "Call started" + (consent ? " (recording requested)." : ".");
         paintDialer();
@@ -16418,18 +16453,20 @@
     }
     function fetchSettings() {
       var body = $("#clSetBody"); if (!body) return;
-      send("/phone/settings", "GET").then(function (r) {
+      send("/phone/settings?motion=recruiting", "GET").then(function (r) {
         var d = (r.ok && r.data) ? (r.data.settings || r.data) : {};
         paintSettings(body, d, r.ok);
       }).catch(function () { paintSettings(body, {}, false); });
     }
     function paintSettings(body, d, ok) {
       var attested = !!d.recordingConsentAttested;
-      var mode = d.recordingMode || "manual";
+      var mode = d.recordingMode || "off";
+      // These values are the ones the server accepts; anything else is rejected.
       var modes = [
-        ["manual", "Manual (record only when the recruiter confirms consent on the call)"],
-        ["always", "Always (record every call, only where lawful and disclosed)"],
-        ["never", "Never (do not record any call)"]
+        ["outbound", "Calls you place (outbound only)"],
+        ["all", "Every call (inbound and outbound)"],
+        ["inbound", "Calls you receive (inbound only)"],
+        ["off", "Off (do not record any call)"]
       ];
       var opts = modes.map(function (m) { return '<option value="' + m[0] + '"' + (mode === m[0] ? " selected" : "") + ">" + esc(m[1]) + "</option>"; }).join("");
       body.innerHTML =
@@ -16444,11 +16481,12 @@
         "</div>";
       $("#clSetSave").addEventListener("click", function () {
         var msg = $("#clSetMsg"), self = this;
-        var payload = { recordingConsentAttested: $("#clSetAttest").checked, recordingMode: $("#clSetMode").value };
+        var payload = { motion: "recruiting", recordingConsentAttested: $("#clSetAttest").checked, recordingMode: $("#clSetMode").value };
         self.disabled = true;
         send("/phone/settings", "POST", payload).then(function (r) {
           self.disabled = false;
           if (r.ok) { msg.style.color = "var(--ok)"; msg.textContent = "Saved."; }
+          else if (r.status === 403) { msg.style.color = "var(--warn)"; msg.textContent = "Only an admin can change the recording policy for your workspace."; }
           else if (r.status === 404 || r.status === 409) { msg.style.color = "var(--warn)"; msg.textContent = "Calling is not configured yet, so this could not be saved."; }
           else { msg.style.color = "var(--danger)"; msg.textContent = "Could not save. Please try again."; }
         }).catch(function () { self.disabled = false; msg.style.color = "var(--danger)"; msg.textContent = "Could not reach the server."; });

@@ -455,10 +455,19 @@
   }
 
   /* ---------------- public actions ---------------- */
-  function dial(number, lineId) {
+  // motion picks which of the recruiter's lines answers: "bd" (default) for the
+  // BD Phone, "recruiting" for the candidate Calls console.
+  function dial(number, lineId, motion) {
     if (!S.leader) return Promise.reject(new Error("Phone is active in another tab."));
     if (S.phase !== "ready" && S.phase !== "ended") return Promise.reject(new Error("A call is already in progress."));
-    return send("/phone/dial", { to: number, lineId: lineId || (S.summary && S.summary.activeLineId), motion: "bd" })
+    var m = motion === "recruiting" ? "recruiting" : "bd";
+    // The cached active line belongs to the BD motion, so a recruiting call
+    // leaves lineId unset and lets the server pick that motion's own line.
+    return send("/phone/dial", {
+      to: number,
+      lineId: lineId || (m === "bd" ? (S.summary && S.summary.activeLineId) : undefined),
+      motion: m,
+    })
       .then(function (d) {
         S.call = d.call;
         pendingOutbound = { callId: d.call.id, until: Date.now() + 45000 };
