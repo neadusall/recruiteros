@@ -160,7 +160,9 @@ function worksAtCompany(hay: string, company: string): boolean {
  * ("Jane Doe - VP Engineering - Acme"). Validates names (looksLikeName) and requires a real
  * leadership title so non-people rows can't pose as a decision-maker.
  */
-function extractPeople(data: unknown, company: string): PersonCandidate[] {
+/** Exported for the regression suite (test-paid-naming-affinity.mts) - the guard below is the
+ *  only thing standing between a loose keyword search and a fabricated decision-maker. */
+export function extractPeople(data: unknown, company: string): PersonCandidate[] {
   const out: PersonCandidate[] = [];
   const seen = new Set<string>();
 
