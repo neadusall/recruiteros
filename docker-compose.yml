@@ -39,6 +39,12 @@ services:
   app:
     build: .
     restart: unless-stopped
+    # The app spawns its own headless browsers for the sourcing/in-market scrapers,
+    # and PID 1 here is npm/next, which never reaps orphaned grandchildren — so
+    # finished Chromiums piled up as <defunct> entries between deploys. `init`
+    # puts a real reaper in front of it. Deliberately NO cpus limit: the portal is
+    # the thing every other cap on this box exists to protect.
+    init: true
     env_file: .env.production
     environment:
       # Durable persistence with ZERO config: the app snapshots accounts,
@@ -159,6 +165,24 @@ services:
   laxis-worker:
     build: ./laxis-worker
     restart: unless-stopped
+    # Enrichment must never be able to take the portal down. This box has 2 vCPUs
+    # and a Chromium session burns most of one, so an enrichment burst (several
+    # vendor lanes plus their canaries) used to run the box to 0% idle — the Next
+    # event loop stopped getting scheduled and Caddy's upstream connections were
+    # reset mid-request, which surfaced to recruiters as a 502 on /sourcing
+    # (ROS-SRV, 2026-08-07). Capping the worker at one core leaves a full core for
+    # the app and the rest of the stack, so a heavy enrichment run now only makes
+    # enrichment slower, never the portal unreachable.
+    cpus: "1.0"
+    # PID 1 in this container is `node server.js`, which does not reap orphaned
+    # grandchildren. Every finished Chromium left a <defunct> entry behind (87 of
+    # them after an hour of enrichment), so the container leaked PIDs until it was
+    # restarted. `init` puts a real reaper in front of node and clears them.
+    init: true
+    # Backstop for the same failure mode: if a flow ever loses track of its
+    # browsers, the container hits this ceiling and its jobs fail loudly instead
+    # of quietly exhausting the host's process table for every other service.
+    pids_limit: 512
     env_file:
       - path: .env.production
         required: false
