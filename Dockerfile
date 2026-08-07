@@ -47,4 +47,12 @@ COPY --from=build /app/integration/package.json ./package.json
 COPY --from=build /app/integration/next.config.js ./next.config.js
 
 EXPOSE 3000
-CMD ["npx", "next", "start", "-p", "3000"]
+# --keepAliveTimeout: Node closes an idle connection after 5s by default, while the
+# edge pools and reuses upstream connections. When the edge picks a socket in the
+# instant Node is closing it, the request dies with "connection reset by peer" and
+# the recruiter gets a 502 from a server that never faulted. The Caddyfile now
+# releases pooled connections after 2s, and this raises our side to 45s: the app
+# holds every socket the edge could still reach, by a margin no scheduling jitter
+# closes. (Stays under Node's 60s headersTimeout, which must remain the longer of
+# the two.)
+CMD ["npx", "next", "start", "-p", "3000", "--keepAliveTimeout", "45000"]

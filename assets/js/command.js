@@ -280,25 +280,30 @@
     return !data || typeof data.error !== "string";
   }
 
-  function api(path, _retried, _blipRetried) {
+  function api(path, _retried, _blipRetried, _quiet) {
     return fetch(API + path, { credentials: "include", headers: authHeaders() }).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (d) {
         if (sessionDead(r.status, d)) {
-          if (!_retried) return delay(1200).then(function () { return api(path, true, _blipRetried); });
+          if (!_retried) return delay(1200).then(function () { return api(path, true, _blipRetried, _quiet); });
           signOut(); throw 0;
         }
         // One quiet retry across a restart window. Reads only, and only when the
         // app itself did not answer: asking twice is free, and the alternative
         // is telling people the app broke when it was being upgraded.
         if (gatewayBlip(r.status, d) && !_blipRetried) {
-          return delay(1800).then(function () { return api(path, _retried, true); });
+          return delay(1800).then(function () { return api(path, _retried, true, _quiet); });
         }
         if (!r.ok || d === null) {
           // A read that fails used to throw a bare 0, so callers rendered an empty
           // screen and the person was left guessing whether the data was missing
           // or the app was. Say so, once, with a code.
-          if (r.status !== 409 || !readySetupNotice(path, d)) {
-            var code = breakCodeFor(r.status, d);
+          var code = breakCodeFor(r.status, d);
+          if (_quiet) {
+            // A loop knocking on its own schedule. It has its own recovery and its
+            // own deadline, so there is nothing here for the person to do — and the
+            // only screen a notice could name is whichever one they wandered onto.
+            if (code) fileBreakQuietly(code, path, r.status, (d && (d.detail || d.error)) || "");
+          } else if (r.status !== 409 || !readySetupNotice(path, d)) {
             if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
           }
           throw 0;
@@ -309,11 +314,32 @@
       // The request never landed at all (offline, server restarting mid-deploy).
       // Same one retry as a gateway blip: the commonest cause by far is a deploy,
       // and it is over before a person could finish reading the notice.
-      if (!_blipRetried) return delay(1800).then(function () { return api(path, _retried, true); });
-      reportBreak("ROS-NET", screenLabel(), { path: path, status: 0, detail: (e && e.message) || "fetch failed" });
+      if (!_blipRetried) return delay(1800).then(function () { return api(path, _retried, true, _quiet); });
+      var det = (e && e.message) || "fetch failed";
+      if (_quiet) fileBreakQuietly("ROS-NET", path, 0, det);
+      else reportBreak("ROS-NET", screenLabel(), { path: path, status: 0, detail: det });
       throw 0;
     });
   }
+
+  /**
+   * A read a BACKGROUND LOOP makes on its own schedule — a search still running
+   * server-side, a connection being watched until it completes.
+   *
+   * Same request as api(), same session handling, same throw-on-failure so the
+   * caller's existing `.catch` keeps knocking. What is different is who hears
+   * about a failure: these loops outlive the screen that started them (the
+   * search watches run for 30-45 minutes, and the recruiter moves on), so a
+   * failure here painted "Something went wrong with OS Text." on whoever
+   * happened to be reading OS Text at the time — naming a tool that was not
+   * involved, could not be retried from there, and was in fact working. Worse,
+   * the loop then recovered silently, so the notice was not even true by the
+   * time it was read.
+   *
+   * The break is still filed (screen: "background") so the owner's Breaks tab
+   * sees every one of them. It just does not accuse a bystander.
+   */
+  function apiPatient(path) { return api(path, false, false, true); }
 
   /**
    * A background question — a badge count, a poll nobody pressed a button for.
@@ -455,10 +481,18 @@
     if (activeProgressFail) { try { activeProgressFail("Stopped"); } catch (e) { /* the notice below still shows */ } }
     try { window.dispatchEvent(new CustomEvent("ros:break", { detail: entry })); } catch (e) { /* older browser: the notice below still shows */ }
 
+    // One outage reads as one outage. The fold above is per REQUEST (so the log
+    // keeps every path that failed), but two paths failing for the same reason
+    // produce the same sentence, and six copies of "The app could not reach the
+    // server." stacked down the screen says nothing the first one did not — it
+    // just looks like six separate things broke. The report is already filed;
+    // what is on screen only has to say it once.
     var host = breakHost();
+    if (host && host.querySelector('[data-break-code="' + code + '"]')) host = null;
     if (host) {
       var note = document.createElement("div");
       note.className = "break-note";
+      note.setAttribute("data-break-code", code);
       note.innerHTML =
         '<b>' + esc(where ? ("Something went wrong with " + where + ".") : "Something went wrong.") + '</b><br>' +
         esc(BREAK_CODES[code]) +
@@ -14090,7 +14124,11 @@
           as a finished run. */
       function lost(label, code, message) { failProgress(label); msgStop(code, message); reset(); loadRuns(); }
       function poll() {
-        return api("/sourcing").then(function (d) {
+        // apiPatient, not api: this loop knocks every 15s for up to 30 minutes,
+        // deliberately, across the very restart it is recovering from. Each
+        // knock that failed used to paint a red notice on whatever screen the
+        // recruiter had moved on to.
+        return apiPatient("/sourcing").then(function (d) {
           var items = (d && d.nightQueue) || [];
           var it = items.filter(function (i) { return i.recovery && i.recovery.token === rec.token; })[0];
           if (it && it.runId) {
@@ -14158,7 +14196,9 @@
         showProgress('"' + label + '" is still running', 90 + findEta(it.cap || 300),
           "This search kept running on the server while you were away. You can leave this page again: the finished list lands under Your saved candidate lists and is sent to Candidates and OS Text automatically.");
         function poll() {
-          return api("/sourcing").then(function (d) {
+          // Background by definition: this watch exists BECAUSE the recruiter
+          // left the tab. See apiPatient.
+          return apiPatient("/sourcing").then(function (d) {
             var q = (d && d.nightQueue) || [];
             var cur = q.filter(function (i) { return i.recovery && i.recovery.token === tok; })[0];
             if (cur && cur.stage === "error") {
@@ -14825,7 +14865,10 @@
       liPoll = setInterval(function () {
         tries++;
         if (tries > 90) { clearInterval(liPoll); liPoll = null; loadEngines(); return; }
-        api("/linkedin/connect").then(function (d) {
+        // Every 4s for up to six minutes while the recruiter finishes signing in
+        // in another tab — and the interval is not registered in viewTimers, so
+        // it survives navigation. Background: file, never accuse. See apiPatient.
+        apiPatient("/linkedin/connect").then(function (d) {
           if (d && d.connected) {
             clearInterval(liPoll); liPoll = null;
             toast("Your LinkedIn is connected. Pasted searches now pull from your own account.");
