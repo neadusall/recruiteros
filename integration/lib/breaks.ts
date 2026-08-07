@@ -20,9 +20,17 @@ const MAX = 300;
 
 export interface BreakEntry {
   id: string;
-  /** Quotable code shown on screen (ROS-NET / ROS-SRV / ROS-DENY / ROS-APP /
-   *  ROS-SETUP — the last one is a tool refused for a missing connection, which
-   *  is a setup gap rather than a fault, and is filed so the owner sees it). */
+  /** Quotable code shown on screen (ROS-NET / ROS-SRV / ROS-BUSY / ROS-DENY /
+   *  ROS-APP / ROS-SETUP).
+   *
+   *  Two of these are deliberately NOT faults, and both are filed anyway so the
+   *  owner sees them: ROS-SETUP is a tool refused for a missing connection (a
+   *  setup gap), and ROS-BUSY is the proxy answering for an app server that was
+   *  mid-restart — deploy churn, which has to be separable from a real 5xx or
+   *  every routine deploy reads as an outage in this log.
+   *
+   *  `screen: "background"` marks a break nobody was shown: a background poll
+   *  that failed. Real for the owner, not worth a notice for the person. */
   code: string;
   /** What the person was doing, named as the app names it ("JD Sourcing"). */
   where: string;

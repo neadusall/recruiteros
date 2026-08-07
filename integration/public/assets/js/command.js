@@ -257,12 +257,27 @@
   function sessionDead(status, data) {
     return status === 401 && data && data.error === "unauthorized";
   }
-  function api(path, _retried) {
+  /** The proxy answering for an app server that is not there right now. Every
+   *  deploy swaps the container, and for the second or two that takes, open tabs
+   *  get a 502/503/504 (or a fetch that never lands at all). That is not "the
+   *  server ran into a problem": nothing is broken, and a read that waits a
+   *  moment and asks again gets its answer. Announcing it painted a permanent
+   *  red notice on whatever screen the person happened to have open — routinely
+   *  a tool that had nothing to do with it. */
+  function gatewayBlip(status) { return status === 502 || status === 503 || status === 504; }
+
+  function api(path, _retried, _blipRetried) {
     return fetch(API + path, { credentials: "include", headers: authHeaders() }).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (d) {
         if (sessionDead(r.status, d)) {
-          if (!_retried) return delay(1200).then(function () { return api(path, true); });
+          if (!_retried) return delay(1200).then(function () { return api(path, true, _blipRetried); });
           signOut(); throw 0;
+        }
+        // One quiet retry across a restart window. Reads only: asking twice is
+        // free, and the alternative is telling people the app broke when it was
+        // being upgraded.
+        if (gatewayBlip(r.status) && !_blipRetried) {
+          return delay(1800).then(function () { return api(path, _retried, true); });
         }
         if (!r.ok || d === null) {
           // A read that fails used to throw a bare 0, so callers rendered an empty
@@ -278,9 +293,36 @@
       });
     }, function (e) {
       // The request never landed at all (offline, server restarting mid-deploy).
+      // Same one retry as a gateway blip: the commonest cause by far is a deploy,
+      // and it is over before a person could finish reading the notice.
+      if (!_blipRetried) return delay(1800).then(function () { return api(path, _retried, true); });
       reportBreak("ROS-NET", screenLabel(), { path: path, status: 0, detail: (e && e.message) || "fetch failed" });
       throw 0;
     });
+  }
+
+  /**
+   * A background question — a badge count, a poll nobody pressed a button for.
+   * Resolves to null on any failure and NEVER paints a notice: the person did
+   * not ask for it, and the only screen a notice could blame is whichever one
+   * they happen to be looking at. (Readiness has always used a raw fetch for
+   * exactly this reason; the badge pollers were the two that had not.)
+   */
+  function apiQuiet(path) {
+    return fetch(API + path, { credentials: "include", headers: authHeaders() }).then(
+      function (r) {
+        if (r.ok) return r.json().catch(function () { return null; });
+        // Silent on screen, not silent in the log: a badge endpoint that is
+        // really down still has to reach the owner's Breaks tab, or "quiet"
+        // becomes "invisible" and we are back to work failing unseen. Only the
+        // codes that mean the platform failed, though — a 401 on a poll is a
+        // session that ended, a 404 a route that moved; neither is a break.
+        var code = breakCodeFor(r.status);
+        if (code) fileBreakQuietly(code, path, r.status, "");
+        return null;
+      },
+      function (e) { fileBreakQuietly("ROS-NET", path, 0, (e && e.message) || "fetch failed"); return null; },
+    );
   }
   // Mutating call (POST/PUT/DELETE) -> { ok, status, data }. Same 401-retry guard.
   function send(path, method, payload, _retried) {
@@ -332,6 +374,11 @@
   var BREAK_CODES = {
     "ROS-NET": "The app could not reach the server. Nothing you typed is lost. Wait a moment and try that again.",
     "ROS-SRV": "The server ran into a problem doing that, so it did not finish. Nothing was changed.",
+    // A restart, not a fault. Reads retry past this on their own and never get
+    // here; a write cannot be retried for someone, so it says what actually
+    // happened and what to do — instead of ROS-SRV telling a whole office the
+    // app broke every time a deploy went out under them.
+    "ROS-BUSY": "The server was restarting (a routine update), so that did not go through. Nothing was changed — try it again.",
     "ROS-DENY": "Your account is not allowed to do that. An admin can grant access.",
     "ROS-APP": "This screen hit a problem and may not have finished what it started. Reload the page before relying on what is on it.",
   };
@@ -423,6 +470,56 @@
     } catch (e) { /* nothing further to do: the person already sees the notice */ }
   }
 
+  /**
+   * File a break with no notice attached.
+   *
+   * For background questions: nobody pressed anything, so there is no screen to
+   * blame and nothing for the person to do — but the owner still needs the
+   * record, and a failing badge endpoint that reaches nobody is exactly the
+   * silent failure this whole layer exists to end. Its own fold-window (five
+   * minutes, per path) and its own map, because the visible one is wiped on
+   * every navigation and a poller would refile through it.
+   */
+  var quietSeen = {};
+  function fileBreakQuietly(code, path, status, detail) {
+    if (!BREAK_CODES[code]) return;
+    var key = code + "|" + path;
+    var now = Date.now();
+    if (quietSeen[key] && now - quietSeen[key] < 300000) return;
+    quietSeen[key] = now;
+    try {
+      fetch(API + "/breaks", {
+        method: "POST", credentials: "include",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          code: code, where: "background refresh", at: new Date().toISOString(),
+          screen: "background", path: path, status: status || 0,
+          detail: detail || "", agent: navigator.userAgent,
+        }),
+        keepalive: true,
+      }).catch(function () { });
+    } catch (e) { /* a background failure is not worth a second one */ }
+  }
+
+  /**
+   * Leaving the screen clears its notices.
+   *
+   * The strip was append-only and lived above every view, so one blip on one
+   * tool followed the person around for the rest of the session: "Something
+   * went wrong with OS Text." sat on top of JD Sourcing, naming a tool that was
+   * not involved and could not be retried from there. What is on screen has to
+   * describe the screen it is on. Nothing is lost — the report is already filed
+   * server-side, where it can actually be looked up.
+   *
+   * The fold-window goes with it: it exists so one outage is one notice, not so
+   * the next screen's own failure is swallowed by a notice we just cleared.
+   */
+  function clearBreaks() {
+    var el = document.getElementById("breakBar");
+    if (el) el.innerHTML = "";
+    breakSeen = {};
+  }
+
   // A crash in this file used to leave a half-drawn screen and no explanation.
   window.addEventListener("error", function (e) {
     reportBreak("ROS-APP", "", { detail: (e && e.message) || "script error", path: (e && e.filename) || "" });
@@ -451,6 +548,10 @@
   function breakCodeFor(status) {
     if (!status) return "ROS-NET";
     if (status === 403) return "ROS-DENY";
+    // Before the generic 5xx: a gateway blip is a different thing from a server
+    // that ran your request and fell over doing it, and the owner's Breaks tab
+    // needs to be able to tell deploy churn from a real fault at a glance.
+    if (gatewayBlip(status)) return "ROS-BUSY";
     if (status >= 500 || status === 0) return "ROS-SRV";
     return "";
   }
@@ -495,10 +596,34 @@
 
   /** The fix line, split by who is reading it: an admin can go and do it, a
    *  recruiter needs to know who to ask (and that it is not their mistake). */
-  function readyFixLine() {
-    return readyCanFix
-      ? "Open Connect › Connected, add the account, then press Test."
-      : "This is a setup step, not something you did. Ask your admin to connect it.";
+  function readyFixLine(canTestHere) {
+    if (!readyCanFix) return "This is a setup step, not something you did. Ask your admin to connect it.";
+    // Keys already saved: the proof is one authenticated call away, and the
+    // person reading the warning is the person allowed to make it. Sending them
+    // off to hunt a tile is why keys sat untested.
+    return canTestHere
+      ? "The keys are already saved — proving them takes one press."
+      : "Open Connect › Connected, add the account, then press Test.";
+  }
+
+  /**
+   * Run the REAL connection test (the same POST the Connected tab's Test button
+   * makes) for every dependency this tool is waiting on, one at a time so a
+   * failure names the connection that failed. Resolves with the ones that did
+   * not pass, carrying the provider's own reason.
+   */
+  function readyTestDeps(deps) {
+    var bad = [];
+    return deps.reduce(function (chain, d) {
+      return chain.then(function () {
+        return send("/connected", "POST", { action: "test", id: d.id }).then(function (res) {
+          var out = res && res.data && res.data.result;
+          if (!out || out.status !== "green") {
+            bad.push({ label: d.label, error: (out && out.error) || "the test did not pass" });
+          }
+        }, function () { bad.push({ label: d.label, error: "the test could not run" }); });
+      });
+    }, Promise.resolve()).then(function () { return bad; });
   }
 
   function readyHost() {
@@ -513,7 +638,8 @@
       '.ready-note.blocked{border-left-color:var(--danger,#d4544e)}' +
       '.ready-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;padding-top:7px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)}' +
       '.ready-act{background:none;border:0;color:var(--text-dim);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;padding:0}' +
-      '.ready-act:hover{color:var(--text)}';
+      '.ready-act:hover{color:var(--text)}' +
+      '.ready-act:disabled{opacity:.55;cursor:default;text-decoration:none}';
     document.head.appendChild(css);
     el = document.createElement("div");
     el.id = "readyBar";
@@ -546,18 +672,49 @@
       host.innerHTML = "";
       if (!r || r.state === "ready" || !r.message) return;
       var blocked = r.state === "blocked";
+      // "Unverified" is the one state this strip can end by itself: the keys are
+      // there, only the proof is missing. Anyone allowed to manage integrations
+      // can settle it from here rather than being sent to another screen.
+      var testable = !blocked && readyCanFix && r.unverified && r.unverified.length ? r.unverified : null;
       var note = document.createElement("div");
       note.className = "ready-note" + (blocked ? " blocked" : "");
       note.innerHTML =
         "<b>" + esc(blocked ? (r.label + " is not set up yet.") : (r.label + " is set up but unproven.")) + "</b><br>" +
-        esc(r.message) +
+        '<span data-ready-msg="1">' + esc(r.message) + "</span>" +
         '<div class="ready-foot">' +
-          "<span>" + esc(readyFixLine()) + "</span>" +
+          '<span data-ready-fix="1">' + esc(readyFixLine(!!testable)) + "</span>" +
+          (testable ? '<button class="ready-act" data-ready-test="1">Test it now</button>' : "") +
           (readyCanFix ? '<button class="ready-act" data-ready-go="1">Open Connected</button>' : "") +
           '<button class="ready-act" data-ready-close="1">Dismiss</button>' +
         "</div>";
       var go = note.querySelector("[data-ready-go]");
       if (go) go.onclick = function () { location.hash = "#connected"; };
+      var tb = note.querySelector("[data-ready-test]");
+      if (tb) tb.onclick = function () {
+        tb.disabled = true;
+        tb.textContent = "Testing…";
+        readyTestDeps(testable).then(function (bad) {
+          readyAt = 0; // whatever we just learned is newer than the cache
+          loadReadiness(true).then(function () {
+            if (!bad.length) {
+              toast(r.label + " tested clean — it is proven now.");
+              renderReadyGate(currentRoute());
+              return;
+            }
+            // Failing the test is the useful outcome: it turns "unproven" into
+            // the provider's actual complaint, which is what gets it fixed.
+            var msg = note.querySelector("[data-ready-msg]");
+            if (msg) {
+              msg.textContent = bad.map(function (b) { return b.label + ": " + b.error; }).join(" · ");
+            }
+            var fix = note.querySelector("[data-ready-fix]");
+            if (fix) fix.textContent = "The saved key was rejected. Open Connected and paste a current one.";
+            note.className = "ready-note blocked";
+            tb.disabled = false;
+            tb.textContent = "Test again";
+          });
+        });
+      };
       note.querySelector("[data-ready-close]").onclick = function () { note.remove(); };
       host.appendChild(note);
     };
@@ -3069,7 +3226,8 @@
   function obRefreshBadge() {
     var badge = $("#badgeOutbound");
     if (!badge) return;
-    api("/outbound?view=notifications").then(function (r) {
+    apiQuiet("/outbound?view=notifications").then(function (r) {
+      if (!r) return; // a badge that cannot be counted is not worth a red notice
       var unread = ((r && r.notifications) || []).filter(function (n) { return !n.read; }).length;
       badge.textContent = unread > 0 ? String(unread) : "";
       badge.classList.toggle("show", unread > 0);
@@ -3094,7 +3252,7 @@
   }
   function liOpsRefreshBadges() {
     if (!can("outreach:send")) return;
-    api("/linkedin/dailyops").then(liOpsSetBadges).catch(function () {});
+    apiQuiet("/linkedin/dailyops").then(function (d) { if (d) liOpsSetBadges(d); });
   }
   liOpsRefreshBadges();
   setInterval(liOpsRefreshBadges, 180000);
@@ -3322,6 +3480,7 @@
     else pa.style.display = "none";
     Array.prototype.forEach.call(document.querySelectorAll(".mt"), function (x) { x.classList.toggle("active", x.dataset.motion === motion); });
     clearViewTimers(); // stop any auto-refresh from the view we're leaving
+    clearBreaks();     // ...and its break notices: they belonged to that screen
     view.innerHTML = "";
     // Before the tool draws anything: does it have what it needs to work at all?
     renderReadyGate(key);
