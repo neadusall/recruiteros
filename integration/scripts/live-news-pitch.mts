@@ -4,14 +4,16 @@ import { composePitch } from "../lib/signals/watch/signalPitch";
 
 const SEGMENT = "supply chain software";
 
-// A desk profile in the shape of the worked example: who you are, what you recruit
-// into, the hard part your people already understand, and how you position.
+// The desk profile: who you are, what you recruit into, the hard part your people
+// already understand, and how you position. Positioning is Lume's own line from
+// lib/bd/houseVoice.ts (the firm that BUILDS and hires leadership teams). Verticals and
+// domainDifficulty are claims about the FIRM, so confirm them before sending for real.
 const profile = {
-  firmName: "Lazio",
+  firmName: "Lume",
   verticals: ["distribution", "warehousing", "logistics"],
   placesTitles: "the operations and supply chain leaders we bring",
   domainDifficulty: "regulated, complex product handling",
-  positioning: "We work as an embedded partner, not a resume vendor.",
+  positioning: "We build leadership teams as an embedded partner, not a resume vendor.",
   ctaMinutes: 15,
 };
 

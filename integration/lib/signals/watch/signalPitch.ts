@@ -18,10 +18,10 @@
  *
  *   "Graham, Tilley is carrying more open operations roles than it has in months, and
  *    chemical distribution is not a space where you can drop just anyone into an
- *    operations seat. Lazio recruits into distribution, warehousing, and logistics, so
+ *    operations seat. Lume recruits into distribution, warehousing, and logistics, so
  *    the operations and supply chain leaders we bring already understand regulated,
  *    complex product handling. We work as an embedded partner, not a resume vendor.
- *    Worth 15 minutes to see where Lazio can help you hire ahead of the growth?"
+ *    Worth 15 minutes to see where Lume can help you hire ahead of the growth?"
  *
  * Beats 3 and 4 are claims about the DESK, not about the prospect, so they cannot be
  * inferred from a headline: they come from a stored DeskProfile. Beats 1, 2 and 5 are
@@ -45,7 +45,7 @@ const MODEL = process.env.RECRUITEROS_EMAIL_MODEL ?? "claude-haiku-4-5";
 /* ------------------------------------------------------------------ */
 
 export interface DeskProfile {
-  /** The recruiting firm's name, e.g. "Lazio". */
+  /** The recruiting firm's name, e.g. "Lume". */
   firmName: string;
   /** What the desk recruits into, e.g. ["distribution", "warehousing", "logistics"]. */
   verticals: string[];

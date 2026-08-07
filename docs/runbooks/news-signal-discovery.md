@@ -74,11 +74,11 @@ curl -sS https://<host>/api/signals/watch \
   -d '{
     "action": "saveDeskProfile",
     "profile": {
-      "firmName": "Lazio",
+      "firmName": "Lume",
       "verticals": ["distribution", "warehousing", "logistics"],
       "placesTitles": "the operations and supply chain leaders we bring",
       "domainDifficulty": "regulated, complex product handling",
-      "positioning": "We work as an embedded partner, not a resume vendor.",
+      "positioning": "We build leadership teams as an embedded partner, not a resume vendor.",
       "ctaMinutes": 15
     }
   }'
@@ -87,6 +87,10 @@ curl -sS https://<host>/api/signals/watch \
 Read it back with `{"action":"deskProfile"}`. Until it is set the email still renders,
 but beats 3 and 4 fall back to generic language rather than inventing a specialization
 the desk never claimed.
+
+`verticals` and `domainDifficulty` are the two fields that assert something about the
+FIRM, and they go out verbatim in every send. Set them to what Lume genuinely recruits
+into. The values above are the worked example, not a verified claim.
 
 ## The email
 

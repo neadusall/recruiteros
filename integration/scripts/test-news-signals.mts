@@ -241,8 +241,8 @@ eq(seatFor(["Operations Manager"]), "operations", "seat derived from the inferre
 eq(seatFor(["Account Executive"]), "revenue", "sales role maps to a revenue seat");
 eq(seatFor([]), "leadership", "no role falls back to leadership");
 
-const lazio = {
-  firmName: "Lazio",
+const lume = {
+  firmName: "Lume",
   verticals: ["distribution", "warehousing", "logistics"],
   placesTitles: "the operations and supply chain leaders we bring",
   domainDifficulty: "regulated, complex product handling",
@@ -256,12 +256,12 @@ const pitch = composePitch({
   segment: "chemical distribution",
   signal: "funding_round",
   roles: ["Operations Manager"],
-  profile: lazio,
+  profile: lume,
 });
 
 ok(pitch.body.startsWith("Graham, Tilley is carrying more open operations roles"), "beat 1 opens on the name and the observation", pitch.body.slice(0, 60));
 ok(pitch.body.includes("chemical distribution is not a space where you can drop just anyone into an operations seat"), "beat 2 names the segment and the seat");
-ok(pitch.body.includes("Lazio recruits into distribution, warehousing, and logistics"), "beat 3 states the matching specialization");
+ok(pitch.body.includes("Lume recruits into distribution, warehousing, and logistics"), "beat 3 states the matching specialization");
 ok(pitch.body.includes("regulated, complex product handling"), "beat 3 carries the domain difficulty");
 ok(pitch.body.includes("We work as an embedded partner, not a resume vendor."), "beat 4 is the positioning line");
 ok(pitch.body.includes("Worth 15 minutes"), "beat 5 is time-boxed");
@@ -274,7 +274,7 @@ ok(pitch.subject.includes("Tilley"), "subject names the company", pitch.subject)
 
 const anon = composePitch({
   company: "Tilley", reason: "just closed a $60M Series B", segment: "chemical distribution",
-  signal: "funding_round", roles: ["Operations Manager"], profile: lazio,
+  signal: "funding_round", roles: ["Operations Manager"], profile: lume,
 });
 ok(anon.body.startsWith("Tilley just closed"), "no first name means no fake greeting", anon.body.slice(0, 40));
 
@@ -285,7 +285,7 @@ const bare = composePitch({
 ok(!/undefined/.test(bare.body), "an unconfigured desk still renders a clean email");
 ok(!bare.body.includes("recruits into ,"), "an unconfigured desk never renders an empty vertical list", bare.body);
 eq(profileComplete(DEFAULT_PROFILE), false, "the default profile is not complete");
-eq(profileComplete(lazio), true, "a filled profile is complete");
+eq(profileComplete(lume), true, "a filled profile is complete");
 
 /* ---- copy defects caught by composing against LIVE discovered leads ---- */
 
@@ -296,7 +296,7 @@ eq(joinBeats("Acme just raised", "a new leader rebuilds, and the market is hard"
    "a stakes line that already has an and becomes its own sentence");
 const runOn = composePitch({
   company: "Freehand", reason: "just closed a $75M Series B", segment: "supply chain software",
-  signal: "funding_round", roles: ["Operations Manager"], profile: lazio,
+  signal: "funding_round", roles: ["Operations Manager"], profile: lume,
 });
 ok((runOn.body.split("\n\n")[0].match(/, and /g) ?? []).length <= 1, "the opening sentence never carries two and-clauses", runOn.body.split("\n\n")[0]);
 
@@ -305,19 +305,19 @@ eq(possessive("Freehand"), "Freehand's", "normal possessive");
 eq(possessive("Conner Industries"), "Conner Industries'", "a trailing s takes the bare apostrophe");
 ok(!composePitch({
   company: "Conner Industries", reason: "just added a new board member", segment: "supply chain software",
-  signal: "exec_hire", roles: ["Account Executive"], profile: lazio,
+  signal: "exec_hire", roles: ["Account Executive"], profile: lume,
 }).subject.includes("Industries's"), "subject never writes Industries's");
 
 // A board seat is not an operating hire.
 const boardPitch = composePitch({
   company: "Conner Industries", reason: "just added a new board member", segment: "supply chain software",
-  signal: "exec_hire", roles: ["Account Executive"], facts: { appointmentKind: "board" }, profile: lazio,
+  signal: "exec_hire", roles: ["Account Executive"], facts: { appointmentKind: "board" }, profile: lume,
 });
 ok(!boardPitch.body.includes("rebuild the bench underneath them"), "a board appointment is not described as rebuilding a bench", boardPitch.body);
 ok(!boardPitch.body.includes("under the new leader"), "and the ask does not assume a new operating leader");
 const execPitch = composePitch({
   company: "Tilley", reason: "just brought in a new chief revenue officer", segment: "chemical distribution",
-  signal: "exec_hire", roles: ["Account Executive"], profile: lazio,
+  signal: "exec_hire", roles: ["Account Executive"], profile: lume,
 });
 ok(execPitch.body.includes("rebuild the bench underneath them"), "a real exec hire still gets the bench framing");
 
@@ -327,7 +327,7 @@ ok(execPitch.body.includes("rebuild the bench underneath them"), "a real exec hi
 
 const pin = {
   company: "Tilley", reason: "x", segment: "chemical distribution",
-  signal: "funding_round" as const, roles: ["Operations Manager"], profile: lazio,
+  signal: "funding_round" as const, roles: ["Operations Manager"], profile: lume,
 };
 ok(checkPitch(pitch.body, pin).ok, "the template pitch passes its own gate", checkPitch(pitch.body, pin).problems);
 ok(!checkPitch("", pin).ok, "empty body rejected");
@@ -373,9 +373,9 @@ ok(mine.length >= 4, "lists are scoped and retrievable", mine.length);
 eq((await listWatchlists("ws_other")).length, 0, "another workspace sees none of them");
 
 /* ---- desk profile round-trips per workspace ---- */
-await saveDeskProfile("ws_test", lazio);
+await saveDeskProfile("ws_test", lume);
 const back = await getDeskProfile("ws_test");
-eq(back.firmName, "Lazio", "desk profile round-trips");
+eq(back.firmName, "Lume", "desk profile round-trips");
 eq(back.verticals.join(), "distribution,warehousing,logistics", "verticals round-trip");
 eq((await getDeskProfile("ws_untouched")).firmName, DEFAULT_PROFILE.firmName, "an unconfigured workspace gets defaults, not a crash");
 eq((await saveDeskProfile("ws_test", { ctaMinutes: 999 })).ctaMinutes, 15, "an out-of-range CTA falls back to the default");
