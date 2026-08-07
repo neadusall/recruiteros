@@ -20,6 +20,7 @@
 import type { CandidateICP, CandidateRow } from "./types";
 import { rowSaysRemote } from "./remoteMode";
 import { type ProofTerm, matchProofTerms, proofScore } from "./proofTerms";
+import { requirementCoverage, shortenRequirement } from "./requirements";
 
 /* ------------------------------------------------------------------ */
 /* Tokenization & boundary-aware matching                              */
@@ -404,14 +405,48 @@ export function scoreCandidate(
     // may still be local. Remote vs on-site is not a qualification signal either.
   }
 
-  /* 5. Domain / must-have signals (15). */
+  /* 5. Domain / must-have signals (15).
+   *
+   * SCORED BY COVERAGE, not by first hit. Two things were wrong here until 2026-08-07:
+   *
+   *  - Requirements arrive from the JD parser as SENTENCES ("Hands-on Power BI
+   *    development including report/dashboard authoring, DAX, and data modeling"), and
+   *    this block phrase-matched them WHOLE against the candidate's text. No headline
+   *    contains a fourteen-word sentence, so the must-have line could not fire and the
+   *    domain component was dead weight on every run. requirementCoverage reduces each
+   *    requirement to the terms a profile would actually state.
+   *
+   *  - It stopped at the first match, so meeting one of five requirements scored the
+   *    same as meeting all five. Coverage is what tells a real match from a coincidence,
+   *    so the award is now proportional to how much of the list a person evidences.
+   *
+   * Industry stays a single phrase test: an industry name IS the phrase people write.
+   */
   let domain = 0;
-  const mh = anyPhrase(fullText, icp.mustHave);
-  if (mh) { domain += 9; reasons.push(`Must-have signal "${mh}"`); }
+  const mhCover = requirementCoverage(fullText, icp.mustHave);
+  if (mhCover.met) {
+    // Meeting all the must-haves earns the full 9; meeting some earns its share, with a
+    // floor so a single genuine credential on a long list still counts for something.
+    domain += Math.max(3, Math.round(9 * mhCover.ratio));
+    reasons.push(
+      mhCover.total > 1
+        ? `Meets ${mhCover.met} of ${mhCover.total} must-haves (${mhCover.matched.slice(0, 2).map((r) => shortenRequirement(r)).join("; ")})`
+        : `Must-have signal "${shortenRequirement(mhCover.matched[0])}"`,
+    );
+  }
   const ind2 = anyPhrase(fullText, icp.industries);
   if (ind2) { domain += 4; reasons.push(`Domain signal "${ind2}"`); }
-  const nh = anyPhrase(fullText, icp.niceToHave);
-  if (nh) { domain += 2; reasons.push(`Nice-to-have "${nh}"`); }
+  const nhCover = requirementCoverage(fullText, icp.niceToHave);
+  if (nhCover.met) {
+    // Nice-to-haves are breadth, not gates: a small award that still rewards the person
+    // showing four of them over the person showing one.
+    domain += Math.min(4, Math.max(1, Math.round(4 * nhCover.ratio) || 1));
+    reasons.push(
+      nhCover.total > 1
+        ? `Also shows ${nhCover.met} of ${nhCover.total} preferred skills (${nhCover.matched.slice(0, 2).map((r) => shortenRequirement(r)).join("; ")})`
+        : `Nice-to-have "${shortenRequirement(nhCover.matched[0])}"`,
+    );
+  }
   score += Math.min(WEIGHTS.domain, domain);
 
   /* 5b. PROOF EVIDENCE (up to 24, on top of the 100-point base).

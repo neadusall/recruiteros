@@ -12904,8 +12904,8 @@
               '<div class="jd-opt2-def">The ceiling on how many candidates this run gathers. It is not a minimum: you get every qualified person the search finds, up to this number. 500 covers most roles.</div>' +
             '</div>' +
             '<div class="jd-opt2">' +
-              '<label class="jd-opt2-top" for="jdMinFit"><input id="jdMinFit" type="number" min="0" max="100" value="10"> Min fit</label>' +
-              '<div class="jd-opt2-def">The match-strength bar, 0 to 100. 0 shows everyone found, 10 casts a wide net, 40 and up keeps only the tightest matches. Start wide: the list comes back ranked, so the gold is at the top either way.</div>' +
+              '<label class="jd-opt2-top" for="jdMinFit" title="How close a match someone has to be before this search keeps them, and before they are contacted. 45 is the point where someone is doing the right kind of job rather than merely sharing a word with the title. Lower it to see more people, raise it to see only the strongest."><input id="jdMinFit" type="number" min="0" max="100" value="45"> Min fit</label>' +
+              '<div class="jd-opt2-def">How close a match someone has to be, 0 to 100. This is the one setting that decides who gets <b>contacted</b>, not just who gets listed: people below it stay on the list to look at, and are left out of the emails and texts. 45 is the default and the point where someone is genuinely doing this kind of job rather than sharing a word with the title. Drop to 20 or 30 in a thin market to see more people, raise it above 60 when you only want the strongest.</div>' +
             '</div>' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdFresh"><input type="checkbox" id="jdFresh"> Fresh only</label>' +
@@ -14105,7 +14105,10 @@
       }).then(function () {
         // 3) Search.
         var cap = parseInt($("#jdCap") && $("#jdCap").value, 10) || 500;
-        var minFit = parseInt($("#jdMinFit") && $("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
+        // 45 matches the server's own default and the outreach quality bar. It used to
+        // read 10, which kept (and then contacted) people the ranker had already called
+        // the wrong role family.
+        var minFit = parseInt($("#jdMinFit") && $("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
         var fresh = !!($("#jdFresh") && $("#jdFresh").checked);
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
@@ -14172,7 +14175,10 @@
       }).then(function () {
         // 5) AI re-rank the top 100 (best effort — the list is already saved).
         if (!savedId) return null;
-        return send("/sourcing", "POST", { action: "rerank", id: savedId, top: 100 }).catch(function () { return null; });
+        // No "top" any more: the server judges the whole list (bounded by its own
+        // ceiling). Pinning this to 100 meant everyone past the first hundred was
+        // ordered and contacted on the rule score alone.
+        return send("/sourcing", "POST", { action: "rerank", id: savedId }).catch(function () { return null; });
       }).then(function () {
         reset();
         // 6) Hands-free: the saved list enriches itself and lands in Candidates and

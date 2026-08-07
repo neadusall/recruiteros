@@ -41,7 +41,7 @@ export {
   companyFromTitle,
   type CompanyFirstJob, type StartCompanyFirstOptions, type CompanyFirstStepResult,
 } from "./companyFirst";
-export { reRankCandidates, type ReRankResult } from "./rerank";
+export { reRankCandidates, RERANK_BATCH, RERANK_MAX, type ReRankResult } from "./rerank";
 export { getSeenKeys, addSeenKeys } from "./seen";
 export { fetchFullProfile, profileFetchConfigured, type FullProfile, type ProfileExperience } from "./profile";
 export {

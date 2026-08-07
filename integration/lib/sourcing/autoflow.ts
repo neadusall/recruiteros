@@ -36,6 +36,7 @@ import { listNightItems, addNightItem } from "./nightQueue";
 import { mergeSourcingRuns } from "./mergeRuns";
 import { enforceRunGeo } from "./geoEnforce";
 import { combinableGroups } from "./sameRole";
+import { deliverMinFit, qualifiedForOutreach, qualityBarNote } from "./qualityBar";
 import {
   ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
 } from "../ostextImport";
@@ -213,6 +214,12 @@ function toOsTextContacts(run: SourcingRun): OsTextContact[] {
     // Sales Nav URL). It stays on the saved list to be looked at; it does not get a
     // text (owner mandate 2026-08-06).
     if (c.outOfArea) continue;
+    // THE QUALITY BAR, the same promise about who gets contacted, made about fit
+    // instead of distance: someone the scorer already judged the wrong role family
+    // stays on the list to be looked at but does not get a text. Before this, every
+    // row on the list was texted, and a third of them scored under 40 (see
+    // lib/sourcing/qualityBar.ts for the measurement that prompted it).
+    if (!qualifiedForOutreach(c, deliverMinFit())) continue;
     const parts = (c.fullName || "").trim().split(/\s+/);
     const custom: Record<string, string> = {};
     if (c.headline) custom.headline = c.headline;
@@ -254,10 +261,17 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       // always creates a new one, and a top-up must never duplicate the campaign.
       // Combined lists retag: everyone the merge holds gets the combined list's
       // name as their tag, even people the source lists promoted earlier.
-      await promoteSourcingRun(ws, run.id, {
+      const promoted = await promoteSourcingRun(ws, run.id, {
         listName: run.name, tag: "", campaignId: run.promotedCampaignId,
         retag: Boolean(run.combinedFrom?.length),
       });
+      // Remember what the quality bar held back so the card can say it plainly. A
+      // delivered count smaller than the list must always carry its own explanation.
+      stamp.belowBarHeld = promoted.belowBarHeld ?? 0;
+      stamp.barUsed = deliverMinFit();
+      if (promoted.belowBarHeld) {
+        console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) ${qualityBarNote(promoted.belowBarHeld, deliverMinFit())}`);
+      }
     }
 
     // 2) OS Text. Zero phones is not a failure — the campaign is still created

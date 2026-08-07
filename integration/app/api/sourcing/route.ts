@@ -38,7 +38,7 @@ import {
   profileFetchConfigured, deepVetCandidate, refineIcp, draftJobDescription,
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
   fetchFullProfileCached, getCachedContact, putCachedContact,
-  reRankCandidates, getSeenKeys, addSeenKeys,
+  reRankCandidates, RERANK_MAX, getSeenKeys, addSeenKeys,
   laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv, jobRowsDone,
   MAX_LAXIS_UPLOAD,
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv,
@@ -647,7 +647,11 @@ export async function POST(req: Request) {
       if (!b?.id) return fail("missing_id", 422);
       const run = await getSourcingRun(ws, b.id);
       if (!run) return fail("run_not_found", 404);
-      const top = Math.max(1, Math.min(b.top ?? 100, 100, run.candidates.length));
+      // Default to the WHOLE list. This line used to clamp at 100 regardless of what the
+      // client asked for, which is why a 1,892-person run only ever had its first 100
+      // people judged by the model. RERANK_MAX is the real ceiling now (env-tunable),
+      // and reRankCandidates covers the span in batches.
+      const top = Math.max(1, Math.min(b.top ?? run.candidates.length, RERANK_MAX, run.candidates.length));
       const { candidates, ranked, warning } = await reRankCandidates(run.candidates, run.icp, top);
       run.candidates = candidates;
       await saveSourcingRun(ws, { ...run });

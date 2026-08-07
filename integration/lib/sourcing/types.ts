@@ -304,6 +304,11 @@ export interface SourcingRun {
      */
     peopleAtSend?: number;
     attempts: number;
+    /** People the outreach quality bar held back at the last send, and the bar it used.
+     *  Stamped so the run card can explain a delivered count that is smaller than the
+     *  list, instead of leaving the recruiter to wonder where the rest went. */
+    belowBarHeld?: number;
+    barUsed?: number;
     /** When the sweeper LAST queued a server-side resume for an orphaned chain. The stamp
      *  expires (see autoflow.resumeInHand): a resume that wedges must be retryable, or the
      *  list's card spins "Enriching now" forever with nothing driving it. */

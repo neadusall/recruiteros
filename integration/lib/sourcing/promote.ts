@@ -20,6 +20,7 @@ import { createCampaign } from "../campaigns";
 import { upsertProspectList } from "../prospect-lists";
 import { getSourcingRun, saveSourcingRun } from "./store";
 import { enforceRunGeo } from "./geoEnforce";
+import { deliverMinFit, qualifiedForOutreach } from "./qualityBar";
 
 export interface PromoteResult {
   campaignId: string;
@@ -31,10 +32,14 @@ export interface PromoteResult {
   /** People held back because they sit outside the list's own radius. Reported so the
    *  recruiter sees the filter working instead of wondering where the count went. */
   outOfAreaHeld?: number;
+  /** People held back by the outreach quality bar (scored, and scored below it).
+   *  Same reason for reporting it: a count that shrinks should always say why. */
+  belowBarHeld?: number;
 }
 
 export interface PromoteOptions {
-  /** Only promote candidates at/above this fit score. Default 0 (all staged). */
+  /** Only promote candidates at/above this fit score. Defaults to the shared
+   *  outreach quality bar (SOURCING_DELIVER_MIN_FIT, 45); pass 0 to promote everyone. */
   minFit?: number;
   /** Promote into an existing campaign instead of creating one. */
   campaignId?: string;
@@ -76,7 +81,11 @@ export async function promoteSourcingRun(
   const run = await getSourcingRun(workspaceId, runId);
   if (!run) throw Object.assign(new Error("run_not_found"), { status: 404 });
 
-  const minFit = opts.minFit ?? 0;
+  // The shared outreach quality bar, not 0. A caller may still pass its own number
+  // (0 explicitly = promote everyone), but the DEFAULT is now the same floor the
+  // texting lane uses, so a person cannot be too weak a match to text yet good
+  // enough to drop into the pipeline and be emailed.
+  const minFit = opts.minFit ?? deliverMinFit();
   const core = getCore();
 
   // The recruiter can name the destination list (and a tag) at promote time; both
@@ -127,9 +136,11 @@ export async function promoteSourcingRun(
   if (geo.marked || geo.cleared) await saveSourcingRun(workspaceId, { ...run });
   const skipOutOfArea = opts.includeOutOfArea !== true;
   let outOfAreaHeld = 0;
+  // People the quality bar held back, so the caller can report it plainly.
+  let belowBarHeld = 0;
 
   for (const c of run.candidates) {
-    if (c.fitScore < minFit) continue;
+    if (!qualifiedForOutreach(c, minFit)) { belowBarHeld++; continue; }
     if (skipOutOfArea && c.outOfArea) { outOfAreaHeld++; continue; }
     if (c.linkedinUrl) {
       const existing = await core.findProspectByLinkedin(workspaceId, c.linkedinUrl);
@@ -201,5 +212,5 @@ export async function promoteSourcingRun(
     void pairRunToJobLibrary(run);
   } catch { /* never blocks the push */ }
 
-  return { campaignId, listId: list.id, added, deduped, name: listName, outOfAreaHeld };
+  return { campaignId, listId: list.id, added, deduped, name: listName, outOfAreaHeld, belowBarHeld };
 }
