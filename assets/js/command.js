@@ -257,14 +257,28 @@
   function sessionDead(status, data) {
     return status === 401 && data && data.error === "unauthorized";
   }
-  /** The proxy answering for an app server that is not there right now. Every
-   *  deploy swaps the container, and for the second or two that takes, open tabs
-   *  get a 502/503/504 (or a fetch that never lands at all). That is not "the
-   *  server ran into a problem": nothing is broken, and a read that waits a
-   *  moment and asks again gets its answer. Announcing it painted a permanent
-   *  red notice on whatever screen the person happened to have open — routinely
-   *  a tool that had nothing to do with it. */
-  function gatewayBlip(status) { return status === 502 || status === 503 || status === 504; }
+  /**
+   * The proxy answering for an app server that is not there right now.
+   *
+   * Every deploy swaps the container, and for the second or two that takes,
+   * open tabs get a 502/503/504 (or a fetch that never lands at all). That is
+   * not "the server ran into a problem": nothing is broken, and a read that
+   * waits a moment and asks again gets its answer. Announcing it painted a
+   * permanent red notice on whatever screen the person happened to have open,
+   * routinely a tool that had nothing to do with it.
+   *
+   * The body is what tells the two apart, and it has to, because the API uses
+   * these same statuses for real answers: an ATS sync that upstream refused, a
+   * provider that is not configured, OS Text that is not connected. Those are
+   * fail() responses — always JSON, always carrying `error` — and they must
+   * never be retried (the upstream call would run twice) nor relabelled as a
+   * restart. A proxy that is standing in for a dead container has no JSON to
+   * give.
+   */
+  function gatewayBlip(status, data) {
+    if (status !== 502 && status !== 503 && status !== 504) return false;
+    return !data || typeof data.error !== "string";
+  }
 
   function api(path, _retried, _blipRetried) {
     return fetch(API + path, { credentials: "include", headers: authHeaders() }).then(function (r) {
@@ -273,10 +287,10 @@
           if (!_retried) return delay(1200).then(function () { return api(path, true, _blipRetried); });
           signOut(); throw 0;
         }
-        // One quiet retry across a restart window. Reads only: asking twice is
-        // free, and the alternative is telling people the app broke when it was
-        // being upgraded.
-        if (gatewayBlip(r.status) && !_blipRetried) {
+        // One quiet retry across a restart window. Reads only, and only when the
+        // app itself did not answer: asking twice is free, and the alternative
+        // is telling people the app broke when it was being upgraded.
+        if (gatewayBlip(r.status, d) && !_blipRetried) {
           return delay(1800).then(function () { return api(path, _retried, true); });
         }
         if (!r.ok || d === null) {
@@ -284,7 +298,7 @@
           // screen and the person was left guessing whether the data was missing
           // or the app was. Say so, once, with a code.
           if (r.status !== 409 || !readySetupNotice(path, d)) {
-            var code = breakCodeFor(r.status);
+            var code = breakCodeFor(r.status, d);
             if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
           }
           throw 0;
@@ -311,15 +325,20 @@
   function apiQuiet(path) {
     return fetch(API + path, { credentials: "include", headers: authHeaders() }).then(
       function (r) {
-        if (r.ok) return r.json().catch(function () { return null; });
-        // Silent on screen, not silent in the log: a badge endpoint that is
-        // really down still has to reach the owner's Breaks tab, or "quiet"
-        // becomes "invisible" and we are back to work failing unseen. Only the
-        // codes that mean the platform failed, though — a 401 on a poll is a
-        // session that ended, a 404 a route that moved; neither is a break.
-        var code = breakCodeFor(r.status);
-        if (code) fileBreakQuietly(code, path, r.status, "");
-        return null;
+        return r.json().catch(function () { return null; }).then(function (d) {
+          if (r.ok) return d;
+          // Silent on screen, not silent in the log: a badge endpoint that is
+          // really down still has to reach the owner's Breaks tab, or "quiet"
+          // becomes "invisible" and we are back to work failing unseen. Only
+          // the codes that mean the platform failed, though — a 401 on a poll
+          // is a session that ended, a 404 a route that moved; neither is a
+          // break. The body is read for the same reason api() reads it: it is
+          // what separates a real answer from a proxy standing in for a dead
+          // container, and it carries the reason worth filing.
+          var code = breakCodeFor(r.status, d);
+          if (code) fileBreakQuietly(code, path, r.status, (d && (d.detail || d.error)) || "");
+          return null;
+        });
       },
       function (e) { fileBreakQuietly("ROS-NET", path, 0, (e && e.message) || "fetch failed"); return null; },
     );
@@ -343,7 +362,7 @@
           // A tool refused for a missing connection is neither: it is a setup
           // gap, and it gets the setup notice rather than an error banner.
           if (r.status !== 409 || !readySetupNotice(path, d)) {
-            var code = breakCodeFor(r.status);
+            var code = breakCodeFor(r.status, d);
             if (code) reportBreak(code, screenLabel(), { path: path, status: r.status, detail: (d && (d.detail || d.error)) || "" });
           }
         }
@@ -545,13 +564,13 @@
 
   /** Which code a failed request deserves. 401 is deliberately absent: a dead
    *  session signs the user out, which is its own (clear) answer. */
-  function breakCodeFor(status) {
+  function breakCodeFor(status, data) {
     if (!status) return "ROS-NET";
     if (status === 403) return "ROS-DENY";
     // Before the generic 5xx: a gateway blip is a different thing from a server
     // that ran your request and fell over doing it, and the owner's Breaks tab
     // needs to be able to tell deploy churn from a real fault at a glance.
-    if (gatewayBlip(status)) return "ROS-BUSY";
+    if (gatewayBlip(status, data)) return "ROS-BUSY";
     if (status >= 500 || status === 0) return "ROS-SRV";
     return "";
   }
