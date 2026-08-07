@@ -42,7 +42,8 @@ import { applySalesNavResult } from "./salesNavApply";
 import { getSeenKeys, addSeenKeys } from "./seen";
 import {
   laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv,
-  submitLaxisJob, getLaxisJob, mergeEnrichedCsv, MAX_LAXIS_UPLOAD,
+  submitLaxisJob, getLaxisJob, mergeEnrichedCsv, jobRowsDone, MAX_LAXIS_UPLOAD,
+  type LaxisJobStatus,
 } from "./laxis";
 import { buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv } from "./koldinfo";
 import { gapFillContacts } from "./gapfill";
@@ -350,6 +351,34 @@ function finish(item: NightItem, stage: "done" | "error", error?: string): void 
   touch(item, stage === "done"
     ? `finished: ${item.added.emails} email(s) + ${item.added.phones} phone(s) added`
     : undefined);
+}
+
+/**
+ * Stamp the worker's real row count onto the parked job ref while a pass is in flight.
+ *
+ * The KoldInfo DB rung sweeps 500 names in 15-row batches and merges ALL-OR-NOTHING at
+ * the end, so the run record used to sit untouched for the entire pass. Two things went
+ * wrong with that: the saved-list card had nothing to draw but a modelled clock (a live
+ * browser and a dead one looked identical — 2026-08-06), and autoflow's orphan check
+ * reads run.updatedAt, so a healthy long pass drifted toward looking abandoned.
+ *
+ * Saves ONLY when the count actually moved. The in-tick poll cadence is ~10s and a batch
+ * takes minutes, so this writes a handful of times per pass, not once per poll — and the
+ * moved-only rule is what makes `progressAt` mean "last real movement" rather than "last
+ * time anyone asked".
+ */
+async function noteJobProgress(
+  ws: string,
+  run: SourcingRun,
+  key: "koldJob" | "koldDbJob",
+  job: LaxisJobStatus,
+): Promise<void> {
+  const ref = run[key];
+  const done = jobRowsDone(job.phase);
+  if (!ref || done == null || done === ref.done) return;
+  ref.done = done;
+  ref.progressAt = nowIso();
+  await saveSourcingRun(ws, { ...run });
 }
 
 /** Boost items ride the SAME free-chain stages first (a half-enriched list must be
@@ -783,7 +812,7 @@ async function step(item: NightItem): Promise<void> {
       return;
     }
     const job = await getLaxisJob(run.koldJob.jobId).catch(() => ({ status: "error", error: "job_not_found" } as any));
-    if (job.status === "queued" || job.status === "running") { touch(item); return; }
+    if (job.status === "queued" || job.status === "running") { await noteJobProgress(ws, run, "koldJob", job); touch(item); return; }
     if (job.status === "done" && job.enrichedCsv) {
       const m = mergeSourcingKoldInfoCsv(run.candidates, job.enrichedCsv);
       item.added.emails += m.emails; item.added.phones += m.phones;
@@ -817,7 +846,11 @@ async function step(item: NightItem): Promise<void> {
       return;
     }
     const job = await getLaxisJob(run.koldDbJob.jobId).catch(() => ({ status: "error", error: "job_not_found" } as any));
-    if (job.status === "queued" || job.status === "running") { touch(item, run.koldDbJob ? `free pass 2: ${job.stage || "working…"}` : undefined); return; }
+    if (job.status === "queued" || job.status === "running") {
+      await noteJobProgress(ws, run, "koldDbJob", job);
+      touch(item, run.koldDbJob ? `free pass 2: ${job.stage || "working…"}` : undefined);
+      return;
+    }
     if (job.status === "done" && job.enrichedCsv) {
       const m = mergeSourcingKoldInfoCsv(run.candidates, job.enrichedCsv);
       item.added.emails += m.emails; item.added.phones += m.phones;

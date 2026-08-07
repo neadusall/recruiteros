@@ -49,7 +49,7 @@ export {
 } from "./store";
 export {
   laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv, parseCsv,
-  submitLaxisJob, getLaxisJob, mergeEnrichedCsv, laxisCandKey,
+  submitLaxisJob, getLaxisJob, mergeEnrichedCsv, laxisCandKey, jobRowsDone,
   LAXIS_CSV_COLUMNS, MAX_LAXIS_UPLOAD, type LaxisJobStatus, type LaxisMergeResult,
 } from "./laxis";
 export { promoteSourcingRun, type PromoteResult, type PromoteOptions } from "./promote";

@@ -37,7 +37,7 @@ import {
   vetBatchAvailable, submitVetBatch, retrieveVetBatch, collectVetBatch,
   fetchFullProfileCached, getCachedContact, putCachedContact,
   reRankCandidates, getSeenKeys, addSeenKeys,
-  laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv,
+  laxisWorkerConfigured, koldinfoWorkerReady, serializeCandidatesCsv, submitLaxisJob, getLaxisJob, mergeEnrichedCsv, jobRowsDone,
   MAX_LAXIS_UPLOAD,
   buildSourcingKoldInfoCsv, mergeSourcingKoldInfoCsv, buildKoldInfoDbCsv,
   startBulkList, stepBulkList, bulkListStatus,
@@ -751,7 +751,16 @@ export async function POST(req: Request) {
       if (!run.koldJob) return ok({ done: true, status: "none" });
       const job = await getLaxisJob(run.koldJob.jobId);
       if (job.status === "queued" || job.status === "running") {
-        return ok({ done: false, status: job.status, stage: job.stage });
+        // Park the worker's own row count on the run (see KoldJobRef.done): the saved-list
+        // card reads it straight off the run, so a tab-driven pass shows the same honest
+        // progress as a queue-driven one instead of a modelled clock.
+        const moved = jobRowsDone(job.phase);
+        if (moved != null && moved !== run.koldJob.done) {
+          run.koldJob.done = moved;
+          run.koldJob.progressAt = nowIso();
+          await saveSourcingRun(ws, { ...run });
+        }
+        return ok({ done: false, status: job.status, stage: job.stage, doneRows: moved ?? undefined });
       }
       if (job.status === "error") {
         delete run.koldJob;
@@ -800,7 +809,15 @@ export async function POST(req: Request) {
       if (!run.koldDbJob) return ok({ done: true, status: "none" });
       const job = await getLaxisJob(run.koldDbJob.jobId);
       if (job.status === "queued" || job.status === "running") {
-        return ok({ done: false, status: job.status, stage: job.stage });
+        // This is the rung that actually counts rows (grid sweep, batch by batch), so
+        // this stamp is what turns "Enriching now · working…" into a real "320 of 500".
+        const moved = jobRowsDone(job.phase);
+        if (moved != null && moved !== run.koldDbJob.done) {
+          run.koldDbJob.done = moved;
+          run.koldDbJob.progressAt = nowIso();
+          await saveSourcingRun(ws, { ...run });
+        }
+        return ok({ done: false, status: job.status, stage: job.stage, doneRows: moved ?? undefined });
       }
       if (job.status === "error") {
         delete run.koldDbJob;

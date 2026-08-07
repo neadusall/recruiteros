@@ -81,6 +81,35 @@ check("...sent + stuck but resume already queued -> no action",
     ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
     autoflow: { sentAt: new Date(NOW - HOUR).toISOString(), phonesAtSend: 1, attempts: 1, resumedAt: new Date(NOW - 10 * MIN).toISOString() },
   }), NOW), null);
+
+/* --- the resume RE-ARMS when it wedges too (2026-08-06) -------------------- */
+// The one-resume rule used to be one-resume-EVER: a permanent resumedAt meant a
+// resume that itself wedged parked the list on a dead chain forever, card spinning
+// "Enriching now" with nothing behind it. The stamp now expires while the chain is
+// STILL in flight (a resume that worked would have cleared the job refs).
+check("sent + stuck, resume 2h old and chain STILL in flight -> resume again",
+  due(run({
+    ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
+    autoflow: { sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, attempts: 1, resumedAt: new Date(NOW - 2 * HOUR).toISOString(), resumes: 1 },
+  }), NOW), "resume");
+check("...unsent equivalent -> resume-send again",
+  due(run({
+    ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
+    autoflow: { phonesAtSend: 0, attempts: 0, resumedAt: new Date(NOW - 2 * HOUR).toISOString(), resumes: 1 },
+  }), NOW), "resume-send");
+// ...but a chain that will never finish stops asking rather than re-queueing hourly.
+check("...same but 6 resumes already spent -> no action (retries exhausted)",
+  due(run({
+    ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
+    autoflow: { sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, attempts: 1, resumedAt: new Date(NOW - 2 * HOUR).toISOString(), resumes: 6 },
+  }), NOW), null);
+// A legacy stamp (written before the counter existed) counts as one resume spent,
+// so it re-arms rather than being read as unlimited or as exhausted.
+check("...legacy stamp with no resumes counter, 2h old -> resume again",
+  due(run({
+    ...stuckJobs, candidates: [enriched(), cand()], updatedAt: new Date(NOW - 61 * MIN).toISOString(),
+    autoflow: { sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, attempts: 1, resumedAt: new Date(NOW - 2 * HOUR).toISOString() },
+  }), NOW), "resume");
 // FIRST-SIGHT DELIVERY (2026-07-21): a healthy live chain no longer delays the
 // FIRST send — the list ships now and enrichment finds ride the top-up rule.
 check("...same but jobs only 30min stale and never sent -> send (first sight)",

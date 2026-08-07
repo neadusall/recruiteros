@@ -60,8 +60,12 @@ function makeVisit() {
   const $ = (id: string) => (id === "#jdProgress" ? hostEl : (hostEl ? hostEl.querySelector(id) : null));
   const esc = (s: any) => String(s == null ? "" : s);
   const api: any = {};
+  // The block assigns to view-level bindings that live OUTSIDE the extracted slice
+  // (renderJdSourcing publishes its bar-killer up to the view so a tab switch can stop
+  // it). eval runs strict here, so an undeclared target throws and takes the whole suite
+  // down; declaring them locally lets the slice run without pulling in the whole view.
   // eslint-disable-next-line no-eval
-  eval(block + "\napi.showProgress = showProgress; api.finishProgress = finishProgress;" +
+  eval("var activeProgressFail;\n" + block + "\napi.showProgress = showProgress; api.finishProgress = finishProgress;" +
     " api.setProgPhase = setProgPhase; api.hideProgress = hideProgress; api.prog = prog;");
   void $; void esc; void viewTimers; // referenced from inside the eval'd block
   return api;

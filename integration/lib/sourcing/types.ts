@@ -260,8 +260,13 @@ export interface SourcingRun {
      */
     peopleAtSend?: number;
     attempts: number;
-    /** When the sweeper queued a server-side resume for an orphaned chain. */
+    /** When the sweeper LAST queued a server-side resume for an orphaned chain. The stamp
+     *  expires (see autoflow.resumeInHand): a resume that wedges must be retryable, or the
+     *  list's card spins "Enriching now" forever with nothing driving it. */
     resumedAt?: string;
+    /** How many server-side resumes this chain has been given, so a chain that will never
+     *  finish stops asking. Absent on stamps written before 2026-08-06; those count as 1. */
+    resumes?: number;
     /** Last failure (kept for ops visibility); cleared on a clean send. */
     error?: string;
     /**
@@ -339,6 +344,17 @@ export interface KoldJobRef {
   submittedAt: string;
   /** How many missing-email rows were sent to KoldInfo. */
   count: number;
+  /**
+   * Rows the worker reports finished so far (DB-lookup rung only — see laxis.jobRowsDone).
+   * That rung merges ALL-OR-NOTHING at the end, so without this stamp the run record sits
+   * untouched for the whole pass: the saved-list card could only model a clock, and a
+   * browser chewing through 500 names looked exactly like a dead job (2026-08-06).
+   */
+  done?: number;
+  /** When `done` last CHANGED — not when it was last polled. This is the honest stall
+   *  clock: a job that keeps answering but stops counting is stuck, and submittedAt
+   *  can't see that. */
+  progressAt?: string;
 }
 
 /** A deep-vet batch in flight, parked on the run so polling survives a redeploy. */

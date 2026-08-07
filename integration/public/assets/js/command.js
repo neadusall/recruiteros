@@ -13001,7 +13001,20 @@
             ms = stageRemain(BUD.kold, P(r.koldJob.submittedAt)) + BUD.koldDb + BUD.laxis + BUD.tail;
             stageWord = "email pass";
           } else if (r.koldDbJob) {
-            ms = stageRemain(BUD.koldDb, P(r.koldDbJob.submittedAt)) + BUD.laxis + BUD.tail;
+            // The database pass counts rows as it sweeps them, so when that count is on
+            // the ref the projection is MEASURED from this run's own pace instead of
+            // budgeted: it's the longest pass on a big list, and a budget alone produced a
+            // clock that slid forward every poll while the card showed nothing moving.
+            var kd = r.koldDbJob, kdAt = P(kd.submittedAt);
+            var kdDone = typeof kd.done === "number" ? kd.done : 0;
+            var kdTot = kd.count || nAll;
+            if (kdDone > 0 && kdAt != null) {
+              var kdPer = (now - kdAt) / kdDone;
+              ms = Math.max((kdTot - kdDone) * kdPer, 30000) + BUD.laxis + BUD.tail;
+              measured = true;
+            } else {
+              ms = stageRemain(BUD.koldDb, kdAt) + BUD.laxis + BUD.tail;
+            }
             stageWord = "database pass";
           } else if (leftRows) {
             var per = learned != null ? learned : BUD.laxis / nAll;
@@ -13085,9 +13098,16 @@
           // from the ref's own submittedAt, so no server change is needed. Plain words
           // only, no internal terms ([[feedback-hide-search-internals]]).
           var jJobRef = r.koldDbJob || r.laxisJob || r.koldJob;
-          var jJobMs = jJobRef && jJobRef.submittedAt ? Date.parse(String(jJobRef.submittedAt).replace(" ", "T")) : NaN;
+          // Prefer the ref's LAST REAL MOVEMENT (progressAt — stamped only when the
+          // worker's row count actually changed) over the submit stamp. A pass that keeps
+          // answering the poll but has stopped counting rows is dead, and submittedAt
+          // can't see that: it just waits out the whole budget while the card says
+          // "Working now". With movement to read, silence IS the signal, so the threshold
+          // is short; the passes that report no row count keep the old size-scaled wait.
+          var jMoved = jJobRef && jJobRef.progressAt;
+          var jJobMs = jJobRef ? Date.parse(String(jMoved || jJobRef.submittedAt || "").replace(" ", "T")) : NaN;
           var jJobMin = isFinite(jJobMs) ? Math.round(Math.max(0, Date.now() - jJobMs) / 60000) : 0;
-          var jStallMin = Math.max(90, Math.round(n / 20)); // scales with list size, floor 90 min
+          var jStallMin = jMoved ? 25 : Math.max(90, Math.round(n / 20)); // floor 90 min when blind
           var enrichStalled = busyJobs && isFinite(jJobMs) && jJobMin >= jStallMin;
           var jStuckAgo = jJobMin < 60 ? (jJobMin + " min") : (Math.round(jJobMin / 60) + " hr");
           // ---- The visible journey: the four stops every list travels (Searched,
@@ -13138,12 +13158,19 @@
               "The contact lookup has been stuck for about " + jStuckAgo + " with no progress, so it most likely hit a snag and stopped. Press to restart it: finished work is kept and nothing is bought twice.");
             jNote = "<b>Stalled:</b> the contact lookup has been stuck for about " + jStuckAgo + " with no progress. Press the amber pill (or the Enrich button) to restart it; it resumes where it stopped and re-sends the refreshed contacts to Candidates and OS Text when done. If it stalls again right after, tell your admin.";
           } else if (busyJobs) {
-            // Real progress under the live stop: the chunk ledger gives actual rows
-            // done, so the mini bar is honest; without a ledger yet it just glides.
-            var livePct = ep ? Math.max(4, Math.min(100, Math.round(epDone / (ep.total || n || 1) * 100))) : null;
+            // Real progress under the live stop. Two sources, both actual work done: the
+            // Laxis chunk ledger, and — on the passes that have no ledger, above all the
+            // database lookup that merges all-or-nothing at the end — the in-flight ref's
+            // own row count, stamped from what the worker reports. Before that count
+            // existed this stop could only glide an indeterminate bar for the whole pass,
+            // which read as "cracking away and going nowhere" whether or not it was alive.
+            var jRefDone = (jJobRef && typeof jJobRef.done === "number") ? jJobRef.done : null;
+            var liveDone = ep ? epDone : jRefDone;
+            var liveTot = ep ? (ep.total || n) : ((jJobRef && jJobRef.count) || n);
+            var livePct = liveDone == null ? null : Math.max(4, Math.min(100, Math.round(liveDone / (liveTot || 1) * 100)));
             var liveBar = '<span class="jd-tbar' + (livePct == null ? ' ind' : '') + '"><b' + (livePct != null ? ' style="width:' + livePct + '%"' : '') + '></b></span>';
             var etaLine = !jEta ? "" : '<span class="jd-teta">' + (jEta.stage ? jEta.stage + " · " : "") + "done by ~" + jEta.clock + " · " + jEta.short + " left" + '</span>';
-            sEnrich = jStop("jt-live", jIcons.loop, "Enriching now", ep ? "~" + epDone + " of " + (ep.total || n) + " rows" : "working…",
+            sEnrich = jStop("jt-live", jIcons.loop, "Enriching now", liveDone == null ? "working…" : "~" + liveDone + " of " + liveTot + " rows",
               "Contact info (emails and phones) is being filled in right now, cheapest source first. This runs by itself; nothing to press.", null, liveBar + etaLine);
             jNote = "<b>Working now:</b> contact info is being filled in" + (jEta && jEta.stage ? " (" + jEta.stage + ")" : "") + ". " + (!jEta ? "" : jEta.finishing
               ? "It's finishing the last checks; projected to be done around <b>" + jEta.clock + "</b> (" + jEta.span + " from now). "

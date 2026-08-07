@@ -48,6 +48,8 @@ const FRESH_MS = 7 * 24 * 3600_000; // only lists touched in the last 7 days are
 const MAX_ATTEMPTS = 20;           // ~1 hour of retries on a hard failure, then park with the error
 const TOPUP_DEBOUNCE_MS = 10 * 60_000; // let a live Boost/gap-fill run accumulate finds between top-ups
 const MAX_SENDS_PER_TICK = 3;      // bound one tick's work; the rest go next tick
+const RESUME_REARM_MS = 60 * 60_000; // a resume that itself wedged becomes retryable again
+const MAX_RESUMES = 6;             // ...but a chain that will never finish stops asking
 
 function phoneCount(run: SourcingRun): number {
   return run.candidates.reduce((n, c) => n + (c.phone ? 1 : 0), 0);
@@ -75,6 +77,29 @@ function chainUnfinished(run: SourcingRun): boolean {
   return hasEnrichableRows(run);
 }
 
+/**
+ * Is this run's server-side resume still "in hand" — i.e. one was queued recently enough
+ * that we should wait for it rather than queue another?
+ *
+ * The stamp used to be permanent, which made the one-resume rule a one-resume-EVER rule:
+ * when the resume itself wedged (2026-08-06 — a KoldInfo DB pass stopped answering after
+ * its single resume), the job refs stayed in flight, `due()` returned null on every sweep
+ * from then on, and the list's card spun "Enriching now" forever with nothing behind it.
+ * Now the stamp expires: after RESUME_REARM_MS with the chain STILL in flight, the resume
+ * is treated as spent-and-failed and one more is allowed — up to MAX_RESUMES, so a chain
+ * that genuinely cannot finish stops re-queueing instead of retrying hourly forever.
+ *
+ * Callers only reach this while `enrichmentInFlight(run)` holds, so "still in flight an
+ * hour later" really does mean the resume didn't take: a resume that worked clears the
+ * refs, and the whole branch stops applying.
+ */
+function resumeInHand(run: SourcingRun, now: number): boolean {
+  const at = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
+  if (!Number.isFinite(at)) return false;                       // never resumed: go
+  if ((run.autoflow?.resumes ?? 1) >= MAX_RESUMES) return true;  // out of retries: hold
+  return now - at < RESUME_REARM_MS;                             // recent: let it work
+}
+
 /** Should the sweeper act on this run right now? (exported for the regression suite) */
 export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" | "resume-send" | "ostext-retry" | null {
   if (!run.candidates.length) return null;
@@ -99,10 +124,11 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
     // list needs that resume too: with first-sight delivery every list is sent
     // almost immediately, and an orphaned chain would otherwise never finish
     // (top-up only fires on finds, and a dead chain finds nothing).
-    const resumedAt = run.autoflow?.resumedAt ? Date.parse(run.autoflow.resumedAt) : NaN;
-    if (run.autoflow?.sentAt) return Number.isFinite(resumedAt) ? null : "resume";
+    // ...and if that resume wedged too, resumeInHand lets the next sweep queue another
+    // (bounded) instead of parking the list on a dead chain for good.
+    if (run.autoflow?.sentAt) return resumeInHand(run, now) ? null : "resume";
     if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
-    return Number.isFinite(resumedAt) ? "send" : "resume-send";
+    return resumeInHand(run, now) ? "send" : "resume-send";
   }
 
   if (run.autoflow?.sentAt) {
@@ -167,6 +193,7 @@ async function resumeRun(run: SourcingRun): Promise<void> {
       console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) chain orphaned mid-job — queued a server-side resume`);
     }
     stamp.resumedAt = nowIso();
+    stamp.resumes = (stamp.resumes ?? 0) + 1;
     run.autoflow = stamp;
     await saveSourcingRun(run.workspaceId, { ...run });
   } catch (e) {

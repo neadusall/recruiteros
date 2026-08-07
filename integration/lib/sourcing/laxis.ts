@@ -128,9 +128,26 @@ function authHeaders(): Record<string, string> {
 export interface LaxisJobStatus {
   jobId: string;
   status: "queued" | "running" | "done" | "error";
+  /** The worker's last log line — prose, for ops. */
   stage?: string;
+  /** Machine-readable progress the flow sets ("processing:120/500"). */
+  phase?: string;
   enrichedCsv?: string;
   error?: string;
+}
+
+/**
+ * Rows the worker has finished so far, read off its phase ("processing:120/500" -> 120).
+ *
+ * Only the KoldInfo DB flow counts rows (it sweeps the grid batch by batch, so it knows);
+ * the Laxis and KoldInfo upload flows are one bulk round-trip with no row granularity and
+ * set word-only phases, which yield null here. The DB flow's discovery mode reports a
+ * running total with no denominator ("processing:340"), which is a different quantity —
+ * the strict `n/total` shape keeps it out.
+ */
+export function jobRowsDone(phase: string | undefined): number | null {
+  const m = /^processing:(\d+)\/(\d+)$/.exec((phase || "").trim());
+  return m ? Number(m[1]) : null;
 }
 
 /**
