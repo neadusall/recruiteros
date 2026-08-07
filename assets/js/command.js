@@ -5681,6 +5681,10 @@
           '<label class="hs-field hs-loc"><span class="hs-fic"><svg class="isvg" aria-hidden="true"><use href="#i-pin"/></svg></span><input id="imqLoc" class="imq-in hs-in" type="text" autocomplete="off" placeholder="Location (blank = nationwide)" /></label>' +
           '<button type="submit" class="btn btn-primary hs-go" id="imqAdd">Search <span class="hs-arrow">→</span></button>' +
           '<button type="button" class="btn hs-watch" id="imqWatchBtn" data-act="watchadd" title="Poll this search every 15 min and auto-run the whole pipeline on new hits">Watch</button>' +
+          // The news front end reaches a company BEFORE the req is posted (it raised, hired an
+          // exec, expanded, acquired). Free and keyless, so it keeps running on a day the paid
+          // job-feed budget is spent. Watches a SEGMENT ("supply chain software"), not a title.
+          '<button type="button" class="btn hs-watch hs-watch-news" id="imqWatchNewsBtn" data-act="watchaddnews" title="Watch the NEWS for this market: funding, exec hires, expansion, acquisitions. Free, and it reaches them before the roles are posted.">Watch news</button>' +
         "</form>" +
         // Company-size narrow (multi-select bands). Resolved free via Wikidata + heuristic.
         '<div class="hs-sizes">' +
@@ -5692,6 +5696,7 @@
         "</div>" +
         '<div id="imqPreview" class="imq-preview hs-preview"></div>' +
         '<div id="imqWatch" class="wl-wrap"></div>' +
+        '<div id="imqTrial" class="ht-wrap"></div>' +
         '<style>' +
           '.wl-wrap{margin-top:14px}' +
           '.wl-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}' +
@@ -5716,7 +5721,48 @@
           '.wl-btn:hover{border-color:var(--brand,#2e5bd7)}' +
           '.wl-del{color:#b91c1c}' +
           '.hs-watch{background:var(--surface,#f1f5f9);border:1px solid var(--border,#e5e7eb);color:var(--text,#111)}' +
+          // Which front end a watch runs on. Colour-coded once here and reused by the
+          // head-to-head panel, so a row and its arm always read as the same thing.
+          '.wl-src{font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:999px;white-space:nowrap;margin-right:7px;vertical-align:1px}' +
+          '.wl-src.jobs{color:#1d4ed8;background:color-mix(in srgb,#2e5bd7 10%,transparent);border:1px solid color-mix(in srgb,#2e5bd7 30%,transparent)}' +
+          '.wl-src.news{color:#7c2d92;background:color-mix(in srgb,#a855f7 12%,transparent);border:1px solid color-mix(in srgb,#a855f7 32%,transparent)}' +
+          '.wl-free{font-size:11px;color:#15803d;font-weight:600}' +
           '@media (max-width:640px){.wl-stats{display:none}}' +
+
+          /* ---- Head-to-head: Hire Signals vs news signals ---- */
+          '.ht-wrap{margin-top:16px}' +
+          '.ht-card{border:1px solid var(--border,#e5e7eb);border-radius:14px;background:var(--card,#fff);padding:16px 18px}' +
+          '.ht-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px}' +
+          '.ht-h{font-weight:650;font-size:14px;letter-spacing:-.01em}' +
+          '.ht-sub{font-size:12px;color:var(--muted,#6b7280);line-height:1.5;margin-top:2px;max-width:62ch}' +
+          '.ht-verdict{font-size:11.5px;font-weight:700;padding:4px 11px;border-radius:999px;white-space:nowrap}' +
+          '.ht-verdict.wait{color:#8a5a00;background:color-mix(in srgb,#d97706 10%,transparent);border:1px solid color-mix(in srgb,#d97706 32%,transparent)}' +
+          '.ht-verdict.win{color:#15803d;background:color-mix(in srgb,#16a34a 10%,transparent);border:1px solid color-mix(in srgb,#16a34a 32%,transparent)}' +
+          '.ht-verdict.tie{color:var(--muted,#6b7280);background:var(--surface,#f8fafc);border:1px solid var(--border,#e5e7eb)}' +
+          // Two arms side by side. Grid (not flex) so both funnels share one baseline and the
+          // bars are directly comparable down the column, which is the whole point.
+          '.ht-arms{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}' +
+          '.ht-arm{border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:13px 14px;background:var(--surface,#f8fafc)}' +
+          '.ht-arm.lead{border-color:color-mix(in srgb,#16a34a 45%,transparent);background:color-mix(in srgb,#16a34a 4%,transparent)}' +
+          '.ht-arm-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}' +
+          '.ht-arm-n{font-size:12px;font-weight:650}' +
+          '.ht-rate{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}' +
+          '.ht-rate-l{font-size:11px;color:var(--muted,#6b7280);margin-top:1px}' +
+          '.ht-steps{margin-top:12px;display:flex;flex-direction:column;gap:6px}' +
+          '.ht-step{display:grid;grid-template-columns:74px 1fr 46px;align-items:center;gap:8px;font-size:11.5px}' +
+          '.ht-step-l{color:var(--muted,#6b7280)}' +
+          '.ht-bar{height:7px;border-radius:999px;background:color-mix(in srgb,var(--text,#111) 8%,transparent);overflow:hidden}' +
+          '.ht-bar i{display:block;height:100%;border-radius:999px}' +
+          '.ht-arm.jobs .ht-bar i{background:#2e5bd7}' +
+          '.ht-arm.news .ht-bar i{background:#a855f7}' +
+          '.ht-step-v{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}' +
+          '.ht-read{margin-top:14px;font-size:12px;line-height:1.55;color:var(--text,#111);background:var(--surface,#f8fafc);border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:10px 12px}' +
+          '.ht-warn{margin-top:8px;font-size:11.5px;line-height:1.5;color:#8a5a00}' +
+          '.ht-prog{margin-top:10px}' +
+          '.ht-prog-bar{height:6px;border-radius:999px;background:color-mix(in srgb,var(--text,#111) 8%,transparent);overflow:hidden}' +
+          '.ht-prog-bar i{display:block;height:100%;border-radius:999px;background:var(--grad,#2e5bd7)}' +
+          '.ht-prog-l{font-size:11px;color:var(--muted,#6b7280);margin-top:5px;font-variant-numeric:tabular-nums}' +
+          '@media (max-width:720px){.ht-arms{grid-template-columns:1fr}}' +
         '</style>' +
       "</div>";
 
@@ -5926,8 +5972,12 @@
       }
       var head = '<div class="wl-head"><span class="wl-h">Watching ' + lists.length + '</span><span class="wl-meters">' + credits +
         (b ? '<span class="wl-budget">' + b.remaining + '/' + b.cap + ' feed pulls left today</span>' : '') + '</span></div>';
-      if (d.feedEnabled === false) {
-        el.innerHTML = head + '<div class="wl-empty">Job feed isn’t connected yet. Ask your account team to enable it, then watches will start polling.</div>';
+      // A news list is keyless and free, so it polls fine with no job feed. Only claim the
+      // feed is missing when there is nothing running that could survive without it —
+      // otherwise this notice hid working news watches behind a job-feed problem.
+      var newsLists = lists.filter(function (w) { return w.source === "news"; });
+      if (d.feedEnabled === false && !newsLists.length) {
+        el.innerHTML = head + '<div class="wl-empty">Job feed isn’t connected yet. Ask your account team to enable it, then watches will start polling. <b>News watches still work</b> — they read public news, so they need no key: press <b>Watch news</b> above.</div>';
         return;
       }
       if (!lists.length) {
@@ -5936,12 +5986,22 @@
       }
       var rows = lists.map(function (w) {
         var s = w.stats || {};
-        var sub = (w.query || "") + (w.industry ? (w.query ? " " : "") + w.industry : "") + (w.location ? " · " + w.location : "");
+        var isNews = w.source === "news";
+        // A news list searches a SEGMENT and a set of signals, not a title + location, so
+        // its subtitle has to describe that instead — otherwise every news row reads "all roles".
+        var sub = isNews
+          ? (w.segment || "") + ((w.newsSignals || []).length ? " · " + w.newsSignals.map(function (t) { return String(t).replace(/_/g, " "); }).join(", ") : "")
+          : (w.query || "") + (w.industry ? (w.query ? " " : "") + w.industry : "") + (w.location ? " · " + w.location : "");
+        var badge = '<span class="wl-src ' + (isNews ? 'news' : 'jobs') + '" title="' +
+          (isNews ? 'News front end: reaches the company before the roles are posted. Free, no key, spends no feed budget.'
+                  : 'Job feed: companies that already posted a role. Spends the metered feed budget.') + '">' +
+          (isNews ? 'News' : 'Jobs') + '</span>';
         var stat = s.lastError
           ? '<span class="wl-err" title="' + esc(s.lastError) + '">needs attention</span>'
-          : '<span title="new companies actioned">' + (s.totalFresh || 0) + ' new</span><span title="contacts curated">' + (s.totalContactable || 0) + ' contacts</span>';
+          : '<span title="new companies actioned">' + (s.totalFresh || 0) + ' new</span><span title="contacts curated">' + (s.totalContactable || 0) + ' contacts</span>' +
+            (isNews ? '<span class="wl-free" title="Google News RSS is keyless, so this list costs nothing to run">free</span>' : '');
         return '<div class="wl-row' + (w.active ? '' : ' off') + '">' +
-            '<div class="wl-main"><div class="wl-name">' + esc(w.name) + '</div><div class="wl-q">' + esc(sub || 'all roles') + '</div></div>' +
+            '<div class="wl-main"><div class="wl-name">' + badge + esc(w.name) + '</div><div class="wl-q">' + esc(sub || 'all roles') + '</div></div>' +
             '<div class="wl-stats">' + stat + '<span class="wl-when">' + relWhen(w.lastPolledAt) + '</span></div>' +
             '<div class="wl-acts">' +
               '<button type="button" class="wl-btn" data-act="watchrun" data-id="' + esc(w.id) + '" title="Poll now">Run</button>' +
@@ -5966,12 +6026,131 @@
         else { toast("Couldn’t start that watch. Try again."); }
       }).catch(function () { toast("Couldn’t start that watch. Try again."); });
     }
+    // Start a NEWS watch on the market currently typed in. The news front end searches a
+    // segment, so the industry box is the natural source and a job title is accepted as one
+    // too (a "controller" search becomes the controller market). Defaults match the runbook:
+    // the four signals that reliably precede a hire, a 7-day window, hourly polling.
+    function watchAddNews() {
+      var s = imqGather(), seg = (s.industry || s.query || "").trim();
+      if (!seg) { toast("Type a market or industry to watch the news for."); return; }
+      var wl = {
+        name: seg + " · news",
+        source: "news",
+        segment: seg,
+        newsSignals: ["funding_round", "exec_hire", "office_expansion", "acquisition"],
+        newsWindowDays: 7,
+        everyMinutes: 60,
+        limit: 40
+      };
+      send("/signals/watch", "POST", { action: "save", watchlist: wl }).then(function (r) {
+        if (r && r.ok) { toast("Watching the news for “" + seg + "”. Free, and it reaches them before the roles post."); loadWatch(); loadTrial(); }
+        else { toast("Couldn’t start that news watch. Try again."); }
+      }).catch(function () { toast("Couldn’t start that news watch. Try again."); });
+    }
+
+    /* ---------------- Head to head: Hire Signals vs news signals ----------------
+       Both arms feed the SAME belt (curation → contacts → copy → mailboxes), so the only
+       difference is which front end put the company in the funnel. That is what makes this
+       readable. The backend (lib/signals/watch/sourceTrial) does the statistics and will
+       answer "insufficient_data" with the number of sends still needed rather than naming a
+       winner off a sample too small to support one — this panel shows that answer honestly
+       instead of rendering a number that looks like a result. */
+    var imqTrial = null;
+    function loadTrial() {
+      send("/signals/watch", "POST", { action: "sourceTrial" }).then(function (r) {
+        if (r && r.ok) { imqTrial = (r.data && r.data.trial) || null; renderTrial(); }
+      }).catch(function () {});
+    }
+    function htNum(n) { return (Number(n) || 0).toLocaleString(); }
+    // One funnel step. Bars are scaled against the widest value ACROSS BOTH arms so the two
+    // columns are visually comparable; scaling each arm to its own max would make a 10-company
+    // arm look identical to a 10,000-company one.
+    function htStep(label, value, max, tip) {
+      var pct = max > 0 ? Math.max(value > 0 ? 3 : 0, Math.round((value / max) * 100)) : 0;
+      return '<div class="ht-step" title="' + esc(tip || "") + '">' +
+          '<span class="ht-step-l">' + esc(label) + '</span>' +
+          '<span class="ht-bar"><i style="width:' + pct + '%"></i></span>' +
+          '<span class="ht-step-v">' + htNum(value) + '</span>' +
+        '</div>';
+    }
+    function htArm(f, max, isLead) {
+      if (!f) return "";
+      var name = f.arm === "news" ? "News signals" : "Hire Signals";
+      var note = f.arm === "news" ? "funding · exec · expansion" : "posted roles";
+      return '<div class="ht-arm ' + esc(f.arm) + (isLead ? ' lead' : '') + '">' +
+          '<div class="ht-arm-h"><div>' +
+            '<div class="ht-arm-n">' + esc(name) + '</div>' +
+            '<div class="ht-rate-l">' + esc(note) + '</div>' +
+          '</div><div style="text-align:right">' +
+            '<div class="ht-rate">' + (Number(f.replyRatePct) || 0).toFixed(2) + '%</div>' +
+            '<div class="ht-rate-l">reply rate</div>' +
+          '</div></div>' +
+          '<div class="ht-steps">' +
+            htStep("companies", f.companies, max, "Distinct companies this arm put into the funnel") +
+            htStep("contacts", f.prospects, max, "Decision-makers researched off those companies") +
+            htStep("reachable", f.contactable, max, "Have a verified, deliverable address (" + (Number(f.contactableRatePct) || 0).toFixed(0) + "% of contacts)") +
+            htStep("sent", f.sent, max, "Emails actually delivered") +
+            htStep("replied", f.replied, max, "Real replies, tied back from the inbox") +
+          '</div>' +
+        '</div>';
+    }
+    function renderTrial() {
+      var el = host.querySelector("#imqTrial"); if (!el) return;
+      var t = imqTrial;
+      if (!t) { el.innerHTML = ""; return; }
+      var jobs = (t.arms && t.arms.jobs) || null, news = (t.arms && t.arms.news) || null;
+      if (!jobs || !news) { el.innerHTML = ""; return; }
+
+      // Nothing attributed yet on either side: say what turns it on rather than showing two
+      // columns of zeros that look like a failure.
+      if (!jobs.companies && !news.companies) {
+        el.innerHTML = '<div class="ht-card"><div class="ht-top"><div>' +
+            '<div class="ht-h">Hire Signals vs news signals</div>' +
+            '<div class="ht-sub">Nothing to compare yet. Every company a <b>watch</b> brings in from here on is tagged with the front end that found it, and this panel fills in as those prospects get emailed. Start one of each above to open the trial.</div>' +
+          '</div></div></div>';
+        return;
+      }
+
+      var max = Math.max(jobs.companies, news.companies, jobs.prospects, news.prospects, 1);
+      var leader = t.verdict === "jobs" ? "jobs" : t.verdict === "news" ? "news" : null;
+      var vClass = (t.verdict === "insufficient_data") ? "wait" : (t.verdict === "tie") ? "tie" : "win";
+      var vText = t.verdict === "insufficient_data" ? "Too early to call"
+        : t.verdict === "tie" ? "Too close to separate"
+        : t.verdict === "news" ? "News signals ahead" : "Hire Signals ahead";
+
+      // Progress toward a readable answer. This is the number that stops the trial being
+      // called on day three off 40 sends: it shows how far the sample still has to go.
+      var prog = "";
+      if (t.sendsStillNeededPerArm) {
+        var have = Math.min(jobs.sent, news.sent);
+        var need = have + Number(t.sendsStillNeededPerArm);
+        var p = need > 0 ? Math.min(100, Math.round((have / need) * 100)) : 0;
+        prog = '<div class="ht-prog"><div class="ht-prog-bar"><i style="width:' + p + '%"></i></div>' +
+          '<div class="ht-prog-l">' + htNum(have) + ' of about ' + htNum(need) +
+          ' sends on the smaller arm before this can be called · <b>' + htNum(t.sendsStillNeededPerArm) + '</b> to go</div></div>';
+      }
+
+      var warn = (t.warnings || []).length
+        ? '<div class="ht-warn">' + (t.warnings || []).map(function (w) { return esc(w); }).join("<br>") + '</div>'
+        : "";
+
+      el.innerHTML = '<div class="ht-card">' +
+          '<div class="ht-top"><div>' +
+            '<div class="ht-h">Hire Signals vs news signals</div>' +
+            '<div class="ht-sub">Same contacts, same copy, same mailboxes — the only difference is which front end found the company. Judged on <b>replies per send</b>, so an arm cannot win just by finding more.</div>' +
+          '</div><span class="ht-verdict ' + vClass + '">' + esc(vText) + '</span></div>' +
+          '<div class="ht-arms">' + htArm(jobs, max, leader === "jobs") + htArm(news, max, leader === "news") + '</div>' +
+          (t.readout ? '<div class="ht-read">' + esc(t.readout) + '</div>' : "") +
+          prog + warn +
+        '</div>';
+    }
+
     function watchToggle(id, active) { send("/signals/watch", "POST", { action: "toggle", id: id, active: active }).then(function (r) { if (r && r.ok) loadWatch(); }); }
     function watchDel(id) { send("/signals/watch", "POST", { action: "delete", id: id }).then(function (r) { if (r && r.ok) loadWatch(); }); }
     function watchRun(id) {
       toast("Polling now…");
       send("/signals/watch", "POST", { action: "run", id: id }).then(function (r) {
-        if (r && r.ok) { var o = (r.data && r.data.outcome) || {}; toast(o.fresh ? o.fresh + " new company(ies) found and queued" : "No new hits this run"); loadWatch(); }
+        if (r && r.ok) { var o = (r.data && r.data.outcome) || {}; toast(o.fresh ? o.fresh + " new company(ies) found and queued" : "No new hits this run"); loadWatch(); loadTrial(); }
         else toast("Couldn’t poll that watch right now.");
       }).catch(function () { toast("Couldn’t poll that watch right now."); });
     }
@@ -5999,6 +6178,7 @@
       else if (act === "pvselpool") imqSelect("pool");
       else if (act === "pvselnone") imqSelect("none");
       else if (act === "watchadd") watchAdd();
+      else if (act === "watchaddnews") watchAddNews();
       else if (act === "watchrun") watchRun(t.getAttribute("data-id"));
       else if (act === "watchtoggle") watchToggle(t.getAttribute("data-id"), t.textContent.trim() === "Resume");
       else if (act === "watchdel") watchDel(t.getAttribute("data-id"));
@@ -6012,6 +6192,7 @@
     });
     applyMode();
     loadWatch();
+    loadTrial();
   }
 
   // Portal-grade styling for the Hire Signals search + company pick-list. Kept inline (not in
