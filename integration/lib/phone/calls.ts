@@ -718,12 +718,19 @@ export function parseTranscriptText(text: string, call: CallRecord): CallTurn[] 
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const marked = lines.filter((l) => /^speaker\s*[a-z0-9]+\s*[:\-]/i.test(l)).length;
   if (marked >= 2 && marked >= lines.length * 0.5) {
+    // Which label means "channel A" is decided by whichever one speaks first,
+    // not by its name: engines number speakers from 0 or from 1, and a rule
+    // that accepts both as the first channel (the old one did) labels EVERY
+    // line as our recruiter — which then feeds the AI a call where the
+    // candidate never said anything.
+    const firstLabel = (lines.find((l) => /^speaker\s*[a-z0-9]+\s*[:\-]/i.test(l))
+      ?.match(/^speaker\s*([a-z0-9]+)/i)?.[1] ?? "").toLowerCase();
     return lines.map((l): CallTurn => {
       const m = l.match(/^speaker\s*([a-z0-9]+)\s*[:\-]\s*(.*)$/i);
       if (!m) return { role: "unknown", text: l };
       // Channel A carries the first leg: inbound = the caller (contact),
-      // outbound = the browser (user). Best-effort mapping.
-      const first = /^(0|a|1)$/i.test(m[1]);
+      // outbound = the browser (user).
+      const first = m[1].toLowerCase() === firstLabel;
       const role = call.direction === "inbound" ? (first ? "contact" : "user") : (first ? "user" : "contact");
       return { role, text: m[2] };
     }).filter((t) => t.text);

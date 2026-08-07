@@ -16356,7 +16356,7 @@
      AI-drafted hiring-manager submittal on each completed recruiting call.
      Talks to /api/phone/* (token, dial, calls, calls/:id, settings). */
   function renderCalls(el) {
-    var cs = { consentAck: false, prospect: null };
+    var cs = { consentAck: false, prospect: null, policy: null };
 
     el.innerHTML = head("Calls",
       "Call candidates from the browser. Every call can be recorded, transcribed, and turned into a hiring-manager submittal. Recording only happens after your workspace attests it has lawful consent (Recording settings, below) and you confirm you will disclose it on the call.") +
@@ -16584,10 +16584,38 @@
       var chk = $("#clConsentChk");
       return !!(chk && chk.checked);
     }
+    /* The workspace policy is what actually starts a recording, and without a
+       recording there is no transcript and no AI notes. Saying "subject to
+       workspace attestation" put that discovery AFTER the call; the policy is
+       read up front so the answer is on screen before anyone dials. */
+    function loadPolicy() {
+      send("/phone/settings?motion=recruiting", "GET").then(function (r) {
+        var d = (r.ok && r.data) ? (r.data.settings || r.data) : null;
+        if (!d) return;
+        var mode = d.recordingMode || "off";
+        cs.policy = {
+          attested: !!d.recordingConsentAttested,
+          records: mode === "all" || mode === "outbound",
+        };
+        updateRecState();
+      }).catch(function () {});
+    }
     function updateRecState() {
       var s = $("#clRecState"); if (!s) return;
+      var p = cs.policy;
+      if (p && !p.attested) {
+        s.style.color = "var(--warn)";
+        s.textContent = "This call will not be recorded, so it will not produce notes: your workspace has not attested consent yet (Recording settings, below).";
+        return;
+      }
+      if (p && !p.records) {
+        s.style.color = "var(--warn)";
+        s.textContent = "This call will not be recorded: your recording policy does not cover calls you place (Recording settings, below).";
+        return;
+      }
+      s.style.color = "var(--text-dim)";
       s.textContent = recordingEnabled()
-        ? "Recording will be requested for this call (subject to workspace attestation)."
+        ? "This call will be recorded, transcribed, and written up as notes."
         : "Recording off: this call will not be recorded.";
     }
     function paintDialer() {
@@ -16754,7 +16782,7 @@
         self.disabled = true;
         send("/phone/settings", "POST", payload).then(function (r) {
           self.disabled = false;
-          if (r.ok) { msg.style.color = "var(--ok)"; msg.textContent = "Saved."; }
+          if (r.ok) { msg.style.color = "var(--ok)"; msg.textContent = "Saved."; loadPolicy(); }
           else if (r.status === 403) { msg.style.color = "var(--warn)"; msg.textContent = "Only an admin can change the recording policy for your workspace."; }
           else if (r.status === 404 || r.status === 409) { msg.style.color = "var(--warn)"; msg.textContent = "Calling is not configured yet, so this could not be saved."; }
           else { msg.style.color = "var(--danger)"; msg.textContent = "Could not save. Please try again."; }
@@ -16933,6 +16961,7 @@
     }
 
     watchPhone(0);
+    loadPolicy();
     loadAudio();
     paintDialer();
     loadSettings();

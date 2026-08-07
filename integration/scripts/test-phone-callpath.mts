@@ -19,6 +19,7 @@
  * directory.
  */
 
+import { createServer } from "http";
 import { mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
@@ -27,6 +28,7 @@ import { fileURLToPath } from "url";
 process.env.ROS_DATA_DIR = mkdtempSync(join(tmpdir(), "phone-"));
 delete process.env.DATABASE_URL;
 process.env.TELNYX_API_KEY = "test-key-not-a-real-credential";
+process.env.ANTHROPIC_API_KEY = "test-key-not-a-real-credential";
 delete process.env.RESEND_API_KEY; // owner alerts log instead of sending
 
 let failed = 0;
@@ -42,11 +44,53 @@ let seen: Seen[] = [];
 /** What the stubbed account currently reports for the connection. */
 let livePreference = "disabled";
 
+/* The Anthropic SDK does its own HTTP, so it is pointed at a local server
+   rather than a patched global fetch: this exercises the real client. */
+const modelCalls: string[] = [];
+const modelServer = createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => { body += c; });
+  req.on("end", () => {
+    modelCalls.push(body);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      id: "msg_1", type: "message", role: "assistant", model: "stub",
+      content: [{ type: "text", text: MODEL_REPLY }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }));
+  });
+});
+await new Promise<void>((r) => modelServer.listen(0, "127.0.0.1", r));
+process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(modelServer.address() as any).port}`;
+
+/** What the stubbed model returns for a finished screening call. */
+const MODEL_REPLY = JSON.stringify({
+  headline: "Dana Whitfield, open to a VP Operations move",
+  summary: "Warm first call. Open to hearing about the role and willing to talk again this week.",
+  fit: "possible",
+  sentiment: "positive",
+  currentRole: "Director of Operations",
+  availability: "Two weeks' notice",
+  location: "Chicago, IL",
+  motivations: ["Wants a bigger operations remit"],
+  strengths: ["Ran a 40-person operations org"],
+  concerns: ["Has not managed a P&L"],
+  compensation: [{ kind: "base", amount: "$185,000" }],
+  submittal: "Dana Whitfield is a Director of Operations in Chicago who is open to a VP-level move. She has run a 40-person operations organization and is looking for a bigger remit. Comp expectation is around $185,000 base, available on two weeks' notice.",
+});
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init: any = {}) => {
   const url = String(typeof input === "string" ? input : input?.url ?? "");
   const method = String(init?.method ?? "GET").toUpperCase();
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+  if (url.startsWith("https://api.anthropic.com")) {
+    seen.push({ method, url, body });
+    return new Response(
+      JSON.stringify({ content: [{ type: "text", text: MODEL_REPLY }], usage: { input_tokens: 10, output_tokens: 10 } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
   if (!url.startsWith("https://api.telnyx.com")) return realFetch(input, init);
   seen.push({ method, url, body });
 
@@ -63,10 +107,13 @@ globalThis.fetch = (async (input: any, init: any = {}) => {
 }) as typeof fetch;
 
 const { ensureInfra } = await import("../lib/phone/infra.js");
-const { patchInfra, getInfra, insertCall, getCallById, logCallEvent, ensurePhoneReady } =
-  await import("../lib/phone/store.js");
-const { handlePhoneEvent } = await import("../lib/phone/calls.js");
+const {
+  patchInfra, getInfra, insertCall, getCallById, logCallEvent, ensurePhoneReady,
+  savePhoneSettings, getPhoneSettings,
+} = await import("../lib/phone/store.js");
+const { handlePhoneEvent, runAnalysis } = await import("../lib/phone/calls.js");
 const { encodeClientState } = await import("../lib/providers/telnyx.js");
+const { shouldRecord } = await import("../lib/phone/types.js");
 
 await ensurePhoneReady();
 
@@ -157,7 +204,92 @@ check("hanging up while it rings is canceled, and nobody is blamed",
 check("the decision does not depend on a leg status that is already overwritten",
   (rangAfter?.agentLegs ?? []).every((l) => l.status !== "answered"));
 
-/* ---------------- 3. what the recruiter is told ---------------- */
+/* ---------------- 3. an answered call comes back as notes ----------------
+   Everything after the candidate picks up, webhook by webhook, because that
+   half of the product has never been observed working end to end on this box:
+   answer -> record -> transcript -> hiring-manager submittal. */
+
+savePhoneSettings(WS, "recruiting", {
+  recordingMode: "all",
+  transcriptionEnabled: true,
+  recordingConsentAttested: true,
+  manualRecordingToggle: true,
+});
+check("recording stays blocked until the workspace attests consent",
+  shouldRecord(getPhoneSettings(WS, "bd"), "outbound") === false
+  && shouldRecord(getPhoneSettings(WS, "recruiting"), "outbound") === true);
+
+const live = insertCall({
+  workspaceId: WS, motion: "recruiting", direction: "outbound", status: "ringing",
+  externalNumber: "+14155550123", lineId: "line_1", lineNumber: "+19295430608",
+  userId: "usr_1", userName: "Ryan", contactName: "Dana Whitfield",
+  startedAt: new Date().toISOString(),
+  recording: { enabled: shouldRecord(getPhoneSettings(WS, "recruiting"), "outbound") },
+  pipeline: "idle", followUpIds: [], events: [],
+});
+live.agentLegs = [{ ccid: "ccid_agent", userId: "usr_1", status: "ringing" }];
+logCallEvent(live, "agent_ready");
+
+const cs = (role: "agent" | "pstn") =>
+  encodeClientState({ phone: 1, callId: live.id, role, workspaceId: WS });
+
+await handlePhoneEvent("call.answered", {
+  call_control_id: "ccid_pstn", call_leg_id: "leg_1", client_state: cs("pstn"),
+});
+let now = getCallById(live.id);
+check("the candidate answering puts the call on the air",
+  now?.status === "active" && Boolean(now?.answeredAt) && now?.telnyxCallControlId === "ccid_pstn",
+  `${now?.status}`);
+check("and recording starts on the leg that carries the audio",
+  seen.some((s) => s.url.includes("/calls/ccid_pstn/actions/record_start")),
+  seen.map((s) => s.url).join(" "));
+
+await handlePhoneEvent("call.hangup", {
+  call_control_id: "ccid_pstn", hangup_cause: "normal_clearing", client_state: cs("pstn"),
+});
+now = getCallById(live.id);
+check("hanging up completes the call and hands it to the pipeline",
+  now?.status === "completed" && now?.pipeline === "recording", `${now?.status}/${now?.pipeline}`);
+
+await handlePhoneEvent("call.recording.saved", {
+  call_control_id: "ccid_pstn", client_state: cs("pstn"),
+  recording_id: "rec_1", channels: "dual",
+  recording_urls: { mp3: "https://example.invalid/rec_1.mp3" },
+});
+now = getCallById(live.id);
+check("the saved recording is attached and waits on the transcript",
+  now?.pipeline === "transcribing" && now?.recording.url === "https://example.invalid/rec_1.mp3",
+  `${now?.pipeline}`);
+
+await handlePhoneEvent("call.recording.transcription.saved", {
+  call_control_id: "ccid_pstn", client_state: cs("pstn"),
+  transcription_text: "Speaker 0: Hi Dana, this is Ryan calling about the VP Operations role.\nSpeaker 1: Great timing, I am open to hearing about it.",
+});
+now = getCallById(live.id);
+check("the transcript keeps the two sides apart",
+  now?.transcript?.length === 2 && now?.transcript?.[0].role === "user" && now?.transcript?.[1].role === "contact",
+  JSON.stringify(now?.transcript));
+
+await runAnalysis(getCallById(live.id)!);
+now = getCallById(live.id);
+const notes: any = now?.analysis;
+check("the finished call comes back as a recruiting screen, not a BD one",
+  now?.pipeline === "complete" && notes?.kind === "recruiting", `${now?.pipeline}/${notes?.kind}`);
+check("with the hiring-manager submittal filled in",
+  typeof notes?.submittal === "string" && notes.submittal.length > 20, String(notes?.submittal).slice(0, 40));
+check("and the call reads as connected in the day's numbers",
+  Boolean(now?.answeredAt) && (now?.durationSec ?? 0) >= 0 && now?.status === "completed");
+
+/* A key that is missing must fail loudly on the record, not vanish. */
+const keyWas = process.env.ANTHROPIC_API_KEY;
+delete process.env.ANTHROPIC_API_KEY;
+await runAnalysis(getCallById(live.id)!);
+now = getCallById(live.id);
+check("a missing AI key leaves a stated pipeline error, not a silent blank",
+  now?.pipeline === "failed" && /anthropic/i.test(now?.pipelineError ?? ""), now?.pipelineError);
+process.env.ANTHROPIC_API_KEY = keyWas;
+
+/* ---------------- 4. what the recruiter is told ---------------- */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const command = readFileSync(join(here, "..", "..", "assets", "js", "command.js"), "utf8");
