@@ -12552,11 +12552,19 @@
      deduped candidate list -> save it under a NAME here (staging) -> send it to
      Candidates under that same name. Backend: /api/sourcing + lib/sourcing/*. */
   function renderJdSourcing(el) {
-    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", runs: [], refineNote: "", location: "" };
+    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", runs: [], refineNote: "", location: "", remote: false };
     function jdbLoc() { var e = $("#jdbLocation"); return e ? e.value.trim() : ""; }
     function jdbRadius() { var e = $("#jdbRadius"); return e ? (parseInt(e.value, 10) || 0) : 0; }
-    function jdLocLabel() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " +" + r + "mi") : loc; }
-    function jdLocPhrase() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " (within ~" + r + " miles, include ALL surrounding metros and cities within that drive, not just " + loc + ")") : loc; }
+    function jdRemote() { var e = $("#jdbRemote"); return !!(e && e.checked); }
+    // A remote search has NO location label. The whole point of the mode is that there is
+    // no center to measure from, so anything that would put a city on the run (the run
+    // name, the saved list, the radius the server reads back out of the label) has to
+    // come back empty here; the server stamps "Remote" on the list itself.
+    function jdLocLabel() { if (jdRemote()) return ""; var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " +" + r + "mi") : loc; }
+    // What the AI is told about geography. On a remote run it is told plainly that there
+    // is none, because left to itself the parse invents a metro list for every role, and
+    // those invented metros become hard filters on the search.
+    function jdLocPhrase() { if (jdRemote()) return "Fully remote, anywhere in the United States. There is no office and no commute, so do NOT narrow this to any city, metro or state: a candidate in any US state qualifies."; var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " (within ~" + r + " miles, include ALL surrounding metros and cities within that drive, not just " + loc + ")") : loc; }
     function jdWithLoc(jd) { var p = jdLocPhrase(); return p ? (jd + "\n\nBased in: " + p) : jd; }
     function jdBreadth() { var s = $("#jdBreadth"); return (s && s.value) || "balanced"; }
 
@@ -12648,7 +12656,18 @@
       '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
       '.jd-lead2{font-size:16px;font-weight:650;letter-spacing:.01em;margin:0 0 3px;background:linear-gradient(90deg,var(--brand),var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
       '.jd-lead-sub{font-size:12.5px;color:var(--text-muted);margin:0 0 12px}' +
-      '.jd-locrow{display:flex;gap:8px}.jd-locrow #jdbLocation{flex:1}' +
+      '.jd-locrow{display:flex;gap:8px;transition:opacity .15s}' +
+      '.jd-locrow #jdbLocation{flex:1}' +
+      '.jd-locrow.is-remote{opacity:.4}' +
+      // flex-start, not center: the hint wraps to two lines in the 1024px band, and a
+      // vertically centred box against wrapped text reads as misaligned. The 2px nudge
+      // sits it on the first line's optical centre.
+      '.jd-field>label.jd-remote{display:flex;align-items:flex-start;gap:8px;margin:9px 0 0;font-size:12.5px;font-weight:500;line-height:1.45;' +
+        'text-transform:none;letter-spacing:0;color:var(--text-muted);cursor:pointer}' +
+      '.jd-field>label.jd-remote:hover{color:var(--text)}' +
+      '.jd-remote input{width:15px;height:15px;margin:2px 0 0;flex:0 0 auto;accent-color:var(--brand);cursor:pointer}' +
+      '.jd-remote b{font-weight:600;color:var(--text)}' +
+      '.jd-remote .jd-remote-h{opacity:.8}' +
       '.jd-snavrow{display:flex;gap:8px}.jd-snavrow #jdSnavName{flex:1;min-width:0}' +
       '#jdSnavTarget{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:8px 9px;cursor:pointer;flex:1;min-width:0;max-width:100%}' +
       '#jdSnavTarget:focus{outline:0;border-color:var(--brand)}' +
@@ -12826,7 +12845,10 @@
             '<div class="jd-locrow"><input id="jdbLocation" type="text" placeholder="e.g. Fair Lawn, NJ" />' +
               '<select id="jdbRadius" title="How far out the search may reach. This is a hard limit: nobody further away is added to the list, and nobody further away is contacted.">' +
                 '<option value="0">Exact (city only)</option><option value="25">+25mi</option><option value="50">+50mi</option><option value="100">+100mi</option><option value="250">+250mi</option>' +
-              '</select></div></div>' +
+              '</select></div>' +
+            '<label class="jd-remote" for="jdbRemote"><input type="checkbox" id="jdbRemote" />' +
+              '<span><b>Remote role</b> <span class="jd-remote-h">search the whole country, no city or radius needed</span></span></label>' +
+          '</div>' +
           '<div class="jd-field"><label>List name</label><input id="jdName" type="text" placeholder="e.g. JAGGAER VP Sales · East" /></div>' +
         '</div>' +
         '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, certs/licenses, must-have experience, deal-breakers" /></div>' +
@@ -12846,7 +12868,7 @@
             '<span><b>Must-have experience</b>: what they have actually done, not nice-to-haves</span>' +
             '<span><b>Industry / domain</b>: where strong candidates come from</span>' +
             '<span><b>Target companies</b>: competitors or peers worth poaching from</span>' +
-            '<span><b>Location &amp; radius</b>: the metros that matter (or remote), widened by the mileage you set</span>' +
+            '<span><b>Location &amp; radius</b>: the metros that matter, widened by the mileage you set. For a remote role tick <b>Remote role</b> instead and the search covers the whole country</span>' +
             '<span><b>Proof of impact</b>: measurable results they can show (outcomes, scale, growth, metrics)</span>' +
             '<span><b>Deal-breakers</b>: what should rule a candidate out</span>' +
           '</div>' +
@@ -13123,13 +13145,14 @@
       qBtn.disabled = true;
       var nameEl = $("#jdName");
       var loc = jdLocLabel();
+      var locTag = jdRemote() ? "Remote · US" : loc;
       var name = (nameEl && nameEl.value.trim()) || title || "Overnight search";
-      if (loc && name.indexOf(loc) < 0) name += " · " + loc;
+      if (locTag && name.indexOf(locTag) < 0) name += " · " + locTag;
       // No JD pasted? Queue the title line as the brief; the server search parses it
       // the same way Initiate Search would after drafting.
-      var jd = jdNow || ("Job title: " + title + (loc ? ("\nLocation: " + loc) : ""));
+      var jd = jdNow || ("Job title: " + title + (jdRemote() ? "\nLocation: Remote (anywhere in the United States)" : loc ? ("\nLocation: " + loc) : ""));
       send("/sourcing", "POST", {
-        action: "queueAdd", kind: "search", jd: jdWithLoc(jd), location: loc, name: name,
+        action: "queueAdd", kind: "search", jd: jdWithLoc(jd), location: loc, name: name, remote: jdRemote(),
         breadth: jdBreadth(), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked),
       }).then(function (r) {
         qBtn.disabled = false;
@@ -13962,12 +13985,16 @@
         // The radius as a NUMBER, alongside the "+25mi" label. The label is what gets
         // saved on the run; this is what the backend actually measures distance with.
         state.radiusMi = jdbRadius();
+        // Remote rides separately from the location, not as a magic value inside it: the
+        // server has to be able to tell "national on purpose" apart from "no city typed",
+        // which are opposite instructions that would otherwise look identical.
+        state.remote = jdRemote();
         if (state.refineNote && state.icp && state.jd === jdNow) {
           renderPlan(); updateRunCost();
           return;
         }
         state.jd = jdNow;
-        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, radiusMi: state.radiusMi, breadth: jdBreadth() }).then(function (r) {
+        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, radiusMi: state.radiusMi, remote: state.remote, breadth: jdBreadth() }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
           renderPlan(); updateRunCost();
@@ -13986,10 +14013,11 @@
         // by this token instead of the bar dying at 95%.
         var nameEl0 = $("#jdName");
         var provisionalName = (nameEl0 && nameEl0.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
-        if (state.location && provisionalName.indexOf(state.location) < 0) provisionalName += " · " + state.location;
+        var jdNameTag = state.remote ? "Remote · US" : state.location;
+        if (jdNameTag && provisionalName.indexOf(jdNameTag) < 0) provisionalName += " · " + jdNameTag;
         var recoveryToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
         liveSearchTokens[recoveryToken] = 1;
-        return send("/sourcing", "POST", { action: "run", recoveryToken: recoveryToken, name: provisionalName, jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).catch(function () {
+        return send("/sourcing", "POST", { action: "run", recoveryToken: recoveryToken, name: provisionalName, jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, remote: state.remote, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).catch(function () {
           // fetch itself rejected: the connection died mid-request (a deploy
           // recreating the server is the everyday cause). Not a server "no".
           return { ok: false, status: 0, data: null };
@@ -14023,7 +14051,8 @@
         // 4) Save under an auto name (List name field wins when filled).
         var nameEl = $("#jdName");
         runName = (nameEl && nameEl.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
-        if (state.location && runName.indexOf(state.location) < 0) runName += " · " + state.location;
+        var saveTag = state.remote ? "Remote · US" : state.location;
+        if (saveTag && runName.indexOf(saveTag) < 0) runName += " · " + saveTag;
         // The search response already carries the run the SERVER saved; adopt it
         // and skip the duplicate save (the server also recognizes and absorbs a
         // stale tab's re-save of the same result).
@@ -14033,7 +14062,7 @@
           state.serverRun = null;
           return null;
         }
-        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings, apiUsage: state.usage || undefined }).then(function (r) {
+        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), remote: state.remote, icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings, apiUsage: state.usage || undefined }).then(function (r) {
           if (!r.ok) throw { stage: "Save", r: r };
           savedId = r.data && r.data.run && r.data.run.id;
         });
@@ -14224,7 +14253,7 @@
       if (!instruction) { inp.focus(); return; }
       if (!state.icp) { msg("Analyze a JD first."); return; }
       var btn = $("#jdRefineBtn"); if (btn) { btn.disabled = true; btn.textContent = "Refining…"; }
-      send("/sourcing", "POST", { action: "refine", jd: state.jd, icp: state.icp, instruction: instruction, location: state.location, radiusMi: state.radiusMi }).then(function (r) {
+      send("/sourcing", "POST", { action: "refine", jd: state.jd, icp: state.icp, instruction: instruction, location: state.location, radiusMi: state.radiusMi, remote: state.remote }).then(function (r) {
         if (btn) { btn.disabled = false; btn.textContent = "Refine"; }
         if (!r.ok) { msg("Refine failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp || state.icp;
@@ -14723,6 +14752,30 @@
     ["#jdbTitle", "#jdbCompany", "#jdbNotes"].forEach(function (sel) {
       var e = $(sel); if (e) e.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.keyCode === 13) { ev.preventDefault(); doBuildJd(); } });
     });
+
+    /* Remote role: the city and radius are not just ignored, they are switched OFF.
+       A greyed-out box still holding "Fair Lawn, NJ" is the kind of thing a recruiter
+       reasonably reads as "it will still lean toward New Jersey", so the value is cleared
+       and the controls are genuinely disabled. Unticking leaves an empty pair of
+       controls, which is the honest starting point for a fresh local search. */
+    (function wireRemoteToggle() {
+      var box = $("#jdbRemote"); if (!box) return;
+      var loc = $("#jdbLocation"), rad = $("#jdbRadius"), out = $("#jdOutside"), any = $("#jdAnywhere");
+      var row = loc && loc.parentNode ? loc.parentNode : null;
+      function paint() {
+        var on = box.checked;
+        if (row) row.className = "jd-locrow" + (on ? " is-remote" : "");
+        if (loc) { loc.disabled = on; if (on) loc.value = ""; }
+        if (rad) { rad.disabled = on; if (on) rad.value = "0"; }
+        // Both out-of-area switches only describe a search that HAS an area. A remote run
+        // has no in/out to split, so they stand down rather than sit on screen promising
+        // a second list that can never be built.
+        if (out) { out.disabled = on; if (on) out.checked = false; }
+        if (any) { any.disabled = on; if (on) any.checked = false; }
+      }
+      box.addEventListener("change", paint);
+      paint();
+    })();
 
     /* "Search power" readout: which sources the next run will actually use, so a
        missing key is visible up front instead of discovered from a thin result. */

@@ -35,6 +35,7 @@ import { getSourcingRun, saveSourcingRun } from "./store";
 import { parseJobDescription } from "./parseJobDescription";
 import { pinIcpLocation } from "./pinLocation";
 import { parseRadiusMi } from "./geoRadius";
+import { applyRemoteIcp, isRemoteRun } from "./remoteMode";
 import { generateQueries } from "./generateQueries";
 import { runDiscovery } from "./discovery";
 import { runSalesNavSourcing } from "./salesNav";
@@ -98,6 +99,10 @@ export interface NightItem {
   freshOnly?: boolean;
   radiusMi?: number;
   strictGeo?: boolean;
+  /** REMOTE search: no center, no radius, national fan-out. Carried on the item so an
+   *  overnight or crash-recovered run reproduces the SAME search; without it the blank
+   *  location reads as "unpinned" and the run silently becomes a regional one. */
+  remote?: boolean;
   /** A Dive-deeper refined profile (or the one the dead request already derived),
    *  so recovery searches the refined profile instead of re-parsing the JD. */
   icp?: CandidateICP;
@@ -227,6 +232,7 @@ export interface NightAddInput {
   freshOnly?: boolean;
   radiusMi?: number;
   strictGeo?: boolean;
+  remote?: boolean;
   icp?: CandidateICP;
   /** kind:"search" from a pasted LinkedIn search URL (salesNav crash net only). */
   salesNav?: NightItem["salesNav"];
@@ -254,6 +260,7 @@ export async function addNightItem(workspaceId: string, input: NightAddInput): P
     freshOnly: input.freshOnly,
     radiusMi: input.radiusMi,
     strictGeo: input.strictGeo,
+    remote: input.remote,
     icp: input.icp,
     salesNav: input.salesNav,
     recovery: input.recoveryToken
@@ -752,12 +759,19 @@ async function step(item: NightItem): Promise<void> {
     // matching stated locations against that short list by NAME — dropping real locals
     // from every town that missed the list while still waving through distant same-state
     // people. Overnight runs must filter by the same measured miles as a live search.
-    const radiusMi = item.radiusMi ?? parseRadiusMi(undefined, item.location);
+    //
+    // A REMOTE item has no radius to read back and no center to pin to. It takes the
+    // other branch at every one of these forks, and it has to take ALL of them: a
+    // half-remote run (national queries, radius filter still on) finds the country and
+    // then throws it away.
+    const remote = isRemoteRun(item);
+    const radiusMi = remote ? 0 : item.radiusMi ?? parseRadiusMi(undefined, item.location);
     // A recovered interactive search carries the profile the dead request already
     // derived (a Dive-deeper refinement included); a plain overnight item parses it.
-    const icp = pinIcpLocation(item.icp ?? (await parseJobDescription(item.jd)), item.location, radiusMi);
+    const parsedIcp = item.icp ?? (await parseJobDescription(item.jd));
+    const icp = remote ? applyRemoteIcp(parsedIcp) : pinIcpLocation(parsedIcp, item.location, radiusMi);
     const breadth: SearchBreadth = item.breadth === "focused" || item.breadth === "wide" ? item.breadth : "balanced";
-    const queries = generateQueries(icp, { breadth, radiusMi });
+    const queries = generateQueries(icp, { breadth, radiusMi, remote });
     // Overnight runs are additive (skip people already surfaced); a recovered
     // interactive search honors its own Fresh-only checkbox instead.
     const excludeKeys = item.freshOnly === false ? undefined : await getSeenKeys(ws);
@@ -766,10 +780,11 @@ async function step(item: NightItem): Promise<void> {
       minFit: item.minFit ?? 10,
       breadth,
       excludeKeys: excludeKeys?.size ? excludeKeys : undefined,
-      strictGeo: item.strictGeo ?? Boolean((item.location || "").trim()),
-      keepOutOfArea: item.outsideGeo === true,
+      strictGeo: !remote && (item.strictGeo ?? Boolean((item.location || "").trim())),
+      keepOutOfArea: !remote && item.outsideGeo === true,
       radiusMi,
-      geoCenter: item.location,
+      geoCenter: remote ? "" : item.location,
+      remote,
     }));
     await addSeenKeys(ws, result.candidates.map((c) =>
       (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "")));
@@ -780,6 +795,7 @@ async function step(item: NightItem): Promise<void> {
       // The number the run actually enforced, so every later touch of this list
       // (merge, enrichment, push) re-enforces the SAME radius.
       radiusMi,
+      remote,
       createdBy: item.createdBy,
       icp,
       queries,

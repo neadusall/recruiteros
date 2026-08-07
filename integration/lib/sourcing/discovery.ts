@@ -813,8 +813,9 @@ export async function runDiscovery(
   if (useKold) {
     try {
       koldJobId = await submitDbDiscovery(icp, Math.min(cap, 500), {
-        location: opts.geoCenter,
-        radiusMi: opts.radiusMi,
+        location: opts.remote === true ? "" : opts.geoCenter,
+        radiusMi: opts.remote === true ? 0 : opts.radiusMi,
+        remote: opts.remote === true,
       });
       koldSubmittedAt = Date.now();
     } catch (e) {
@@ -844,10 +845,15 @@ export async function runDiscovery(
   // (EXACT_RADIUS_MI) rather than "unlimited".
   //
   // Only a center we genuinely cannot place on a map falls back to the string matcher.
-  const radiusMi = opts.radiusMi ?? 0;
-  const geoLabel = stripRadiusSuffix(opts.geoCenter || icp.geos?.[0] || "");
+  //
+  // REMOTE runs sit outside all of it. There is no typed center, so there is no circle,
+  // no distance to measure and nothing to be outside of — the radius machinery is turned
+  // off at the source here rather than being fed a blank location and left to guess.
+  const remote = opts.remote === true;
+  const radiusMi = remote ? 0 : opts.radiusMi ?? 0;
+  const geoLabel = remote ? "" : stripRadiusSuffix(opts.geoCenter || icp.geos?.[0] || "");
   // What the FILTER enforces (Exact = 15mi) vs what the recruiter picked (0 for Exact).
-  const filterRadiusMi = enforcedRadiusMi(radiusMi);
+  const filterRadiusMi = remote ? 0 : enforcedRadiusMi(radiusMi);
   const geoCenter = geoLabel ? geocodeUsPlace(geoLabel) : null;
   // Every state the circle touches, for the coarse fallback on rows we cannot place.
   const radiusStates = geoCenter ? statesWithinRadius(geoCenter, filterRadiusMi) : [];
@@ -874,7 +880,11 @@ export async function runDiscovery(
       r.milesFromTarget = distanceFromCenter(r.location, geoCenter);
       // Score against the ENFORCED radius, so an Exact search ranks by real miles too
       // instead of dropping to name matching the moment the dropdown says "Exact".
-      const sc = scoreCandidate(r, icp, { radiusMi: geoCenter ? filterRadiusMi : radiusMi, geoLabel: geoLabel });
+      const sc = scoreCandidate(r, icp, {
+        radiusMi: geoCenter ? filterRadiusMi : radiusMi,
+        geoLabel: geoLabel,
+        remote,
+      });
       r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
       // Strict location: a row that states a DIFFERENT location is marked for the
       // separate out-of-area list (unknown locations stay in the main list — the
@@ -886,7 +896,11 @@ export async function runDiscovery(
       // hundreds of miles out ride along as "in area". The string test stays as the
       // fallback for rows whose stated location will not geocode.
       let outside = false;
-      if (opts.strictGeo && icp.geos && icp.geos.length) {
+      // `!remote` is belt and braces: a remote run clears icp.geos, so the condition
+      // below is already false. It is spelled out anyway because "nobody is ever dropped
+      // for where they live" is the whole promise of the mode, and it should not depend
+      // on a side effect of how the profile was shaped.
+      if (!remote && opts.strictGeo && icp.geos && icp.geos.length) {
         const measured = withinRadius(r.location, geoCenter, filterRadiusMi);
         if (measured !== undefined) {
           outside = !measured;

@@ -98,7 +98,12 @@ export {
 } from "./geoRadius";
 export { enforceGeo, enforceRunGeo } from "./geoEnforce";
 export type { GeoEnforceResult, RunGeo } from "./geoEnforce";
+export {
+  applyRemoteIcp, isRemoteRun, locationSaysRemote, rowSaysRemote, nationalGeoTargets,
+  NATIONAL_METROS, REMOTE_PHRASES, REMOTE_LABEL,
+} from "./remoteMode";
 import { parseRadiusMi } from "./geoRadius";
+import { applyRemoteIcp } from "./remoteMode";
 
 /** Parse a JD and generate its search set in one call (no discovery yet). */
 export async function planSourcing(
@@ -106,10 +111,16 @@ export async function planSourcing(
   location?: string,
   breadth?: SearchBreadth,
   radiusMi?: number,
+  /** Remote role: no center, no radius, national fan-out. Overrides `location`. */
+  remote?: boolean,
 ): Promise<SourcingPlan> {
-  const miles = parseRadiusMi(radiusMi, location);
-  const icp = pinIcpLocation(await parseJobDescription(jd), location, miles);
-  const queries = generateQueries(icp, { breadth, radiusMi: miles });
+  const miles = remote ? 0 : parseRadiusMi(radiusMi, location);
+  const parsed = await parseJobDescription(jd);
+  // Exactly one of the two geography shapers runs: the pin for a typed location, or the
+  // clear-out for a remote role. Running neither is what leaves the LLM's invented metro
+  // list in place, which is the bug this mode exists to close.
+  const icp = remote ? applyRemoteIcp(parsed) : pinIcpLocation(parsed, location, miles);
+  const queries = generateQueries(icp, { breadth, radiusMi: miles, remote });
   // Empty across the load-bearing fields means the profile couldn't be built from the
   // brief (e.g. the model returned unparseable output). Say so plainly rather than
   // silently handing back a profile of dashes that finds nobody.

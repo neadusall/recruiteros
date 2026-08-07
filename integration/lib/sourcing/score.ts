@@ -18,6 +18,7 @@
  */
 
 import type { CandidateICP, CandidateRow } from "./types";
+import { rowSaysRemote } from "./remoteMode";
 
 /* ------------------------------------------------------------------ */
 /* Tokenization & boundary-aware matching                              */
@@ -252,6 +253,12 @@ export interface ScoreOptions {
   radiusMi?: number;
   /** The typed location, for the human-readable "12 mi from Fair Lawn, NJ" reason. */
   geoLabel?: string;
+  /**
+   * Remote role: there is no center, so geography stops being a filter and becomes a
+   * preference. Nobody is penalized for where they live; people who already work
+   * remotely get the geography points, everyone else scores neutral on it.
+   */
+  remote?: boolean;
 }
 
 export function scoreCandidate(
@@ -259,7 +266,11 @@ export function scoreCandidate(
   icp: CandidateICP,
   scoreOpts: ScoreOptions = {},
 ): { fitScore: number; fitReasons: string[] } {
-  const opts = { radiusMi: scoreOpts.radiusMi ?? 0, geoLabel: scoreOpts.geoLabel };
+  const opts = {
+    radiusMi: scoreOpts.radiusMi ?? 0,
+    geoLabel: scoreOpts.geoLabel,
+    remote: scoreOpts.remote === true,
+  };
   const fullText = [row.title, row.headline, row.company, row.location].filter(Boolean).join(" · ");
   const titleText = (row.title || row.headline || "").trim();
   const reasons: string[] = [];
@@ -323,7 +334,21 @@ export function scoreCandidate(
   // the string test scores identically (a neighbouring town it never heard of vs. a
   // same-state city three hours away) and lets the nearer of two equal candidates win.
   const miles = row.milesFromTarget;
-  if (opts.radiusMi > 0 && typeof miles === "number") {
+  if (opts.remote) {
+    // REMOTE: no center, no radius, nothing to be outside of. Scoring a national search
+    // on distance would be meaningless, and scoring it on the ICP's geos would be worse —
+    // a remote run clears those, so the name branch below would read "no geos" and go
+    // silent, letting whoever happened to rank first win on title alone. Instead the
+    // geography weight becomes the one thing geography still means here: does this person
+    // already work remotely? A yes is a real signal (proven at it, and open to it); a no
+    // is not a mark against them, so it scores mid-band rather than zero.
+    if (rowSaysRemote(row)) {
+      score += WEIGHTS.geo;
+      reasons.push("Already works remotely");
+    } else {
+      score += Math.round(WEIGHTS.geo * 0.6);
+    }
+  } else if (opts.radiusMi > 0 && typeof miles === "number") {
     // Full geo credit inside the radius, tapering with distance so the local ranks above
     // the commuter; beyond it, the same penalty the name-based branch applies.
     if (miles <= opts.radiusMi) {

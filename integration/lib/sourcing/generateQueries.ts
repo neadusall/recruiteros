@@ -24,6 +24,7 @@
  */
 
 import type { CandidateICP, SearchBreadth, SourcingQuery } from "./types";
+import { REMOTE_PHRASES, nationalGeoTargets } from "./remoteMode";
 
 /** Quote a phrase for Boolean search if it contains spaces. */
 function q(s: string): string {
@@ -123,11 +124,19 @@ const REGIONAL_ALIAS_MIN_MI = 50;
  */
 export function generateQueries(
   icp: CandidateICP,
-  opts: { titleCap?: number; geoCap?: number; breadth?: SearchBreadth; radiusMi?: number } = {},
+  opts: {
+    titleCap?: number;
+    geoCap?: number;
+    breadth?: SearchBreadth;
+    radiusMi?: number;
+    /** Remote role: search the whole country, and target remote wording explicitly. */
+    remote?: boolean;
+  } = {},
 ): SourcingQuery[] {
   const titleCap = opts.titleCap ?? 4;
   const geoCap = opts.geoCap ?? 6;
   const breadth = opts.breadth ?? "balanced";
+  if (opts.remote) return remoteQueries(icp, titleCap, breadth);
   // No radius picked at all ("Exact", or a caller that does not know) leaves the historical
   // wide behavior alone; only an explicitly TIGHT radius turns the regional widening off.
   const radiusMi = opts.radiusMi ?? 0;
@@ -223,6 +232,115 @@ export function generateQueries(
         googleUrl: googleUrl(xray),
         linkedinUrl: linkedinUrl(`${lead}${geoHint}`),
         keyword: `${lead}${geoHint}`.trim(),
+      });
+    });
+  }
+
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Remote roles: the national search set                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How many title chunks ride the metro rota.
+ *
+ * The rota is the expensive axis (chunks × metros), so only the closest-matching title
+ * groups run against every metro; the rest still run nationwide in the geo-free passes
+ * below, which cost one query each. Keeps a balanced remote run in the same query budget
+ * as a balanced local one while covering the whole country.
+ */
+const METRO_ROTA_CHUNKS: Record<SearchBreadth, number> = { focused: 1, balanced: 2, wide: 3 };
+
+/**
+ * The search set for a REMOTE role: no radius, no pinned metro, the whole US.
+ *
+ * Four passes, cheapest signal first. Nothing here filters on location — a remote run
+ * drops nobody for where they live — so every pass is purely about reaching people the
+ * others would miss:
+ *
+ *   1. STATED REMOTE. People whose profile already says Remote / Work From Home. The
+ *      strongest rows in a remote search and the only pass that targets them directly.
+ *   2. NATIONWIDE BY INDUSTRY. Title × industry with no location term at all. Catches
+ *      everyone whose snippet simply never mentions where they are, which on a geo-free
+ *      search is most people.
+ *   3. TARGET COMPANIES. The poaching searches, minus the geo term the local builder
+ *      staples on (a remote role does not care that the VP of Ops at a competitor lives
+ *      in Ohio).
+ *   4. THE METRO ROTA. The same title Boolean fanned across the country's largest
+ *      professional markets. This is what turns "the first page of a national query"
+ *      into real national coverage — see remoteMode.ts for why one query is not enough.
+ */
+function remoteQueries(icp: CandidateICP, titleCap: number, breadth: SearchBreadth): SourcingQuery[] {
+  const allTitles = icp.titles.length ? icp.titles : [leadTitle(icp)];
+  const titleChunks = chunkList(allTitles, titleCap).slice(0, TITLE_CHUNKS[breadth]);
+  const titleGroups = titleChunks.map((c) => orGroup(c, titleCap));
+  const titleGroup = titleGroups[0];
+  const industryGroup = orGroup(icp.industries, 4);
+  const remoteGroup = orGroup(REMOTE_PHRASES, 4);
+  const out: SourcingQuery[] = [];
+  const leadOf = (ci: number) => titleChunks[ci][0] || leadTitle(icp);
+
+  // 1) People who state they work remotely. Industry is deliberately LEFT OUT: the
+  //    remote OR-group is already several terms wide, and every extra AND against a
+  //    two-line snippet costs more recall than the precision is worth here.
+  titleGroups.forEach((tg, ci) => {
+    const xray = [`site:linkedin.com/in`, tg, remoteGroup].filter(Boolean).join(" ");
+    out.push({
+      group: "remote: works remotely",
+      label: `${leadOf(ci)} working remotely`,
+      xray,
+      googleUrl: googleUrl(xray),
+      linkedinUrl: linkedinUrl(`${leadOf(ci)} remote`),
+      keyword: `${leadOf(ci)} remote`.trim(),
+      titleTerm: leadOf(ci),
+    });
+  });
+
+  // 2) Nationwide, no location term.
+  titleGroups.forEach((tg, ci) => {
+    const xray = [`site:linkedin.com/in`, tg, industryGroup].filter(Boolean).join(" ");
+    out.push({
+      group: "nationwide: industry",
+      label: `${leadOf(ci)} across the US`,
+      xray,
+      googleUrl: googleUrl(xray),
+      linkedinUrl: linkedinUrl(`${leadOf(ci)} ${icp.industries.slice(0, 2).join(" ")}`.trim()),
+      keyword: `${leadOf(ci)} ${icp.industries.slice(0, 2).join(" ")}`.trim(),
+      titleTerm: leadOf(ci),
+    });
+  });
+
+  // 3) Target companies, nationwide.
+  for (const company of icp.targetCompanies) {
+    const xray = [`site:linkedin.com/in`, titleGroup, q(company)].filter(Boolean).join(" ");
+    out.push({
+      group: company,
+      label: `${leadTitle(icp)} @ ${company}`,
+      xray,
+      googleUrl: googleUrl(xray),
+      linkedinUrl: linkedinUrl(`${company} ${leadTitle(icp)}`),
+      keyword: `${leadTitle(icp)} ${company}`.trim(),
+      titleTerm: leadTitle(icp),
+    });
+  }
+
+  // 4) The metro rota: national coverage, one market at a time.
+  const rotaChunks = titleGroups.slice(0, METRO_ROTA_CHUNKS[breadth]);
+  for (const metro of nationalGeoTargets(breadth)) {
+    const geoVar = orGroup(geoVariants(metro, true), 4);
+    rotaChunks.forEach((tg, ci) => {
+      const xray = [`site:linkedin.com/in`, tg, industryGroup, geoVar].filter(Boolean).join(" ");
+      out.push({
+        group: `nationwide: ${metro}`,
+        label: `${leadOf(ci)} in ${metro}`,
+        xray,
+        googleUrl: googleUrl(xray),
+        linkedinUrl: linkedinUrl(`${leadOf(ci)} ${metro}`),
+        keyword: `${leadOf(ci)} ${metro}`.trim(),
+        titleTerm: leadOf(ci),
+        geoLocation: metro,
       });
     });
   }

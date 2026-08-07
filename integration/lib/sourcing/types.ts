@@ -195,6 +195,15 @@ export interface SourcingRun {
    * enforcing a different radius than the one it was run with.
    */
   radiusMi?: number;
+  /**
+   * True when this list came from a REMOTE search: no center, no radius, the whole US.
+   *
+   * Persisted because every later pass over a saved list asks it where it was pinned —
+   * `enforceRunGeo` before delivery, the same-role auto-combine, a re-run from the
+   * overnight queue. Without the flag those would read the empty location as "unpinned"
+   * and quietly apply a different rule than the search was run with.
+   */
+  remote?: boolean;
   icp: CandidateICP;
   queries: SourcingQuery[];
   candidates: CandidateRow[];
@@ -438,4 +447,14 @@ export interface DiscoveryOptions {
   radiusMi?: number;
   /** The typed location the radius is measured from ("Fair Lawn, NJ"). */
   geoCenter?: string;
+  /**
+   * REMOTE ROLE: search the whole country and filter nobody on location.
+   *
+   * Not the same as leaving `geoCenter` blank. A blank location means "the recruiter did
+   * not say", and the run still carries whatever metros the LLM parse invented; this
+   * means "there is no location", which switches off the radius, the strict-location
+   * drop and the out-of-area split, and switches ON the national query fan-out plus the
+   * remote-wording searches (see remoteMode.ts).
+   */
+  remote?: boolean;
 }

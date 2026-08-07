@@ -46,6 +46,7 @@ import {
   gapFillContacts, listNightItems, addNightItem, removeNightItem, failNightItem, attachNightIcp,
   landlineDbReady,
   premiumPhoneQuote, runPremiumPhoneBoost,
+  applyRemoteIcp, REMOTE_LABEL,
 } from "../../../lib/sourcing";
 import type { CandidateRow, SearchBreadth, VetBatchItem, SourcingRun } from "../../../lib/sourcing";
 import { sendRunNow } from "../../../lib/sourcing/autoflow";
@@ -146,7 +147,7 @@ export async function POST(req: Request) {
   try {
     if (action === "plan") {
       if (!b?.jd) return fail("missing_jd", 422);
-      return ok(await planSourcing(b.jd, b.location, parseBreadth(b.breadth), b.radiusMi as number));
+      return ok(await planSourcing(b.jd, b.location, parseBreadth(b.breadth), b.radiusMi as number, b.remote === true));
     }
 
     /* Which discovery sources will actually run right now — the UI's "Search power"
@@ -212,11 +213,15 @@ export async function POST(req: Request) {
       // typed location over its geos. Without this the previewed profile and queries show a
       // wider area than the run will actually search (the run re-pins at `action: "run"`),
       // which reads as the radius being ignored even when the results are correct.
-      const refineRadius = parseRadiusMi(b.radiusMi, b.location);
-      const pinned = pinIcpLocation(icp, b.location, refineRadius);
+      // On a REMOTE refine the same reasoning runs the other way: refine will happily
+      // invent metros for a role that has none, so the geos get cleared again rather
+      // than pinned, or the preview would promise a national search and show a regional one.
+      const remote = b.remote === true;
+      const refineRadius = remote ? 0 : parseRadiusMi(b.radiusMi, b.location);
+      const pinned = remote ? applyRemoteIcp(icp) : pinIcpLocation(icp, b.location, refineRadius);
       return ok({
         icp: pinned,
-        queries: generateQueries(pinned, { breadth: parseBreadth(b.breadth), radiusMi: refineRadius }),
+        queries: generateQueries(pinned, { breadth: parseBreadth(b.breadth), radiusMi: refineRadius, remote }),
         changes,
       });
     }
@@ -236,11 +241,17 @@ export async function POST(req: Request) {
       // The radius the recruiter picked, as a NUMBER. The UI also bakes it into the
       // location label ("Fair Lawn, NJ +25mi"), so fall back to reading it back out of
       // there for older clients / re-runs of saved lists that only stored the label.
-      const radiusMi = parseRadiusMi(b.radiusMi, b.location);
+      //
+      // A REMOTE run has no center, so every geography dial reads zero/off from here
+      // down: no radius to parse, no strict-location drop, no out-of-area appendix. It is
+      // set once, in one place, because the failure mode of getting this half-right is
+      // silent — the search still returns people, just the wrong ones.
+      const remote = b.remote === true;
+      const radiusMi = remote ? 0 : parseRadiusMi(b.radiusMi, b.location);
       // Breadth drives the query FAN-OUT here (how many title-chunk × geo searches
       // run) and the per-query paging depth inside runDiscovery.
       const breadth = parseBreadth(b.breadth);
-      const strictGeo = b.strictGeo !== false && Boolean(((b.location as string) || "").trim());
+      const strictGeo = !remote && b.strictGeo !== false && Boolean(((b.location as string) || "").trim());
       // CRASH NET: this whole request runs for minutes and nothing exists outside it
       // until the client saves — an auto-deploy recreating the container mid-request
       // used to eat the entire run. So park a held recovery checkpoint in the durable
@@ -264,9 +275,10 @@ export async function POST(req: Request) {
             kind: "search",
             name: (typeof b.name === "string" && b.name.trim()) || "Candidate search",
             jd: b.jd,
-            location: (b.location as string) || undefined,
+            location: remote ? undefined : (b.location as string) || undefined,
             breadth,
-            outsideGeo: b.outsideGeo === true,
+            remote,
+            outsideGeo: !remote && b.outsideGeo === true,
             createdBy: actor,
             cap: typeof b.cap === "number" ? b.cap : undefined,
             minFit: typeof b.minFit === "number" ? b.minFit : undefined,
@@ -277,7 +289,9 @@ export async function POST(req: Request) {
             // it must ride along or a recovery would silently drop the refinement and
             // re-parse the raw JD. A plain run leaves icp unset; the queue's search
             // stage already parses the JD itself when it is missing.
-            icp: clientIcp ? pinIcpLocation(clientIcp, b.location, radiusMi) : undefined,
+            icp: clientIcp
+              ? (remote ? applyRemoteIcp(clientIcp) : pinIcpLocation(clientIcp, b.location, radiusMi))
+              : undefined,
             recoveryToken,
           });
           recoveryId = checkpoint.id;
@@ -288,7 +302,8 @@ export async function POST(req: Request) {
       try {
         // A client-supplied ICP wins over re-parsing; otherwise this is the LLM call
         // that used to run OUTSIDE the net.
-        const icp = pinIcpLocation(clientIcp ?? (await parseJobDescription(b.jd)), b.location, radiusMi);
+        const parsedIcp = clientIcp ?? (await parseJobDescription(b.jd));
+        const icp = remote ? applyRemoteIcp(parsedIcp) : pinIcpLocation(parsedIcp, b.location, radiusMi);
         // Hand the freshly parsed profile to the checkpoint so a recovery re-runs the
         // SAME search instead of paying to derive the profile a second time (and
         // possibly deriving a different one). Best-effort: a failure here only costs a
@@ -297,7 +312,7 @@ export async function POST(req: Request) {
           try { await attachNightIcp(ws, recoveryId, icp); }
           catch (err) { console.warn("[sourcing] checkpoint icp not attached:", (err as Error).message); }
         }
-        const queries = generateQueries(icp, { breadth, radiusMi });
+        const queries = generateQueries(icp, { breadth, radiusMi, remote });
         // Cross-run "seen" memory: fresh-only excludes anyone surfaced in prior runs.
         const excludeKeys = b.freshOnly === true ? await getSeenKeys(ws) : undefined;
         // withWorkspaceCreds: the engines read their keys via cred(), which only sees
@@ -311,9 +326,10 @@ export async function POST(req: Request) {
           strictGeo,
           // OPT-IN: the separate out-of-area list only when the recruiter asked for it,
           // so a geo'd run stays geo-only (and credit-safe) by default.
-          keepOutOfArea: b.outsideGeo === true,
+          keepOutOfArea: !remote && b.outsideGeo === true,
           radiusMi,
-          geoCenter: (b.location as string) || "",
+          geoCenter: remote ? "" : (b.location as string) || "",
+          remote,
         }));
         // Remember who we surfaced so a later fresh-only run skips them.
         await addSeenKeys(ws, result.candidates.map(candKey));
@@ -332,11 +348,14 @@ export async function POST(req: Request) {
             savedRun = await saveSourcingRun(ws, {
               name: listName,
               jd: typeof b.jd === "string" ? b.jd : "",
-              location: (b.location as string) || undefined,
+              location: remote ? REMOTE_LABEL : (b.location as string) || undefined,
               // The number, not just the "+25mi" label: the list re-enforces its own
               // radius on every later merge / enrichment / push, and re-reading prose
               // each time is how a list drifts onto a radius it was never run with.
               radiusMi,
+              // Same reasoning one level up: the list has to remember it was national,
+              // or a later pass reads the blank radius as "unpinned" and re-pins it.
+              remote,
               icp, queries,
               candidates: result.candidates,
               warnings: result.warnings,
@@ -564,8 +583,10 @@ export async function POST(req: Request) {
       const name = (typeof b.name === "string" && b.name.trim()) ||
         `Overnight search · ${new Date().toLocaleDateString()}`;
       const item = await addNightItem(ws, {
-        kind: "search", name, jd: b.jd, location: b.location,
-        breadth: parseBreadth(b.breadth), outsideGeo: b.outsideGeo === true,
+        kind: "search", name, jd: b.jd,
+        location: b.remote === true ? undefined : b.location,
+        remote: b.remote === true,
+        breadth: parseBreadth(b.breadth), outsideGeo: b.remote !== true && b.outsideGeo === true,
         createdBy: actor,
       });
       return ok({ item });
@@ -605,8 +626,10 @@ export async function POST(req: Request) {
         if (twin) return ok({ run: twin });
       }
       const run = await saveSourcingRun(ws, {
-        id: b.id, name: b.name, jd: b.jd ?? "", jdUrl: b.jdUrl, location: b.location,
-        radiusMi: parseRadiusMi(b.radiusMi, b.location),
+        id: b.id, name: b.name, jd: b.jd ?? "", jdUrl: b.jdUrl,
+        location: b.remote === true ? REMOTE_LABEL : b.location,
+        radiusMi: b.remote === true ? 0 : parseRadiusMi(b.radiusMi, b.location),
+        remote: b.remote === true,
         icp: b.icp, queries: b.queries ?? [], candidates: b.candidates ?? [],
         warnings: b.warnings ?? [],
         motion: b.motion === "bd" ? "bd" : "recruiting",

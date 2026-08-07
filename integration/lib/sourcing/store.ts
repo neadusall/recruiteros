@@ -69,6 +69,8 @@ export interface SaveRunInput {
   /** The recruiter's mileage pick, kept as a number so the list can re-enforce its own
    *  radius later without re-parsing the "+25mi" label. */
   radiusMi?: number;
+  /** True for a REMOTE search: no center, no radius, the whole US. */
+  remote?: boolean;
   icp: CandidateICP;
   queries: SourcingQuery[];
   candidates: CandidateRow[];
@@ -94,6 +96,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     existing.jdUrl = input.jdUrl ?? existing.jdUrl;
     existing.location = input.location ?? existing.location;
     if (input.radiusMi !== undefined) existing.radiusMi = input.radiusMi;
+    if (input.remote !== undefined) existing.remote = input.remote;
     existing.icp = input.icp ?? existing.icp;
     existing.queries = input.queries ?? existing.queries;
     existing.candidates = input.candidates ?? existing.candidates;
@@ -117,6 +120,7 @@ export async function saveSourcingRun(workspaceId: string, input: SaveRunInput):
     jdUrl: input.jdUrl,
     location: input.location,
     radiusMi: input.radiusMi,
+    remote: input.remote,
     icp: input.icp,
     queries: input.queries || [],
     candidates: input.candidates || [],

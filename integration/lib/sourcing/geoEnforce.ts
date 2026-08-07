@@ -36,6 +36,7 @@ import {
   distanceFromCenter, enforcedRadiusMi, geocodeUsPlace, parseRadiusMi, stateOfPlace,
   statesWithinRadius, stripRadiusSuffix, withinRadius,
 } from "./geoRadius";
+import { isRemoteRun } from "./remoteMode";
 
 export interface GeoEnforceResult {
   /** Rows newly marked out-of-area by this pass. */
@@ -107,5 +108,10 @@ export function enforceGeo(rows: CandidateRow[], geo: RunGeo): GeoEnforceResult 
 
 /** Same pass, reading the dials off a saved run. The caller saves. */
 export function enforceRunGeo(run: SourcingRun): GeoEnforceResult {
+  // A REMOTE list has no center by definition, so there is nothing to enforce and
+  // everyone on it is exactly where they should be. The label would not geocode anyway
+  // and this would no-op, but a national list must never depend on a place-name lookup
+  // FAILING in order to keep its people — say it outright instead.
+  if (isRemoteRun(run)) return { marked: 0, cleared: 0, radiusMi: 0, enforced: false };
   return enforceGeo(run.candidates, { location: run.location, radiusMi: run.radiusMi });
 }
