@@ -29,7 +29,7 @@
  */
 
 import { nowIso } from "../core/ids";
-import type { SourcingRun } from "./types";
+import type { CandidateRow, SourcingRun } from "./types";
 import { listAllSourcingRuns, saveSourcingRun, deleteSourcingRun } from "./store";
 import { promoteSourcingRun } from "./promote";
 import { listNightItems, addNightItem } from "./nightQueue";
@@ -53,6 +53,62 @@ const MAX_RESUMES = 6;             // ...but a chain that will never finish stop
 
 function phoneCount(run: SourcingRun): number {
   return run.candidates.reduce((n, c) => n + (c.phone ? 1 : 0), 0);
+}
+
+/** Stable per-candidate key — the same one mergeRuns dedupes on. */
+function personKey(c: CandidateRow): string {
+  return (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "");
+}
+
+function hash32(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+/**
+ * Order-independent signature of WHO is on the list right now, and which of them
+ * hold a phone. Summed (not sequenced) on purpose: every merge re-ranks the rows
+ * verified-first, and a reorder must not read as a membership change. Built from
+ * the stable person key, so enrichment filling in an email or a phone doesn't
+ * move the people half of it.
+ */
+function deliverySignature(run: SourcingRun): string {
+  let people = 0, phones = 0, n = 0, p = 0;
+  for (const c of run.candidates) {
+    const h = hash32(personKey(c));
+    people = (people + h) >>> 0; n++;
+    if (c.phone) { phones = (phones + h) >>> 0; p++; }
+  }
+  return `${n}.${people.toString(36)}.${p}.${phones.toString(36)}`;
+}
+
+/**
+ * Is what we DELIVERED behind what the list holds right now?
+ *
+ * The phonesAtSend/peopleAtSend triggers are aggregates, and aggregates go blind
+ * in two ways that both cost a real recruiter real candidates (2026-08-07: a
+ * combined list showed 1,892 candidates against 1,762 delivered and sat there
+ * saying "campaign ready to launch"):
+ *
+ *  - a stamp carried across a combine that LOST peopleAtSend fell back to
+ *    "people can't have grown", so a list that grew by 130 never topped up;
+ *  - a merge that swaps members 1-for-1 leaves both counters identical while the
+ *    set underneath is different.
+ *
+ * These two reads don't care about the counters. promotedCount is what promote
+ * actually delivered to Candidates, and the signature is who the last push
+ * carried — either falling behind the live list means someone is missing, and
+ * one top-up (which re-promotes everyone and re-sends the full contact set) puts
+ * them back. Both converge: the top-up rewrites both stamps.
+ */
+export function deliveryBehind(run: SourcingRun): boolean {
+  // An ABSENT promotedCount means "never recorded", not "delivered nobody" — a
+  // run predating the stamp must not read as behind and drag every old list into
+  // a re-send. Only a number we actually have gets compared.
+  if (typeof run.promotedCount === "number" && run.promotedCount < run.candidates.length) return true;
+  const sig = run.autoflow?.sentSignature;
+  return Boolean(sig) && sig !== deliverySignature(run);
 }
 
 function enrichmentInFlight(run: SourcingRun): boolean {
@@ -143,7 +199,7 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
     // next top-up.
     const morePhones = phoneCount(run) > run.autoflow.phonesAtSend;
     const morePeople = run.candidates.length > (run.autoflow.peopleAtSend ?? run.candidates.length);
-    if (morePhones || morePeople) {
+    if (morePhones || morePeople || deliveryBehind(run)) {
       const sentAt = Date.parse(run.autoflow.sentAt);
       if (Number.isFinite(sentAt) && now - sentAt < TOPUP_DEBOUNCE_MS) return null;
       return "topup";
@@ -236,7 +292,14 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     // 1) Candidates. promoteSourcingRun stamps promotedListId back on the run, so a
     //    push the browser chain already made is never repeated (and re-promoting on a
     //    top-up only adds the people enrichment newly reached — dedupe by LinkedIn URL).
+    // Snapshot WHAT THIS SEND CARRIES before any leg runs. The run object is the
+    // shared store entry, so a live enrichment tick can grow it mid-send; stamping
+    // the post-send set would mark people as delivered that this push never saw.
+    // Snapshotting first leaves them behind by exactly what arrived late, and the
+    // next top-up collects them.
     const phonesNow = phoneCount(run);
+    const peopleNow = run.candidates.length;
+    const signatureNow = deliverySignature(run);
     const topup = Boolean(stamp.sentAt);
     // A stale outcome must not outlive this attempt: without this, a retry that
     // SUCCEEDS still carries the old ostext_not_connected stamp (the clear below
@@ -345,7 +408,8 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
 
     stamp.sentAt = nowIso();
     stamp.phonesAtSend = phonesNow;
-    stamp.peopleAtSend = run.candidates.length;
+    stamp.peopleAtSend = peopleNow;
+    stamp.sentSignature = signatureNow;
     if (stamp.error?.startsWith("ostext_not_connected") !== true) stamp.error = undefined;
     console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) sent on: ${run.candidates.length} to Candidates, ${contacts.length} phone(s) to OS Text${topup ? " (top-up)" : ""}`);
     // Tell the desk that owns this list RIGHT NOW: new candidates just landed and
@@ -451,6 +515,9 @@ export function parityDue(run: SourcingRun, now: number): boolean {
   if (phoneCount(run) > run.autoflow.phonesAtSend) return true; // phones OS Text never got
   // People a later merge added who never reached Candidates (no phone required).
   if (run.candidates.length > (run.autoflow.peopleAtSend ?? run.candidates.length)) return true;
+  // ...and the counter-blind cases: Candidates short of the list, or a set that
+  // changed membership without changing the totals.
+  if (deliveryBehind(run)) return true;
   return Boolean(run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0);
 }
 

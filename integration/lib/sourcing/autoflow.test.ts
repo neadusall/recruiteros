@@ -194,6 +194,52 @@ check("old stamp without peopleAtSend, people grew, phones didn't -> no topup",
     autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, attempts: 1 },
   }), NOW), null);
 
+/* --- delivery-gap lane: the counters go blind ------------------------------
+ * 2026-08-07: a combined list read "1,892 candidates · 1,762 delivered" and
+ * still said "campaign ready to launch". The Combine handler carried the
+ * master's sentAt and phonesAtSend but DROPPED peopleAtSend, so the fallback
+ * above read it as "people can't have grown" and no lane ever re-pushed the 130
+ * the combine added. deliveryBehind() doesn't consult either counter.
+ */
+
+// Candidates SHORT of the list is the exact fingerprint of that incident.
+const behind = { doneOffsets: [0], total: 2, nextStart: null, updatedAt: new Date(NOW - 6 * MIN).toISOString() } as SourcingRun["laxisProgress"];
+check("promoted fewer than the list holds -> topup even with a legacy stamp",
+  due(run({
+    candidates: [enriched(), cand()], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, attempts: 1 },
+  }), NOW), "topup");
+
+// ...and once the top-up delivered everyone, it must STOP (this converges).
+check("...promoted count caught up -> quiet",
+  due(run({
+    candidates: [enriched(), cand()], promotedCount: 2,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
+  }), NOW), null);
+
+// A run that never recorded a promotedCount is UNKNOWN, not behind — otherwise
+// this deploy drags every pre-stamp list into a re-send.
+check("no promotedCount at all -> not treated as behind",
+  due(run({
+    candidates: [enriched(), cand()],
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
+  }), NOW), null);
+
+// Membership churn with IDENTICAL totals: a combine that deduped one person away
+// and added a different one. Both counters match; the signature doesn't.
+check("same counts, different people -> topup",
+  due(run({
+    candidates: [enriched(), cand({ fullName: "Sam Roe" })], promotedCount: 2,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: {
+      sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2,
+      sentSignature: "2.abc.1.def", attempts: 1,
+    },
+  }), NOW), "topup");
+
 // ostext_not_connected self-heal (2026-07-20 Lume incident): a FRESH sent list
 // stamped not-connected retries through the fresh lane. The tick loop gates the
 // actual send on ostextConfiguredFor(ws), so returning ostext-retry while the

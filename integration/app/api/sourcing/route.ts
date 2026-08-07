@@ -1230,7 +1230,20 @@ export async function POST(req: Request) {
         mergedRun.promotedCampaignId = carried.promotedCampaignId;
         mergedRun.promotedListId = carried.promotedListId;
         if (carried.autoflow?.sentAt) {
-          mergedRun.autoflow = { sentAt: carried.autoflow.sentAt, phonesAtSend: carried.autoflow.phonesAtSend, attempts: 0 };
+          // Carry the full watermark, not just the phone half. Dropping
+          // peopleAtSend here (through 2026-08-07) let the sweeper's fallback read
+          // it as "people can't have grown", so when the in-request send below
+          // failed or was blocked, NOTHING re-pushed the people the combine added:
+          // a 1,892-candidate list sat at 1,762 delivered saying "ready to launch".
+          // The master's own set is the honest floor when its stamp predates the
+          // field. sentSignature is deliberately NOT carried — the merged set is a
+          // different set, so it must read as behind until a send covers it.
+          mergedRun.autoflow = {
+            sentAt: carried.autoflow.sentAt,
+            phonesAtSend: carried.autoflow.phonesAtSend,
+            peopleAtSend: carried.autoflow.peopleAtSend ?? carried.candidates.length,
+            attempts: 0,
+          };
         }
         await saveSourcingRun(ws, { ...mergedRun });
       }

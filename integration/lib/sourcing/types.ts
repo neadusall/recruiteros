@@ -259,6 +259,16 @@ export interface SourcingRun {
      * phones-only trigger.
      */
     peopleAtSend?: number;
+    /**
+     * Order-independent signature of WHO the last send carried (see
+     * autoflow.deliverySignature): the people on the list, and which of them held
+     * a phone. The two counters above are aggregates, so a merge that swapped
+     * members without changing the totals — a combine that deduped K people away
+     * and added K different ones — left them both false and the newcomers never
+     * shipped. The signature moves whenever the SET moves. Absent on stamps
+     * written before 2026-08-07; those ride the counter triggers alone.
+     */
+    sentSignature?: string;
     attempts: number;
     /** When the sweeper LAST queued a server-side resume for an orphaned chain. The stamp
      *  expires (see autoflow.resumeInHand): a resume that wedges must be retryable, or the

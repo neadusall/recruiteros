@@ -13432,7 +13432,18 @@
           // promotedListId (or the autoflow sent stamp, which always promotes first)
           // proves everyone reached Candidates.
           var candN = r.promotedCount || ((r.promotedListId || sentOk) ? n : 0);
-          var sCand = candN
+          // BEHIND = the promote record covers fewer people than the list holds now,
+          // i.e. a combine or merge added people after the last push. This strip used
+          // to render that state fully green with the two numbers sitting one line
+          // apart and say nothing about the gap (2026-08-07: "1,892 candidates" over
+          // "1,762 delivered", four ticks, "campaign ready to launch"). The sweeper
+          // tops these up by itself, so it is a catching-up state, not an error — but
+          // it must never read as done.
+          var behindN = candN && n > candN ? n - candN : 0;
+          var sCand = behindN
+            ? jStop("jt-live", jIcons.users, "In Candidates", candN + " of " + n + " delivered",
+              behindN + " people were added to this list after the last push and have not reached Candidates yet. The automatic sweep tops the list up within a few minutes — no button to press. Click to open the ones already there.", r.promotedListId || "")
+            : candN
             ? jStop("jt-done", jIcons.check, "In Candidates", candN + " delivered · open",
               "Everyone on this list is in the Candidates tab under this list name. Click to open them.", r.promotedListId || "")
             : jStop("jt-wait", jIcons.users, "Candidates", "arrives automatically",
@@ -13442,6 +13453,8 @@
             "This list reached Candidates, but this workspace has no OS Text engine connected, so no text campaign was created. Connect OS Text under Setup (or have the owner grant access); the phones on this list are then pushed automatically within a few minutes.");
           else if (afErr) sText = jStop("jt-act", jIcons.alert, "OS Text", "send issue · retrying",
             "The automatic send of this list hit a problem. It keeps retrying on its own; if this stays up for more than an hour, ask your admin to check the send logs.");
+          else if (sentOk && behindN) sText = jStop("jt-live", jIcons.msg, "OS Text", "topping up " + behindN + " more",
+            "The campaign holds everyone from the last push, but " + behindN + " people added since then are still on their way over. The automatic sweep pushes them within a few minutes. Launching now would text only the ones already in — worth waiting for the count to settle. Click to open OS Text.", "#ostext");
           else if (sentOk && phs > 0) sText = jStop("jt-done", jIcons.check, "In OS Text", "campaign ready to launch",
             "A text campaign was built from everyone with a phone number and is ready to review and launch. Phones found later are topped up automatically. Click to open OS Text.", "#ostext");
           else if (sentOk) sText = jStop("jt-wait", jIcons.msg, "OS Text", "waiting on phones",
@@ -13451,6 +13464,8 @@
           if (!jNote) {
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
             else if (afErr) jNote = "The automatic send hit a problem and keeps retrying on its own. If this stays up for more than an hour, ask your admin.";
+            else if (behindN) jNote = "<b>Catching up:</b> " + behindN + " of the " + n +
+              " people on this list were added after the last push and have not gone over to Candidates and OS Text yet. The sweep picks them up within a few minutes on its own — hold off launching the campaign until this reads " + n + ".";
             else if (sentOk && candN) jNote = phs > 0
               ? ("<b>Done:</b> everyone is in Candidates. Next: open OS Text to review and launch the text campaign." +
                 (boostable ? " Texts reach " + phs + " of " + n + " so far; Boost phones can find numbers for up to " + boostable + " more." : ""))
