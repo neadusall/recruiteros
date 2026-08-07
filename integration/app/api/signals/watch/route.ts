@@ -97,9 +97,29 @@ export async function POST(req: Request) {
   try {
     if (action === "save") {
       const input = (b?.watchlist ?? b) as WatchlistInput;
-      if (!input?.query && !input?.industry && !input?.id) return fail("missing_query", 422);
+      // A news list searches a SEGMENT, not a job query, so it has no `query` to check.
+      // Requiring one here is what would silently reject every news watchlist.
+      const hasTerm = input?.source === "news"
+        ? Boolean(input?.segment?.trim())
+        : Boolean(input?.query || input?.industry);
+      if (!hasTerm && !input?.id) {
+        return fail(input?.source === "news" ? "missing_segment" : "missing_query", 422);
+      }
       const saved = await upsertWatchlist(ws, input);
       return ok({ watchlist: saved });
+    }
+    // The desk profile: who this firm is, what it recruits into, how it positions.
+    // These are the only claims the signal-anchored pitch makes about the SENDER, so
+    // they cannot be inferred from a headline and have to be stored per workspace.
+    if (action === "deskProfile") {
+      const { getDeskProfile, profileComplete } = await import("../../../../lib/signals/watch/signalPitch");
+      const profile = await getDeskProfile(ws);
+      return ok({ profile, complete: profileComplete(profile) });
+    }
+    if (action === "saveDeskProfile") {
+      const { saveDeskProfile, profileComplete } = await import("../../../../lib/signals/watch/signalPitch");
+      const profile = await saveDeskProfile(ws, (b?.profile ?? {}) as never);
+      return ok({ profile, complete: profileComplete(profile) });
     }
     if (action === "toggle") {
       if (!b?.id) return fail("missing_id", 422);

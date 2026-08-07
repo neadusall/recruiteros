@@ -1,0 +1,133 @@
+# News-signal discovery (Signal Watchlists, `source: "news"`)
+
+Companion to [signal-watchlists.md](./signal-watchlists.md). That runbook covers the
+job-feed front end. This one covers the news front end, which answers a different and
+earlier question.
+
+| | job feed | news feed |
+|---|---|---|
+| trigger | a role was **posted** | the company **raised / hired an exec / expanded / acquired / launched** |
+| you search | a job title | a **segment** ("supply chain software") |
+| cost | RapidAPI JSearch, budget-metered | **$0**, Google News RSS is keyless |
+| timing | after the req exists | **before the reqs are posted** |
+
+Both hand the same `InMarketLead[]` to the same belt: dedupe against the global seen
+set, `curateFromPool` for 3 decision-makers, Clients tab, email, Send Queue.
+
+## Why a news lead reaches the same decision-maker
+
+`curateFromPool` finds a buyer by asking "who owns this open role?", and it **drops any
+lead with no roles**. A funding headline carries none, so discovery infers the build-out
+the money buys (`Account Executive`, `Software Engineer`, `Operations Manager` by
+default). Those three classify into three distinct job functions, so the curator
+researches three different bosses at the same company. Set `targetRoles` on the list to
+override the inference with the roles your desk actually fills.
+
+## Why a company is never pitched twice
+
+News leads are keyed with the job feed's own `companyKey()` (`jobfeed_<normalized>`).
+A company that both raised and posted a role is one company to the seen set, so it gets
+one pitch, not two.
+
+## Creating a news watchlist
+
+```bash
+curl -sS https://<host>/api/signals/watch \
+  -H 'content-type: application/json' -H 'cookie: <session>' \
+  -d '{
+    "action": "save",
+    "watchlist": {
+      "name": "Supply chain software raises",
+      "source": "news",
+      "segment": "supply chain software",
+      "newsSignals": ["funding_round", "exec_hire"],
+      "newsWindowDays": 7,
+      "minAmountUsd": 5000000,
+      "targetRoles": ["Director of Operations"],
+      "everyMinutes": 60
+    }
+  }'
+```
+
+Fields (all optional except `segment`):
+
+| field | default | notes |
+|---|---|---|
+| `segment` | required | plain English, quoted into the news query |
+| `newsSignals` | `funding_round`, `exec_hire` | also `office_expansion`, `acquisition`, `product_launch` |
+| `newsWindowDays` | 7 | clamped 1..90, uses Google News' own `when:` operator |
+| `minAmountUsd` | none | a raise with **no stated amount is kept**: plenty of real rounds omit the figure |
+| `targetRoles` | inferred | overrides the post-signal build-out |
+| `perPollCompanyCap` | 25 | ceiling on net-new companies per poll |
+
+Layoff and distress signals are deliberately **not** discoverable here. A layoff is a
+candidate-supply signal, not a reason to pitch a company on hiring help.
+
+## The desk profile (required for good copy)
+
+The pitch makes exactly two claims about **you**, and neither can come from a headline.
+Set them once per workspace:
+
+```bash
+curl -sS https://<host>/api/signals/watch \
+  -H 'content-type: application/json' -H 'cookie: <session>' \
+  -d '{
+    "action": "saveDeskProfile",
+    "profile": {
+      "firmName": "Lazio",
+      "verticals": ["distribution", "warehousing", "logistics"],
+      "placesTitles": "the operations and supply chain leaders we bring",
+      "domainDifficulty": "regulated, complex product handling",
+      "positioning": "We work as an embedded partner, not a resume vendor.",
+      "ctaMinutes": 15
+    }
+  }'
+```
+
+Read it back with `{"action":"deskProfile"}`. Until it is set the email still renders,
+but beats 3 and 4 fall back to generic language rather than inventing a specialization
+the desk never claimed.
+
+## The email
+
+Five beats, in this order:
+
+1. **observation** the signal said back as a fact about their business
+2. **stakes** why that hire is hard in their vertical
+3. **proof** your matching specialization (desk profile)
+4. **positioning** one line (desk profile)
+5. **ask** a time-boxed question
+
+The prose reason also lands on the prospect's `signalReason`, which is the `Signal:`
+line in the existing Email 1 prompt, so the belt's own copy is anchored on the same fact.
+
+`SIGNAL_PITCH_AI=0` disables the Haiku surface-variation pass. The deterministic
+template is always the floor: a rewrite is discarded whenever it adds a dash, a banned
+phrase, an unrendered token, a candidate claim, or drifts outside 45..130 words.
+
+## Verifying it works
+
+```bash
+cd integration
+npx tsx scripts/test-news-signals.mts   # 142 deterministic assertions, no network
+npx tsx scripts/live-news-check.mts     # live Google News pull, prints extracted leads
+npx tsx scripts/live-news-pitch.mts     # live leads composed into finished emails
+```
+
+`live-news-check` is the one to run when quality drops: it prints
+`queries / headlines / named / leads`. A healthy segment names a company in most
+headlines. A collapse in `named` means the extractor is meeting a headline shape it does
+not know, and `scripts/live-news-check.mts` is the place to widen it.
+
+## Known limits (stated honestly)
+
+- **Google News is a pull feed.** "Real time" means same-hour, bounded by indexing lag
+  plus the poll cadence, not the second an article publishes.
+- **Outlet name variants do not merge.** Two outlets spelling a company "Conner" and
+  "Connor" produce two leads. Possessive and descriptor prefixes DO merge.
+- **Segment fit is the recruiter's call.** A company surfaced under "supply chain
+  software" is asserted to be in that market by the copy. Narrow segments behave better
+  than broad ones.
+- **LinkedIn posts are not a discovery source.** Unipile reads posts for a profile you
+  already follow (`lib/linkedin/poster.ts`), so LinkedIn adds depth on known targets, not
+  new companies. RSS is what finds companies you do not know yet.

@@ -115,6 +115,12 @@ export interface InMarketLead {
   /** The signal that says they're hiring, e.g. "Posted 9 engineering roles in 7 days". */
   reason: string;
   signalType: string;
+  /** STRUCTURED evidence behind `reason`, when the lead came from a news signal. The
+   *  prose reason alone loses distinctions the copy needs, e.g. a board appointment
+   *  reads as an exec hire, and an email that tells a director they will "rebuild the
+   *  bench underneath them" is wrong in a way the reader spots immediately. Type-only
+   *  import, so nothing here depends on the signals module at runtime. */
+  newsFacts?: import("../signals/watch/newsDiscover").NewsFacts;
   /** 0..100 intent/fit score from the engine. */
   score: number;
   scoreReasons: string[];
