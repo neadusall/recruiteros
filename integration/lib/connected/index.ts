@@ -192,6 +192,18 @@ const CATALOG: IntegrationMeta[] = [
       // --- Cheap wide pass (optional): Serper.dev Google results over the same X-ray ---
       { key: "SERPER_API_KEY", label: "Wide pass · Serper API key", required: false, secret: true, placeholder: "paste your serper.dev key", hint: "Optional but recommended. Serper.dev serves real Google results at roughly $0.30-$1 per 1,000 searches (2,500 free credits to start), no daily cap. Runs after the free passes and before the paid people search, so it widens every run for pennies. Get a key at serper.dev → API Key." },
       { key: "SERPER_MAX_QUERIES", label: "Wide pass · max searches per run", required: false, placeholder: "100", hint: "Optional spend guard. Each JD Sourcing run stops its Serper pass after this many searches (default 100, about 5-10 cents). Raise it for bigger runs." },
+      // --- Cheapest wide pass (optional): DataForSEO, run BEFORE Serper ---
+      //
+      // These fields have to exist. The engine shipped reading its login from the
+      // server environment only, and cred() deliberately suppresses the env fallback
+      // inside an isolated (white-label) workspace so a customer can never ride the
+      // operator's house key. The result was an engine that was installed, health-
+      // checked green, and structurally unreachable for the tenant doing the actual
+      // searching: it spent $0.00 and returned 0 of 25,320 rows across 40 runs, while
+      // Serper carried 64% of them at several times the cost per result.
+      { key: "DATAFORSEO_LOGIN", label: "Cheapest pass · DataForSEO login", required: false, placeholder: "the email you signed up with", hint: "Optional and the cheapest way to widen a search. DataForSEO returns up to 100 Google results per request for a fraction of a cent, several times cheaper per result than Serper's 10-result pages. It runs BEFORE Serper, so it absorbs the volume first and Serper only picks up what is left. Sign up at app.dataforseo.com → API Access." },
+      { key: "DATAFORSEO_PASSWORD", label: "Cheapest pass · DataForSEO password", required: false, secret: true, placeholder: "paste your API password", hint: "The API password from app.dataforseo.com → API Access. This is NOT your dashboard login password. Checking your balance is free, so this key costs nothing to verify." },
+      { key: "DATAFORSEO_MAX_QUERIES", label: "Cheapest pass · max searches per run", required: false, placeholder: "100", hint: "Optional spend guard, same idea as the Serper one (default 100, raised automatically on a Wide net search). At roughly $0.0006 a search this is pennies either way." },
     ],
     steps: [
       "Subscribe to the Fresh LinkedIn Scraper API (by SaleLeads) on RapidAPI. The free plan is enough to start.",
@@ -199,6 +211,7 @@ const CATALOG: IntegrationMeta[] = [
       "DEEP-VET (optional) → host: same · path: /api/v1/user/profile?username={username} · method: GET. {username} is filled in per candidate.",
       "FREE PASS (optional) → add a Google Custom Search key + engine ID (cx) to get 100 free searches/day that run before any paid lookup. Google retires this API Jan 1, 2027 and no longer accepts new signups.",
       "WIDE PASS (recommended) → add a serper.dev API key: real Google results at roughly $0.30-$1 per 1,000 searches, no daily cap, runs before the paid people search. New accounts start with 2,500 free credits.",
+      "CHEAPEST PASS (recommended) → add a DataForSEO login + API password from app.dataforseo.com → API Access. Up to 100 results per request for a fraction of a cent, so it runs before Serper and absorbs the volume first. Having both also means a drained balance on one can never stop a search.",
       "PHONE FINDER (optional) → subscribe to any RapidAPI phone/direct-dial lookup listing and fill its host + path. It only runs on candidates the free phone sources (KoldInfo, Laxis, the in-house database) could not fill, so it is pure top-up spend.",
       "BOOST PHONES (optional) → subscribe to a RapidAPI skip-trace / people-search listing (about $0.10 per lookup) and fill its host + path. This one is recruiter-triggered: after the free enrichment finishes, each list shows a Boost phones option with an estimated cost, and every run's real spend is tracked per recruiter under Outbound Performance.",
       "Paste your RapidAPI key, fill the values above exactly, Save, then Test. It should go green.",
