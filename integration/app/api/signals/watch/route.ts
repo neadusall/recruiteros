@@ -121,6 +121,21 @@ export async function POST(req: Request) {
       const profile = await saveDeskProfile(ws, (b?.profile ?? {}) as never);
       return ok({ profile, complete: profileComplete(profile) });
     }
+    // Head to head: Hire Signals (job feed) vs news signals, on reply rate per send.
+    // Deliberately conservative, see lib/signals/watch/sourceTrial.ts: it answers
+    // "insufficient_data" with a number of sends still needed rather than naming a
+    // winner off a sample that cannot support one.
+    if (action === "sourceTrial") {
+      const { allCurated } = await import("../../../../lib/inmarket/curation");
+      const { compareArms } = await import("../../../../lib/signals/watch/sourceTrial");
+      const report = compareArms(await allCurated(), {
+        from: typeof b?.from === "string" ? b.from : undefined,
+        to: typeof b?.to === "string" ? b.to : undefined,
+        minSendsPerArm: Number.isFinite(Number(b?.minSendsPerArm)) ? Number(b.minSendsPerArm) : undefined,
+        baselineRate: Number.isFinite(Number(b?.baselineRate)) ? Number(b.baselineRate) : undefined,
+      });
+      return ok({ trial: report });
+    }
     if (action === "toggle") {
       if (!b?.id) return fail("missing_id", 422);
       const okd = await setWatchlistActive(b.id, b.active !== false);

@@ -183,6 +183,9 @@ export async function pollOne(w: Watchlist, todayIso: string): Promise<PollOutco
         concurrency: 4,
         minScore,
         nowIso: todayIso,
+        // Which arm found these. Recorded on rows this run CREATES only, so a company
+        // stays credited to whichever front end actually earned it.
+        attribution: { source: isNews ? "news" : "jobs", listId: w.id },
       });
       contactable = report.contactable;
     } catch (e) {

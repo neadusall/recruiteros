@@ -123,6 +123,60 @@ npx tsx scripts/live-news-pitch.mts     # live leads composed into finished emai
 headlines. A collapse in `named` means the extractor is meeting a headline shape it does
 not know, and `scripts/live-news-check.mts` is the place to widen it.
 
+## Head to head vs Hire Signals
+
+Both arms feed the same belt, the same curation, the same copy engine and the same
+mailboxes. The only difference is which front end put the company in the funnel, which
+is what makes the result readable rather than two dashboards side by side.
+
+Open a matched pair (same cap, same cadence, same segment):
+
+```bash
+COOKIE='session=...' SEGMENT='supply chain software' JOB_QUERY='VP Operations' \
+  bash C:/Users/nead0/start-source-trial.sh
+```
+
+Read it any time:
+
+```bash
+curl -sS "$HOST/api/signals/watch" -H 'content-type: application/json' \
+  -H "cookie: $COOKIE" -d '{"action":"sourceTrial","from":"2026-08-10"}'
+# or on the box:
+npx tsx scripts/source-trial-report.mts --from 2026-08-10
+```
+
+**Headline metric is replies / sends.** Reply per send is unaffected by one arm simply
+discovering more companies, which is a volume question rather than a quality one. Volume
+is reported next to it as `replies/100 companies`, because an arm that finds ten times as
+many companies at the same reply rate is still worth far more. The pair of numbers is
+what decides where to spend.
+
+**Attribution is first-touch and never moves.** The arm that first puts a company in the
+funnel keeps credit for whatever it goes on to do. A later re-curate by the other arm
+does not re-attribute it. Without that rule the trial would score its own bookkeeping.
+Rows curated before the trial shipped carry no attribution, sit in neither arm, and are
+reported as `unattributedProspects`.
+
+**The verdict refuses to be rushed.** It stays `insufficient_data` until both arms clear
+200 sends, and `tie` unless a two-proportion z-test on reply rate clears p < 0.05. This
+matters more than it sounds: a 15/215 vs 8/240 split looks like double the reply rate and
+is still only p=0.077. The report says how many more sends per arm would resolve the gap
+it is actually seeing.
+
+Sends per arm needed, 80% power, p<0.05, at a 3.5% baseline:
+
+| to distinguish | sends per arm |
+|---|---|
+| 3.5% vs 4.5% | ~6,000 |
+| 3.5% vs 5.0% | ~2,840 |
+| 3.5% vs 7.0% | ~640 |
+
+So a week of normal volume can only settle a large difference. A 1-point difference is a
+quarter-long question. Plan the call accordingly.
+
+The report also warns when one arm has 3x the other's volume, and when an arm's bounce
+rate is above 2% (a reply rate bought with domain damage is not a win).
+
 ## Known limits (stated honestly)
 
 - **Google News is a pull feed.** "Real time" means same-hour, bounded by indexing lag
