@@ -512,6 +512,21 @@ export interface CurationFunnel {
   /** Where the curated emails came from — guess vs deep-pulled vs SMTP-found vs externally validated.
    *  This tells us how many "contacts" are real vs blind guesses at a glance. */
   emailBySource: Array<{ source: string; total: number; validated: number }>;
+  /** WHY the un-rendered backlog is stuck. One EXCLUSIVE bucket per gate (they sum to `total`), so
+   *  "no videos came out" names its own cause instead of being guessed at. The video queue renders
+   *  `renderable` only; every other bucket is a role that research reached but outreach can't use. */
+  blocked: {
+    renderable: number;      // contactable + an address → the video queue's entire supply
+    noName: number;          // researched, still no decision-maker name (the naming gate)
+    noDomain: number;        // named, but no company domain → no finder can even be attempted
+    emailPending: number;    // named + domain, no verdict yet → the Reoon finder will reach it
+    catchAllParked: number;  // catch-all domain: a deliverable best-guess is held back, unconfirmable
+    invalidParked: number;   // every syntax rejected → only a residual (paid) finder rung rescues these
+    suppressed: number;      // deliberately out (dupe / opted-out / undeliverable)
+  };
+  /** Whether the two levers over `catchAllParked` / `invalidParked` are currently armed, so the
+   *  panel shows a stuck bucket next to the switch that drains it. */
+  levers: { catchAllContactable: boolean; residualFinder: boolean };
   /** Daily throughput toward the 5,000 valid-emails/day goal, so consistency is measurable. */
   daily: {
     target: number;                  // 5,000
@@ -539,6 +554,7 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   const via = new Map<string, number>();                                  // named-row attribution by source
   const tiers = new Map<string, { total: number; named: number }>();      // confidence-tier distribution
   let contactableOrBetter = 0, validated = 0, invalid = 0, catchAll = 0, named = 0, withDomain = 0, namedLastHour = 0;
+  const blocked = { renderable: 0, noName: 0, noDomain: 0, emailPending: 0, catchAllParked: 0, invalidParked: 0, suppressed: 0 };
   const hourAgoMs = Date.now() - 3_600_000;
   const byDay = new Map<string, { valid: number; contactable: number }>();
   const bump = (date: string | null, k: "valid" | "contactable") => {
@@ -572,6 +588,15 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     }
     const isContactable = r.status === "contactable" || r.status === "queued" || r.status === "enrolled";
     if (isContactable) contactableOrBetter++;
+    // Exclusive gate attribution, most-decisive gate first: a row with no NAME is stuck on naming
+    // regardless of what its domain looks like, so it is only ever counted once.
+    if (r.status === "suppressed") blocked.suppressed++;
+    else if (isContactable && r.likelyEmail) blocked.renderable++;
+    else if (!r.managerName) blocked.noName++;
+    else if (!r.domain) blocked.noDomain++;
+    else if (r.emailCatchAll) blocked.catchAllParked++;
+    else if (r.emailInvalid) blocked.invalidParked++;
+    else blocked.emailPending++;
     const s = sig.get(r.signalType) ?? { total: 0, contactable: 0 };
     s.total++; if (isContactable) s.contactable++; sig.set(r.signalType, s);
     const f = fn.get(r.function) ?? { total: 0, contactable: 0 };
@@ -612,6 +637,8 @@ export async function curationFunnel(): Promise<CurationFunnel> {
       resolverRate: rs.rate,
     },
     emailBySource: [...src.entries()].map(([source, v]) => ({ source, ...v })).sort((a, b) => b.total - a.total),
+    blocked,
+    levers: { catchAllContactable: catchAllContactableEnabled(), residualFinder: await residualFinderEnabled() },
     daily: {
       target: DAILY_TARGET,
       validToday: todayRow.valid,
@@ -1137,6 +1164,9 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
         // NOT auto-promoted to contactable. emailCatchAll keeps it out of re-processing.
         if (res.email) r.likelyEmail = res.email;
         r.emailSource = "catch_all"; r.emailCatchAll = true; r.emailValidated = false; r.emailInvalid = false; r.validatedAt = nowIso;
+        // …unless the operator has said this tier is workable, in which case it becomes supply now
+        // instead of waiting for the backfill sweep. Still never marked validated.
+        if (r.likelyEmail && catchAllContactableEnabled() && (r.status === "sourced" || r.status === "named")) r.status = "contactable";
         catchAll++;
       } else if (res.outcome === "invalid") {
         r.emailValidated = false; r.emailInvalid = true; r.validatedAt = nowIso;
@@ -1149,6 +1179,64 @@ export async function findEmailsByReoon(limit: number, nowIso: string, concurren
   });
   try { const { flushPatternCache } = await import("./emailPattern"); await flushPatternCache(true); } catch { /* flush best-effort */ }
   return { checked, found, catchAll, invalid };
+}
+
+/**
+ * OPERATOR POLICY — is a catch-all domain's best-pattern address good enough to work?
+ *
+ * On a catch-all domain the mail server accepts every local-part, so NO verifier (Reoon, SMTP,
+ * anyone) can prove the specific mailbox exists; it can only prove the mail will not bounce. The
+ * engine therefore parks those rows in their own tier rather than calling them "valid". That is the
+ * safe default and it stays the default — but it also means a real, deliverable, named
+ * decision-maker sits unusable forever, because no wired finder ever revisits a parked row.
+ *
+ * Set INMARKET_CATCHALL_CONTACTABLE=1 to work that tier: the row becomes contactable (so it renders
+ * and can be enrolled) while KEEPING emailCatchAll + emailSource="catch_all", so it is never counted
+ * as validated and can be filtered or reverted at any time. Off by default because turning it on
+ * means sending to addresses that are pattern-confident rather than confirmed.
+ *
+ * Deliberately NOT keyed to REOON_ACCEPT_CATCHALL: that flag governs how a bulk VERIFY verdict is
+ * read, defaults to on, and would silently start emailing this tier for every operator.
+ */
+export function catchAllContactableEnabled(): boolean {
+  return (process.env.INMARKET_CATCHALL_CONTACTABLE || "").trim() === "1";
+}
+
+/** Whether any residual (paid) finder rung is configured — the finder-of-record service, or Icypeas. */
+export async function residualFinderEnabled(): Promise<boolean> {
+  try {
+    const { finderServiceEnabled } = await import("./finderService");
+    if (finderServiceEnabled()) return true;
+    const { paidEmailEnabled } = await import("./paidEmail");
+    return paidEmailEnabled();
+  } catch { return false; }
+}
+
+/**
+ * Drain the parked catch-all tier into renderable supply, under the policy flag above.
+ *
+ * Needed as its own sweep because rows already carrying emailCatchAll are excluded from every
+ * finder's target set ("emailCatchAll keeps it out of re-processing"), so flipping the flag would
+ * otherwise only affect catch-alls discovered from that moment on and leave the existing backlog
+ * parked. Idempotent and cheap: a no-op once the backlog is drained, and a no-op while the flag is
+ * off. Only promotes rows that already have a name and a deliverable best-guess address.
+ */
+export async function promoteCatchAllParked(limit = 2000): Promise<{ promoted: number }> {
+  if (!catchAllContactableEnabled()) return { promoted: 0 };
+  let promoted = 0;
+  await withCurationLock(async () => {
+    const current = await load();
+    for (const r of current) {
+      if (promoted >= limit) break;
+      if (!r.emailCatchAll || r.emailInvalid) continue;
+      if (!r.managerName || !r.likelyEmail) continue;
+      if (r.status !== "named" && r.status !== "sourced") continue;   // never touch locked/suppressed rows
+      r.status = "contactable";
+      promoted++;
+    }
+    if (promoted) await save(current);
+  });
+  return { promoted };
 }
 
 /**
