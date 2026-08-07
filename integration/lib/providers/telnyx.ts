@@ -238,6 +238,10 @@ export class TelnyxClient extends ProviderClient {
     return this.request({ path: "/credential_connections", query: { "page[size]": pageSize } });
   }
 
+  getCredentialConnection(connectionId: string) {
+    return this.request({ path: `/credential_connections/${encodeURIComponent(connectionId)}` });
+  }
+
   updateCredentialConnection(connectionId: string, body: Record<string, unknown>) {
     return this.request({
       method: "PATCH",

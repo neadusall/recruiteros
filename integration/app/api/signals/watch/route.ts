@@ -49,13 +49,19 @@ async function cronBranch(req: Request): Promise<NextResponse> {
     const lists = await listWatchlists();
     const remaining = await fetchBudgetRemaining(nowIso());
     const health = await getWatchHealth();
+    // News-feed breaker state. A watchdog should treat `newsFeed.open` as a real
+    // outage: while it is open every news list reports zero, and a zero that is
+    // actually a block must never read as a quiet market.
+    const { newsFeedHealth } = await import("../../../../lib/signals/watch/newsDiscover");
     return NextResponse.json({
       ok: true,
       health,
+      newsFeed: newsFeedHealth(),
       budget: { remaining, cap: dailyFetchCap() },
       activeWatchlists: lists.filter((w) => w.active).length,
+      newsWatchlists: lists.filter((w) => w.source === "news" && w.active).length,
       watchlists: lists.map((w) => ({
-        id: w.id, name: w.name, active: w.active, everyMinutes: w.everyMinutes,
+        id: w.id, name: w.name, source: w.source, active: w.active, everyMinutes: w.everyMinutes,
         lastPolledAt: w.lastPolledAt, stats: w.stats,
       })),
     });
@@ -97,9 +103,44 @@ export async function POST(req: Request) {
   try {
     if (action === "save") {
       const input = (b?.watchlist ?? b) as WatchlistInput;
-      if (!input?.query && !input?.industry && !input?.id) return fail("missing_query", 422);
+      // A news list searches a SEGMENT, not a job query, so it has no `query` to check.
+      // Requiring one here is what would silently reject every news watchlist.
+      const hasTerm = input?.source === "news"
+        ? Boolean(input?.segment?.trim())
+        : Boolean(input?.query || input?.industry);
+      if (!hasTerm && !input?.id) {
+        return fail(input?.source === "news" ? "missing_segment" : "missing_query", 422);
+      }
       const saved = await upsertWatchlist(ws, input);
       return ok({ watchlist: saved });
+    }
+    // The desk profile: who this firm is, what it recruits into, how it positions.
+    // These are the only claims the signal-anchored pitch makes about the SENDER, so
+    // they cannot be inferred from a headline and have to be stored per workspace.
+    if (action === "deskProfile") {
+      const { getDeskProfile, profileComplete } = await import("../../../../lib/signals/watch/signalPitch");
+      const profile = await getDeskProfile(ws);
+      return ok({ profile, complete: profileComplete(profile) });
+    }
+    if (action === "saveDeskProfile") {
+      const { saveDeskProfile, profileComplete } = await import("../../../../lib/signals/watch/signalPitch");
+      const profile = await saveDeskProfile(ws, (b?.profile ?? {}) as never);
+      return ok({ profile, complete: profileComplete(profile) });
+    }
+    // Head to head: Hire Signals (job feed) vs news signals, on reply rate per send.
+    // Deliberately conservative, see lib/signals/watch/sourceTrial.ts: it answers
+    // "insufficient_data" with a number of sends still needed rather than naming a
+    // winner off a sample that cannot support one.
+    if (action === "sourceTrial") {
+      const { allCurated } = await import("../../../../lib/inmarket/curation");
+      const { compareArms } = await import("../../../../lib/signals/watch/sourceTrial");
+      const report = compareArms(await allCurated(), {
+        from: typeof b?.from === "string" ? b.from : undefined,
+        to: typeof b?.to === "string" ? b.to : undefined,
+        minSendsPerArm: Number.isFinite(Number(b?.minSendsPerArm)) ? Number(b.minSendsPerArm) : undefined,
+        baselineRate: Number.isFinite(Number(b?.baselineRate)) ? Number(b.baselineRate) : undefined,
+      });
+      return ok({ trial: report });
     }
     if (action === "toggle") {
       if (!b?.id) return fail("missing_id", 422);

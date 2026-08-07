@@ -40,11 +40,23 @@ export interface WatchStats {
   lastHitAt?: string;
 }
 
+/**
+ * Which front end feeds this list.
+ *   jobs — JSearch job feed: companies that ALREADY posted a role (paid, budget-metered)
+ *   news — Google News RSS: companies that just raised, hired an exec, expanded, acquired,
+ *          or launched (free, keyless), reached BEFORE the roles are posted
+ * Both land on the same belt from curation onward. Absent = "jobs", so every list saved
+ * before this field existed keeps behaving exactly as it did.
+ */
+export type WatchSource = "jobs" | "news";
+
 export interface Watchlist {
   id: string;
   workspaceId: string;
   /** Human name, e.g. "VP Sales · SaaS · US remote". */
   name: string;
+  /** Which discovery front end runs for this list. Default "jobs". */
+  source: WatchSource;
   /* ---- the query (what the feed searches) ---- */
   query: string;                 // JSearch query (role / keywords), REQUIRED by the feed
   industry?: string;             // optional market/industry, folded into the query at poll time
@@ -59,6 +71,19 @@ export interface Watchlist {
   minScore?: number;
   /** Cap net-new companies actioned per poll, so one hot list can't flood the belt. */
   perPollCompanyCap?: number;
+  /* ---- news source only (ignored when source === "jobs") ---- */
+  /** Plain-English market to watch, e.g. "supply chain software". This is the news
+   *  equivalent of `query`: without it a news list has nothing to search. */
+  segment?: string;
+  /** Which news signals to hunt. Empty = funding + exec hire, the two that convert. */
+  newsSignals?: string[];
+  /** Recency window in days for the news feed. */
+  newsWindowDays?: number;
+  /** Ignore raises below this dollar figure. 0 = keep every size. */
+  minAmountUsd?: number;
+  /** The roles this desk fills. Overrides the inferred post-signal build-out, so
+   *  curation researches the bosses THIS recruiter can actually sell into. */
+  targetRoles?: string[];
   /* ---- scheduling ---- */
   active: boolean;
   everyMinutes: number;          // poll cadence; 15 = "hottest"
@@ -105,6 +130,9 @@ function normalize(w: Partial<Watchlist>): Watchlist {
     id: w.id || rid("wl"),
     workspaceId: w.workspaceId || "default",
     name: (w.name || "Untitled watchlist").trim(),
+    // Anything not explicitly "news" is a job list: that keeps every pre-existing
+    // snapshot row, which has no source field at all, on its original behavior.
+    source: w.source === "news" ? "news" : "jobs",
     query: (w.query || "").trim(),
     industry: w.industry?.trim() || undefined,
     location: w.location?.trim() || undefined,
@@ -114,6 +142,18 @@ function normalize(w: Partial<Watchlist>): Watchlist {
     limit: clampInt(w.limit, 1, 200, 30),
     minScore: clampInt(w.minScore, 0, 100, 0),
     perPollCompanyCap: clampInt(w.perPollCompanyCap, 1, 500, 25),
+    segment: w.segment?.trim() || undefined,
+    newsSignals: Array.isArray(w.newsSignals) && w.newsSignals.length
+      ? [...new Set(w.newsSignals.map((s) => String(s).trim()).filter(Boolean))].slice(0, 8)
+      : undefined,
+    newsWindowDays: clampInt(w.newsWindowDays, 1, 90, 7),
+    // No clamp floor: 0 is a meaningful value here (keep every raise size).
+    minAmountUsd: Number.isFinite(Number(w.minAmountUsd)) && Number(w.minAmountUsd) > 0
+      ? Math.min(Math.round(Number(w.minAmountUsd)), 10_000_000_000)
+      : undefined,
+    targetRoles: Array.isArray(w.targetRoles) && w.targetRoles.length
+      ? w.targetRoles.map((s) => String(s).trim()).filter(Boolean).slice(0, 5)
+      : undefined,
     active: w.active ?? true,
     everyMinutes: clampInt(w.everyMinutes, 5, 1440, 15),
     createdAt: w.createdAt || now,

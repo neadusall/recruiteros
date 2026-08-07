@@ -61,7 +61,10 @@ export async function GET(req: Request) {
     const { videoSupply } = await import("../../../../lib/inmarket/autoVideo");
     const s = await videoSupply();
     const v = (out.video ?? {}) as Record<string, unknown>;
-    out.video = { ...v, pending: s.pending, rebuilds: s.rebuilds, clip: s.clip, shared: s.shared, reason: s.reason };
+    // `prerender` is the ahead-of-demand depth (researched roles with no decision-maker email yet).
+    // Read it WITH pending: pending 0 + prerender 0 means the book is genuinely exhausted, while
+    // pending 0 + prerender > 0 means the fleet still has work and email enrichment is the constraint.
+    out.video = { ...v, pending: s.pending, rebuilds: s.rebuilds, prerender: s.prerender, clip: s.clip, shared: s.shared, reason: s.reason };
   } catch { /* supply optional */ }
   try {
     const { engineHealth } = await import("../../../../lib/inmarket/accumulator");

@@ -43,7 +43,7 @@ import { resolvePersonEmail } from "./deepContact";
 import { paidEmailEnabled, findEmailIcypeas } from "./paidEmail";
 import { paidNamingEnabled, findDecisionMakerRapid } from "./paidNaming";
 import { recordSearch, isAvailable } from "./searchHealth";
-import { webSearchEnabled, webSearchTitles } from "./webSearch";
+import { webSearchEnabled, webSearchReady, webSearchTitles } from "./webSearch";
 import { xrayPeopleGraph } from "./xray";
 
 /* ------------------------------------------------------------------ */
@@ -386,6 +386,76 @@ async function githubEngCandidates(company: string): Promise<PersonCandidate[]> 
 
 const searchCache = new Map<string, { at: number; people: PersonCandidate[] }>();
 const SEARCH_TTL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * PERSISTENT MISS MEMO — the guard that makes a paid search budget go far.
+ *
+ * `searchCache` is in-process, so every deploy (this box redeploys on each push to main) wipes it
+ * and the next curation tick re-searches every company from scratch. Unnamed companies also retry
+ * on a ~90-minute cycle by design. Together that means the SAME hopeless company — one with no
+ * public leadership footprint anywhere — would be re-bought many times a day, burning the ceiling
+ * that the genuinely-findable companies need.
+ *
+ * So a MISS is remembered on disk and rested: a company that yielded no name is not re-searched
+ * for MISS_TTL_MS. Hits are not memoised here (the in-process cache already covers the short term
+ * and a hit costs nothing to keep). Bounded and pruned so it can never grow without limit.
+ */
+const MISS_KEY = "inmarket_name_search_miss_v1";
+const MISS_TTL_MS = 3 * 24 * 60 * 60 * 1000;   // a company doesn't sprout a public exec in 90 minutes
+const MISS_MAX = 20_000;
+let missMemo: Record<string, number> | null = null;
+let missHydrating: Promise<void> | null = null;
+let missDirty = false;
+let missSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function hydrateMisses(): Promise<Record<string, number>> {
+  if (missMemo) return missMemo;
+  missHydrating ??= (async () => {
+    const { loadSnapshot } = await import("../db");
+    const saved = await loadSnapshot<Record<string, number>>(MISS_KEY).catch(() => null);
+    missMemo = saved && typeof saved === "object" ? saved : {};
+  })();
+  await missHydrating;
+  missHydrating = null;
+  return missMemo!;
+}
+
+function scheduleMissSave(): void {
+  if (missSaveTimer || !missDirty) return;
+  missSaveTimer = setTimeout(async () => {
+    missSaveTimer = null;
+    if (!missMemo || !missDirty) return;
+    missDirty = false;
+    // Prune expired entries, then the oldest, so the memo stays bounded.
+    const now = Date.now();
+    let entries = Object.entries(missMemo).filter(([, at]) => now - at < MISS_TTL_MS);
+    if (entries.length > MISS_MAX) entries = entries.sort((a, b) => b[1] - a[1]).slice(0, MISS_MAX);
+    missMemo = Object.fromEntries(entries);
+    const { saveSnapshot } = await import("../db");
+    await saveSnapshot(MISS_KEY, missMemo).catch(() => {});
+  }, 15_000);
+  (missSaveTimer as unknown as { unref?: () => void }).unref?.();
+}
+
+/** True when this company+function was searched recently and yielded nothing — skip the paid hop. */
+async function isRestedMiss(cacheKey: string): Promise<boolean> {
+  const memo = await hydrateMisses();
+  const at = memo[cacheKey];
+  return !!at && Date.now() - at < MISS_TTL_MS;
+}
+
+async function noteMiss(cacheKey: string): Promise<void> {
+  const memo = await hydrateMisses();
+  memo[cacheKey] = Date.now();
+  missDirty = true;
+  scheduleMissSave();
+}
+
+async function clearMiss(cacheKey: string): Promise<void> {
+  const memo = await hydrateMisses();
+  if (memo[cacheKey] !== undefined) { delete memo[cacheKey]; missDirty = true; scheduleMissSave(); }
+}
+
 // A real browser UA — search engines serve scrape-friendly HTML to it and challenge bots less.
 const SEARCH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
@@ -576,13 +646,19 @@ async function searchEngines(q: string, parse: (titles: string[]) => PersonCandi
   // X-ray queries work and it returns clean titles — with no per-IP throttle. When it's configured
   // it is the SOLE backend: we do NOT fall through to the free scrapers (that's the whole point of
   // moving off them). It handles its own errors → [], so a miss just yields no names here.
-  if (webSearchEnabled()) {
+  // Note `webSearchReady` (not `webSearchEnabled`): when today's paid ceiling is spent we fall
+  // THROUGH to the free rotation below rather than naming nobody for the rest of the day.
+  if (await webSearchReady()) {
     const found = parse(await webSearchTitles(q));
     recordSearch("web_search", found.length ? "ok" : "empty");
-    return found;
+    if (found.length) return found;
+    // A paid provider that returned nothing is a real negative, not a throttle — don't then spend
+    // the free engines' back-off budget re-asking the same question.
+    return [];
   }
-  // FALLBACK (no RAPID_WEBSEARCH_KEY): the free engine rotation, kept so local/dev without a key
-  // still names people. Each engine is independently rested by the health system.
+  // FALLBACK (no paid provider configured, or its daily ceiling is spent): the free engine
+  // rotation, kept so local/dev without a key still names people. Each engine is independently
+  // rested by the health system.
   for (const eng of SEARCH_ENGINES) {
     if (!isAvailable(eng.id)) continue; // engine resting in back-off — skip to the next source
     // Each attempt goes out a FRESH rotated source IP (egressFetch round-robins the /64). On a
@@ -612,6 +688,10 @@ async function searchEngineCandidates(company: string, titles: string[]): Promis
   const cacheKey = `${anchor}::${(titles[0] || "").toLowerCase()}`;
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SEARCH_TTL_MS) return cached.people;
+  // Rested miss: this company+function came back empty recently. Skip it entirely so the paid
+  // ceiling is spent on companies that might actually resolve. (Only gates the PAID hop — with no
+  // provider configured the free rotation is free to keep trying.)
+  if (webSearchEnabled() && (await isRestedMiss(cacheKey))) return [];
 
   const titleQ = titles.slice(0, 5).map((t) => `"${t}"`).join(" OR ");
   // PASS 1 — precise: the exact boss titles on LinkedIn ("Name - VP of Engineering - Acme").
@@ -630,6 +710,7 @@ async function searchEngineCandidates(company: string, titles: string[]): Promis
     );
   }
   searchCache.set(cacheKey, { at: Date.now(), people });
+  if (people.length) await clearMiss(cacheKey); else await noteMiss(cacheKey);
   return people;
 }
 

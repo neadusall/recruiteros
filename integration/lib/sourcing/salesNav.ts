@@ -350,6 +350,7 @@ export async function runSalesNavSourcing(ws: string, ownerUserId: string, opts:
     queries = generateQueries(icp, { breadth });
     if (queries.length) {
       const disc = await runDiscovery(queries, icp, {
+        workspaceId: ws,
         cap: Math.min(Math.max(opts.cap ?? 300, 25), 2000),
         minFit: typeof opts.minFit === "number" ? opts.minFit : 10,
         breadth,

@@ -12,11 +12,23 @@
 import { randomBytes } from "crypto";
 import { telnyx } from "../providers";
 import { getInfra, patchInfra, getUserState, patchUserState } from "./store";
+import { phoneAlert } from "./alerts";
 import { nowIso } from "../core/ids";
 import type { PhoneInfra } from "./types";
 
 const APP_NAME = "RecruitersOS Phone";
 const CRED_CONN_NAME = "RecruitersOS Phone WebRTC";
+/**
+ * Every browser leg in this system is dialed to `sip:<credential>@sip.telnyx.com`
+ * (see sipUriFor). Telnyx creates credential connections with SIP URI calling
+ * DISABLED, and then refuses those legs outright: the call dies in about a
+ * second with no ring, no answer, and a hangup cause that reads like the far
+ * end was busy. "internal" accepts only calls originated by connections on the
+ * same Telnyx account, which is exactly our own Call Control application.
+ */
+const SIP_URI_CALLING = "internal";
+/** How long a proven-good SIP URI setting is trusted before it is re-checked. */
+const SIP_URI_RECHECK_MS = 6 * 60 * 60 * 1000;
 
 function appUrl(): string {
   return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
@@ -34,7 +46,18 @@ export function phoneWebhookUrl(): string {
  */
 export async function ensureInfra(workspaceId: string): Promise<PhoneInfra> {
   const infra = getInfra(workspaceId);
-  if (infra.appId && infra.credentialConnectionId) return infra;
+  if (infra.appId && infra.credentialConnectionId) {
+    // Provisioned, but this is the setting the whole phone hangs on, so it is
+    // re-checked rather than remembered: a workspace set up before the fix
+    // existed heals on the next connect, and one changed in the Telnyx portal
+    // afterwards is caught within a few hours instead of after a few weeks of
+    // calls that quietly refuse to ring.
+    if (infra.sipUriCalling !== SIP_URI_CALLING || checkDue(infra.sipUriCallingAt)) {
+      await ensureSipUriCalling(workspaceId, infra.credentialConnectionId);
+      return getInfra(workspaceId);
+    }
+    return infra;
+  }
 
   try {
     if (!infra.appId) {
@@ -45,10 +68,65 @@ export async function ensureInfra(workspaceId: string): Promise<PhoneInfra> {
       const credentialConnectionId = await findOrCreateCredentialConnection();
       patchInfra(workspaceId, { credentialConnectionId });
     }
+    const connId = getInfra(workspaceId).credentialConnectionId;
+    if (connId) await ensureSipUriCalling(workspaceId, connId);
     return patchInfra(workspaceId, { provisionedAt: nowIso(), lastError: undefined });
   } catch (e: any) {
     patchInfra(workspaceId, { lastError: String(e?.message ?? e) });
     throw e;
+  }
+}
+
+/** True when the SIP URI setting has not been proven against Telnyx recently. */
+function checkDue(at?: string): boolean {
+  const t = at ? Date.parse(at) : NaN;
+  return !Number.isFinite(t) || Date.now() - t > SIP_URI_RECHECK_MS;
+}
+
+/**
+ * Prove — and if need be restore — the one Telnyx setting every browser call
+ * depends on. Read first, so drift can be told apart from first-time setup:
+ * a connection that was working and is now "disabled" means someone changed it
+ * out from under the product, and that is worth saying out loud rather than
+ * quietly repairing. The marker is written only when Telnyx echoes the value
+ * back, so a rejected write is retried instead of remembered as done. Never
+ * throws: a phone that is otherwise fine must still get its token.
+ */
+async function ensureSipUriCalling(workspaceId: string, connectionId: string): Promise<void> {
+  const before = getInfra(workspaceId).sipUriCalling;
+  try {
+    const cur = await telnyx.getCredentialConnection(connectionId).catch(() => null);
+    const live = String((cur as any)?.data?.sip_uri_calling_preference ?? "");
+    if (live && live !== "disabled") {
+      patchInfra(workspaceId, { sipUriCalling: live, sipUriCallingAt: nowIso(), lastError: undefined });
+      return;
+    }
+
+    const res = await telnyx.updateCredentialConnection(connectionId, {
+      sip_uri_calling_preference: SIP_URI_CALLING,
+    });
+    if (res?.dryRun) return;
+    const applied = String(res?.data?.sip_uri_calling_preference ?? "");
+    if (applied && applied !== "disabled") {
+      patchInfra(workspaceId, { sipUriCalling: applied, sipUriCallingAt: nowIso(), lastError: undefined });
+      // Repairing a setting that was already proven good means it was changed
+      // elsewhere. Calls were failing until this moment, so the owner hears it.
+      if (before && before !== "disabled") {
+        void phoneAlert(workspaceId, "PHONE-SIP-URI-CALLING-DISABLED",
+          "Browser calling was switched off on this workspace's Telnyx connection and has been switched back on.",
+          `SIP URI calling on connection ${connectionId} was found "disabled" and was reset to "${applied}". While it was off, every browser call failed within a second without ringing. If someone changed it in the Telnyx portal, leave it on ${SIP_URI_CALLING}.`);
+      }
+      return;
+    }
+    patchInfra(workspaceId, {
+      sipUriCallingAt: nowIso(),
+      lastError: "telnyx_provision: Telnyx did not accept SIP URI calling on the browser connection, so browser calls will not connect",
+    });
+    void phoneAlert(workspaceId, "PHONE-SIP-URI-CALLING-REFUSED",
+      "Browser calling could not be enabled on this workspace's Telnyx connection.",
+      `Telnyx would not set sip_uri_calling_preference on connection ${connectionId}. Until it is set to "${SIP_URI_CALLING}" (Voice, SIP Trunking, Authentication and routing), every browser call will fail within a second without ringing.`);
+  } catch (e: any) {
+    patchInfra(workspaceId, { lastError: `telnyx_provision: ${String(e?.message ?? e)}`.slice(0, 300) });
   }
 }
 

@@ -85,6 +85,11 @@ export interface CandidateRow {
   fullName: string;
   title?: string;
   headline?: string;
+  /** The search result's snippet: a line or two of the profile's About/summary text.
+   *  Free evidence that used to be discarded whenever a headline existed, and the
+   *  place long-tail proof ("CPA", "ASC 740", "BCBA", "PointClickCare") actually
+   *  shows up. Read by proof scoring; never shown raw to a recruiter. */
+  snippet?: string;
   company?: string;
   location?: string;
   linkedinUrl?: string;
@@ -117,6 +122,18 @@ export interface CandidateRow {
    * nothing found is silently discarded.
    */
   outOfArea?: boolean;
+
+  /**
+   * True when this row survived the location filter WITHOUT being measured — its stated
+   * location would not resolve to a coordinate, so it was kept on the never-empty rule
+   * rather than because the radius cleared it.
+   *
+   * It exists so an unmeasured row can be re-judged later: enrichment often fills in a
+   * real city after the search is over, and `enforceRunGeo` re-measures every row still
+   * carrying this flag. Without it a person whose location only became readable
+   * post-search would sit in the deliverable list as though the mileage had passed them.
+   */
+  geoUnverified?: boolean;
 
   /**
    * Straight-line miles from the recruiter's typed location, when both that location and
@@ -171,14 +188,41 @@ export interface SourcingRun {
   motion: Motion;
   jd: string;
   jdUrl?: string;
-  /** City & state of the role, as entered by the recruiter (saved with the list). */
+  /** City & state of the role, as entered by the recruiter (saved with the list). The
+   *  label carries the radius suffix ("Howell, NJ +25mi"). */
   location?: string;
+  /**
+   * The mileage the recruiter picked, as a NUMBER (0 = "Exact").
+   *
+   * The label above already encodes it, but a saved list has to be able to re-enforce
+   * its own radius long after the search — on a merge, after enrichment, before delivery
+   * — and re-deriving the number from prose every time is how a list quietly ends up
+   * enforcing a different radius than the one it was run with.
+   */
+  radiusMi?: number;
+  /**
+   * True when this list came from a REMOTE search: no center, no radius, the whole US.
+   *
+   * Persisted because every later pass over a saved list asks it where it was pinned —
+   * `enforceRunGeo` before delivery, the same-role auto-combine, a re-run from the
+   * overnight queue. Without the flag those would read the empty location as "unpinned"
+   * and quietly apply a different rule than the search was run with.
+   */
+  remote?: boolean;
   icp: CandidateICP;
   queries: SourcingQuery[];
   candidates: CandidateRow[];
   /** Quota'd search-API requests the discovery run spent building this list, by
    *  engine (rapidapi = the paid people-search listing's monthly credits). */
   apiUsage?: { rapidapi?: number; serper?: number; google?: number; dataforseo?: number };
+  /**
+   * The name this run's OS Text campaign was actually created under. The engine's
+   * /api/import get-or-creates a campaign BY EXACT NAME, so a renamed list must
+   * keep pushing top-ups under the original name or the rename would fork a
+   * second, half-empty campaign. Stamped from the engine's answer on first push;
+   * absent on runs that have never been pushed (they use the current name).
+   */
+  ostextName?: string;
   /** Set once promoted into Candidates, with the created campaign + list ids.
    *  promotedCount = everyone delivered (new + already-in-pipeline), not net-new. */
   promotedCampaignId?: string;
@@ -270,6 +314,11 @@ export interface SourcingRun {
      */
     sentSignature?: string;
     attempts: number;
+    /** People the outreach quality bar held back at the last send, and the bar it used.
+     *  Stamped so the run card can explain a delivered count that is smaller than the
+     *  list, instead of leaving the recruiter to wonder where the rest went. */
+    belowBarHeld?: number;
+    barUsed?: number;
     /** When the sweeper LAST queued a server-side resume for an orphaned chain. The stamp
      *  expires (see autoflow.resumeInHand): a resume that wedges must be retryable, or the
      *  list's card spins "Enriching now" forever with nothing driving it. */
@@ -389,6 +438,10 @@ export interface VetBatchRef {
 export interface DiscoveryOptions {
   /** Stop once this many ranked, deduped rows are collected. Default 3000. */
   cap?: number;
+  /** Whose evidence ledger this run reads and writes (lib/sourcing/proofStats). Omitted
+   *  means the run still uses proof scoring, it just neither learns from nor benefits
+   *  from measured yield, which is the correct behaviour for a workspace-less caller. */
+  workspaceId?: string;
   /** Drop rows scoring below this fit threshold (0..100). Default 45. */
   minFit?: number;
   /** Which engines to use, in cheapest-first order. Defaults to whatever is configured.
@@ -426,4 +479,14 @@ export interface DiscoveryOptions {
   radiusMi?: number;
   /** The typed location the radius is measured from ("Fair Lawn, NJ"). */
   geoCenter?: string;
+  /**
+   * REMOTE ROLE: search the whole country and filter nobody on location.
+   *
+   * Not the same as leaving `geoCenter` blank. A blank location means "the recruiter did
+   * not say", and the run still carries whatever metros the LLM parse invented; this
+   * means "there is no location", which switches off the radius, the strict-location
+   * drop and the out-of-area split, and switches ON the national query fan-out plus the
+   * remote-wording searches (see remoteMode.ts).
+   */
+  remote?: boolean;
 }

@@ -34,7 +34,9 @@ import { listAllSourcingRuns, saveSourcingRun, deleteSourcingRun } from "./store
 import { promoteSourcingRun } from "./promote";
 import { listNightItems, addNightItem } from "./nightQueue";
 import { mergeSourcingRuns } from "./mergeRuns";
+import { enforceRunGeo } from "./geoEnforce";
 import { combinableGroups } from "./sameRole";
+import { deliverMinFit, qualifiedForOutreach, qualityBarNote } from "./qualityBar";
 import {
   ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
 } from "../ostextImport";
@@ -262,6 +264,18 @@ function toOsTextContacts(run: SourcingRun): OsTextContact[] {
   const out: OsTextContact[] = [];
   for (const c of run.candidates) {
     if (!c.phone) continue;
+    // The radius is a promise about who gets CONTACTED. A row the list marked as
+    // outside it never rides the texting lane, whichever route put it on the list
+    // (out-of-area appendix, never-empty rescue, a folded wider duplicate search, a
+    // Sales Nav URL). It stays on the saved list to be looked at; it does not get a
+    // text (owner mandate 2026-08-06).
+    if (c.outOfArea) continue;
+    // THE QUALITY BAR, the same promise about who gets contacted, made about fit
+    // instead of distance: someone the scorer already judged the wrong role family
+    // stays on the list to be looked at but does not get a text. Before this, every
+    // row on the list was texted, and a third of them scored under 40 (see
+    // lib/sourcing/qualityBar.ts for the measurement that prompted it).
+    if (!qualifiedForOutreach(c, deliverMinFit())) continue;
     const parts = (c.fullName || "").trim().split(/\s+/);
     const custom: Record<string, string> = {};
     if (c.headline) custom.headline = c.headline;
@@ -310,10 +324,17 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       // always creates a new one, and a top-up must never duplicate the campaign.
       // Combined lists retag: everyone the merge holds gets the combined list's
       // name as their tag, even people the source lists promoted earlier.
-      await promoteSourcingRun(ws, run.id, {
+      const promoted = await promoteSourcingRun(ws, run.id, {
         listName: run.name, tag: "", campaignId: run.promotedCampaignId,
         retag: Boolean(run.combinedFrom?.length),
       });
+      // Remember what the quality bar held back so the card can say it plainly. A
+      // delivered count smaller than the list must always carry its own explanation.
+      stamp.belowBarHeld = promoted.belowBarHeld ?? 0;
+      stamp.barUsed = deliverMinFit();
+      if (promoted.belowBarHeld) {
+        console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) ${qualityBarNote(promoted.belowBarHeld, deliverMinFit())}`);
+      }
     }
 
     // 2) OS Text. Zero phones is not a failure — the campaign is still created
@@ -349,8 +370,13 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       }
 
       try {
+        // The engine get-or-creates its campaign BY EXACT NAME, so a renamed run
+        // pushes top-ups under the name its campaign was created with (pinned in
+        // ostextName by the rename) — otherwise the rename would fork a second,
+        // near-empty campaign and split the same list's texts across two.
+        const pushName = run.ostextName || run.name;
         const imported = await ostextImport({
-          name: run.name,
+          name: pushName,
           template,
           positionSummary: `Pushed from JD Sourcing list "${run.name}" (${contacts.length} contacts, server auto-send).`,
           recruiterName: recruiter?.name || "",
@@ -367,6 +393,10 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
         // Keep the engine's answer on the run: "list shows N phones but the
         // campaign holds fewer" is almost always knownNonMobile (Telnyx already
         // judged those numbers not cells), and this stamp makes that checkable.
+        // Remember the name the campaign actually lives under, so a later rename
+        // keeps topping THAT campaign up (the engine answers with its own name,
+        // which is authoritative when it reused an existing campaign).
+        run.ostextName = (typeof imported.campaignName === "string" && imported.campaignName) || pushName;
         stamp.lastImport = {
           at: nowIso(),
           added: Number(imported.added) || 0,
@@ -604,6 +634,17 @@ async function autoCombinePass(runs: SourcingRun[], now: number): Promise<Set<st
       const master = g.master;
       const { candidates, overlap } = mergeSourcingRuns([master, ...g.donors]);
       master.candidates = candidates;
+      // THE MASTER'S MILEAGE WINS. The same-role key deliberately ignores radius tokens,
+      // so "VP Ops - Howell NJ" and its "+100mi" twin are one role and DO fold together
+      // — but folding them used to hand the master every one of the wider search's
+      // people, which is precisely how a +25mi list ended up full of candidates two
+      // hours away. Re-measure the whole union against the master's own location and
+      // radius: donor rows outside it are marked out-of-area, so they stay visible in
+      // the list and stay out of the delivery lane (owner mandate 2026-08-06).
+      const geo = enforceRunGeo(master);
+      if (geo.enforced && geo.marked) {
+        console.log(`[sourcing-autoflow] combine: ${geo.marked} merged row(s) fell outside the master's ${geo.radiusMi}mi radius and were marked out-of-area`);
+      }
       master.queries = master.queries.concat(g.donors.flatMap((d) => d.queries));
       master.combinedFrom = [...new Set([...(master.combinedFrom ?? []), ...g.donors.map((d) => d.id)])];
       // The union may hold rows the master's enrichment never saw: wipe the chunk

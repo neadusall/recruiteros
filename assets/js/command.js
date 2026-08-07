@@ -12586,11 +12586,19 @@
      deduped candidate list -> save it under a NAME here (staging) -> send it to
      Candidates under that same name. Backend: /api/sourcing + lib/sourcing/*. */
   function renderJdSourcing(el) {
-    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", runs: [], refineNote: "", location: "" };
+    var state = { jd: "", icp: null, queries: [], candidates: [], warnings: [], note: "", runs: [], refineNote: "", location: "", remote: false };
     function jdbLoc() { var e = $("#jdbLocation"); return e ? e.value.trim() : ""; }
     function jdbRadius() { var e = $("#jdbRadius"); return e ? (parseInt(e.value, 10) || 0) : 0; }
-    function jdLocLabel() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " +" + r + "mi") : loc; }
-    function jdLocPhrase() { var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " (within ~" + r + " miles, include ALL surrounding metros and cities within that drive, not just " + loc + ")") : loc; }
+    function jdRemote() { var e = $("#jdbRemote"); return !!(e && e.checked); }
+    // A remote search has NO location label. The whole point of the mode is that there is
+    // no center to measure from, so anything that would put a city on the run (the run
+    // name, the saved list, the radius the server reads back out of the label) has to
+    // come back empty here; the server stamps "Remote" on the list itself.
+    function jdLocLabel() { if (jdRemote()) return ""; var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " +" + r + "mi") : loc; }
+    // What the AI is told about geography. On a remote run it is told plainly that there
+    // is none, because left to itself the parse invents a metro list for every role, and
+    // those invented metros become hard filters on the search.
+    function jdLocPhrase() { if (jdRemote()) return "Fully remote, anywhere in the United States. There is no office and no commute, so do NOT narrow this to any city, metro or state: a candidate in any US state qualifies."; var loc = jdbLoc(); if (!loc) return ""; var r = jdbRadius(); return r > 0 ? (loc + " (within ~" + r + " miles, include ALL surrounding metros and cities within that drive, not just " + loc + ")") : loc; }
     function jdWithLoc(jd) { var p = jdLocPhrase(); return p ? (jd + "\n\nBased in: " + p) : jd; }
     function jdBreadth() { var s = $("#jdBreadth"); return (s && s.value) || "balanced"; }
 
@@ -12682,7 +12690,18 @@
       '.jd-opt{font-weight:500;text-transform:none;letter-spacing:0;opacity:.75;margin-left:7px}' +
       '.jd-lead2{font-size:16px;font-weight:650;letter-spacing:.01em;margin:0 0 3px;background:linear-gradient(90deg,var(--brand),var(--brand-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--brand-2)}' +
       '.jd-lead-sub{font-size:12.5px;color:var(--text-muted);margin:0 0 12px}' +
-      '.jd-locrow{display:flex;gap:8px}.jd-locrow #jdbLocation{flex:1}' +
+      '.jd-locrow{display:flex;gap:8px;transition:opacity .15s}' +
+      '.jd-locrow #jdbLocation{flex:1}' +
+      '.jd-locrow.is-remote{opacity:.4}' +
+      // flex-start, not center: the hint wraps to two lines in the 1024px band, and a
+      // vertically centred box against wrapped text reads as misaligned. The 2px nudge
+      // sits it on the first line's optical centre.
+      '.jd-field>label.jd-remote{display:flex;align-items:flex-start;gap:8px;margin:9px 0 0;font-size:12.5px;font-weight:500;line-height:1.45;' +
+        'text-transform:none;letter-spacing:0;color:var(--text-muted);cursor:pointer}' +
+      '.jd-field>label.jd-remote:hover{color:var(--text)}' +
+      '.jd-remote input{width:15px;height:15px;margin:2px 0 0;flex:0 0 auto;accent-color:var(--brand);cursor:pointer}' +
+      '.jd-remote b{font-weight:600;color:var(--text)}' +
+      '.jd-remote .jd-remote-h{opacity:.8}' +
       '.jd-snavrow{display:flex;gap:8px}.jd-snavrow #jdSnavName{flex:1;min-width:0}' +
       '#jdSnavTarget{background:var(--bg-soft);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font:inherit;font-size:13px;padding:8px 9px;cursor:pointer;flex:1;min-width:0;max-width:100%}' +
       '#jdSnavTarget:focus{outline:0;border-color:var(--brand)}' +
@@ -12785,6 +12804,22 @@
         '.jd-ttxt{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}}' +
       '.jd-run-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}' +
       '.jd-run-main{display:flex;align-items:center;gap:10px;min-width:0}' +
+      /* Rename in place: the list name is a click target, with a pencil beside it.
+         The pencil stays visible (dimmed) rather than hover-only — hover-only
+         affordances are invisible on touch and undiscoverable everywhere else. */
+      '.jd-runname{cursor:text;border-radius:5px;padding:1px 3px;margin-left:-3px;transition:background .12s ease}' +
+      '.jd-runname:hover{background:var(--bg-soft);box-shadow:inset 0 0 0 1px var(--border-strong)}' +
+      '.jd-rename{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;margin-left:3px;border:0;border-radius:6px;background:transparent;color:var(--text-dim);cursor:pointer;opacity:.55;transition:opacity .12s ease,background .12s ease,color .12s ease;vertical-align:middle}' +
+      '.jd-rename .isvg{width:13px;height:13px;pointer-events:none}' +
+      '.jd-run:hover .jd-rename{opacity:.9}' +
+      '.jd-rename:hover,.jd-rename:focus-visible{opacity:1;background:var(--bg-soft);color:var(--text)}' +
+      '.jd-rename:focus-visible{outline:none;box-shadow:var(--focus-ring)}' +
+      // Wraps rather than overflows: on a narrow screen the hint drops under the
+      // field instead of running off the edge of the card.
+      '.jd-renamebox{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 8px;max-width:100%;vertical-align:middle}' +
+      '.jd-renamebox input{font:inherit;font-weight:700;padding:3px 8px;width:min(420px,100%);min-width:0;border:1px solid var(--accent,#2e5bd7);border-radius:7px;background:var(--bg);color:var(--text)}' +
+      '.jd-renamebox input:focus{outline:none;box-shadow:var(--focus-ring)}' +
+      '.jd-renamebox .jd-renamehint{font-size:11.5px;font-weight:500;color:var(--text-dim)}' +
       '.jd-reach{display:inline-flex;flex-wrap:wrap;row-gap:4px;gap:6px;margin:0 4px 0 2px;vertical-align:middle;max-width:100%}' +
       '.jd-reach span{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.jd-reach .isvg{width:12px;height:12px}' +
@@ -12858,9 +12893,12 @@
         '<div class="jd-fieldgrid">' +
           '<div class="jd-field"><label>City &amp; state <span class="jd-opt muted">+ radius</span></label>' +
             '<div class="jd-locrow"><input id="jdbLocation" type="text" placeholder="e.g. Fair Lawn, NJ" />' +
-              '<select id="jdbRadius" title="Expand beyond the exact metro by estimated drive distance">' +
-                '<option value="0">Exact</option><option value="25">+25mi</option><option value="50">+50mi</option><option value="100">+100mi</option><option value="250">+250mi</option>' +
-              '</select></div></div>' +
+              '<select id="jdbRadius" title="How far out the search may reach. This is a hard limit: nobody further away is added to the list, and nobody further away is contacted.">' +
+                '<option value="0">Exact (city only)</option><option value="25">+25mi</option><option value="50">+50mi</option><option value="100">+100mi</option><option value="250">+250mi</option>' +
+              '</select></div>' +
+            '<label class="jd-remote" for="jdbRemote"><input type="checkbox" id="jdbRemote" />' +
+              '<span><b>Remote role</b> <span class="jd-remote-h">search the whole country, no city or radius needed</span></span></label>' +
+          '</div>' +
           '<div class="jd-field"><label>List name</label><input id="jdName" type="text" placeholder="e.g. JAGGAER VP Sales · East" /></div>' +
         '</div>' +
         '<div class="jd-field"><label>Anything specific <span class="jd-opt muted">optional</span></label><input id="jdbNotes" type="text" placeholder="Seniority, certs/licenses, must-have experience, deal-breakers" /></div>' +
@@ -12880,7 +12918,7 @@
             '<span><b>Must-have experience</b>: what they have actually done, not nice-to-haves</span>' +
             '<span><b>Industry / domain</b>: where strong candidates come from</span>' +
             '<span><b>Target companies</b>: competitors or peers worth poaching from</span>' +
-            '<span><b>Location &amp; radius</b>: the metros that matter (or remote), widened by the mileage you set</span>' +
+            '<span><b>Location &amp; radius</b>: the metros that matter, widened by the mileage you set. For a remote role tick <b>Remote role</b> instead and the search covers the whole country</span>' +
             '<span><b>Proof of impact</b>: measurable results they can show (outcomes, scale, growth, metrics)</span>' +
             '<span><b>Deal-breakers</b>: what should rule a candidate out</span>' +
           '</div>' +
@@ -12900,8 +12938,8 @@
               '<div class="jd-opt2-def">The ceiling on how many candidates this run gathers. It is not a minimum: you get every qualified person the search finds, up to this number. 500 covers most roles.</div>' +
             '</div>' +
             '<div class="jd-opt2">' +
-              '<label class="jd-opt2-top" for="jdMinFit"><input id="jdMinFit" type="number" min="0" max="100" value="10"> Min fit</label>' +
-              '<div class="jd-opt2-def">The match-strength bar, 0 to 100. 0 shows everyone found, 10 casts a wide net, 40 and up keeps only the tightest matches. Start wide: the list comes back ranked, so the gold is at the top either way.</div>' +
+              '<label class="jd-opt2-top" for="jdMinFit" title="How close a match someone has to be before this search keeps them, and before they are contacted. 45 is the point where someone is doing the right kind of job rather than merely sharing a word with the title. Lower it to see more people, raise it to see only the strongest."><input id="jdMinFit" type="number" min="0" max="100" value="45"> Min fit</label>' +
+              '<div class="jd-opt2-def">How close a match someone has to be, 0 to 100. This is the one setting that decides who gets <b>contacted</b>, not just who gets listed: people below it stay on the list to look at, and are left out of the emails and texts. 45 is the default and the point where someone is genuinely doing this kind of job rather than sharing a word with the title. Drop to 20 or 30 in a thin market to see more people, raise it above 60 when you only want the strongest.</div>' +
             '</div>' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdFresh"><input type="checkbox" id="jdFresh"> Fresh only</label>' +
@@ -12909,7 +12947,7 @@
             '</div>' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdAnywhere"><input type="checkbox" id="jdAnywhere"> Include out-of-area</label>' +
-              '<div class="jd-opt2-def">Keeps candidates whose profile shows a location outside the city and radius you set, mixed into one ranked list. Turn it on for remote roles or when you would relocate the right person.</div>' +
+              '<div class="jd-opt2-def">Lifts the mileage limit for this run: candidates outside the city and radius you set are kept and mixed into one ranked list. Leave it off and the mileage is a hard limit, so nobody further out is added to the list or contacted. Turn it on for remote roles or when you would relocate the right person.</div>' +
             '</div>' +
             '<div class="jd-opt2">' +
               '<label class="jd-opt2-top" for="jdOutside"><input type="checkbox" id="jdOutside"> Also list out-of-area (separate list)</label>' +
@@ -13157,13 +13195,14 @@
       qBtn.disabled = true;
       var nameEl = $("#jdName");
       var loc = jdLocLabel();
+      var locTag = jdRemote() ? "Remote · US" : loc;
       var name = (nameEl && nameEl.value.trim()) || title || "Overnight search";
-      if (loc && name.indexOf(loc) < 0) name += " · " + loc;
+      if (locTag && name.indexOf(locTag) < 0) name += " · " + locTag;
       // No JD pasted? Queue the title line as the brief; the server search parses it
       // the same way Initiate Search would after drafting.
-      var jd = jdNow || ("Job title: " + title + (loc ? ("\nLocation: " + loc) : ""));
+      var jd = jdNow || ("Job title: " + title + (jdRemote() ? "\nLocation: Remote (anywhere in the United States)" : loc ? ("\nLocation: " + loc) : ""));
       send("/sourcing", "POST", {
-        action: "queueAdd", kind: "search", jd: jdWithLoc(jd), location: loc, name: name,
+        action: "queueAdd", kind: "search", jd: jdWithLoc(jd), location: loc, name: name, remote: jdRemote(),
         breadth: jdBreadth(), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked),
       }).then(function (r) {
         qBtn.disabled = false;
@@ -13171,6 +13210,86 @@
         msg('Queued. It runs on the server (you can close this tab); the finished list lands under "Your saved candidate lists".');
         loadRuns();
       }).catch(function () { qBtn.disabled = false; msg("Could not reach the server."); });
+    }
+
+    /* ---- Rename a saved list, in place ----
+       The name is not decoration: it is the Candidates list's name, its campaign's
+       name and every promoted candidate's tag, so the server moves all of them
+       together (lib/sourcing/rename). The OS Text campaign keeps the name it was
+       created under on purpose — that engine finds campaigns BY NAME, and renaming
+       there would fork a second, near-empty campaign.
+       renamingId is read by loadRuns: the overnight-queue poll re-renders this list
+       every 8-30s and would otherwise wipe the half-typed name mid-edit. */
+    var renamingId = null;
+    function startRunRename(id) {
+      var host = $("#jdRuns"); if (!host || !id) return;
+      var nameEl = host.querySelector('b.jd-runname[data-rename="' + id + '"]');
+      if (!nameEl || renamingId === id) return;
+      var run = (state.runs || []).find(function (r) { return r.id === id; });
+      var current = (run && run.name) || nameEl.textContent || "";
+      renamingId = id;
+
+      var box = document.createElement("span");
+      box.className = "jd-renamebox";
+      var input = document.createElement("input");
+      input.type = "text"; input.value = current; input.maxLength = 120;
+      input.setAttribute("aria-label", "List name");
+      var hint = document.createElement("span");
+      hint.className = "jd-renamehint";
+      hint.textContent = "Enter to save · Esc to cancel";
+      box.appendChild(input); box.appendChild(hint);
+      // The name and its pencil both step aside while the field is open.
+      var pencil = host.querySelector('button.jd-rename[data-rename="' + id + '"]');
+      nameEl.style.display = "none";
+      if (pencil) pencil.style.display = "none";
+      nameEl.parentNode.insertBefore(box, nameEl);
+      input.focus(); input.select();
+
+      // open -> saving -> closed. Only "open" accepts a commit, so a blur that
+      // lands on top of an Enter can never fire the same rename twice.
+      var phase = "open";
+      function close() {
+        if (phase === "closed") return;
+        phase = "closed"; renamingId = null;
+        if (box.parentNode) box.parentNode.removeChild(box);
+        nameEl.style.display = "";
+        if (pencil) pencil.style.display = "";
+        // The poll that was skipped while editing picks the list back up.
+        loadRuns();
+      }
+      function commit() {
+        if (phase !== "open") return;
+        var next = input.value.replace(/\s+/g, " ").trim();
+        if (!next || next === current.trim()) { close(); return; }
+        phase = "saving";
+        input.disabled = true; hint.textContent = "Renaming…";
+        send("/sourcing", "POST", { action: "rename", id: id, name: next }).then(function (r) {
+          if (!r.ok) {
+            phase = "open";
+            input.disabled = false; input.focus();
+            hint.textContent = (r.data && r.data.detail) || "Could not rename this list.";
+            return;
+          }
+          // Say what moved with the name, so nobody has to go and check.
+          var d = r.data || {};
+          var also = [];
+          if (d.renamedList || d.renamedCampaign) also.push("the Candidates list moved with it");
+          if (d.retagged) also.push(d.retagged + " candidate tag" + (d.retagged === 1 ? "" : "s") + " updated");
+          close();
+          toast('Renamed to "' + next + '"' + (also.length ? " · " + also.join(" · ") : ""));
+        }).catch(function () {
+          phase = "open";
+          input.disabled = false; input.focus();
+          hint.textContent = "Could not reach the server.";
+        });
+      }
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); commit(); }
+        else if (e.key === "Escape") { e.preventDefault(); close(); }
+      });
+      // A click away saves rather than discards (the same rule the rest of the
+      // tab's inline fields follow); the delay lets Enter/Esc win the race.
+      input.addEventListener("blur", function () { setTimeout(commit, 120); });
     }
 
     function loadRuns() {
@@ -13182,6 +13301,9 @@
         renderNight((d && d.nightQueue) || []);
         resumeInflightSearches((d && d.nightQueue) || []);
         renderSnavTargets();
+        // Never re-render the list out from under someone typing a new name. The
+        // queue poll above still runs, and closing the editor re-renders.
+        if (renamingId) return;
         // FAILSAFE: if the backend reports non-durable storage, warn LOUDLY before the user
         // saves work that won't survive a restart. durable===false should never happen in prod.
         var warn = (d && d.durable === false)
@@ -13522,7 +13644,11 @@
             '</span>';
           return '<div class="jd-run"><div class="jd-run-top"><div class="jd-run-main">' +
             '<input type="checkbox" class="jd-pick" data-pick="' + esc(r.id) + '" title="Tick lists to combine them into one" />' +
-            '<div><b>' + esc(r.name) + '</b> ' + reach + '<span class="muted">· ' +
+            // The list name is editable in place (click the name or the pencil).
+            // Renaming moves the Candidates list, its campaign and everyone's tag
+            // with it, so one list never ends up living under two names.
+            '<div><b class="jd-runname" data-rename="' + esc(r.id) + '" title="Click to rename this list">' + esc(r.name) + '</b>' +
+            '<button type="button" class="jd-rename" data-rename="' + esc(r.id) + '" title="Rename this list. The Candidates list, its campaign and every tagged candidate are renamed with it."><svg class="isvg" aria-hidden="true"><use href="#i-edit"/></svg></button> ' + reach + '<span class="muted">· ' +
             (r.location ? (esc(r.location) + ' · ') : '') +
             (outN ? ((n - outN) + ' in area + ' + outN + ' out of area') : (n + ' candidates')) + ' · ' + urls + ' with LinkedIn URL' +
             (vetted ? (' · ' + vetted + ' deep-vetted') : '') + '</span></div></div>' +
@@ -14011,12 +14137,16 @@
         // The radius as a NUMBER, alongside the "+25mi" label. The label is what gets
         // saved on the run; this is what the backend actually measures distance with.
         state.radiusMi = jdbRadius();
+        // Remote rides separately from the location, not as a magic value inside it: the
+        // server has to be able to tell "national on purpose" apart from "no city typed",
+        // which are opposite instructions that would otherwise look identical.
+        state.remote = jdRemote();
         if (state.refineNote && state.icp && state.jd === jdNow) {
           renderPlan(); updateRunCost();
           return;
         }
         state.jd = jdNow;
-        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, radiusMi: state.radiusMi, breadth: jdBreadth() }).then(function (r) {
+        return send("/sourcing", "POST", { action: "plan", jd: jdWithLoc(state.jd), location: state.location, radiusMi: state.radiusMi, remote: state.remote, breadth: jdBreadth() }).then(function (r) {
           if (!r.ok) throw { stage: "Analyze", r: r };
           state.icp = r.data.icp; state.queries = r.data.queries || []; state.note = r.data.note || ""; state.refineNote = "";
           renderPlan(); updateRunCost();
@@ -14024,7 +14154,10 @@
       }).then(function () {
         // 3) Search.
         var cap = parseInt($("#jdCap") && $("#jdCap").value, 10) || 500;
-        var minFit = parseInt($("#jdMinFit") && $("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 10;
+        // 45 matches the server's own default and the outreach quality bar. It used to
+        // read 10, which kept (and then contacted) people the ranker had already called
+        // the wrong role family.
+        var minFit = parseInt($("#jdMinFit") && $("#jdMinFit").value, 10); if (isNaN(minFit)) minFit = 45;
         var fresh = !!($("#jdFresh") && $("#jdFresh").checked);
         // A refined profile is sent along so the search actually honors the
         // Dive-deeper instruction instead of re-deriving the profile from the JD.
@@ -14035,10 +14168,11 @@
         // by this token instead of the bar dying at 95%.
         var nameEl0 = $("#jdName");
         var provisionalName = (nameEl0 && nameEl0.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
-        if (state.location && provisionalName.indexOf(state.location) < 0) provisionalName += " · " + state.location;
+        var jdNameTag = state.remote ? "Remote · US" : state.location;
+        if (jdNameTag && provisionalName.indexOf(jdNameTag) < 0) provisionalName += " · " + jdNameTag;
         var recoveryToken = "rcv_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
         liveSearchTokens[recoveryToken] = 1;
-        return send("/sourcing", "POST", { action: "run", recoveryToken: recoveryToken, name: provisionalName, jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).catch(function () {
+        return send("/sourcing", "POST", { action: "run", recoveryToken: recoveryToken, name: provisionalName, jd: jdWithLoc(state.jd), icp: refinedIcp, cap: cap, minFit: minFit, breadth: jdBreadth(), freshOnly: fresh, location: state.location, radiusMi: state.radiusMi, remote: state.remote, strictGeo: !($("#jdAnywhere") && $("#jdAnywhere").checked), outsideGeo: !!($("#jdOutside") && $("#jdOutside").checked) }).catch(function () {
           // fetch itself rejected: the connection died mid-request (a deploy
           // recreating the server is the everyday cause). Not a server "no".
           return { ok: false, status: 0, data: null };
@@ -14072,7 +14206,8 @@
         // 4) Save under an auto name (List name field wins when filled).
         var nameEl = $("#jdName");
         runName = (nameEl && nameEl.value.trim()) || (state.icp && state.icp.label) || title || "Candidate search";
-        if (state.location && runName.indexOf(state.location) < 0) runName += " · " + state.location;
+        var saveTag = state.remote ? "Remote · US" : state.location;
+        if (saveTag && runName.indexOf(saveTag) < 0) runName += " · " + saveTag;
         // The search response already carries the run the SERVER saved; adopt it
         // and skip the duplicate save (the server also recognizes and absorbs a
         // stale tab's re-save of the same result).
@@ -14082,14 +14217,17 @@
           state.serverRun = null;
           return null;
         }
-        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings, apiUsage: state.usage || undefined }).then(function (r) {
+        return send("/sourcing", "POST", { action: "save", name: runName, jd: state.jd, location: state.location || jdLocLabel(), remote: state.remote, icp: state.icp, queries: state.queries, candidates: state.candidates, warnings: state.warnings, apiUsage: state.usage || undefined }).then(function (r) {
           if (!r.ok) throw { stage: "Save", r: r };
           savedId = r.data && r.data.run && r.data.run.id;
         });
       }).then(function () {
         // 5) AI re-rank the top 100 (best effort — the list is already saved).
         if (!savedId) return null;
-        return send("/sourcing", "POST", { action: "rerank", id: savedId, top: 100 }).catch(function () { return null; });
+        // No "top" any more: the server judges the whole list (bounded by its own
+        // ceiling). Pinning this to 100 meant everyone past the first hundred was
+        // ordered and contacted on the rule score alone.
+        return send("/sourcing", "POST", { action: "rerank", id: savedId }).catch(function () { return null; });
       }).then(function () {
         reset();
         // 6) Hands-free: the saved list enriches itself and lands in Candidates and
@@ -14279,7 +14417,7 @@
       if (!instruction) { inp.focus(); return; }
       if (!state.icp) { msg("Analyze a JD first."); return; }
       var btn = $("#jdRefineBtn"); if (btn) { btn.disabled = true; btn.textContent = "Refining…"; }
-      send("/sourcing", "POST", { action: "refine", jd: state.jd, icp: state.icp, instruction: instruction, location: state.location, radiusMi: state.radiusMi }).then(function (r) {
+      send("/sourcing", "POST", { action: "refine", jd: state.jd, icp: state.icp, instruction: instruction, location: state.location, radiusMi: state.radiusMi, remote: state.remote }).then(function (r) {
         if (btn) { btn.disabled = false; btn.textContent = "Refine"; }
         if (!r.ok) { msg("Refine failed: " + ((r.data && r.data.error) || r.status)); return; }
         state.icp = r.data.icp || state.icp;
@@ -14406,7 +14544,14 @@
         try { sessionStorage.setItem("ros_open_list", openA.getAttribute("data-openlist") || ""); } catch (err) {}
         return;
       }
-      if (t.tagName !== "BUTTON") return;
+      // Rename in place: the list name itself and its pencil both open the editor.
+      var renameEl = t.closest ? t.closest("[data-rename]") : null;
+      if (renameEl) { startRunRename(renameEl.getAttribute("data-rename")); return; }
+      // closest("button"), not t.tagName: clicks on a button's inner <svg> land on
+      // the icon, not the button, and used to fall straight through this guard.
+      var btn = t.closest ? t.closest("button") : (t.tagName === "BUTTON" ? t : null);
+      if (!btn) return;
+      t = btn;
       var id;
       // Send to Candidates + Send to OS Text run automatically when a search finishes
       // (runAutoPipeline). Enrich here is the manual RESUME for a chain that stopped
@@ -14778,6 +14923,30 @@
     ["#jdbTitle", "#jdbCompany", "#jdbNotes"].forEach(function (sel) {
       var e = $(sel); if (e) e.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.keyCode === 13) { ev.preventDefault(); doBuildJd(); } });
     });
+
+    /* Remote role: the city and radius are not just ignored, they are switched OFF.
+       A greyed-out box still holding "Fair Lawn, NJ" is the kind of thing a recruiter
+       reasonably reads as "it will still lean toward New Jersey", so the value is cleared
+       and the controls are genuinely disabled. Unticking leaves an empty pair of
+       controls, which is the honest starting point for a fresh local search. */
+    (function wireRemoteToggle() {
+      var box = $("#jdbRemote"); if (!box) return;
+      var loc = $("#jdbLocation"), rad = $("#jdbRadius"), out = $("#jdOutside"), any = $("#jdAnywhere");
+      var row = loc && loc.parentNode ? loc.parentNode : null;
+      function paint() {
+        var on = box.checked;
+        if (row) row.className = "jd-locrow" + (on ? " is-remote" : "");
+        if (loc) { loc.disabled = on; if (on) loc.value = ""; }
+        if (rad) { rad.disabled = on; if (on) rad.value = "0"; }
+        // Both out-of-area switches only describe a search that HAS an area. A remote run
+        // has no in/out to split, so they stand down rather than sit on screen promising
+        // a second list that can never be built.
+        if (out) { out.disabled = on; if (on) out.checked = false; }
+        if (any) { any.disabled = on; if (on) any.checked = false; }
+      }
+      box.addEventListener("change", paint);
+      paint();
+    })();
 
     /* "Search power" readout: which sources the next run will actually use, so a
        missing key is visible up front instead of discovered from a thin result. */
@@ -16245,12 +16414,13 @@
      AI-drafted hiring-manager submittal on each completed recruiting call.
      Talks to /api/phone/* (token, dial, calls, calls/:id, settings). */
   function renderCalls(el) {
-    var cs = { consentAck: false, prospect: null };
+    var cs = { consentAck: false, prospect: null, policy: null };
 
     el.innerHTML = head("Calls",
       "Call candidates from the browser. Every call can be recorded, transcribed, and turned into a hiring-manager submittal. Recording only happens after your workspace attests it has lawful consent (Recording settings, below) and you confirm you will disclose it on the call.") +
       '<div class="vt-view">' +
         '<div id="clSoft"></div>' +
+        '<div id="clAudio"></div>' +
         '<div id="clDialer"></div>' +
         '<div id="clSettings"></div>' +
         '<h3 style="margin:20px 0 8px;font-size:14px;color:var(--text-muted)">Call history</h3>' +
@@ -16281,7 +16451,14 @@
         complete: ["Complete", "var(--ok)"],
         completed: ["Complete", "var(--ok)"],
         scored: ["Complete", "var(--ok)"],
-        failed: ["Failed", "var(--danger)"]
+        ringing: ["Ringing", "var(--warn)"],
+        active: ["On the call", "var(--ok)"],
+        held: ["On hold", "var(--warn)"],
+        missed: ["Missed", "var(--warn)"],
+        noanswer: ["No answer", "var(--warn)"],
+        declined: ["Declined", "var(--warn)"],
+        canceled: ["Canceled", "var(--text-dim)"],
+        failed: ["Not connected", "var(--danger)"]
       };
       var m = map[v] || [(status ? (String(status).charAt(0).toUpperCase() + String(status).slice(1)) : "Pending"), "var(--text-dim)"];
       return '<span style="display:inline-flex;align-items:center;gap:6px;flex:none;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:4px;color:' + m[1] + ';border:1px solid ' + m[1] + '">' +
@@ -16295,33 +16472,168 @@
       return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:4px 11px;border-radius:4px;color:' + color + ';border:1px solid ' + color + '">Fit: ' + esc(String(fit)) + "</span>";
     }
 
-    /* ---- softphone status (POST /phone/token) ---- */
+    /* ---- softphone status ---------------------------------------------------
+       Whether a call can actually be placed is known by the browser phone
+       engine, not by the token endpoint: a token mints fine while the calling
+       client sits unregistered, and a card that says "ready" over a phone that
+       cannot ring is how a recruiter ends up blaming the candidate's number.
+       So this reports the engine's own state, and falls back to the token probe
+       only on a page where the engine never mounted. */
+    function softCard(st) {
+      var host = $("#clSoft"); if (!host) return;
+      var phase = (st && st.phase) || "";
+      var live = phase === "dialing" || phase === "active" || phase === "held" || phase === "incoming";
+      var v;
+      if (live) v = ["var(--ok)", "On a call", "Your call controls are in the bar at the bottom of the screen.", ""];
+      else if (phase === "ready" || phase === "ended") v = ["var(--ok)", "Phone ready", "You can call candidates from this browser.", ""];
+      else if (phase === "nolines") v = ["var(--warn)", "No calling number yet", "You have no number assigned to you. Ask your admin to assign one on the Numbers page.", ""];
+      else if (phase === "error-mic") v = ["var(--warn)", "Microphone blocked", "Your browser is blocking the microphone for this site. Allow it in the padlock menu in the address bar, then reconnect.", "reconnect"];
+      else if (phase === "error-conn") v = ["var(--danger)", "Phone not connected", (st && st.error) || "The calling client could not connect, so calls cannot be placed yet.", "reconnect"];
+      else if (phase === "leaderelse") v = ["var(--warn)", "Phone active in another tab", "Your browser phone is running in another tab. Move it here to call from this page.", "take"];
+      else if (phase === "reconnecting") v = ["var(--warn)", "Reconnecting your phone", "The connection dropped and is being restored. This usually takes a few seconds.", ""];
+      else v = ["var(--text-dim)", "Connecting your phone...", "This takes a moment after the page loads.", ""];
+      var btn = v[3] === "reconnect" ? '<button class="vt-btn" id="clSoftAct" type="button">Reconnect</button>'
+        : v[3] === "take" ? '<button class="vt-btn" id="clSoftAct" type="button">Use the phone here</button>' : "";
+      host.innerHTML = '<div class="vt-card" style="display:flex;align-items:center;gap:12px">' +
+        '<span style="width:10px;height:10px;border-radius:50%;background:' + v[0] + ';flex:none"></span>' +
+        '<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">' + esc(v[1]) + "</div>" +
+        '<div style="font-size:12.5px;color:var(--text-muted);margin-top:2px">' + esc(v[2]) + "</div></div>" + btn + "</div>";
+      var act = $("#clSoftAct");
+      if (act) act.addEventListener("click", function () {
+        var eng = audioEngine(); if (!eng) return;
+        if (v[3] === "take" && eng.takeLeader) eng.takeLeader();
+        else if (eng.reconnect) eng.reconnect();
+      });
+    }
+    /* Engine-less page (it failed to load, or an old cached copy): say what is
+       known from the server instead of pretending to know the client state. */
     function loadToken() {
       var host = $("#clSoft"); if (!host) return;
       host.innerHTML = '<div class="vt-card" style="display:flex;align-items:center;gap:12px">' +
         '<span id="clSoftDot" style="width:10px;height:10px;border-radius:50%;background:var(--text-dim);flex:none"></span>' +
-        '<div><div id="clSoftTitle" style="font-weight:600;font-size:14px">Connecting softphone...</div>' +
+        '<div><div id="clSoftTitle" style="font-weight:600;font-size:14px">Checking your phone...</div>' +
         '<div id="clSoftSub" style="font-size:12.5px;color:var(--text-muted);margin-top:2px"></div></div></div>';
       send("/phone/token", "POST").then(function (r) {
         var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
         if (!dot) return;
         if (r.ok && r.data && r.data.token) {
-          dot.style.background = "var(--ok)";
-          title.textContent = "Softphone ready";
-          sub.textContent = "Connected. In-browser audio uses the in-browser calling client, which loads automatically once calling is fully configured.";
+          dot.style.background = "var(--warn)";
+          title.textContent = "Phone not loaded on this page";
+          sub.textContent = "Calling is set up for you, but the browser phone did not load here. Reload the page before you call.";
         } else if (r.status === 404 || r.status === 409) {
           dot.style.background = "var(--warn)";
           title.textContent = "Calling not configured yet";
           sub.innerHTML = 'Connect telephony to place calls from the browser. <a href="#setup" style="color:var(--brand)">Open Setup</a>.';
         } else {
           dot.style.background = "var(--warn)";
-          title.textContent = "Softphone unavailable";
-          sub.textContent = "Could not obtain a softphone token right now. Try again shortly.";
+          title.textContent = "Phone unavailable";
+          sub.textContent = "Your phone could not be reached right now. Try again shortly.";
         }
       }).catch(function () {
         var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
-        if (dot) { dot.style.background = "var(--warn)"; title.textContent = "Softphone unavailable"; if (sub) sub.textContent = "Could not reach the server."; }
+        if (dot) { dot.style.background = "var(--warn)"; title.textContent = "Phone unavailable"; if (sub) sub.textContent = "Could not reach the server."; }
       });
+    }
+
+    /* ---- headset: pick the audio devices and prove the mic is live ----------
+       A candidate call is worthless if it goes out through the laptop mic while
+       the recruiter is talking into a headset, and the browser will not tell
+       them. So the device is chosen here and the input level is shown live. */
+    var micTestStop = null;
+    function stopMicTest() {
+      if (micTestStop) { try { micTestStop(); } catch (e) {} micTestStop = null; }
+    }
+    function audioEngine() { return window.__bdPhone || null; }
+    function paintAudio() {
+      var host = $("#clAudio"); if (!host) return;
+      var eng = audioEngine();
+      if (!eng || !eng.refreshDevices) {
+        host.innerHTML = '<div class="vt-card"><h3>Headset</h3>' +
+          '<div class="vt-hint" style="margin:8px 0 0">The browser phone has not loaded on this page, so audio devices cannot be chosen here. Reload the page and try again.</div></div>';
+        return;
+      }
+      var st = eng.getState ? eng.getState() : { devices: { mics: [], speakers: [] } };
+      var d = st.devices || { mics: [], speakers: [] };
+      var perm = st.micPermission || "unknown";
+      var sel = function (id, list, cur, empty) {
+        if (!list.length) return '<select id="' + id + '" disabled><option>' + esc(empty) + "</option></select>";
+        return '<select id="' + id + '">' + list.map(function (x) {
+          return '<option value="' + esc(x.id) + '"' + (x.id === cur ? " selected" : "") + ">" + esc(x.label) + "</option>";
+        }).join("") + "</select>";
+      };
+      var note = "";
+      if (perm === "denied") {
+        note = '<div class="vt-warn" style="margin:10px 0 0">Your browser is blocking the microphone for this site. Allow it in the padlock menu in the address bar, then choose Refresh devices.</div>';
+      } else if (perm === "unsupported") {
+        note = '<div class="vt-warn" style="margin:10px 0 0">This browser cannot open a microphone. Use Chrome or Edge to call from the browser.</div>';
+      } else if (perm !== "granted") {
+        note = '<div class="vt-hint" style="margin:10px 0 0">Allow the microphone when your browser asks, so your headset can be named and tested here.</div>';
+      }
+      host.innerHTML = '<div class="vt-card" style="margin-top:12px"><h3>Headset</h3>' +
+        '<div class="vt-hint" style="margin:0 0 12px">Pick the headset you will speak and listen through, then test it. This is the device your candidate calls use.</div>' +
+        '<div class="vt-form-grid">' +
+          '<div class="vt-field"><label>Microphone</label>' + sel("clMic", d.mics || [], d.micId, "No microphone found") + "</div>" +
+          '<div class="vt-field"><label>Speaker or headset</label>' + sel("clSpk", d.speakers || [], d.speakerId, "Browser default") + "</div>" +
+        "</div>" +
+        '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">' +
+          '<button class="vt-btn vt-btn-ghost" id="clMicTest" type="button">Test microphone</button>' +
+          '<button class="vt-btn vt-btn-ghost" id="clDevRefresh" type="button">Refresh devices</button>' +
+          '<div id="clMicMeter" style="flex:1;min-width:160px;height:8px;border-radius:4px;background:var(--border);overflow:hidden">' +
+            '<div id="clMicFill" style="height:100%;width:0%;background:var(--ok);transition:width .1s linear"></div></div>' +
+        "</div>" +
+        '<div id="clMicMsg" style="font-size:12.5px;color:var(--text-dim);margin-top:8px">' +
+          (micTestStop ? "Speak now. The bar moves with your voice." : "") + "</div>" +
+        note + "</div>";
+
+      var micSel = $("#clMic"), spkSel = $("#clSpk");
+      if (micSel) micSel.addEventListener("change", function () {
+        if (eng.setMic) eng.setMic(this.value);
+        if (micTestStop) { stopMicTest(); startMicTest(); } // retest on the new device
+      });
+      if (spkSel) spkSel.addEventListener("change", function () { if (eng.setSpeaker) eng.setSpeaker(this.value); });
+      $("#clDevRefresh").addEventListener("click", function () {
+        var self = this; self.disabled = true;
+        eng.ensureMicPermission().then(eng.refreshDevices).then(function () { paintAudio(); })
+          .catch(function () { self.disabled = false; });
+      });
+      $("#clMicTest").addEventListener("click", function () {
+        if (micTestStop) { stopMicTest(); paintAudio(); return; }
+        startMicTest();
+      });
+      if (micTestStop) $("#clMicTest").textContent = "Stop test";
+    }
+    function startMicTest() {
+      var eng = audioEngine(); if (!eng || !eng.testMic) return;
+      var st = eng.getState ? eng.getState() : {};
+      var chosen = ($("#clMic") || {}).value || (st.devices && st.devices.micId) || "";
+      var peak = 0;
+      micTestStop = eng.testMic(chosen, function (level, err) {
+        var fill = $("#clMicFill"), msg = $("#clMicMsg");
+        if (!fill) { stopMicTest(); return; }
+        if (err) {
+          fill.style.width = "0%";
+          if (msg) { msg.style.color = "var(--danger)"; msg.textContent = "That microphone could not be opened. Pick another device, or allow the microphone for this site."; }
+          stopMicTest();
+          return;
+        }
+        if (level > peak) peak = level;
+        fill.style.width = Math.round(level * 100) + "%";
+        fill.style.background = level > 0.02 ? "var(--ok)" : "var(--border)";
+        if (msg) {
+          msg.style.color = peak > 0.05 ? "var(--ok)" : "var(--text-dim)";
+          msg.textContent = peak > 0.05
+            ? "Your microphone is working. Choose Stop test when you are done."
+            : "Speak now. The bar moves with your voice.";
+        }
+      });
+      var btn = $("#clMicTest"); if (btn) btn.textContent = "Stop test";
+      var msg = $("#clMicMsg"); if (msg) { msg.style.color = "var(--text-dim)"; msg.textContent = "Speak now. The bar moves with your voice."; }
+    }
+    function loadAudio() {
+      var eng = audioEngine();
+      paintAudio();
+      if (!eng || !eng.ensureMicPermission) return;
+      eng.ensureMicPermission().then(function () { return eng.refreshDevices(); }).then(paintAudio).catch(function () {});
     }
 
     /* ---- dialer + recording-consent gate ---- */
@@ -16330,10 +16642,38 @@
       var chk = $("#clConsentChk");
       return !!(chk && chk.checked);
     }
+    /* The workspace policy is what actually starts a recording, and without a
+       recording there is no transcript and no AI notes. Saying "subject to
+       workspace attestation" put that discovery AFTER the call; the policy is
+       read up front so the answer is on screen before anyone dials. */
+    function loadPolicy() {
+      send("/phone/settings?motion=recruiting", "GET").then(function (r) {
+        var d = (r.ok && r.data) ? (r.data.settings || r.data) : null;
+        if (!d) return;
+        var mode = d.recordingMode || "off";
+        cs.policy = {
+          attested: !!d.recordingConsentAttested,
+          records: mode === "all" || mode === "outbound",
+        };
+        updateRecState();
+      }).catch(function () {});
+    }
     function updateRecState() {
       var s = $("#clRecState"); if (!s) return;
+      var p = cs.policy;
+      if (p && !p.attested) {
+        s.style.color = "var(--warn)";
+        s.textContent = "This call will not be recorded, so it will not produce notes: your workspace has not attested consent yet (Recording settings, below).";
+        return;
+      }
+      if (p && !p.records) {
+        s.style.color = "var(--warn)";
+        s.textContent = "This call will not be recorded: your recording policy does not cover calls you place (Recording settings, below).";
+        return;
+      }
+      s.style.color = "var(--text-dim)";
       s.textContent = recordingEnabled()
-        ? "Recording will be requested for this call (subject to workspace attestation)."
+        ? "This call will be recorded, transcribed, and written up as notes."
         : "Recording off: this call will not be recorded.";
     }
     function paintDialer() {
@@ -16370,6 +16710,37 @@
       $("#clCall").addEventListener("click", placeCall);
       updateRecState();
     }
+    /* A failed dial is explained in the recruiter's terms and in terms of what
+       to do next. Engine codes stay in the network log, never on screen. */
+    function dialProblem(r) {
+      var code = String((r && r.data && (r.data.error || r.data.message)) || "");
+      // The browser phone refuses in the recruiter's own terms already ("still
+      // connecting", "active in another tab"): pass that through rather than
+      // re-guessing it from a pattern match.
+      if (r && r.fromEngine && code) return { tone: "var(--warn)", text: code };
+      if (/invalid_number|missing_number/.test(code)) {
+        return { tone: "var(--danger)", text: "That number could not be dialed. Enter it in full, with the country code (for example, +14155550123)." };
+      }
+      if (/no_line/.test(code)) {
+        return { tone: "var(--warn)", text: "You do not have a calling number yet. Ask your admin to assign you one on the Numbers page, then try again." };
+      }
+      if (/line_not_assigned|line_not_found/.test(code)) {
+        return { tone: "var(--warn)", text: "Your calling number is not assigned to you for candidate calls. Ask your admin to check it on the Numbers page." };
+      }
+      if (/in progress/i.test(code)) {
+        return { tone: "var(--warn)", text: "A call is already in progress. Finish that call first." };
+      }
+      if (/another tab/i.test(code)) {
+        return { tone: "var(--warn)", text: "Your phone is active in another tab. Switch to that tab to call, or close it and try again here." };
+      }
+      if (/phone_not_ready/.test(code)) {
+        return { tone: "var(--warn)", text: "Your browser phone is still connecting. Wait a moment and try again." };
+      }
+      if (r && (r.status === 404 || r.status === 409)) {
+        return { tone: "var(--warn)", text: "Calling is not fully set up for your workspace yet. Open Setup to connect it." };
+      }
+      return { tone: "var(--danger)", text: "The call could not be placed. Please try again." };
+    }
     function placeCall() {
       var msg = $("#clDialMsg"), btn = $("#clCall");
       var to = (($("#clPhone") || {}).value || "").trim();
@@ -16382,24 +16753,38 @@
       var orig = btn.innerHTML;
       btn.disabled = true; btn.innerHTML = "Calling...";
       msg.style.color = "var(--text-dim)"; msg.textContent = "";
-      var payload = { toNumber: to, consentAcknowledged: consent };
+      var payload = { to: to, motion: "recruiting" };
       if (cs.prospect) payload.prospectId = cs.prospect.id;
-      send("/phone/dial", "POST", payload).then(function (r) {
+      // The softphone engine owns the browser leg, so dial through it when it is
+      // loaded: that attaches the in-call controls to this call. The direct POST
+      // is the fallback for a page where the engine did not mount.
+      var engine = window.__bdPhone;
+      var started = (engine && engine.dial)
+        ? engine.dial(to, null, "recruiting").then(function (call) { return { ok: true, status: 200, data: { call: call } }; },
+            function (e) { return { ok: false, status: 0, fromEngine: true, data: { error: (e && e.message) || "" } }; })
+        : send("/phone/dial", "POST", payload);
+      started.then(function (r) {
         btn.disabled = false; btn.innerHTML = orig;
-        if (r.status === 409) {
-          msg.style.color = "var(--warn)";
-          msg.textContent = (r.data && r.data.message) || "Calling is not fully configured, or recording consent has not been attested for this workspace. Open Recording settings below to attest consent, or connect telephony under Setup.";
-          return;
-        }
         if (!r.ok) {
-          msg.style.color = "var(--danger)";
-          msg.textContent = (r.data && (r.data.error || r.data.message)) || "Could not place the call. Please try again.";
+          var why = dialProblem(r);
+          msg.style.color = why.tone; msg.textContent = why.text;
           return;
         }
         if (consent) cs.consentAck = true; // banner collapses for the rest of the session once consent is given
-        msg.style.color = "var(--ok)";
-        msg.textContent = "Call started" + (consent ? " (recording requested)." : ".");
+        // Workspace policy is what starts a recording, so an unconfirmed consent
+        // box has to actively stop it. Otherwise the notice below would promise
+        // "not recorded" on a call the policy is already recording.
+        var call = r.data && r.data.call;
+        if (!consent && call && call.id) send("/phone/calls/" + call.id, "POST", { action: "record", on: false }).catch(function () {});
+        // The repaint (to collapse the consent banner) replaces the message
+        // node, so the confirmation has to be written to the NEW one.
         paintDialer();
+        var live = $("#clDialMsg");
+        if (live) {
+          live.style.color = "var(--ok)";
+          live.textContent = "Dialing. Your call controls are in the bar at the bottom of the screen."
+            + (consent ? " Recording was requested for this call." : "");
+        }
         loadHistory();
       }).catch(function () {
         btn.disabled = false; btn.innerHTML = orig;
@@ -16423,18 +16808,20 @@
     }
     function fetchSettings() {
       var body = $("#clSetBody"); if (!body) return;
-      send("/phone/settings", "GET").then(function (r) {
+      send("/phone/settings?motion=recruiting", "GET").then(function (r) {
         var d = (r.ok && r.data) ? (r.data.settings || r.data) : {};
         paintSettings(body, d, r.ok);
       }).catch(function () { paintSettings(body, {}, false); });
     }
     function paintSettings(body, d, ok) {
       var attested = !!d.recordingConsentAttested;
-      var mode = d.recordingMode || "manual";
+      var mode = d.recordingMode || "off";
+      // These values are the ones the server accepts; anything else is rejected.
       var modes = [
-        ["manual", "Manual (record only when the recruiter confirms consent on the call)"],
-        ["always", "Always (record every call, only where lawful and disclosed)"],
-        ["never", "Never (do not record any call)"]
+        ["outbound", "Calls you place (outbound only)"],
+        ["all", "Every call (inbound and outbound)"],
+        ["inbound", "Calls you receive (inbound only)"],
+        ["off", "Off (do not record any call)"]
       ];
       var opts = modes.map(function (m) { return '<option value="' + m[0] + '"' + (mode === m[0] ? " selected" : "") + ">" + esc(m[1]) + "</option>"; }).join("");
       body.innerHTML =
@@ -16449,11 +16836,12 @@
         "</div>";
       $("#clSetSave").addEventListener("click", function () {
         var msg = $("#clSetMsg"), self = this;
-        var payload = { recordingConsentAttested: $("#clSetAttest").checked, recordingMode: $("#clSetMode").value };
+        var payload = { motion: "recruiting", recordingConsentAttested: $("#clSetAttest").checked, recordingMode: $("#clSetMode").value };
         self.disabled = true;
         send("/phone/settings", "POST", payload).then(function (r) {
           self.disabled = false;
-          if (r.ok) { msg.style.color = "var(--ok)"; msg.textContent = "Saved."; }
+          if (r.ok) { msg.style.color = "var(--ok)"; msg.textContent = "Saved."; loadPolicy(); }
+          else if (r.status === 403) { msg.style.color = "var(--warn)"; msg.textContent = "Only an admin can change the recording policy for your workspace."; }
           else if (r.status === 404 || r.status === 409) { msg.style.color = "var(--warn)"; msg.textContent = "Calling is not configured yet, so this could not be saved."; }
           else { msg.style.color = "var(--danger)"; msg.textContent = "Could not save. Please try again."; }
         }).catch(function () { self.disabled = false; msg.style.color = "var(--danger)"; msg.textContent = "Could not reach the server."; });
@@ -16461,19 +16849,41 @@
     }
 
     /* ---- call history + detail (GET /phone/calls, GET /phone/calls/:id) ---- */
+    /* Why a call never happened, in terms of what to do about it. The server
+       records how far it got; older records are read from their event log,
+       where "agent_ready" is the proof that this browser answered its own leg
+       and the candidate really was dialed. Getting this backwards sends a
+       recruiter after a candidate's number when the phone is what broke. */
+    function failStage(c) {
+      if (c.failureStage) return c.failureStage;
+      var agentUp = (c.events || []).some(function (e) { return e.type === "agent_ready"; });
+      return agentUp ? "candidate" : "browser";
+    }
+    function failNote(c) {
+      if (c.status === "canceled") return "You ended this call before it connected.";
+      if (c.status !== "failed") return "";
+      var stage = failStage(c);
+      if (stage === "browser") return "Your browser phone never picked up, so the candidate was not dialed. Check your phone status at the top of this page.";
+      if (stage === "transfer") return "Your phone answered, but the call could not be dialed out. Your admin can check the calling setup.";
+      return "This call did not connect.";
+    }
     function callRow(c) {
-      var nm = c.candidateName || c.prospectName || (c.prospect && prospectName(c.prospect)) || c.toNumber || c.number || "Candidate";
-      var num = c.toNumber || c.number || (c.prospect && c.prospect.phone) || "";
+      var nm = c.contactName || c.candidateName || c.prospectName || (c.prospect && prospectName(c.prospect)) || c.externalNumber || "Candidate";
+      var num = c.externalNumber || c.toNumber || c.number || (c.prospect && c.prospect.phone) || "";
       var when = fmtWhen(c.createdAt || c.startedAt || c.date);
       var dur = (c.durationSec != null) ? fmtDur(c.durationSec) : (c.duration || "");
+      var why = failNote(c);
       return '<div class="vt-call" data-call="' + esc(String(c.id)) + '">' +
         '<div class="vt-call-top">' +
           '<svg class="isvg" aria-hidden="true" style="color:var(--brand);flex:none"><use href="#i-phone"/></svg>' +
           '<div style="flex:1;min-width:0">' +
-            '<div class="vt-call-name">' + esc(nm) + (num ? ' <span>&middot; ' + esc(num) + "</span>" : "") + "</div>" +
+            '<div class="vt-call-name">' + esc(nm) + (num !== nm && num ? ' <span>&middot; ' + esc(num) + "</span>" : "") + "</div>" +
             '<div class="vt-call-sub" style="color:var(--text-muted)">' + esc(when) + (dur ? (" &middot; " + esc(dur)) : "") + "</div>" +
+            (why ? '<div class="vt-call-sub" style="color:var(--text-muted);margin-top:2px">' + esc(why) + "</div>" : "") +
           "</div>" +
-          statusBadge(c.status) +
+          // "Missed" is the word for a call that came to you; one you placed
+          // that nobody picked up is a no answer.
+          statusBadge(c.status === "missed" && c.direction === "outbound" ? "noanswer" : c.status) +
         "</div>" +
         '<div class="vt-call-detail vt-detail" data-detail="' + esc(String(c.id)) + '" style="display:none;margin-top:12px"></div></div>';
     }
@@ -16585,7 +16995,32 @@
         paintDialer();
       }).catch(function () {});
     }
-    loadToken();
+    /* The phone engine mounts on the page independently of this view (it has to
+       outlive navigation), so wait briefly for it before falling back to the
+       server-only status card. */
+    function watchPhone(tries) {
+      var eng = audioEngine();
+      if (!eng || !eng.subscribe) {
+        if (tries > 40) { loadToken(); return; }
+        setTimeout(function () { watchPhone(tries + 1); }, 125);
+        return;
+      }
+      var lastPhase = null;
+      var unsub = eng.subscribe(function (st) {
+        if (!document.body.contains(el)) { unsub(); stopMicTest(); return; }
+        if (st.phase === lastPhase) return;
+        var was = lastPhase;
+        lastPhase = st.phase;
+        softCard(st);
+        // A call that just ended, however it ended, belongs in the history now.
+        if (was && st.phase === "ended") loadHistory();
+      });
+      softCard(eng.getState ? eng.getState() : null);
+    }
+
+    watchPhone(0);
+    loadPolicy();
+    loadAudio();
     paintDialer();
     loadSettings();
     loadHistory();
@@ -23943,9 +24378,14 @@
     function bdpHistRow(c) {
       var opp = bdpEff(c, "opportunity").value;
       var missed = c.status === "missed" || c.status === "declined";
-      var statusTxt = missed ? (c.voicemail ? "Voicemail" : c.status === "declined" ? "Declined" : "Missed") :
-        c.status === "failed" ? "Failed" : c.status === "canceled" ? "Canceled" :
-        c.durationSec ? bdpFmtDur(c.durationSec) : "";
+      // A call you placed that nobody picked up is a no answer, not a missed
+      // call, and "Failed" is only honest when the phone itself is what failed.
+      var statusTxt = missed
+        ? (c.voicemail ? "Voicemail" : c.status === "declined" ? "Declined"
+          : c.direction === "outbound" ? "No answer" : "Missed")
+        : c.status === "failed" ? (c.failureStage === "candidate" ? "No answer" : "Phone failed")
+        : c.status === "canceled" ? "Canceled"
+        : c.durationSec ? bdpFmtDur(c.durationSec) : "";
       return '<div class="list-row clickable" data-call="' + esc(c.id) + '" style="display:flex;align-items:center;gap:12px;padding:10px 4px">' +
         bdpDirIcon(c) +
         '<div style="min-width:0;flex:2"><div style="font:500 13px var(--font);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
@@ -23954,7 +24394,7 @@
           esc([bdpFmtNum(c.externalNumber), c.companyName].filter(Boolean).join(" · ")) + "</div></div>" +
         '<div style="flex:1;font:400 12px var(--font);color:var(--text-muted);white-space:nowrap">' + esc(c.userName || "") + "</div>" +
         '<div style="flex:none;width:130px;font:400 12px var(--font);color:var(--text-muted)">' + bdpFmtWhen(c.startedAt) + "</div>" +
-        '<div style="flex:none;width:70px;font:500 12px var(--mono);color:' + (missed || c.status === "failed" ? "var(--danger)" : "var(--text-muted)") + ';text-align:right">' + esc(statusTxt) + "</div>" +
+        '<div style="flex:none;width:92px;font:500 12px var(--mono);color:' + (missed || c.status === "failed" ? "var(--danger)" : "var(--text-muted)") + ';text-align:right;white-space:nowrap">' + esc(statusTxt) + "</div>" +
         '<div style="flex:none;width:96px;text-align:right">' + (bdpOppPill(opp) || bdpPipeBadge(c) || "") + "</div>" +
       "</div>";
     }

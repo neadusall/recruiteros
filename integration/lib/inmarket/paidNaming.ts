@@ -97,8 +97,62 @@ function pickStr(o: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
-const NAME_KEYS = ["full_name", "fullName", "name", "display_name", "displayName", "title"];
+/** Fields that only ever hold a PERSON's name. */
+const NAME_ONLY_KEYS = ["full_name", "fullName", "name", "display_name", "displayName"];
+/** `title` is ambiguous — a job title on a person record, a result line on a SERP record. */
+const NAME_KEYS = [...NAME_ONLY_KEYS, "title"];
 const TITLE_KEYS = ["headline", "job_title", "jobTitle", "occupation", "sub_title", "subtitle", "position", "summary"];
+const COMPANY_KEYS = ["company", "company_name", "companyName", "current_company", "currentCompany", "employer", "organization", "org"];
+
+/* ------------------------------------------------------------------ */
+/* COMPANY AFFINITY — the guard that keeps this rung honest             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * THE FAILURE THIS PREVENTS (measured against the live listing 2026-08-07): these people-search
+ * APIs take one keyword string and return loose matches with NO binding to the company you asked
+ * about. Searching "VP of Marketing Carta" returned an SVP at PriceSmart; "Director of Operations
+ * Gusto" returned a manager at a restaurant called "gusto! fresh bowls & wraps". The old extractor
+ * accepted both — it validated only that the name parsed as a name and the title contained a
+ * leadership word — so the rung would have written a REAL person's name into a curated row for a
+ * company they have never worked at, and cold email would have gone out addressing them as that
+ * company's decision-maker. A wrong name is far worse than no name.
+ *
+ * So a candidate is now kept only when the response itself ties them to the target company: their
+ * employer/company field, or their headline, has to actually mention it. Anything unverifiable is
+ * dropped, which is why this rung can be enabled without it inventing decision-makers.
+ */
+const LEGAL_SUFFIX = /\b(inc|llc|l\.?l\.?c|ltd|limited|corp|corporation|co|company|plc|gmbh|ag|sa|nv|bv|ab|oy|pty|holdings|group|technologies|technology|labs|software|solutions|systems|services|partners|ventures)\b/g;
+
+function norm(s: string): string {
+  return s.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** The distinctive part of a company name — legal suffixes and filler stripped. */
+function companyCore(company: string): string {
+  const stripped = norm(company).replace(LEGAL_SUFFIX, " ").replace(/\s+/g, " ").trim();
+  return stripped || norm(company);
+}
+
+/** Where a headline stops describing the job and starts naming the employer. */
+const SEGMENT = /\s+at\s+|\s*@\s*|\s*[|·–—]\s*|\s+-\s+|\s*,\s*/i;
+
+/**
+ * True when `hay` — an employer field, a headline, or a SERP line — says this person works AT the
+ * target company, as opposed to merely containing its name somewhere.
+ *
+ * The distinction is the whole point, and CONTAINMENT IS NOT ENOUGH: "Director of Operations at
+ * gusto! fresh bowls & wraps" contains "gusto" but is a restaurant, not Gusto the payroll company.
+ * So the haystack is split into segments and the company core must EQUAL a whole segment — the
+ * restaurant's segment normalizes to "gusto fresh bowls and wraps" and is rejected, while
+ * "… at Gusto", "… @ Gusto" and "… at Stripe, Inc." all reduce to a segment that equals the core.
+ * Testing every segment (not just the last) keeps trailing noise like "| We're hiring!" harmless.
+ */
+function worksAtCompany(hay: string, company: string): boolean {
+  const core = companyCore(company);
+  if (core.length < 3) return false;   // too short/generic to verify — never guess
+  return hay.split(SEGMENT).some((seg) => companyCore(seg) === core);
+}
 
 /**
  * Tolerant extraction: walk the whole JSON response and pull validated {name, title} pairs out of
@@ -106,13 +160,18 @@ const TITLE_KEYS = ["headline", "job_title", "jobTitle", "occupation", "sub_titl
  * ("Jane Doe - VP Engineering - Acme"). Validates names (looksLikeName) and requires a real
  * leadership title so non-people rows can't pose as a decision-maker.
  */
-function extractPeople(data: unknown, company: string): PersonCandidate[] {
+/** Exported for the regression suite (test-paid-naming-affinity.mts) - the guard below is the
+ *  only thing standing between a loose keyword search and a fabricated decision-maker. */
+export function extractPeople(data: unknown, company: string): PersonCandidate[] {
   const out: PersonCandidate[] = [];
   const seen = new Set<string>();
 
-  const add = (name: string, title: string) => {
+  const add = (name: string, title: string, employer = "") => {
     if (!looksLikeName(name)) return;
-    if (title && !TITLE_KEYWORD.test(title)) return; // had a title but it isn't a leadership one
+    if (!title || !TITLE_KEYWORD.test(title)) return; // no title, or not a leadership one
+    // Company affinity: the response must tie this person to the company we asked about. An
+    // untied match is a stranger with a similar-sounding job — see worksAtCompany above.
+    if (!worksAtCompany(employer, company) && !worksAtCompany(title, company)) return;
     const key = name.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
@@ -126,7 +185,9 @@ function extractPeople(data: unknown, company: string): PersonCandidate[] {
   const fromSerpTitle = (raw: string) => {
     const parts = raw.split(/\s+[–\-|]\s+/);
     if (parts.length < 2) return;
-    add(parts[0].trim(), parts[1].replace(/\s*\|\s*linkedin.*$/i, "").trim());
+    // The whole line is the affinity haystack: a SERP result carries the employer in its tail
+    // ("Jane Doe - VP Engineering - Acme"), which is exactly the part we must verify against.
+    add(parts[0].trim(), parts[1].replace(/\s*\|\s*linkedin.*$/i, "").trim(), raw);
   };
 
   const visit = (node: unknown) => {
@@ -135,10 +196,17 @@ function extractPeople(data: unknown, company: string): PersonCandidate[] {
     if (typeof node !== "object") return;
     const o = node as Record<string, unknown>;
 
-    const name = pickStr(o, NAME_KEYS);
-    const title = pickStr(o, TITLE_KEYS);
+    // `title` means different things on different records, and reading it wrong silently disables
+    // the leadership-title check: on this shape (full_name + title) the LinkedIn listings put the
+    // JOB TITLE in `title`, which used to be claimed by NAME_KEYS and never read as a title, so
+    // every person came through with an empty title and no check could reject them. When a
+    // dedicated name field is present, `title` is the job title.
+    const dedicatedName = pickStr(o, NAME_ONLY_KEYS);
+    const name = dedicatedName || pickStr(o, ["title"]);
+    const title = pickStr(o, TITLE_KEYS) || (dedicatedName ? pickStr(o, ["title"]) : "");
+    const employer = pickStr(o, COMPANY_KEYS);
     if (name && looksLikeName(name)) {
-      add(name, title);
+      add(name, title, employer);
     } else if (name && / [–\-|] /.test(name)) {
       // a `title`/`name` field that is actually a SERP result line
       fromSerpTitle(name);

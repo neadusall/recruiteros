@@ -65,6 +65,17 @@ function companyId(company: string): string {
   return `jobfeed_${company.toLowerCase().replace(/[^a-z0-9]+/g, "")}`.slice(0, 120);
 }
 
+/**
+ * The GLOBAL company key for the watch "seen" set, exported so a non-job-feed front end
+ * (news-signal discovery) keys the same company to the same string. Without this, a
+ * company that both raised and posted a role would look like two companies and get
+ * pitched twice, which is the one BD hygiene rule the seen set exists to enforce.
+ * The `jobfeed_` prefix is kept for backward compatibility with every key already stored.
+ */
+export function companyKey(company: string): string {
+  return companyId(company);
+}
+
 /** Hosts that bot-wall a headless capture — roleShot can't screenshot these, so don't feed them. */
 const AGG_RE = /(^|\.)(linkedin|indeed|glassdoor|ziprecruiter|monster|dice|simplyhired|jooble|adzuna|lensa|talent\.com)\./i;
 /** Press / marketing / investor paths — we must screenshot a JOB DESCRIPTION, never a press release,

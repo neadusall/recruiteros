@@ -55,9 +55,15 @@ function effectiveQuery(w: Watchlist): string {
   return [w.query, w.industry].map((s) => (s || "").trim()).filter(Boolean).join(" ").trim();
 }
 
+/** What a list searches on, whichever front end it uses. A news list searches its
+ *  segment; a job list its query. Empty either way means there is nothing to poll. */
+function searchTerm(w: Watchlist): string {
+  return w.source === "news" ? (w.segment || "").trim() : effectiveQuery(w);
+}
+
 function isDue(w: Watchlist, now: number): boolean {
   if (!w.active) return false;
-  if (!effectiveQuery(w)) return false;   // nothing to search on
+  if (!searchTerm(w)) return false;   // nothing to search on
   if (!w.lastPolledAt) return true;
   const last = Date.parse(w.lastPolledAt) || 0;
   return now - last >= w.everyMinutes * 60_000;
@@ -93,6 +99,30 @@ async function fetchLeads(w: Watchlist): Promise<InMarketLead[]> {
 }
 
 /**
+ * The news front end. Free and keyless, so unlike the job feed there is nothing to
+ * reserve and no key to check. Warnings are folded into the list's lastError so a
+ * recruiter can see "Google News blocked us" rather than a silent zero, but partial
+ * results still flow: one dead signal query does not discard the four that worked.
+ */
+async function fetchNewsLeads(w: Watchlist): Promise<InMarketLead[]> {
+  const { discoverFromNews } = await import("./newsDiscover");
+  const res = await discoverFromNews({
+    segment: (w.segment || "").trim(),
+    signals: w.newsSignals as never,
+    windowDays: w.newsWindowDays,
+    minAmountUsd: w.minAmountUsd,
+    targetRoles: w.targetRoles,
+    limit: w.limit ?? 40,
+  });
+  // Only surface a warning when the sweep produced nothing at all; a partial sweep that
+  // still found companies is a success, not an error the recruiter needs to see.
+  if (!res.leads.length && res.warnings.length) {
+    throw new Error(res.warnings[0].slice(0, 140));
+  }
+  return res.leads;
+}
+
+/**
  * Run one watchlist: fetch -> dedupe -> curate -> mark seen -> record. Returns an outcome either
  * way; throws only on a truly unexpected fault (the tick catches it). Guarded so the same list is
  * never polled concurrently.
@@ -103,23 +133,29 @@ export async function pollOne(w: Watchlist, todayIso: string): Promise<PollOutco
   if (inFlight.has(w.id)) return { ...base, skipped: "busy" };
   inFlight.add(w.id);
   try {
-    if (!jobFeedEnabled()) {
-      await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error: "job feed not configured (RAPID_JOBS_KEY/HOST)" });
-      return { ...base, skipped: "feed_off" };
+    const isNews = w.source === "news";
+
+    // A news list costs nothing: Google News RSS is keyless, so it neither needs the
+    // RapidAPI key nor draws against the paid daily fetch budget. That is deliberate,
+    // it means signal discovery keeps running on a day the job-feed budget is spent.
+    if (!isNews) {
+      if (!jobFeedEnabled()) {
+        await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error: "job feed not configured (RAPID_JOBS_KEY/HOST)" });
+        return { ...base, skipped: "feed_off" };
+      }
+      // Reserve the paid fetches for this poll against the daily ceiling.
+      const pages = Math.max(1, Math.ceil((w.limit ?? 30) / JOBS_PER_PAGE));
+      const granted = await reserveFetches(pages, todayIso);
+      if (granted <= 0) {
+        await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error: "daily feed budget reached" });
+        return { ...base, skipped: "no_budget" };
+      }
     }
 
-    // Reserve the paid fetches for this poll against the daily ceiling.
-    const pages = Math.max(1, Math.ceil((w.limit ?? 30) / JOBS_PER_PAGE));
-    const granted = await reserveFetches(pages, todayIso);
-    if (granted <= 0) {
-      await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error: "daily feed budget reached" });
-      return { ...base, skipped: "no_budget" };
-    }
-
-    // 1) Pull real postings for this target audience (pure, no side effects, no pool write).
+    // 1) Pull this list's raw companies (pure, no side effects, no pool write).
     let leads: InMarketLead[] = [];
     try {
-      leads = await fetchLeads(w);
+      leads = isNews ? await fetchNewsLeads(w) : await fetchLeads(w);
     } catch (e) {
       const error = (e as Error)?.message?.slice(0, 160) || "feed fetch failed";
       await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error });
@@ -147,6 +183,9 @@ export async function pollOne(w: Watchlist, todayIso: string): Promise<PollOutco
         concurrency: 4,
         minScore,
         nowIso: todayIso,
+        // Which arm found these. Recorded on rows this run CREATES only, so a company
+        // stays credited to whichever front end actually earned it.
+        attribution: { source: isNews ? "news" : "jobs", listId: w.id },
       });
       contactable = report.contactable;
     } catch (e) {

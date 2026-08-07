@@ -45,8 +45,13 @@
 
 import type { CandidateICP, CandidateRow, DiscoveryOptions, SearchBreadth, SourcingQuery } from "./types";
 import { scoreCandidate, inTargetGeo, US_STATE_FULL, type ScoreOptions } from "./score";
+import { buildProofPlan } from "./proofPlan";
+import { extractProofTerms, roleSignature } from "./proofExtract";
+import { recordTermYield, termStatsFor } from "./proofStats";
+import type { ProofTerm } from "./proofTerms";
 import {
-  distanceFromCenter, geocodeUsPlace, stateOfPlace, statesWithinRadius, stripRadiusSuffix, withinRadius,
+  distanceFromCenter, enforcedRadiusMi, geocodeUsPlace, stateOfPlace, statesWithinRadius,
+  stripRadiusSuffix, withinRadius,
 } from "./geoRadius";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
 import { cred } from "../providers/http";
@@ -382,6 +387,13 @@ function mapGoogleItem(o: any): CandidateRow | null {
     fullName,
     title: headline,
     headline: headline || snippet,
+    // KEEP THE SNIPPET. It used to be collapsed into `headline` only when no headline
+    // existed, and otherwise dropped on the floor. It is the richest free text a search
+    // result carries: a line or two of the About section, which is exactly where the
+    // qualifying evidence lives ("CPA", "ASC 740", "BCBA", "PointClickCare"). Scoring
+    // now reads it (see proofTerms), so throwing it away was throwing away the whole
+    // long-tail signal we had already paid the search to fetch.
+    snippet: snippet || undefined,
     company,
     // Parsed from the snippet/meta when clearly stated; undefined stays neutral.
     location: locationFromSnippet([mt && str(mt["og:description"]), snippet, headline].filter(Boolean).join(" · ")),
@@ -621,6 +633,8 @@ function mapSearxItem(o: { url?: string; title?: string; content?: string }): Ca
     fullName,
     title: headline,
     headline: headline || snippet,
+    // Kept as evidence for proof-term scoring, same as the Google mapper above.
+    snippet: snippet || undefined,
     company,
     // Parsed from the snippet when clearly stated; undefined stays neutral.
     location: locationFromSnippet(hay || undefined),
@@ -812,8 +826,9 @@ export async function runDiscovery(
   if (useKold) {
     try {
       koldJobId = await submitDbDiscovery(icp, Math.min(cap, 500), {
-        location: opts.geoCenter,
-        radiusMi: opts.radiusMi,
+        location: opts.remote === true ? "" : opts.geoCenter,
+        radiusMi: opts.remote === true ? 0 : opts.radiusMi,
+        remote: opts.remote === true,
       });
       koldSubmittedAt = Date.now();
     } catch (e) {
@@ -832,13 +847,52 @@ export async function runDiscovery(
   const outByKey = new Map<string, CandidateRow>();
   const OUT_CAP = Math.min(300, cap); // the out-of-area block is a bounded appendix, not the list
   // Radius state, resolved ONCE per run: the recruiter's mileage pick plus the coordinate
-  // of the location they typed. Both must be present for distance filtering to engage;
-  // a center we cannot geocode leaves every row on the legacy string matcher.
-  const radiusMi = opts.radiusMi ?? 0;
-  const geoLabel = stripRadiusSuffix(opts.geoCenter || icp.geos?.[0] || "");
-  const geoCenter = radiusMi > 0 ? geocodeUsPlace(geoLabel) : null;
+  // of the location they typed.
+  //
+  // THE MILEAGE IS A CEILING, NOT A HINT (owner mandate 2026-08-06). The center is
+  // geocoded whenever a location was typed at all — including "Exact". Gating it on
+  // `radiusMi > 0` meant the tightest setting on the dropdown silently disabled the only
+  // real filter in the product and handed every row to the keep-biased name matcher,
+  // which passes anyone sharing a state token. That is exactly how people hundreds of
+  // miles out kept landing in a pinned search. "Exact" is now a measured 15mi
+  // (EXACT_RADIUS_MI) rather than "unlimited".
+  //
+  // Only a center we genuinely cannot place on a map falls back to the string matcher.
+  //
+  // REMOTE runs sit outside all of it. There is no typed center, so there is no circle,
+  // no distance to measure and nothing to be outside of — the radius machinery is turned
+  // off at the source here rather than being fed a blank location and left to guess.
+  const remote = opts.remote === true;
+  const radiusMi = remote ? 0 : opts.radiusMi ?? 0;
+  const geoLabel = remote ? "" : stripRadiusSuffix(opts.geoCenter || icp.geos?.[0] || "");
+  // What the FILTER enforces (Exact = 15mi) vs what the recruiter picked (0 for Exact).
+  const filterRadiusMi = remote ? 0 : enforcedRadiusMi(radiusMi);
+  const geoCenter = geoLabel ? geocodeUsPlace(geoLabel) : null;
+  // PROOF EVIDENCE for this run, assembled from all three layers: the curated library,
+  // vocabulary derived for this role when no shelf covers its industry, and the measured
+  // yield that retires terms this market does not actually use. Built here rather than
+  // passed in so EVERY caller gets it (interactive run, overnight queue, Sales Nav import,
+  // crash recovery) with no wiring of its own.
+  //
+  // Both enrichments are best-effort by design: a model hiccup or a cold stats ledger
+  // must never stop a search, so each degrades to the layer beneath it.
+  const roleSig = roleSignature(icp);
+  const derived = await extractProofTerms(icp, "").catch(() => [] as ProofTerm[]);
+  const termStats = opts.workspaceId
+    ? await termStatsFor(opts.workspaceId, roleSig).catch(() => ({}))
+    : {};
+  const proofPlan = buildProofPlan(icp, "", { derived, stats: termStats });
+  const proofTerms = proofPlan.terms;
+  // Score against the ENFORCED radius, so an Exact search ranks by real miles too
+  // instead of dropping to name matching the moment the dropdown says "Exact".
+  const scoreOpts: ScoreOptions = {
+    radiusMi: geoCenter ? filterRadiusMi : radiusMi,
+    geoLabel,
+    remote,
+    proofTerms,
+  };
   // Every state the circle touches, for the coarse fallback on rows we cannot place.
-  const radiusStates = geoCenter ? statesWithinRadius(geoCenter, radiusMi) : [];
+  const radiusStates = geoCenter ? statesWithinRadius(geoCenter, filterRadiusMi) : [];
   let scanned = 0;
   let geoDropped = 0;
   // SAFEGUARD buffers: sub-fit-bar rows and (in default geo-only mode) the out-of-area
@@ -860,7 +914,7 @@ export async function runDiscovery(
       // Measure BEFORE scoring: the scorer reads milesFromTarget to award geo credit on
       // a sliding scale, so the distance has to be on the row by the time it runs.
       r.milesFromTarget = distanceFromCenter(r.location, geoCenter);
-      const sc = scoreCandidate(r, icp, { radiusMi, geoLabel: geoLabel });
+      const sc = scoreCandidate(r, icp, scoreOpts);
       r.fitScore = sc.fitScore; r.fitReasons = sc.fitReasons;
       // Strict location: a row that states a DIFFERENT location is marked for the
       // separate out-of-area list (unknown locations stay in the main list — the
@@ -872,8 +926,12 @@ export async function runDiscovery(
       // hundreds of miles out ride along as "in area". The string test stays as the
       // fallback for rows whose stated location will not geocode.
       let outside = false;
-      if (opts.strictGeo && icp.geos && icp.geos.length) {
-        const measured = withinRadius(r.location, geoCenter, radiusMi);
+      // `!remote` is belt and braces: a remote run clears icp.geos, so the condition
+      // below is already false. It is spelled out anyway because "nobody is ever dropped
+      // for where they live" is the whole promise of the mode, and it should not depend
+      // on a side effect of how the profile was shaped.
+      if (!remote && opts.strictGeo && icp.geos && icp.geos.length) {
+        const measured = withinRadius(r.location, geoCenter, filterRadiusMi);
         if (measured !== undefined) {
           outside = !measured;
         } else if (geoCenter) {
@@ -885,11 +943,19 @@ export async function runDiscovery(
           // far, per the never-empty rule.
           const st = stateOfPlace(r.location);
           outside = Boolean(st && !radiusStates.includes(st));
+          // We kept this row on a guess, not a measurement. Say so on the row: later
+          // enrichment routinely fills in a real city, and enforceRunGeo re-measures
+          // every unverified row the moment that happens, so a person whose location
+          // only becomes readable AFTER the search can never ride into the deliverable
+          // list as if the radius had cleared them.
+          r.geoUnverified = true;
         } else {
           outside = inTargetGeo(r.location, icp.geos) === false;
+          r.geoUnverified = true; // name matching is not a measurement either
         }
       }
       if (outside) r.outOfArea = true; // marked BEFORE buffering so rescued rows stay labeled
+      if (outside || !opts.strictGeo) r.geoUnverified = undefined; // settled: measured out, or no geo filter asked for
       if (r.fitScore < minFit) {
         // Keep the strongest sub-threshold rows for the empty-run rescue (0 = disqualified, never kept).
         if (r.fitScore > 0) {
@@ -1151,7 +1217,7 @@ export async function runDiscovery(
   // already fetched.
   let rescued = false;
   if (!inList.length && !outList.length && (geoBuffer.length || fitBuffer.length)) {
-    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap, { radiusMi, geoLabel });
+    const rescue = rescueEmptyRun(geoBuffer, fitBuffer, icp, minFit, cap, scoreOpts);
     if (rescue) {
       rescued = true;
       inList = rescue.candidates.filter((r) => !r.outOfArea);
@@ -1161,6 +1227,19 @@ export async function runDiscovery(
   }
 
   const candidates = inList.concat(outList);
+
+  // LEARN FROM THIS RUN. Fold how often each term actually appeared into the evidence
+  // ledger, so the next run for this role ranks its vocabulary on measured reality rather
+  // than on anyone's opinion, and terms that describe no real person get retired.
+  // Deliberately counts the WHOLE harvest, not just the rows that survived the fit bar:
+  // the question is what this market's people write on their profiles, and rows we
+  // discarded are just as good evidence of that as rows we kept. Rows found BY a proof
+  // query are excluded inside recordTermYield, since their evidence was guaranteed by the
+  // boolean that found them. Fire-and-forget: a ledger write must never fail a search.
+  if (opts.workspaceId && proofTerms.length) {
+    const harvest = candidates.concat(geoBuffer, fitBuffer);
+    void recordTermYield(opts.workspaceId, roleSig, proofTerms, harvest).catch(() => {});
+  }
 
   if (geoDropped && !rescued) {
     warnings.push(`${geoDropped} matching people outside the target area were left out to keep this run geo-only (turn on "Also list out-of-area (separate list)" in Advanced controls to see them next run)`);

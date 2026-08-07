@@ -295,13 +295,15 @@ function searxngEngine(): Engine | null {
   };
 }
 
-/** The active engine list at call time. When real-time web search is configured it is the SOLE
- *  backend (JSearch + real-time-web-search only — the free scrapers are bypassed). Otherwise:
- *  SearXNG first when configured, then the HTML scrapers. */
+/** The active engine list at call time. A configured paid provider goes FIRST — it is the only
+ *  backend that works from this box, since every free scraper is IP-throttled here. The free
+ *  engines stay in the list BEHIND it as a backstop: `webSearchResults` returns [] once the daily
+ *  paid ceiling is spent, and the engine loop then simply moves on to the next source rather than
+ *  finding nobody for the rest of the day. */
 function activeEngines(): Engine[] {
-  if (webSearchEnabled()) return [webSearchXrayEngine()];
   const sx = searxngEngine();
-  return sx ? [sx, ...HTML_ENGINES] : HTML_ENGINES;
+  const free = sx ? [sx, ...HTML_ENGINES] : HTML_ENGINES;
+  return webSearchEnabled() ? [webSearchXrayEngine(), ...free] : free;
 }
 
 async function searchFetch(url: string): Promise<{ status: number; body: string | null }> {

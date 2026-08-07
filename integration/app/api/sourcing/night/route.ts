@@ -16,6 +16,7 @@ import { NextResponse } from "next/server";
 import { requireCronAuth } from "../../../../lib/linkedin/auth";
 import { tickNightQueue, listNightItems, searchesInFlight } from "../../../../lib/sourcing";
 import { tickSourcingAutoflow } from "../../../../lib/sourcing/autoflow";
+import { seedStandingSweeps, workspacesWithStandingProfiles } from "../../../../lib/sourcing/standingProfiles";
 import { backfillListPhones, unstickSourcingRun } from "../../../../lib/sourcing/phoneBackfill";
 
 async function run(req: Request) {
@@ -60,7 +61,27 @@ async function run(req: Request) {
   // instrumentation.ts gets its own bundle instance whose store copy goes stale (and
   // whose saves could clobber live data), which is why the queue ticks via HTTP too.
   void tickSourcingAutoflow().catch((e) => console.warn("[sourcing-autoflow] tick failed:", e?.message ?? e));
+  // STANDING SWEEPS (lib/sourcing/standingProfiles): the rota of roles this desk always
+  // recruits for. Seeding is idempotent per day and paced by a per-workspace ceiling, so
+  // running it on every tick is safe: whatever is not due, or is already in flight, is
+  // simply not seeded. This is what turns discovery from "as often as somebody presses a
+  // button" into a steady daily supply.
+  void tickStandingSweeps().catch((e) => console.warn("[standing-sweeps] tick failed:", e?.message ?? e));
   return NextResponse.json({ ok: true, ticked: true });
+}
+
+/** Seed due sweeps for every workspace that has an active standing profile. */
+async function tickStandingSweeps(): Promise<void> {
+  const workspaces = await workspacesWithStandingProfiles();
+  for (const ws of workspaces) {
+    try {
+      const { seeded } = await seedStandingSweeps(ws);
+      if (seeded.length) console.log(`[standing-sweeps] ${ws}: seeded ${seeded.length} (${seeded.join(", ")})`);
+    } catch (e: any) {
+      // One workspace's bad profile must not stop the others' rotas.
+      console.warn(`[standing-sweeps] ${ws} failed:`, e?.message ?? e);
+    }
+  }
 }
 
 export async function GET(req: Request) { return run(req); }
