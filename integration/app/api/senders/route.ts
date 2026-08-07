@@ -7,6 +7,9 @@
  *   { action: "assign", ids:[], ownerId, ownerName? }     bulk assign a pool to a recruiter
  *   { action: "setStatus", ids:[], status, pausedReason? }
  *   { action: "test", id }                                verify SMTP login
+ *   { action: "sync-fleet" }                              mirror the Smartlead warm-up fleet
+ *   { action: "sync-sendingac" }                          pull Sending.ac IMAP/SMTP credentials
+ *   { action: "ping-sendingac" }                          check the Sending.ac Partner API key
  *
  * Inboxes are scoped to the caller's workspace (= portal), so RecruitersOS and Lume
  * pools never mix. Secrets are encrypted at rest and never returned.
@@ -77,6 +80,19 @@ export async function POST(req: Request) {
         // (this portal's rows come back in the next GET; other portals fill too).
         const { syncFleetInboxes } = await import("../../../lib/senders");
         return ok({ report: await syncFleetInboxes() });
+      }
+      case "sync-sendingac": {
+        // Pull IMAP/SMTP credentials for the Sending.ac fleet from the Partner API.
+        // This is what makes those mailboxes SENDABLE from here: the Smartlead mirror
+        // above discovers them but carries no password for OAuth-provisioned M365.
+        const { syncSendingAcFleet } = await import("../../../lib/senders");
+        return ok({ report: await syncSendingAcFleet() });
+      }
+      case "ping-sendingac": {
+        // Cheap key check for the Senders tab, so a bad key shows as one line rather
+        // than as a fleet import that half-finishes.
+        const { pingSendingAc } = await import("../../../lib/senders");
+        return ok({ ping: await pingSendingAc() });
       }
       case "test": {
         if (!b.id) return fail("missing_id", 422);

@@ -65,7 +65,13 @@ export async function goLiveReadiness(
   const totalInboxes = inboxes.length;
   const recruiterId = c?.recruiterId;
   const ownedInboxes = recruiterId ? inboxes.filter((m) => m.ownerId === recruiterId) : [];
-  const ownedCapacity = ownedInboxes.reduce((n, m) => n + coldCap(m.dailyCap), 0);
+  // Capacity only counts inboxes that hold an SMTP login. The rotation skips a
+  // credential-less mailbox (lib/senders/pool.ts), so counting it here reported a pool
+  // that could never actually be spent: the Sending.ac fleet imported over OAuth with
+  // no password, and the checklist called it "ready" for sends that had nowhere to go.
+  const sendableOwned = ownedInboxes.filter((m) => !!m.smtpPassEnc);
+  const ownedCapacity = sendableOwned.reduce((n, m) => n + coldCap(m.dailyCap), 0);
+  const ownedNoCreds = ownedInboxes.length - sendableOwned.length;
 
   const checks: GoLiveCheck[] = [
     {
@@ -79,10 +85,14 @@ export async function goLiveReadiness(
       detail: recruiterId ? "Set: sends route through that recruiter's inbox pool" : "Pick a recruiter in the campaign setup, or sends fall back to MTA/Instantly",
     },
     {
-      key: "inboxes_assigned", required: true, ok: ownedInboxes.length > 0,
+      key: "inboxes_assigned", required: true, ok: sendableOwned.length > 0,
       label: "Inboxes assigned to that recruiter",
       detail: !recruiterId ? "Set the campaign's recruiter first"
-        : ownedInboxes.length > 0 ? `${ownedInboxes.length.toLocaleString()} inboxes · ${ownedCapacity.toLocaleString()} cold sends/day`
+        : sendableOwned.length > 0
+          ? `${sendableOwned.length.toLocaleString()} inboxes · ${ownedCapacity.toLocaleString()} cold sends/day`
+            + (ownedNoCreds > 0 ? ` (${ownedNoCreds.toLocaleString()} more have no login yet)` : "")
+        : ownedInboxes.length > 0
+          ? `${ownedInboxes.length.toLocaleString()} inboxes assigned but none hold a sending login: press 'Pull Sending.ac logins' on the Senders screen`
         : "That recruiter owns no inboxes: assign the pool to them on the Senders screen",
     },
     {

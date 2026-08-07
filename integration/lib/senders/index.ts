@@ -16,8 +16,13 @@ export type { NewInboxInput, RecruiterCapacity, SendCapacity } from "./store";
 
 export { pickSender, poolCapacity } from "./pool";
 
-export { syncFleetInboxes, maybeAutoFleetSync } from "./fleetSync";
+export { syncFleetInboxes, maybeAutoFleetSync, buildPortalRouter } from "./fleetSync";
 export type { FleetSyncReport } from "./fleetSync";
+
+export { syncSendingAcFleet, maybeAutoSendingAcSync } from "./sendingAcSync";
+export type { SendingAcSyncReport } from "./sendingAcSync";
+export { sendingAcConfigured, sendingAcIsSandbox, sendingAcKeyHint, pingSendingAc } from "./sendingAcApi";
+export type { SendingAcPing } from "./sendingAcApi";
 
 export { runSenderHealthGuard, guardStatus } from "./healthGuard";
 export type { GuardReport, GuardAction } from "./healthGuard";

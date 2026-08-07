@@ -1741,6 +1741,29 @@
           card("Email hit-rate", hit + "%", "verified ÷ emails", hit < 20 ? "var(--danger)" : "var(--ok)") +
           "</div>";
 
+        // 2a) WHERE THE BACKLOG IS STUCK. The video fleet renders `renderable` and nothing else, so
+        //     when video output falls to zero this row says which gate is holding the rest — instead
+        //     of the answer being "somewhere upstream". Buckets are exclusive and sum to Curated.
+        var bl = f.blocked || {}, lv = f.levers || {};
+        var stuck = (bl.catchAllParked || 0) + (bl.invalidParked || 0);
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Video supply · where the backlog is stuck ' +
+          '<span style="font-weight:400;color:var(--text-dim)">the fleet can only render “renderable”</span></h3>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          card("Renderable", n(bl.renderable), "contactable + address", "var(--ok)") +
+          card("No name yet", n(bl.noName), "naming gate") +
+          card("No domain", n(bl.noDomain), "no finder can try") +
+          card("Email pending", n(bl.emailPending), "finder will reach these") +
+          card("~ Catch-all parked", n(bl.catchAllParked), lv.catchAllContactable ? "policy: working these" : "policy: held back", "var(--warn)") +
+          card("✕ Invalid parked", n(bl.invalidParked), lv.residualFinder ? "residual finder armed" : "needs a residual rung", "var(--danger)") +
+          "</div>";
+        if (stuck > 0 && (!lv.catchAllContactable || !lv.residualFinder)) {
+          html += '<div style="margin-top:8px;font-size:12px;color:var(--text-dim);line-height:1.5">' +
+            n(stuck) + ' named decision-maker(s) are parked with no path forward. ' +
+            (lv.catchAllContactable ? "" : "Set <code>INMARKET_CATCHALL_CONTACTABLE=1</code> to work the catch-all tier (deliverable best-guess, mailbox unconfirmed). ") +
+            (lv.residualFinder ? "" : "Set <code>INMARKET_FINDER_URL</code> (or <code>ICYPEAS_API_KEY</code>) to arm the residual finder for the rejected ones.") +
+            "</div>";
+        }
+
         // 2b) KoldInfo enrichment, first rung, operator CSV round-trip.
         html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Contact-data enrichment ' +
           '<span style="font-weight:400;color:var(--text-dim)">first rung · CSV round-trip</span></h3>' +
@@ -7584,6 +7607,7 @@
           '<button class="btn btn-primary btn-sm" id="sndImport">Import inboxes (CSV)</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndAdd">+ Add one</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndSyncFleet">Sync from warm-up fleet</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndSyncSac">Pull Sending.ac logins</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
         '</div>' +
       '</div>' +
@@ -7608,6 +7632,28 @@
         if (!r.ok || !rep) { toast("Fleet sync failed"); return; }
         if (!rep.configured) { toast("Warm-up connection is not configured"); return; }
         toast("Fleet synced: " + rep.imported + " new, " + rep.updated + " refreshed (" + rep.withCreds + " sendable here, " + rep.credsless + " upstream-managed)");
+        loadSenders(); loadWarmup(true);
+      });
+    });
+    // Sending.ac mailboxes are provisioned upstream as Microsoft 365 accounts, so the
+    // warm-up mirror above knows they exist but carries no password for them. This pulls
+    // the real logins from Sending.ac so those mailboxes can actually send from here.
+    $("#sndSyncSac").addEventListener("click", function () {
+      var btn = $("#sndSyncSac"); btn.disabled = true; btn.textContent = "Pulling logins…";
+      send("/senders", "POST", { action: "sync-sendingac" }).then(function (r) {
+        btn.disabled = false; btn.textContent = "Pull Sending.ac logins";
+        var rep = (r.data || {}).report;
+        if (!r.ok || !rep) { toast("Could not reach Sending.ac"); return; }
+        if (!rep.configured) { toast("Sending.ac is not connected yet: add the API key on the server, then try again"); return; }
+        if (rep.errors && rep.errors.length && !rep.credentialed) {
+          toast("Sending.ac refused the connection: check the API key");
+          return;
+        }
+        var msg = rep.credentialed + " mailboxes ready to send";
+        if (rep.imported) msg += " · " + rep.imported + " new";
+        if (rep.pending) msg += " · " + rep.pending + " still provisioning";
+        if (rep.sandbox) msg += " (test key)";
+        toast(msg);
         loadSenders(); loadWarmup(true);
       });
     });

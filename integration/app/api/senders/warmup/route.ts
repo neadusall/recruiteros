@@ -291,6 +291,14 @@ export async function GET(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
   await ensureConfig();
+  // Self-refreshing credentials: opening the Senders tab re-pulls the Sending.ac
+  // IMAP/SMTP logins (debounced to every 6h, fire-and-forget). Deliberately ahead of
+  // the warm-up check below, because the Sending.ac fleet must keep its credentials
+  // whether or not the Smartlead warm-up connection is configured.
+  {
+    const { maybeAutoSendingAcSync } = await import("../../../../lib/senders");
+    maybeAutoSendingAcSync();
+  }
   if (!smartleadConfigured()) {
     return ok({ configured: false, updatedAt: null, domains: [], totals: null });
   }

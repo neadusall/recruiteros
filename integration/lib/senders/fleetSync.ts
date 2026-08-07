@@ -94,6 +94,36 @@ async function houseWorkspaceId(): Promise<string | null> {
   }
 }
 
+/**
+ * Build the domain -> portal router once, then answer per mailbox.
+ *
+ * Shared with the Sending.ac Partner API sync (`./sendingAcSync`) so BOTH import paths
+ * put a mailbox in the same portal. When each path carried its own copy of this rule,
+ * the same lookalike domain could land in the tenant pool via one sync and the house
+ * pool via the other, which is the one mistake this whole boundary exists to prevent:
+ * the house workspace must never send cold email speaking as a tenant's brand.
+ *
+ * Returns null for a domain with no home (no matching tenant and no house workspace),
+ * so callers can count the skip instead of guessing a destination.
+ */
+export async function buildPortalRouter(): Promise<(domain: string) => string | null> {
+  const { allBrandPresets } = await import("../branding/presets");
+  const { tenantWorkspaceForHost } = await import("../branding/portal");
+  const tenants: Array<{ token: string; wsId: string }> = [];
+  for (const p of allBrandPresets()) {
+    const wsId = tenantWorkspaceForHost(p.appHost);
+    const token = brandToken(p.brandName);
+    if (wsId && token) tenants.push({ token, wsId });
+  }
+  const houseWs = await houseWorkspaceId();
+  return (domain: string) => {
+    const d = (domain || "").toLowerCase();
+    if (!d) return null;
+    const tenant = tenants.find((t) => domainBelongsToBrand(d, t.token));
+    return tenant ? tenant.wsId : houseWs;
+  };
+}
+
 function providerFor(accountType: string | undefined, smtpHost: string | undefined, internal: string[]): SenderProvider {
   const t = (accountType || "").toUpperCase();
   if (t === "OUTLOOK") return "sending-ac"; // Sending.ac provisions MS-based mailboxes
@@ -121,22 +151,13 @@ export async function syncFleetInboxes(): Promise<FleetSyncReport> {
     report.accounts = accounts.length;
     if (!accounts.length) return report;
 
-    const { allBrandPresets } = await import("../branding/presets");
-    const { tenantWorkspaceForHost } = await import("../branding/portal");
-    const tenants: Array<{ token: string; wsId: string }> = [];
-    for (const p of allBrandPresets()) {
-      const wsId = tenantWorkspaceForHost(p.appHost);
-      const token = brandToken(p.brandName);
-      if (wsId && token) tenants.push({ token, wsId });
-    }
-    const houseWs = await houseWorkspaceId();
+    const routePortal = await buildPortalRouter();
     const internal = internalSmtpHosts();
 
     for (const a of accounts) {
       const domain = (a.email.split("@")[1] || "").toLowerCase();
       if (!domain) continue;
-      const tenant = tenants.find((t) => domainBelongsToBrand(domain, t.token));
-      const wsId = tenant ? tenant.wsId : houseWs;
+      const wsId = routePortal(domain);
       if (!wsId) { report.skippedNoWorkspace++; continue; }
 
       // Routing can change under a mailbox (a widened brand match, a new tenant).
