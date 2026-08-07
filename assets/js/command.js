@@ -16246,6 +16246,7 @@
       "Call candidates from the browser. Every call can be recorded, transcribed, and turned into a hiring-manager submittal. Recording only happens after your workspace attests it has lawful consent (Recording settings, below) and you confirm you will disclose it on the call.") +
       '<div class="vt-view">' +
         '<div id="clSoft"></div>' +
+        '<div id="clAudio"></div>' +
         '<div id="clDialer"></div>' +
         '<div id="clSettings"></div>' +
         '<h3 style="margin:20px 0 8px;font-size:14px;color:var(--text-muted)">Call history</h3>' +
@@ -16317,6 +16318,107 @@
         var dot = $("#clSoftDot"), title = $("#clSoftTitle"), sub = $("#clSoftSub");
         if (dot) { dot.style.background = "var(--warn)"; title.textContent = "Softphone unavailable"; if (sub) sub.textContent = "Could not reach the server."; }
       });
+    }
+
+    /* ---- headset: pick the audio devices and prove the mic is live ----------
+       A candidate call is worthless if it goes out through the laptop mic while
+       the recruiter is talking into a headset, and the browser will not tell
+       them. So the device is chosen here and the input level is shown live. */
+    var micTestStop = null;
+    function stopMicTest() {
+      if (micTestStop) { try { micTestStop(); } catch (e) {} micTestStop = null; }
+    }
+    function audioEngine() { return window.__bdPhone || null; }
+    function paintAudio() {
+      var host = $("#clAudio"); if (!host) return;
+      var eng = audioEngine();
+      if (!eng || !eng.refreshDevices) {
+        host.innerHTML = '<div class="vt-card"><h3>Headset</h3>' +
+          '<div class="vt-hint" style="margin:8px 0 0">The browser phone has not loaded on this page, so audio devices cannot be chosen here. Reload the page and try again.</div></div>';
+        return;
+      }
+      var st = eng.getState ? eng.getState() : { devices: { mics: [], speakers: [] } };
+      var d = st.devices || { mics: [], speakers: [] };
+      var perm = st.micPermission || "unknown";
+      var sel = function (id, list, cur, empty) {
+        if (!list.length) return '<select id="' + id + '" disabled><option>' + esc(empty) + "</option></select>";
+        return '<select id="' + id + '">' + list.map(function (x) {
+          return '<option value="' + esc(x.id) + '"' + (x.id === cur ? " selected" : "") + ">" + esc(x.label) + "</option>";
+        }).join("") + "</select>";
+      };
+      var note = "";
+      if (perm === "denied") {
+        note = '<div class="vt-warn" style="margin:10px 0 0">Your browser is blocking the microphone for this site. Allow it in the padlock menu in the address bar, then choose Refresh devices.</div>';
+      } else if (perm === "unsupported") {
+        note = '<div class="vt-warn" style="margin:10px 0 0">This browser cannot open a microphone. Use Chrome or Edge to call from the browser.</div>';
+      } else if (perm !== "granted") {
+        note = '<div class="vt-hint" style="margin:10px 0 0">Allow the microphone when your browser asks, so your headset can be named and tested here.</div>';
+      }
+      host.innerHTML = '<div class="vt-card" style="margin-top:12px"><h3>Headset</h3>' +
+        '<div class="vt-hint" style="margin:0 0 12px">Pick the headset you will speak and listen through, then test it. This is the device your candidate calls use.</div>' +
+        '<div class="vt-form-grid">' +
+          '<div class="vt-field"><label>Microphone</label>' + sel("clMic", d.mics || [], d.micId, "No microphone found") + "</div>" +
+          '<div class="vt-field"><label>Speaker or headset</label>' + sel("clSpk", d.speakers || [], d.speakerId, "Browser default") + "</div>" +
+        "</div>" +
+        '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">' +
+          '<button class="vt-btn vt-btn-ghost" id="clMicTest" type="button">Test microphone</button>' +
+          '<button class="vt-btn vt-btn-ghost" id="clDevRefresh" type="button">Refresh devices</button>' +
+          '<div id="clMicMeter" style="flex:1;min-width:160px;height:8px;border-radius:4px;background:var(--border);overflow:hidden">' +
+            '<div id="clMicFill" style="height:100%;width:0%;background:var(--ok);transition:width .1s linear"></div></div>' +
+        "</div>" +
+        '<div id="clMicMsg" style="font-size:12.5px;color:var(--text-dim);margin-top:8px">' +
+          (micTestStop ? "Speak now. The bar moves with your voice." : "") + "</div>" +
+        note + "</div>";
+
+      var micSel = $("#clMic"), spkSel = $("#clSpk");
+      if (micSel) micSel.addEventListener("change", function () {
+        if (eng.setMic) eng.setMic(this.value);
+        if (micTestStop) { stopMicTest(); startMicTest(); } // retest on the new device
+      });
+      if (spkSel) spkSel.addEventListener("change", function () { if (eng.setSpeaker) eng.setSpeaker(this.value); });
+      $("#clDevRefresh").addEventListener("click", function () {
+        var self = this; self.disabled = true;
+        eng.ensureMicPermission().then(eng.refreshDevices).then(function () { paintAudio(); })
+          .catch(function () { self.disabled = false; });
+      });
+      $("#clMicTest").addEventListener("click", function () {
+        if (micTestStop) { stopMicTest(); paintAudio(); return; }
+        startMicTest();
+      });
+      if (micTestStop) $("#clMicTest").textContent = "Stop test";
+    }
+    function startMicTest() {
+      var eng = audioEngine(); if (!eng || !eng.testMic) return;
+      var st = eng.getState ? eng.getState() : {};
+      var chosen = ($("#clMic") || {}).value || (st.devices && st.devices.micId) || "";
+      var peak = 0;
+      micTestStop = eng.testMic(chosen, function (level, err) {
+        var fill = $("#clMicFill"), msg = $("#clMicMsg");
+        if (!fill) { stopMicTest(); return; }
+        if (err) {
+          fill.style.width = "0%";
+          if (msg) { msg.style.color = "var(--danger)"; msg.textContent = "That microphone could not be opened. Pick another device, or allow the microphone for this site."; }
+          stopMicTest();
+          return;
+        }
+        if (level > peak) peak = level;
+        fill.style.width = Math.round(level * 100) + "%";
+        fill.style.background = level > 0.02 ? "var(--ok)" : "var(--border)";
+        if (msg) {
+          msg.style.color = peak > 0.05 ? "var(--ok)" : "var(--text-dim)";
+          msg.textContent = peak > 0.05
+            ? "Your microphone is working. Choose Stop test when you are done."
+            : "Speak now. The bar moves with your voice.";
+        }
+      });
+      var btn = $("#clMicTest"); if (btn) btn.textContent = "Stop test";
+      var msg = $("#clMicMsg"); if (msg) { msg.style.color = "var(--text-dim)"; msg.textContent = "Speak now. The bar moves with your voice."; }
+    }
+    function loadAudio() {
+      var eng = audioEngine();
+      paintAudio();
+      if (!eng || !eng.ensureMicPermission) return;
+      eng.ensureMicPermission().then(function () { return eng.refreshDevices(); }).then(paintAudio).catch(function () {});
     }
 
     /* ---- dialer + recording-consent gate ---- */
@@ -16619,6 +16721,7 @@
       }).catch(function () {});
     }
     loadToken();
+    loadAudio();
     paintDialer();
     loadSettings();
     loadHistory();

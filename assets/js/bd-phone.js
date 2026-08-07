@@ -73,6 +73,7 @@
     devices: { mics: [], speakers: [], micId: "", speakerId: "" },
     endedInfo: null,       // {callId, status} shown briefly after hangup
     micLevel: 0,           // live input level 0..1 while a call is active
+    micPermission: "unknown", // unknown | granted | denied | error | unsupported
   };
   var subs = [];
   function emit() {
@@ -428,16 +429,99 @@
   }
 
   /* ---------------- devices ---------------- */
+  /**
+   * Ask for the mic once. Until the browser grants it, enumerateDevices returns
+   * entries with blank labels, so a headset is indistinguishable from the
+   * built-in mic and no picker can be honest about what is selected.
+   */
+  function ensureMicPermission() {
+    if (S.micPermission === "granted") return Promise.resolve(true);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      S.micPermission = "unsupported"; emit();
+      return Promise.resolve(false);
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      S.micPermission = "granted"; emit();
+      return true;
+    }, function () {
+      S.micPermission = "denied"; emit();
+      return false;
+    });
+  }
+  /**
+   * List audio devices. Prefers the SDK's view once it is connected, and falls
+   * back to the browser's own enumeration so the picker works on a page where
+   * the softphone has not finished registering yet.
+   */
   function refreshDevices() {
-    if (!client) return;
-    Promise.all([
-      client.getAudioInDevices ? client.getAudioInDevices() : Promise.resolve([]),
-      client.getAudioOutDevices ? client.getAudioOutDevices() : Promise.resolve([]),
-    ]).then(function (r) {
-      S.devices.mics = (r[0] || []).map(function (d) { return { id: d.deviceId, label: d.label || "Microphone" }; });
-      S.devices.speakers = (r[1] || []).map(function (d) { return { id: d.deviceId, label: d.label || "Speaker" }; });
+    var viaSdk = client && client.getAudioInDevices
+      ? Promise.all([
+          client.getAudioInDevices(),
+          client.getAudioOutDevices ? client.getAudioOutDevices() : Promise.resolve([]),
+        ]).then(function (r) { return { mics: r[0] || [], speakers: r[1] || [] }; })
+      : Promise.reject();
+    return viaSdk.catch(function () {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return { mics: [], speakers: [] };
+      return navigator.mediaDevices.enumerateDevices().then(function (all) {
+        return {
+          mics: all.filter(function (d) { return d.kind === "audioinput"; }),
+          speakers: all.filter(function (d) { return d.kind === "audiooutput"; }),
+        };
+      });
+    }).then(function (r) {
+      S.devices.mics = (r.mics || []).map(function (d, i) { return { id: d.deviceId, label: d.label || ("Microphone " + (i + 1)) }; });
+      S.devices.speakers = (r.speakers || []).map(function (d, i) { return { id: d.deviceId, label: d.label || ("Speaker " + (i + 1)) }; });
       emit();
-    }).catch(function () {});
+      return S.devices;
+    }).catch(function () { return S.devices; });
+  }
+  /**
+   * Open the chosen mic and report its live input level until the returned stop
+   * function runs. This is how a recruiter proves the headset is the device the
+   * call will actually use, before dialing a candidate.
+   */
+  function testMic(deviceId, onLevel) {
+    var stopped = false, stream = null, timer = null, src = null, analyser = null;
+    function stop() {
+      stopped = true;
+      if (timer) { clearInterval(timer); timer = null; }
+      try { if (src) src.disconnect(); } catch (e) {}
+      try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      stream = null; src = null; analyser = null;
+    }
+    var want = deviceId ? { deviceId: { exact: deviceId } } : true;
+    var p = (navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+      ? navigator.mediaDevices.getUserMedia({ audio: want })
+      : Promise.reject(new Error("unsupported"));
+    p.then(function (s) {
+      if (stopped) { try { s.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} return; }
+      stream = s;
+      S.micPermission = "granted"; emit();
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      // A tab that was never interacted with keeps the context suspended, which
+      // would read as a dead mic rather than a silent one.
+      try { if (audioCtx.state === "suspended" && audioCtx.resume) audioCtx.resume(); } catch (e) {}
+      src = audioCtx.createMediaStreamSource(s);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      var buf = new Uint8Array(analyser.frequencyBinCount);
+      timer = setInterval(function () {
+        if (!analyser) return;
+        analyser.getByteTimeDomainData(buf);
+        var peak = 0;
+        for (var i = 0; i < buf.length; i += 4) {
+          var v = Math.abs(buf[i] - 128) / 128;
+          if (v > peak) peak = v;
+        }
+        try { onLevel(Math.min(1, peak * 1.6), null); } catch (e) {}
+      }, 100);
+    }, function (err) {
+      S.micPermission = (err && err.name === "NotAllowedError") ? "denied" : "error"; emit();
+      try { onLevel(0, err || new Error("mic_unavailable")); } catch (e) {}
+    });
+    return stop;
   }
   function setMic(id) {
     S.devices.micId = id;
@@ -731,6 +815,8 @@
     setMic: setMic,
     setSpeaker: setSpeaker,
     refreshDevices: refreshDevices,
+    ensureMicPermission: ensureMicPermission,
+    testMic: testMic,
     refreshSummary: refreshSummary,
     takeLeader: takeLeader,
     requestNotifications: requestNotifications,
