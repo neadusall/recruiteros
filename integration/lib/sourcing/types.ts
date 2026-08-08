@@ -329,6 +329,16 @@ export interface SourcingRun {
     /** Last failure (kept for ops visibility); cleared on a clean send. */
     error?: string;
     /**
+     * When this run FIRST hit an unreachable OS Text engine in the current
+     * outage; cleared the moment a send gets through. An engine that is down is
+     * an infrastructure fact, not a verdict on this run, so while the outage is
+     * young the failed pushes do not spend the run's retry budget (see
+     * autoflow.OUTAGE_GRACE_MS). The stamp is what keeps that refund bounded:
+     * an engine that has been unreachable for a day is genuinely broken, and
+     * from then on the run parks with its reason instead of retrying forever.
+     */
+    outageSince?: string;
+    /**
      * Last time the parity backfill lane acted on this run. The parity lane
      * covers what the fresh-window sweeper won't (lists idle past FRESH_MS,
      * runs parked by MAX_ATTEMPTS) so no phone-bearing list ever stays out of

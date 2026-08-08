@@ -13,7 +13,7 @@
  *      a ledger-less run, so the new rows never got phones or an OS Text push.
  */
 
-import { due, parityDue } from "./autoflow";
+import { due, parityDue, isEngineOutage } from "./autoflow";
 import type { SourcingRun } from "./types";
 
 const NOW = Date.parse("2026-07-20T12:00:00Z");
@@ -426,6 +426,64 @@ check("stale sent-with-ostext_not_connected list holding phones -> parity due",
     candidates: [enriched()], updatedAt: new Date(NOW - 30 * DAY).toISOString(),
     autoflow: { sentAt: new Date(NOW - 30 * DAY).toISOString(), phonesAtSend: 1, attempts: 1, error: "ostext_not_connected: sent to Candidates only" },
   }), NOW), true);
+
+/* --- engine outages must not spend a run's rescue budget (2026-08-07) --------
+ * A routine ~15-minute taltxt restart parked three healthy lists at 20/20, and
+ * the rescue pass that fired inside that window stamped parityAt, failed against
+ * the down engine, and locked the only lane that re-opens a parked run out for
+ * 20 hours. The engine came back within the hour; the lists stayed stranded with
+ * empty campaigns while the card read "retrying" and the log read "all in parity".
+ */
+const OUTAGE = "Could not reach the OS Text engine at http://taltxt:3000/ostext-app — TypeError: fetch failed";
+
+check("isEngineOutage: the bridge's unreachable message", isEngineOutage(OUTAGE), true);
+check("isEngineOutage: the bridge's older container-is-up message",
+  isEngineOutage("Could not reach the OS Text engine. Check that the taltxt container is up."), true);
+check("isEngineOutage: a real per-run rejection is NOT an outage",
+  isEngineOutage("preflight: every contact is missing a first name"), false);
+check("isEngineOutage: no error at all", isEngineOutage(undefined), false);
+
+// THE INCIDENT: parked by an outage, rescue-locked minutes ago -> still due.
+check("parked by an engine outage, parity-tried 20min ago -> parity due anyway",
+  parityDue(run({
+    candidates: [enriched()], promotedCount: 1,
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, peopleAtSend: 1,
+      attempts: 20, error: OUTAGE, parityAt: new Date(NOW - 20 * MIN).toISOString(),
+    },
+  }), NOW), true);
+
+// ...and the same run an hour into a healthy engine is still due until it lands.
+check("...still due 19h later while the error stands",
+  parityDue(run({
+    candidates: [enriched()], promotedCount: 1,
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, peopleAtSend: 1,
+      attempts: 20, error: OUTAGE, parityAt: new Date(NOW - 19 * HOUR).toISOString(),
+    },
+  }), NOW), true);
+
+// The rate limit still binds for failures that ARE about this run: those repeat
+// identically on every pass, so one attempt per day is exactly right.
+check("parked by a preflight block, parity-tried 20min ago -> NOT due (lockout holds)",
+  parityDue(run({
+    candidates: [enriched()], promotedCount: 1,
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, peopleAtSend: 1,
+      attempts: 20, error: "preflight: every contact is missing a first name",
+      parityAt: new Date(NOW - 20 * MIN).toISOString(),
+    },
+  }), NOW), false);
+
+// An outage on a list with nobody textable is still nothing to rescue.
+check("outage-parked run with no deliverable phone -> not parity due",
+  parityDue(run({
+    candidates: [cand()], promotedCount: 1,
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 0, peopleAtSend: 1,
+      attempts: 20, error: OUTAGE, parityAt: new Date(NOW - 20 * MIN).toISOString(),
+    },
+  }), NOW), false);
 
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
 console.log("\nall green");

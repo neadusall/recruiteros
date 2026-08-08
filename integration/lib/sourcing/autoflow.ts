@@ -52,6 +52,20 @@ const TOPUP_DEBOUNCE_MS = 10 * 60_000; // let a live Boost/gap-fill run accumula
 const MAX_SENDS_PER_TICK = 3;      // bound one tick's work; the rest go next tick
 const RESUME_REARM_MS = 60 * 60_000; // a resume that itself wedged becomes retryable again
 const MAX_RESUMES = 6;             // ...but a chain that will never finish stops asking
+const OUTAGE_GRACE_MS = 24 * 3600_000; // an engine down THIS long stops being "transient"
+
+/**
+ * Was this failure the OS Text ENGINE being unreachable, rather than anything
+ * about this run?
+ *
+ * Matched on the bridge's own message (lib/ostextImport builds exactly this
+ * prefix for both ostext_unreachable and ostext_timeout) rather than on the
+ * error code, because only the MESSAGE is stamped onto the run — which also
+ * means runs parked by an older build are recognized and healed.
+ */
+export function isEngineOutage(err: string | undefined): boolean {
+  return Boolean(err && err.startsWith("Could not reach the OS Text engine"));
+}
 
 function phoneCount(run: SourcingRun): number {
   return run.candidates.reduce((n, c) => n + (c.phone ? 1 : 0), 0);
@@ -471,6 +485,7 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     stamp.peopleAtSend = peopleNow;
     stamp.sentSignature = signatureNow;
     if (stamp.error?.startsWith("ostext_not_connected") !== true) stamp.error = undefined;
+    stamp.outageSince = undefined; // a send got through: whatever outage there was is over
     console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) sent on: ${run.candidates.length} to Candidates, ${contacts.length} phone(s) to OS Text${topup ? " (top-up)" : ""}`);
     // Tell the desk that owns this list RIGHT NOW: new candidates just landed and
     // are waiting for their first outreach. Recipient = the recruiter who ran the
@@ -482,6 +497,22 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     } catch { /* delivery is best-effort */ }
   } catch (e) {
     stamp.error = (e as Error).message?.slice(0, 300) || "send failed";
+    // AN OUTAGE IS NOT AN ATTEMPT. The retry budget exists to stop a run whose
+    // OWN push keeps failing; an engine that is down fails every run equally and
+    // has nothing to do with this one. Counting it burned all 20 attempts of
+    // three healthy lists during a routine ~15-minute taltxt restart and parked
+    // them (2026-08-07), so a failure that never reached the engine refunds the
+    // attempt it just spent. Bounded by OUTAGE_GRACE_MS measured from the FIRST
+    // failure of the outage: a container restart never costs a list its budget,
+    // while an engine that has been unreachable for a day resumes burning
+    // attempts and parks with its reason, as it should.
+    if (isEngineOutage(stamp.error)) {
+      stamp.outageSince = stamp.outageSince || nowIso();
+      const since = Date.parse(stamp.outageSince);
+      if (!Number.isFinite(since) || Date.now() - since < OUTAGE_GRACE_MS) {
+        stamp.attempts = Math.max(0, stamp.attempts - 1);
+      }
+    }
     console.error(`[sourcing-autoflow] "${run.name}" (${run.id}) attempt ${stamp.attempts} failed: ${stamp.error}`);
   }
   run.autoflow = stamp;
@@ -570,7 +601,17 @@ export function parityDue(run: SourcingRun, now: number): boolean {
     (run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS;
   if (!staleOrParked) return false; // the fresh-window lane owns this run
   const parityAt = run.autoflow?.parityAt ? Date.parse(run.autoflow.parityAt) : NaN;
-  if (Number.isFinite(parityAt) && now - parityAt < PARITY_RETRY_MS) return false;
+  // The once-per-day stamp rate-limits REAL attempts. A parity send that died
+  // because the engine was unreachable was never an attempt at all — it could
+  // not have worked for any run — so it must not spend the whole day's rescue.
+  // Without this, a rescue pass that happened to land inside a 15-minute taltxt
+  // restart stamped parityAt, failed, and locked the ONLY lane that re-opens a
+  // parked run out for 20 hours, leaving the list stranded long after the engine
+  // was healthy again (2026-08-07: three lists parked at 20/20 with their
+  // campaigns empty, while the card said "retrying" and the log said "all runs
+  // in parity"). The lane is still bounded — it runs once per PARITY_EVERY_MS.
+  const lockedOut = Number.isFinite(parityAt) && now - parityAt < PARITY_RETRY_MS;
+  if (lockedOut && !isEngineOutage(run.autoflow?.error)) return false;
   if (!run.autoflow?.sentAt) return true;                       // never sent at all
   if (phoneCount(run) > run.autoflow.phonesAtSend) return true; // phones OS Text never got
   // People a later merge added who never reached Candidates (no phone required).

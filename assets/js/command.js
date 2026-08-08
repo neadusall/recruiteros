@@ -13656,6 +13656,14 @@
           var afErr = (r.autoflow && r.autoflow.error) || "";
           var afNotConn = afErr.indexOf("ostext_not_connected") === 0;
           var sentOk = !!(r.autoflow && r.autoflow.sentAt);
+          // "Retrying" has to MEAN retrying. The server stops after 20 failed
+          // attempts and parks the list; this strip claimed "send issue · retrying"
+          // either way, so a list that had given up hours ago still read as busy
+          // healing itself and nobody was told to look (2026-08-07). An outage —
+          // the engine itself unreachable — is the one failure the server keeps
+          // working on by itself, so it is the one that may still say "retrying".
+          var afOutage = afErr.indexOf("Could not reach the OS Text engine") === 0;
+          var afParked = !afOutage && (r.autoflow && r.autoflow.attempts >= 20);
           // Each stop: state class (jt-done / jt-live / jt-act / jt-wait), a dot
           // (check, pulsing loop, alert "!", or the grey step number), a bold label,
           // and its own one-line detail. linkId turns the stop into the open link.
@@ -13766,6 +13774,10 @@
           var sText;
           if (afNotConn) sText = jStop("jt-act", jIcons.alert, "OS Text", "not connected · see Setup",
             "This list reached Candidates, but this workspace has no OS Text engine connected, so no text campaign was created. Connect OS Text under Setup (or have the owner grant access); the phones on this list are then pushed automatically within a few minutes.");
+          else if (afParked) sText = jStop("jt-act", jIcons.alert, "OS Text", "send stopped · needs a look",
+            "The automatic send failed enough times in a row that it stopped trying, so this list's text campaign does not hold its contacts. Nothing you press here will change that — send your admin this list's name and ask them to check the OS Text send logs. The reason recorded was: " + afErr);
+          else if (afOutage) sText = jStop("jt-act", jIcons.alert, "OS Text", "engine unreachable · retrying",
+            "The OS Text engine could not be reached when this list was pushed — usually the engine restarting through an update. The send retries by itself and no attempts are lost while the engine is down. If this is still here tomorrow, ask your admin to check that the OS Text engine is up.");
           else if (afErr) sText = jStop("jt-act", jIcons.alert, "OS Text", "send issue · retrying",
             "The automatic send of this list hit a problem. It keeps retrying on its own; if this stays up for more than an hour, ask your admin to check the send logs.");
           else if (sentOk && behindN) sText = jStop("jt-live", jIcons.msg, "OS Text", "topping up " + behindN + " more",
@@ -13778,6 +13790,8 @@
             "A text campaign is built automatically from everyone with a phone number once the list is sent.");
           if (!jNote) {
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
+            else if (afParked) jNote = "<b>Stopped trying:</b> the automatic send failed too many times in a row, so this list's text campaign does not hold its contacts and nothing is retrying. Send your admin this list's name and ask them to check the OS Text send logs.";
+            else if (afOutage) jNote = "<b>Waiting on the engine:</b> OS Text could not be reached when this list was pushed, usually the engine restarting through an update. It retries by itself and loses no attempts while the engine is down; if this is still here tomorrow, ask your admin.";
             else if (afErr) jNote = "The automatic send hit a problem and keeps retrying on its own. If this stays up for more than an hour, ask your admin.";
             else if (behindN) jNote = "<b>Catching up:</b> " + behindN + " of the " + wantN +
               " people this list would contact were added after the last push and have not gone over to Candidates and OS Text yet. The sweep picks them up within a few minutes on its own — hold off launching the campaign until this reads " + wantN + ".";
