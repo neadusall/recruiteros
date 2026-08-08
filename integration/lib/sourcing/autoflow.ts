@@ -240,6 +240,18 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
     // only after ostextConfiguredFor(ws) turns true, so it never spins while
     // unconnected (2026-07-20 incident: Lume lists silently stamped sent-with-error).
     if (run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0) return "ostext-retry";
+    // ...and so does ANY other failed OS Text leg. A transient engine outage (the
+    // taltxt container restarting through a deploy — 2026-08-07) stamps a generic
+    // error, and NOTHING re-armed it: the Candidates leg had already succeeded so
+    // promotedCount is caught up, sentSignature never gets stamped because the send
+    // threw before reaching it, and phonesAtSend can even sit ABOVE the current
+    // deliverable phone count once the quality bar and the radius exclude some
+    // phone-holders — which kills the morePhones trigger too. The list was left
+    // holding a campaign that never received its contacts, with no lane able to see
+    // it. Bounded by MAX_ATTEMPTS, so an engine that is genuinely broken parks with
+    // its reason instead of retrying forever.
+    if (run.autoflow.error && run.autoflow.attempts < MAX_ATTEMPTS &&
+        deliverableRows(run).some((c) => c.phone)) return "ostext-retry";
     return null;
   }
   if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;

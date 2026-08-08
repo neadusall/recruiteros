@@ -253,6 +253,45 @@ check("one below-bar row plus a qualified one never delivered -> topup",
     autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 3, attempts: 1 },
   }), NOW), "topup");
 
+// A FAILED OS TEXT LEG re-arms on its own. 2026-08-07: the engine container
+// restarted through a deploy, the send stamped a generic "could not reach"
+// error, and every other trigger was already satisfied — Candidates had been
+// promoted, so promotedCount was caught up; the signature was never stamped
+// because the send threw first; and phonesAtSend (190, from before the quality
+// bar) sat ABOVE the current deliverable phone count (164), so morePhones was
+// dead too. The list held a campaign that never got its contacts and no lane
+// could see it.
+check("generic OS Text failure with deliverable phones -> retry",
+  due(run({
+    candidates: [enriched(), enriched()], promotedCount: 2,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: {
+      sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 10, error: "Could not reach the OS Text engine. Check that the taltxt container is up.",
+    },
+  }), NOW), "ostext-retry");
+// ...but an engine that is genuinely broken parks instead of retrying forever.
+check("...same but the attempt budget is spent -> park with the reason",
+  due(run({
+    candidates: [enriched(), enriched()], promotedCount: 2,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: {
+      sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 20, error: "Could not reach the OS Text engine. Check that the taltxt container is up.",
+    },
+  }), NOW), null);
+// A failure on a list with nobody textable is not an OS Text retry — there is
+// nothing to re-push, so it must not burn the attempt budget.
+check("...same failure but no deliverable phone -> no retry",
+  due(run({
+    candidates: [cand(), cand({ phone: "+15551230000", fitScore: 10 })], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: {
+      sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 10, error: "Could not reach the OS Text engine. Check that the taltxt container is up.",
+    },
+  }), NOW), null);
+
 // Membership churn with IDENTICAL totals: a combine that deduped one person away
 // and added a different one. Both counters match; the signature doesn't.
 check("same counts, different people -> topup",
