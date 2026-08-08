@@ -615,9 +615,11 @@ export function parityDue(run: SourcingRun, now: number): boolean {
   // Without this, a rescue pass that happened to land inside a 15-minute taltxt
   // restart stamped parityAt, failed, and locked the ONLY lane that re-opens a
   // parked run out for 20 hours, leaving the list stranded long after the engine
-  // was healthy again (2026-08-07: three lists parked at 20/20 with their
-  // campaigns empty, while the card said "retrying" and the log said "all runs
-  // in parity"). The lane is still bounded — it runs once per PARITY_EVERY_MS.
+  // was healthy again (2026-08-07: three lists parked at 20/20 while the card
+  // said "retrying" and the log said "all runs in parity"). What that costs is
+  // not the contacts an earlier push already delivered — it is every top-up from
+  // then on: a parked run is unreachable by both lanes, so newly-enriched phones
+  // never reach the campaign again. The lane stays bounded by PARITY_EVERY_MS.
   const lockedOut = Number.isFinite(parityAt) && now - parityAt < PARITY_RETRY_MS;
   if (lockedOut && !isEngineOutage(run.autoflow?.error)) return false;
   if (!run.autoflow?.sentAt) return true;                       // never sent at all

@@ -13775,7 +13775,7 @@
           if (afNotConn) sText = jStop("jt-act", jIcons.alert, "OS Text", "not connected · see Setup",
             "This list reached Candidates, but this workspace has no OS Text engine connected, so no text campaign was created. Connect OS Text under Setup (or have the owner grant access); the phones on this list are then pushed automatically within a few minutes.");
           else if (afParked) sText = jStop("jt-act", jIcons.alert, "OS Text", "send stopped · needs a look",
-            "The automatic send failed enough times in a row that it stopped trying, so this list's text campaign does not hold its contacts. Nothing you press here will change that — send your admin this list's name and ask them to check the OS Text send logs. The reason recorded was: " + afErr);
+            "The automatic send failed enough times in a row that it stopped trying. Whatever an earlier send delivered is still in the campaign, but nothing new will reach it — anyone enrichment finds from here on stays out. Nothing you press here will change that: send your admin this list's name and ask them to check the OS Text send logs. The reason recorded was: " + afErr);
           else if (afOutage) sText = jStop("jt-act", jIcons.alert, "OS Text", "engine unreachable · retrying",
             "The OS Text engine could not be reached when this list was pushed — usually the engine restarting through an update. The send retries by itself and no attempts are lost while the engine is down. If this is still here tomorrow, ask your admin to check that the OS Text engine is up.");
           else if (afErr) sText = jStop("jt-act", jIcons.alert, "OS Text", "send issue · retrying",
@@ -13790,7 +13790,7 @@
             "A text campaign is built automatically from everyone with a phone number once the list is sent.");
           if (!jNote) {
             if (afNotConn) jNote = "<b>One step left:</b> everyone is in Candidates, but no OS Text engine is connected, so the text campaign is waiting. Connect OS Text under Setup and the phones push over by themselves.";
-            else if (afParked) jNote = "<b>Stopped trying:</b> the automatic send failed too many times in a row, so this list's text campaign does not hold its contacts and nothing is retrying. Send your admin this list's name and ask them to check the OS Text send logs.";
+            else if (afParked) jNote = "<b>Stopped trying:</b> the automatic send failed too many times in a row and nothing is retrying. What an earlier send delivered is still in the campaign, but nobody new will reach it. Send your admin this list's name and ask them to check the OS Text send logs.";
             else if (afOutage) jNote = "<b>Waiting on the engine:</b> OS Text could not be reached when this list was pushed, usually the engine restarting through an update. It retries by itself and loses no attempts while the engine is down; if this is still here tomorrow, ask your admin.";
             else if (afErr) jNote = "The automatic send hit a problem and keeps retrying on its own. If this stays up for more than an hour, ask your admin.";
             else if (behindN) jNote = "<b>Catching up:</b> " + behindN + " of the " + wantN +
