@@ -33,7 +33,7 @@ import {
   listReceipts, addManualReceipt, updateReceipt, deleteReceipt,
   billingMailboxes, startHarvest, harvestState, lastSweeps, lastSweepAt,
   pullerStates, lastPullerReportAt, renderMissingShots, repairVault, vaultHealth,
-  collapseToOnePerCell, collapseToOnePerCellOnce, purgeJunkEmail, purgeJunkEmailOnce, attachDocument,
+  collapseToOnePerCell, purgeJunkEmail, purgeJunkEmailOnce, attachDocument,
   type Receipt,
 } from "../../../../lib/owner/receipts";
 import { buildSpendMatrix, sourcingStatus, withinRegister, REGISTER_START_MONTH } from "../../../../lib/owner/spendMatrix";
@@ -57,14 +57,13 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const months = Number(new URL(req.url).searchParams.get("months")) || 12;
 
-  /* One-shot: the first time this grid is opened after the one-per-cell cleanup shipped,
-     collapse any cell a wide sweep left stacked down to its single best receipt, then never
-     again (a persisted flag guards it). This is what turns "clean it up" into something that
-     happens on the owner's next page load without a button press — and being one-shot, it
-     can never touch a second charge the owner re-adds by hand later. */
-  await collapseToOnePerCellOnce().catch(() => {});
+  /* NOTE: the grid does NOT auto-collapse stacked cells. Two receipts filed for one vendor in
+     one month are two charges until the owner says otherwise — merging them on page load
+     silently destroyed the second one, so it was removed. Collapsing to one receipt per cell
+     is now ONLY the explicit "Keep one receipt per cell" button (collapseToOnePerCell), a
+     deliberate, confirmed press. */
 
-  /* Same one-shot shape for the marketing that got filed as receipts: the first grid load
+  /* One-shot: the first grid load
      after the strict classifier shipped re-judges every email-harvested receipt under it
      and takes out the ones that were never receipts (job alerts as LinkedIn, Prime Day as
      AWS, deal blasts as TidyCal). Fingerprint-dismissed on the way out, so no sweep can

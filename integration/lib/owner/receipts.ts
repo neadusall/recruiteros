@@ -2045,11 +2045,12 @@ export async function purgeJunkEmail(opts: { dryRun?: boolean } = {}): Promise<{
 }
 
 /**
- * Run the junk purge ONCE, on the next grid load after this ships, then remember it did —
- * same shape as collapseToOnePerCellOnce, and for the same reason: the cleanup needs no
- * button press and no SSH, and being one-shot it can never re-delete something the owner
- * later re-adds by hand. The nightly sweep cannot refile any of it, because the same
- * classifier that judged it here now refuses those messages at the door.
+ * Run the junk purge ONCE, on the next grid load after this ships, then remember it did: the
+ * cleanup needs no button press and no SSH, and being one-shot it can never re-delete
+ * something the owner later re-adds by hand. Unlike the removed one-per-cell auto-collapse,
+ * this only takes out messages that were never receipts — it never merges two real charges.
+ * The nightly sweep cannot refile any of it, because the same classifier that judged it here
+ * now refuses those messages at the door.
  */
 export async function purgeJunkEmailOnce(): Promise<{ removed: number; repaired: number; ran: boolean }> {
   await ensureReceiptsReady();
@@ -2282,21 +2283,11 @@ export async function collapseToOnePerCell(): Promise<{ removed: number; cells: 
   return { removed, cells };
 }
 
-/**
- * Run the one-per-cell collapse ONCE, ever, then remember it did. The Spend master grid
- * calls this on load so a vault a wide sweep left stacked cleans itself the first time the
- * owner opens the page after this shipped — no button press, no SSH. The flag makes it a
- * one-shot: every later load is a no-op, so a second charge the owner re-adds by hand is
- * never touched. Returns what it removed (zero on every run after the first).
- */
-export async function collapseToOnePerCellOnce(): Promise<{ removed: number; cells: number; ran: boolean }> {
-  await ensureReceiptsReady();
-  if (store.onePerCellRunAt) return { removed: 0, cells: 0, ran: false };
-  const res = await collapseToOnePerCell();
-  store.onePerCellRunAt = nowIso();
-  persist();
-  return { ...res, ran: true };
-}
+/* Removed: collapseToOnePerCellOnce(). Collapsing stacked cells used to run automatically on
+   the first grid load, which silently merged two genuinely separate charges into one and
+   deleted the loser. Combining is now only ever the explicit "Keep one receipt per cell"
+   button (collapseToOnePerCell). The persisted `onePerCellRunAt` flag is left untouched so
+   existing vaults keep it harmlessly; nothing reads it any more. */
 
 /** What the console needs to know about whether the vault is tidy, without changing it. */
 export async function vaultHealth(): Promise<{ unlinked: number; duplicates: number; linkable: number }> {
