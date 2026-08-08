@@ -374,6 +374,31 @@ check("sent list idle 30 days, people grew after send -> parity due",
     autoflow: { sentAt: new Date(NOW - 30 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 1, attempts: 1 },
   }), NOW), true);
 
+// A run PARKED at MAX_ATTEMPTS by a failing OS Text leg must be visible to the
+// parity lane — that lane is the one that re-opens the attempt budget, so it is
+// the only way back for a list whose engine outage outlasted 20 attempts. Before
+// this, such a run reported "in parity" while its campaign held none of its
+// contacts (2026-08-07).
+check("parked by a failed OS Text push, still has textable people -> parity due",
+  parityDue(run({
+    candidates: [enriched(), enriched()], promotedCount: 2,
+    updatedAt: new Date(NOW - 10 * MIN).toISOString(),
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 20, error: "Could not reach the OS Text engine at http://taltxt:3000/ostext-app — TimeoutError",
+    },
+  }), NOW), true);
+// ...but not when there is nobody left to text: re-pushing would achieve nothing.
+check("...same but nobody deliverable holds a phone -> not parity due",
+  parityDue(run({
+    candidates: [cand(), cand({ phone: "+15551230000", fitScore: 10 })], promotedCount: 1,
+    updatedAt: new Date(NOW - 10 * MIN).toISOString(),
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 20, error: "Could not reach the OS Text engine at http://taltxt:3000/ostext-app — TimeoutError",
+    },
+  }), NOW), false);
+
 // Gap 2: MAX_ATTEMPTS-parked runs re-enter through the parity lane...
 check("fresh but parked at 20 attempts -> parity due",
   parityDue(run({ candidates: [enriched()], autoflow: { phonesAtSend: 0, attempts: 20 } }), NOW), true);

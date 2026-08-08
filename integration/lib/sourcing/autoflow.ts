@@ -578,7 +578,15 @@ export function parityDue(run: SourcingRun, now: number): boolean {
   // ...and the counter-blind cases: Candidates short of the list, or a set that
   // changed membership without changing the totals.
   if (deliveryBehind(run)) return true;
-  return Boolean(run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0);
+  if (run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0) return true;
+  // A push that failed for ANY reason, on a run that still has someone textable,
+  // is out of parity too. Parking at MAX_ATTEMPTS is precisely how such a run
+  // arrives in this lane, and this lane is the one that re-opens the attempt
+  // budget — without this, the fresh lane's bounded retries were the only ones
+  // that ever ran, so an engine outage that outlasted 20 attempts stranded the
+  // list for good (2026-08-07: a parked list read "all runs in parity" while its
+  // campaign held none of its contacts).
+  return Boolean(run.autoflow.error) && deliverableRows(run).some((c) => c.phone);
 }
 
 let lastParity = 0;
