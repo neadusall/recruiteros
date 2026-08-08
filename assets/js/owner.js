@@ -1855,6 +1855,10 @@
          cell and drop the rest, so the grid reads one receipt per service per month. Only
          shown when there is actually something to trim. */
       (cellExtras(d) ? '<button class="btn btn-sm" id="rcOnePer" title="Keep the best receipt in each service-month cell and remove the extras. Add any real second charge back by hand.">Keep one receipt per cell (removes ' + cellExtras(d) + ')</button>' : "") +
+      /* Re-judge every email-harvested receipt under the current classifier and remove the
+         ones that were never receipts (marketing, notices, a salary line that carried a $).
+         Always offered — it previews the exact list before removing anything. */
+      '<button class="btn btn-sm" id="rcPurgeJunk" title="Re-check every filed receipt under the current rules and remove the ones that were never receipts — marketing, notices, salary lines. Shows the list first.">Remove junk</button>' +
       '</div></div>' +
       '<p class="note" style="margin-top:2px">Every charge the business makes, in one grid: subscriptions, one-time buys, credit top-ups, domains, pay-per-use, and anything that arrived with no line item behind it. Each row says which it is. <strong>View receipt</strong> opens the invoice itself, full size, ready to show an accountant; the month heading opens every receipt for that month in turn. Solid figures are proven by a receipt, faded figures are the register\'s estimate. <strong>Tick</strong> the receipts you want the client to see, then press <strong>Send</strong> in the bar at the foot of the grid. They appear on their Spending page straight away, each with its invoice behind it. Only charges already dated in the past can be sent.' +
       /* Where the books open. Said out loud so the missing earlier months read as a
@@ -2460,6 +2464,44 @@
           ? "Removed " + d.removed + " extra receipt" + (d.removed > 1 ? "s" : "") + " · one kept in each of " + d.cells + " cell" + (d.cells > 1 ? "s" : "")
           : "Every cell already had just one receipt");
         viewBurn();
+      });
+    });
+
+    /* Re-judge every email-harvested receipt under the current classifier and drop the ones
+       that were never receipts. It previews first — the owner sees the exact list and the
+       reason each is going before anything is removed — because unlike a stacked duplicate,
+       a wrongly-filed charge can look real at a glance. Removals are fingerprint-dismissed so
+       the next sweep cannot refile them. */
+    var pj = $("#rcPurgeJunk");
+    if (pj) pj.addEventListener("click", function () {
+      var was = pj.textContent;
+      pj.classList.add("disabled");
+      pj.textContent = "Checking…";
+      send("/owner/receipts", "POST", { action: "purgeJunk", dryRun: true }).then(function (r) {
+        var d = r.ok && r.data;
+        if (!d) { pj.classList.remove("disabled"); pj.textContent = was; toast("Could not check for junk"); return; }
+        var junk = d.charges || [];
+        if (!junk.length) {
+          pj.classList.remove("disabled"); pj.textContent = was;
+          toast("No junk found — every filed receipt still reads as a real charge");
+          return;
+        }
+        var sample = junk.slice(0, 8).map(function (c) {
+          return "· " + (c.vendor || "?") + (c.amountUsd != null ? " $" + Math.abs(c.amountUsd).toFixed(2) : "") + " — " + (c.why || "not a receipt");
+        }).join("\n");
+        var more = junk.length > 8 ? "\n…and " + (junk.length - 8) + " more" : "";
+        if (!confirm("Remove " + junk.length + " filed item" + (junk.length > 1 ? "s" : "") + " that are not receipts?\n\n" + sample + more + "\n\nEach is re-judged under the current rules and dismissed so a future sweep can't refile it. This cannot be undone (a fresh pull re-fetches anything still in the mailbox).")) {
+          pj.classList.remove("disabled"); pj.textContent = was;
+          return;
+        }
+        pj.textContent = "Removing…";
+        send("/owner/receipts", "POST", { action: "purgeJunk" }).then(function (r2) {
+          pj.classList.remove("disabled"); pj.textContent = was;
+          var d2 = r2.ok && r2.data;
+          if (!d2) { toast("Could not remove the junk"); return; }
+          toast("Removed " + d2.removed + " non-receipt" + (d2.removed === 1 ? "" : "s") + (d2.repaired ? " · fixed " + d2.repaired + " figure" + (d2.repaired === 1 ? "" : "s") : ""));
+          viewBurn();
+        });
       });
     });
 
