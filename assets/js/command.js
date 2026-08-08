@@ -5695,8 +5695,10 @@
           '<button type="button" class="hs-clear" data-act="sizeclear">Clear</button>' +
         "</div>" +
         '<div id="imqPreview" class="imq-preview hs-preview"></div>' +
+        '<div id="imqPresets" class="wl-presets"></div>' +
         '<div id="imqWatch" class="wl-wrap"></div>' +
         '<div id="imqTrial" class="ht-wrap"></div>' +
+        '<div id="imqVerticals" class="vt-wrap"></div>' +
         '<style>' +
           '.wl-wrap{margin-top:14px}' +
           '.wl-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}' +
@@ -5730,6 +5732,37 @@
           '@media (max-width:640px){.wl-stats{display:none}}' +
 
           /* ---- Head-to-head: Hire Signals vs news signals ---- */
+          /* Recommended verticals. Tier A and tier B are visually distinct because the
+             difference is not quality, it is whether the desk can honestly claim it. */
+          '.wl-presets{margin-top:14px}' +
+          '.wl-presets-card{border:1px solid var(--border,#e5e7eb);border-radius:14px;background:var(--card,#fff);padding:14px 16px}' +
+          '.wl-presets-h{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}' +
+          '.wl-presets-sub{font-size:12px;color:var(--muted,#6b7280);margin-top:4px;max-width:70ch;line-height:1.5}' +
+          '.wl-preset-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
+          '.wl-preset{display:flex;flex-direction:column;gap:2px;text-align:left;cursor:pointer;padding:8px 12px;border-radius:10px;' +
+            'border:1px solid var(--border,#e5e7eb);background:var(--surface,#f9fafb);color:var(--text,#111827);font:inherit}' +
+          '.wl-preset:hover{border-color:var(--brand,#4f46e5)}' +
+          '.wl-preset.ta{border-left:3px solid var(--brand,#4f46e5)}' +
+          '.wl-preset.tb{border-left:3px dashed var(--muted,#9ca3af)}' +
+          '.wl-preset-n{font-size:13px;font-weight:600}' +
+          '.wl-preset-m{font-size:11px;color:var(--muted,#6b7280)}' +
+          /* Per-vertical results. The reply column is intentionally blank until readable. */
+          '.vt-wrap{margin-top:16px}' +
+          '.vt-card{border:1px solid var(--border,#e5e7eb);border-radius:14px;background:var(--card,#fff);padding:16px 18px}' +
+          '.vt-sub{font-size:12px;color:var(--muted,#6b7280);margin-top:4px;max-width:78ch;line-height:1.5}' +
+          '.vt-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}' +
+          '.vt-table th{text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;' +
+            'color:var(--muted,#6b7280);padding:6px 10px 6px 0;border-bottom:1px solid var(--border,#e5e7eb)}' +
+          '.vt-table td{padding:8px 10px 8px 0;border-bottom:1px solid var(--border,#f3f4f6)}' +
+          '.vt-table tr:last-child td{border-bottom:0}' +
+          '.vt-arm{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:1px 6px;' +
+            'border-radius:999px;margin-right:6px;border:1px solid var(--border,#e5e7eb);color:var(--muted,#6b7280)}' +
+          '.vt-arm.news{border-color:var(--brand,#4f46e5);color:var(--brand,#4f46e5)}' +
+          '.vt-na{color:var(--muted,#9ca3af)}' +
+          '.vt-tag{font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap}' +
+          '.vt-tag.ok{background:rgba(16,185,129,.12);color:#047857}' +
+          '.vt-tag.mid{background:rgba(59,130,246,.12);color:#1d4ed8}' +
+          '.vt-tag.low{background:var(--surface,#f3f4f6);color:var(--muted,#6b7280)}' +
           '.ht-wrap{margin-top:16px}' +
           '.ht-card{border:1px solid var(--border,#e5e7eb);border-radius:14px;background:var(--card,#fff);padding:16px 18px}' +
           '.ht-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px}' +
@@ -6172,6 +6205,104 @@
         '</div>';
     }
 
+    /* ---------------- Recommended verticals ----------------
+       A watchlist has twelve fields and three of them decide whether it produces anything:
+       the segment string the feed actually returns companies for, which signals to hunt,
+       and which roles to research a boss for. Nobody guesses those right cold, so the
+       presets carry them, measured (scripts/selftest-news-capacity across 20 candidate
+       verticals). Tier A is defensible on a logistics desk today; tier B pays better and
+       supplies more but asserts a desk the firm may not be able to claim, which would turn
+       the pitch's specialization beat into filler. So tier B is never added by default. */
+    var imqPresets = null;
+    function loadPresets() {
+      send("/signals/watch", "POST", { action: "presets" }).then(function (r) {
+        if (r && r.ok) { imqPresets = (r.data && r.data.presets) || null; renderPresets(); }
+      }).catch(function () {});
+    }
+    function renderPresets() {
+      var el = host.querySelector("#imqPresets"); if (!el) return;
+      var ps = imqPresets;
+      if (!ps || !ps.length) { el.innerHTML = ""; return; }
+      var pending = ps.filter(function (p) { return !p.alreadyAdded; });
+      if (!pending.length) { el.innerHTML = ""; return; }   // all added: the panel has done its job
+      var tierA = pending.filter(function (p) { return p.tier === "a"; });
+
+      function chip(p) {
+        var cap = p.measuredCompanies30d >= 40 ? "40+" : String(p.measuredCompanies30d);
+        return '<button type="button" class="wl-preset t' + esc(p.tier) + '" data-act="presetadd" data-key="' + esc(p.key) + '" ' +
+          'title="' + esc(p.rationale + "  ·  " + cap + " companies in 30 days, " + p.namedPct + "% named  ·  " + p.newsSignals.join(", ").replace(/_/g, " ")) + '">' +
+          '<span class="wl-preset-n">' + esc(p.segment) + '</span>' +
+          '<span class="wl-preset-m">' + esc(cap) + ' co · ' + esc(String(p.namedPct)) + '% named</span>' +
+        '</button>';
+      }
+      el.innerHTML = '<div class="wl-presets-card">' +
+          '<div class="wl-presets-h">' +
+            '<div><b>Recommended verticals</b>' +
+              '<div class="wl-presets-sub">Measured over 30 days, not guessed. The number is distinct companies the news feed produced and the share of headlines that named one — a low name rate means most of the sweep is wasted. Tier B pays more but only add it if the desk can honestly claim it.</div>' +
+            '</div>' +
+            (tierA.length ? '<button type="button" class="btn" data-act="presetaddall" title="Add the three verticals defensible on a logistics and supply-chain desk today">Add tier A (' + tierA.length + ')</button>' : "") +
+          '</div>' +
+          '<div class="wl-preset-row">' + pending.map(chip).join("") + '</div>' +
+        '</div>';
+    }
+    function presetAdd(keys) {
+      send("/signals/watch", "POST", { action: "addPresets", keys: keys }).then(function (r) {
+        if (r && r.ok) {
+          var n = ((r.data && r.data.added) || []).length;
+          toast(n ? n + " vertical" + (n === 1 ? "" : "s") + " now watching. Hourly, capped at 10 companies a poll until you widen it." : "Already watching those.");
+          loadPresets(); loadWatch(); loadTrial(); loadVerticals();
+        } else { toast("Couldn’t add those verticals. Try again."); }
+      }).catch(function () { toast("Couldn’t add those verticals. Try again."); });
+    }
+
+    /* ---------------- Which vertical is working ----------------
+       Deliberately separate from the head-to-head above. That answers "jobs or news" once;
+       this answers "keep this segment on" every week. The trap it exists to prevent: reply
+       rate is the WRONG first screen for a vertical — six segments across two arms is twelve
+       cells, and each needs hundreds of sends before it beats noise. Supply, name rate and
+       reachability converge in days and kill the weak segments on their own. So each row
+       reports upstream screenability and reply-readability SEPARATELY, and never shows a
+       reply rate as meaningful before it is. */
+    var imqVerticals = null;
+    function loadVerticals() {
+      send("/signals/watch", "POST", { action: "listTrial" }).then(function (r) {
+        if (r && r.ok) { imqVerticals = (r.data && r.data.lists) || null; renderVerticals(); }
+      }).catch(function () {});
+    }
+    function renderVerticals() {
+      var el = host.querySelector("#imqVerticals"); if (!el) return;
+      var rows = imqVerticals;
+      if (!rows || !rows.length) { el.innerHTML = ""; return; }
+      var body = rows.map(function (f) {
+        var arm = f.arm === "news" ? "news" : "jobs";
+        // Reply rate is shown ONLY once the row has the sends to support it. Before that
+        // the cell says so, because a number here is what gets a vertical killed early.
+        var reply = f.replyReadable
+          ? '<b>' + (Number(f.replyRatePct) || 0).toFixed(2) + '%</b>'
+          : '<span class="vt-na" title="Not enough sends behind this row for a reply rate to mean anything yet">—</span>';
+        var stage = f.replyReadable ? '<span class="vt-tag ok">reply readable</span>'
+          : f.screenable ? '<span class="vt-tag mid">screen on funnel</span>'
+          : '<span class="vt-tag low">too early</span>';
+        return '<tr title="' + esc(f.readout || "") + '">' +
+            '<td><span class="vt-arm ' + esc(arm) + '">' + esc(arm) + '</span> ' + esc(f.label || f.listId) + '</td>' +
+            '<td>' + htNum(f.companies) + '</td>' +
+            '<td>' + htNum(f.prospects) + '</td>' +
+            '<td>' + (Number(f.contactableRatePct) || 0).toFixed(0) + '%</td>' +
+            '<td>' + htNum(f.sent) + '</td>' +
+            '<td>' + reply + '</td>' +
+            '<td>' + stage + '</td>' +
+          '</tr>';
+      }).join("");
+      el.innerHTML = '<div class="vt-card">' +
+          '<div class="vt-h"><b>Which vertical is working</b>' +
+            '<div class="vt-sub">Screen on the left-hand columns first — they settle in days. Reply rate needs hundreds of sends per row, so it stays blank until it can be trusted. Hover a row for the plain-English read.</div>' +
+          '</div>' +
+          '<table class="vt-table"><thead><tr>' +
+            '<th>vertical</th><th>companies</th><th>contacts</th><th>reachable</th><th>sent</th><th>reply</th><th></th>' +
+          '</tr></thead><tbody>' + body + '</tbody></table>' +
+        '</div>';
+    }
+
     function watchToggle(id, active) { send("/signals/watch", "POST", { action: "toggle", id: id, active: active }).then(function (r) { if (r && r.ok) loadWatch(); }); }
     function watchDel(id) { send("/signals/watch", "POST", { action: "delete", id: id }).then(function (r) { if (r && r.ok) loadWatch(); }); }
     function watchRun(id) {
@@ -6209,6 +6340,10 @@
       else if (act === "watchrun") watchRun(t.getAttribute("data-id"));
       else if (act === "watchtoggle") watchToggle(t.getAttribute("data-id"), t.textContent.trim() === "Resume");
       else if (act === "watchdel") watchDel(t.getAttribute("data-id"));
+      // No keys = the tier-A set. Never every preset: tier B asserts a desk the firm may
+      // not be able to claim, and that turns the pitch's specialization beat into filler.
+      else if (act === "presetaddall") presetAdd(null);
+      else if (act === "presetadd") presetAdd([t.getAttribute("data-key")]);
     });
     // Delegated changes for the preview checkboxes (toggle one / select all).
     host.addEventListener("change", function (e) {
@@ -6220,6 +6355,8 @@
     applyMode();
     loadWatch();
     loadTrial();
+    loadPresets();
+    loadVerticals();
   }
 
   // Portal-grade styling for the Hire Signals search + company pick-list. Kept inline (not in

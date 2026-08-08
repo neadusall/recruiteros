@@ -333,6 +333,10 @@ export function compareArms(all: CuratedProspect[], opts: TrialOptions = {}): Tr
 
 export interface ListFunnel extends Omit<ArmFunnel, "arm" | "label"> {
   listId: string;
+  /** The watchlist's human name ("Industrial automation · news"), falling back to the id
+   *  when the list has since been deleted — its prospects still count and must still be
+   *  attributable to something a reader recognises. */
+  label: string;
   /** The arm this list belongs to, so a reader never compares a news list's volume
    *  against a job list's without knowing why they differ by an order of magnitude. */
   arm?: Arm;
@@ -383,13 +387,15 @@ export function compareLists(all: CuratedProspect[], opts: ListTrialOptions = {}
     const { arm: _a, label: _l, ...rest } = base;
     const screenable = rest.prospects >= minProspects;
     const replyReadable = rest.sent >= minSends;
+    const label = opts.names?.[listId] || listId;
     out.push({
       ...rest,
       listId,
+      label,
       arm,
       screenable,
       replyReadable,
-      readout: listReadout(opts.names?.[listId] || listId, rest, screenable, replyReadable, minProspects, minSends),
+      readout: listReadout(label, rest, screenable, replyReadable, minProspects, minSends),
     });
   }
   // Most-researched first: the rows with the most evidence behind them lead.
