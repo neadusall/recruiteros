@@ -57,4 +57,26 @@ export async function poolCapacity(
   return { inboxes: pool.length, remainingToday: rem, dailyCapacity: cap };
 }
 
+/**
+ * The fleet's STEADY daily ceiling: what this pool can send on a normal day, ignoring how
+ * much of today it has already spent.
+ *
+ * `poolCapacity` deliberately drops inboxes that have hit their cap, because it answers
+ * "what is left right now". That makes its `dailyCapacity` shrink as the day runs, which
+ * is the correct answer to its question and the WRONG number to plan against: anything
+ * sizing a multi-day buffer against it would quietly starve itself every afternoon and
+ * refill every midnight. This one counts every inbox that is capable of sending at all,
+ * so it is stable across the day and safe to multiply by a buffer length.
+ */
+export async function fleetDailyCapacity(
+  workspaceId: string,
+  recruiterId?: string,
+): Promise<{ inboxes: number; dailyCapacity: number }> {
+  const pool = (await listInboxes(workspaceId, { ownerId: recruiterId }))
+    .filter((m) => (m.status === "active" || m.status === "warming") && !!m.smtpPassEnc);
+  let cap = 0;
+  for (const m of pool) cap += coldCapFor(m);
+  return { inboxes: pool.length, dailyCapacity: cap };
+}
+
 export { recordSend };

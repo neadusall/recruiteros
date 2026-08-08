@@ -14,7 +14,7 @@ export {
 } from "./store";
 export type { NewInboxInput, RecruiterCapacity, SendCapacity } from "./store";
 
-export { pickSender, poolCapacity } from "./pool";
+export { pickSender, poolCapacity, fleetDailyCapacity } from "./pool";
 
 export { syncFleetInboxes, maybeAutoFleetSync } from "./fleetSync";
 export type { FleetSyncReport } from "./fleetSync";

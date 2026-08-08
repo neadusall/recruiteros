@@ -214,12 +214,89 @@ export interface TickSummary {
   contactableTotal: number;
   budgetRemaining: number;
   outcomes: PollOutcome[];
+  /** Set when the tick discovered nothing because the send queue was already full.
+   *  Distinguishes "paused on purpose" from "found nothing", which otherwise look
+   *  identical in the logs and in every daily count. */
+  pausedForCapacity?: BeltRoom;
 }
 
 /** Bound how many companies one tick may curate, so a tick stays short and the timer never starves. */
 function maxCuratePerTick(): number {
   const n = Number(process.env.SIGNALS_WATCH_MAX_CURATE_PER_TICK);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 60;
+}
+
+/* ------------------------------------------------------------------ */
+/* Back pressure: discovery must not outrun sending                    */
+/* ------------------------------------------------------------------ */
+/*
+ * Discovery has no natural brake. The tick runs every 15 minutes against every active
+ * list, and its only ceilings are per-tick work limits — none of which know anything
+ * about whether the belt downstream can still send. Left alone it curates thousands of
+ * companies a day into a queue that drains at the fleet's rate, which is lower.
+ *
+ * The overflow is not free, and it is not merely early:
+ *
+ *   - step 4 of pollOne marks every curated company SEEN, permanently and globally, so a
+ *     company discovered on a day we could not email it is a company that will never be
+ *     re-picked when we can. Over-curating does not build a backlog, it spends inventory;
+ *   - each company costs three decision-maker researches, email-pattern work and Reoon
+ *     verifications, all of which have their own quotas;
+ *   - on the jobs arm it also spends paid JSearch fetches.
+ *
+ * So the tick asks one question first: does the belt have room? If the staged, send-ready
+ * supply already covers the buffer the operator asked for, this tick discovers NOTHING —
+ * no fetch, no curate, no company burned — and the lists stay due for the next one. The
+ * moment the queue drains, discovery resumes on its own. That is what lets this run for
+ * weeks unattended instead of quietly eating the market it is supposed to work.
+ *
+ * Fails OPEN. If the send-queue modules cannot be read we allow discovery: a wedged belt
+ * that finds nothing is a worse failure than one that finds too much.
+ */
+
+export interface BeltRoom {
+  hasRoom: boolean;
+  readySupply?: number;
+  bufferTarget?: number;
+  dailyTarget?: number;
+  /** Present when the target was cut to what the inbox fleet can physically send. */
+  fleetClamped?: boolean;
+  note?: string;
+}
+
+export async function beltRoom(): Promise<BeltRoom> {
+  if (process.env.SIGNALS_WATCH_RESPECT_CAPACITY === "0") {
+    return { hasRoom: true, note: "capacity back pressure disabled (SIGNALS_WATCH_RESPECT_CAPACITY=0)" };
+  }
+  try {
+    const { getAutofillSettings, dailyTargetExplained } = await import("../../sending/autofill");
+    const s = await getAutofillSettings();
+    // With no campaign chosen, autofill is not staging anything, so there is no queue to
+    // measure and nothing to hold discovery back.
+    if (!s.workspaceId || !s.campaignId) return { hasRoom: true, note: "no send-queue campaign configured" };
+
+    const { target, clamped } = await dailyTargetExplained(s.workspaceId);
+    if (target <= 0) return { hasRoom: true, note: "no readable daily target" };
+
+    const { sendQueueOverview } = await import("../../sending/sendReady");
+    const ov = await sendQueueOverview(s.workspaceId, nowIso());
+    const bufferTarget = s.bufferDays * target;
+    const hasRoom = ov.readySupply < bufferTarget;
+    return {
+      hasRoom,
+      readySupply: ov.readySupply,
+      bufferTarget,
+      dailyTarget: target,
+      fleetClamped: clamped,
+      note: hasRoom
+        ? undefined
+        : `belt is full: ${ov.readySupply} send-ready prospects staged against a ${s.bufferDays}-day buffer of ` +
+          `${bufferTarget} (${target}/day${clamped ? ", capped by inbox fleet capacity" : ""}). ` +
+          `Discovery is paused so companies are not burned faster than they can be emailed.`,
+    };
+  } catch {
+    return { hasRoom: true, note: "send-queue capacity unreadable; discovery allowed" };
+  }
 }
 
 /**
@@ -241,6 +318,26 @@ export async function tickWatchlists(): Promise<TickSummary> {
       .sort((a, b) => (Date.parse(a.lastPolledAt || "") || 0) - (Date.parse(b.lastPolledAt || "") || 0));
     const maxLists = Math.max(1, Number(process.env.SIGNALS_WATCH_MAX_LISTS_PER_TICK) || 50);
     const curateCap = maxCuratePerTick();
+
+    // BACK PRESSURE, checked once per tick and BEFORE any list is touched: a company is
+    // burned by being curated, so the only safe place to stop is upstream of the fetch.
+    // Nothing is marked polled or seen, so every list stays due and resumes untouched.
+    const room = await beltRoom();
+    if (!room.hasRoom) {
+      await recordTickHealth({
+        lastTickAt: nowIso(),
+        lastTickMs: Math.max(0, Date.now() - startedMs),
+        lastDue: due.length,
+        lastPolled: 0,
+        lastFreshTotal: 0,
+        errored: false,
+      });
+      return {
+        ran: true, due: due.length, polled: 0, freshTotal: 0, contactableTotal: 0,
+        budgetRemaining: await fetchBudgetRemaining(today), outcomes: [],
+        pausedForCapacity: room,
+      };
+    }
 
     const outcomes: PollOutcome[] = [];
     let curatedThisTick = 0;

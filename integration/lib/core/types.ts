@@ -270,6 +270,35 @@ export interface Prospect {
   signalType?: string;
   /** Human reason string for that signal, e.g. "Reposted the role twice in 30 days". */
   signalReason?: string;
+  /** WHICH discovery arm put this prospect in the funnel: "jobs" = the Hire Signals job
+   *  feed (they already posted the role), "news" = the news sweep (they just raised /
+   *  hired / expanded / acquired, and have posted nothing yet). Stamped once at
+   *  enrollment from the curated row.
+   *
+   *  This is not just reporting. The two arms know DIFFERENT things about the buyer, so
+   *  they must not send the same email: a job-arm lead has a real open role to anchor an
+   *  MPC candidate pitch on, and a news-arm lead does not. lib/campaigns/cadence reads
+   *  this to pick which opener a prospect gets. */
+  discoverySource?: "jobs" | "news";
+  /** The market the news sweep was watching when it found them ("cold chain logistics").
+   *  The pitch's stakes beat names this segment, so it has to survive to send time. */
+  discoverySegment?: string;
+  /** The role THIS decision-maker owns — the seat curation researched them for, not their
+   *  own title. Curation creates one prospect per distinct job function at a company, so
+   *  the three managers at one employer each carry a different role here, and each opener
+   *  names the seat that person is actually accountable for. */
+  discoveryRole?: string;
+  /** Evidence the news arm parsed out of the headline, carried so the send-time pitch can
+   *  tell a board seat from an operating hire without re-reading the article. Structurally
+   *  a subset of lib/signals/watch/newsDiscover's NewsFacts. */
+  newsFacts?: {
+    amountText?: string;
+    round?: string;
+    investor?: string;
+    purpose?: string;
+    execTitle?: string;
+    appointmentKind?: "board" | "leadership_team";
+  };
   /** Assigned sequence (from the Campaign Sequences Library), by id + name. */
   sequenceId?: string;
   sequenceName?: string;

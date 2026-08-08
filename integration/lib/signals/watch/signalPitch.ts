@@ -126,6 +126,82 @@ function article(word: string): string {
   return /^[aeiou]/i.test(word.trim()) ? "an" : "a";
 }
 
+/* ------------------------------------------------------------------ */
+/* Surface variation                                                   */
+/* ------------------------------------------------------------------ */
+/*
+ * The five beats are the ARGUMENT and never change. What varies is the wording, and it
+ * has to: a desk running this arm at volume sends the same signal type hundreds of times
+ * a month, and four companies in one market receiving byte-identical stakes lines is both
+ * the thing a human notices and the thing a spam filter fingerprints.
+ *
+ * Variation is DETERMINISTIC and pre-written, not generated per send. Three reasons that
+ * matters more than it sounds:
+ *   - every phrasing is read once by a person and then fixed, so no send can drift into a
+ *     claim the desk never made (the failure mode a per-send rewrite always risks);
+ *   - it costs nothing and cannot fail at send time, so the copy layer has no outage;
+ *   - the same prospect always renders the same email, so a resend or a re-render after a
+ *     held send is not a different pitch arriving from the same sender.
+ *
+ * Each beat draws its own index from the seed, so two prospects that happen to collide on
+ * the stakes line still differ on the proof, ask, and subject. With the counts below that
+ * is a few hundred distinct surface forms per signal, from five fixed beats.
+ *
+ * Index 0 of every list is the original wording, so an unseeded call is unchanged.
+ */
+
+/** FNV-1a, the same family used for the MPC template pick, so variation is stable per
+ *  prospect and needs no stored assignment. */
+function pickIndex(seed: string, beat: string, n: number): number {
+  if (n <= 1) return 0;
+  let h = 2166136261;
+  const s = `${seed}:${beat}`;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) % n;
+}
+
+/** The "this seat is not interchangeable" claim. A judgment the sender is entitled to
+ *  make about the market, never an assertion about the prospect's business. */
+function barClause(seg: string, seat: string, i: number): string {
+  const a = article(seat);
+  const forms = [
+    `${seg} is not a space where you can drop just anyone into ${a} ${seat} seat`,
+    `${seg} is not a market where ${a} ${seat} hire is interchangeable`,
+    `in ${seg}, the wrong ${seat} hire costs more than the open seat did`,
+    `${seg} punishes a weak ${seat} hire harder than most markets do`,
+  ];
+  return forms[i % forms.length];
+}
+
+/** Signal-specific lead-ins to the stakes beat. Every entry beyond index 0 keeps the same
+ *  ", and " shape, because joinBeats splits on it to avoid a two-clause run-on. */
+const STAKES_LEADIN: Record<NewsSignal, string[]> = {
+  funding_round: [
+    "",
+    "money moves faster than hiring does",
+    "the board will expect headcount against that",
+  ],
+  exec_hire: [
+    "a new leader tends to rebuild the bench underneath them",
+    "new leadership usually means a new bench",
+    "the first thing a new leader changes is who reports to them",
+  ],
+  office_expansion: [
+    "standing up a new location means hiring where you have no bench yet",
+    "a new location has no local bench on day one",
+    "opening a new market means recruiting where nobody knows you yet",
+  ],
+  acquisition: [
+    "integrations tend to open seats faster than they close them",
+    "an integration usually creates more openings than it removes",
+    "the seats that matter after a close are the ones people vacate",
+  ],
+  product_launch: [
+    "",
+    "a launch is only as strong as the team standing behind it",
+  ],
+};
+
 /**
  * The seat the signal points at, in the words a hiring exec would use. Derived from the
  * roles the discovery engine inferred, so the stakes beat names the seat the buyer is
@@ -170,24 +246,21 @@ export function stakes(
   seat: string,
   signal: NewsSignal,
   appointmentKind?: "board" | "leadership_team",
+  variant = 0,
 ): string {
   const seg = (segment || "").trim() || "this market";
   const s = seat.trim();
-  const bar = `${seg} is not a space where you can drop just anyone into ${article(s)} ${s} seat`;
+  const bar = barClause(seg, s, variant);
 
   // A BOARD appointment is a governance change, not an operating one. Saying a new
   // board member "rebuilds the bench underneath them" is simply false, and a reader
-  // who sits on that board knows it instantly.
-  if (signal === "exec_hire" && appointmentKind !== "board") {
-    return `a new leader tends to rebuild the bench underneath them, and ${bar}`;
-  }
-  if (signal === "office_expansion") {
-    return `standing up a new location means hiring where you have no bench yet, and ${bar}`;
-  }
-  if (signal === "acquisition") {
-    return `integrations tend to open seats faster than they close them, and ${bar}`;
-  }
-  return bar;
+  // who sits on that board knows it instantly. This drops the lead-in entirely rather
+  // than softening it, so no variant can reintroduce the claim by another route.
+  if (signal === "exec_hire" && appointmentKind === "board") return bar;
+
+  const leadIns = STAKES_LEADIN[signal] ?? [""];
+  const leadIn = leadIns[variant % leadIns.length];
+  return leadIn ? `${leadIn}, and ${bar}` : bar;
 }
 
 /**
@@ -222,6 +295,10 @@ export interface PitchInput {
   roles?: string[];
   facts?: NewsFacts;
   profile: DeskProfile;
+  /** Stable per-prospect string (the prospect id). Selects the surface wording of each
+   *  beat independently. Omit and every beat renders its original form, which is what
+   *  keeps a preview or a test deterministic. */
+  variantSeed?: string;
 }
 
 export interface Pitch {
@@ -234,25 +311,52 @@ export interface Pitch {
 
 /** Beat 3: the desk's matching specialization. Degrades to an honest generic when the
  *  profile is not filled in, rather than inventing a vertical the desk never claimed. */
-function proof(p: DeskProfile): string {
+function proof(p: DeskProfile, variant = 0): string {
+  const tail = `so ${p.placesTitles} already understand ${p.domainDifficulty}`;
   if (!p.verticals.length) {
-    return `${p.firmName === DEFAULT_PROFILE.firmName ? "We" : p.firmName} focus on this market, so ${p.placesTitles} already understand ${p.domainDifficulty}`;
+    const who = p.firmName === DEFAULT_PROFILE.firmName ? "We" : p.firmName;
+    return [
+      `${who} focus on this market, ${tail}`,
+      `${who} work this market specifically, ${tail}`,
+    ][variant % 2];
   }
-  return `${p.firmName} recruits into ${listPhrase(p.verticals)}, so ${p.placesTitles} already understand ${p.domainDifficulty}`;
+  const list = listPhrase(p.verticals);
+  return [
+    `${p.firmName} recruits into ${list}, ${tail}`,
+    `${p.firmName} works ${list} specifically, ${tail}`,
+    `${list} is where ${p.firmName} recruits, ${tail}`,
+  ][variant % 3];
 }
 
 /** Beat 5: the ask. Time-boxed and framed around getting ahead of the hiring wave the
  *  signal implies, which is the reader's own interest rather than the sender's. */
-function ask(p: DeskProfile, signal: NewsSignal, appointmentKind?: "board" | "leadership_team"): string {
+function ask(
+  p: DeskProfile,
+  signal: NewsSignal,
+  appointmentKind?: "board" | "leadership_team",
+  variant = 0,
+): string {
   const who = p.firmName === DEFAULT_PROFILE.firmName ? "we" : p.firmName;
-  const tail =
-    signal === "funding_round" ? "help you hire ahead of the growth"
-    : signal === "exec_hire"
-      ? (appointmentKind === "board" ? "help you hire ahead of the plan" : "help build out the bench under the new leader")
-    : signal === "office_expansion" ? "help you staff the new location"
-    : signal === "acquisition" ? "help you cover the seats the integration opens"
-    : "help you hire ahead of the growth";
-  return `Worth ${p.ctaMinutes} minutes to see where ${who} can ${tail}?`;
+  // What the 15 minutes would be ABOUT, in the reader's own interest. A board seat gets
+  // the neutral framing: there is no new operating leader to build a bench under.
+  const tails: string[] =
+    signal === "exec_hire"
+      ? (appointmentKind === "board"
+          ? ["help you hire ahead of the plan", "be useful on the hiring that follows"]
+          : ["help build out the bench under the new leader", "help build the bench under them"])
+    : signal === "office_expansion"
+      ? ["help you staff the new location", "help you build the team in the new market"]
+    : signal === "acquisition"
+      ? ["help you cover the seats the integration opens", "help you cover what the integration opens up"]
+    : ["help you hire ahead of the growth", "help you get ahead of the hiring that follows"];
+  const tail = tails[variant % tails.length];
+
+  const m = p.ctaMinutes;
+  return [
+    `Worth ${m} minutes to see where ${who} can ${tail}?`,
+    `Open to ${m} minutes on where ${who} can ${tail}?`,
+    `Would ${m} minutes be worth it to see where ${who} can ${tail}?`,
+  ][variant % 3];
 }
 
 function subjectFor(
@@ -260,16 +364,22 @@ function subjectFor(
   seat: string,
   signal: NewsSignal,
   appointmentKind?: "board" | "leadership_team",
+  variant = 0,
 ): string {
-  if (signal === "funding_round") return `${possessive(company)} ${seat} hiring after the raise`;
-  if (signal === "exec_hire") {
-    return appointmentKind === "board"
-      ? `${possessive(company)} ${seat} hiring`
-      : `the bench under ${possessive(company)} new leader`;
-  }
-  if (signal === "office_expansion") return `staffing ${possessive(company)} new location`;
-  if (signal === "acquisition") return `${company} ${seat} seats post-acquisition`;
-  return `${company} and your ${seat} hiring`;
+  const poss = possessive(company);
+  const forms: string[] =
+    signal === "funding_round"
+      ? [`${poss} ${seat} hiring after the raise`, `hiring after ${poss} raise`, `${poss} ${seat} bench, post-raise`]
+    : signal === "exec_hire"
+      ? (appointmentKind === "board"
+          ? [`${poss} ${seat} hiring`, `${company} and the ${seat} bench`]
+          : [`the bench under ${poss} new leader`, `${poss} new leader and the bench`, `who reports to ${poss} new leader`])
+    : signal === "office_expansion"
+      ? [`staffing ${poss} new location`, `${poss} new location and the hiring`, `hiring into ${poss} new market`]
+    : signal === "acquisition"
+      ? [`${company} ${seat} seats post-acquisition`, `the ${seat} seats the ${company} deal opens`]
+    : [`${company} and your ${seat} hiring`, `${poss} ${seat} hiring`];
+  return forms[variant % forms.length];
 }
 
 /**
@@ -280,19 +390,27 @@ export function composePitch(input: PitchInput): Pitch {
   const p = input.profile;
   const seat = seatFor(input.roles);
   const kind = input.facts?.appointmentKind;
+  // A separate draw per beat: two prospects colliding on the stakes line still differ on
+  // the proof, the ask, and the subject, so the forms multiply instead of moving in step.
+  const seed = input.variantSeed || "";
+  const v = (beat: string, n: number) => (seed ? pickIndex(seed, beat, n) : 0);
   const beats = {
+    // Beat 1 is the FACT, said back to them. It is the one beat that must not vary.
     observation: observation(input.company, input.reason),
-    stakes: stakes(input.segment, seat, input.signal, kind),
-    proof: proof(p),
+    stakes: stakes(input.segment, seat, input.signal, kind, v("stakes", 4)),
+    proof: proof(p, v("proof", 3)),
     positioning: p.positioning,
-    ask: ask(p, input.signal, kind),
+    ask: ask(p, input.signal, kind, v("ask", 3)),
   };
   const greeting = input.firstName?.trim() ? `${input.firstName.trim()}, ` : "";
   const body =
     `${greeting}${joinBeats(beats.observation, beats.stakes)}.\n\n` +
     `${beats.proof}. ${beats.positioning}\n\n` +
     `${beats.ask}`;
-  return { subject: subjectFor(input.company, seat, input.signal, kind), body, source: "template", beats };
+  return {
+    subject: subjectFor(input.company, seat, input.signal, kind, v("subject", 3)),
+    body, source: "template", beats,
+  };
 }
 
 /* ------------------------------------------------------------------ */

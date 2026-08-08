@@ -51,6 +51,11 @@ export interface CuratedProspect {
   discoverySource?: "jobs" | "news";
   /** The watchlist that found them, so two lists in the same arm stay separable. */
   discoveryListId?: string;
+  /** The news arm's parsed headline evidence. The reason STRING alone is not enough at
+   *  send time: "just announced a new senior leader" reads the same whether the seat is
+   *  operating or on the board, and the pitch must never tell a new board member it will
+   *  rebuild the bench underneath them. Carried so the copy layer can tell them apart. */
+  newsFacts?: import("../signals/watch/newsDiscover").NewsFacts;
   /** When this company first entered the funnel (ISO) — the trial's time window. */
   discoveredAt?: string;
   role: string;                     // the specific open role this prospect owns
@@ -187,6 +192,10 @@ interface PoolLeadLite {
    *      workers stamp it too without a signature change on buildCuratedRow ---- */
   discoverySource?: "jobs" | "news";
   discoveryListId?: string;
+  /** The news arm's parsed headline evidence, carried the same way and for the same
+   *  reason: the send-time opener needs to know a board seat from an operating hire, and
+   *  the reason string alone cannot tell them apart. */
+  newsFacts?: import("../signals/watch/newsDiscover").NewsFacts;
 }
 
 /**
@@ -315,6 +324,7 @@ export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMa
     discoverySource: lead.discoverySource,
     discoveryListId: lead.discoveryListId,
     discoveredAt: lead.discoverySource ? nowIso : undefined,
+    newsFacts: lead.newsFacts,
     role,
     jobUrl: d ? d.url : lead.sourceUrl,
     jobLocation: d?.location || undefined,
@@ -714,6 +724,9 @@ export async function listCurated(opts?: {
   validatedOnly?: boolean;
   /** Filter to a single industry (exact match on the curated row's industry). */
   industry?: string;
+  /** Only rows the given discovery arm found. Lets the staging step hold a share for
+   *  each arm instead of letting whichever one polls faster take every send slot. */
+  discoverySource?: "jobs" | "news";
   limit?: number;
 }): Promise<CuratedProspect[]> {
   await sweepJobDetails();   // one-shot persistent posting-details fill (throttled; no-op in steady state)
@@ -722,6 +735,7 @@ export async function listCurated(opts?: {
   if (opts?.signalType) rows = rows.filter((r) => r.signalType === opts.signalType);
   if (opts?.function) rows = rows.filter((r) => r.function === opts.function);
   if (opts?.industry) rows = rows.filter((r) => (r.industry ?? "") === opts.industry);
+  if (opts?.discoverySource) rows = rows.filter((r) => r.discoverySource === opts.discoverySource);
   if (opts?.contactableOnly) rows = rows.filter((r) => !!r.likelyEmail);
   if (opts?.namedOnly) rows = rows.filter((r) => !!r.managerName);
   if (opts?.validatedOnly) rows = rows.filter((r) => r.emailValidated === true && !r.emailInvalid);
@@ -906,7 +920,16 @@ export async function enrollToBulk(
         signalType: r.signalType,
         signalReason: r.signalReason,
         warmth: Math.max(50, r.score),
-        mpcContext: campaignMpc,
+        // The arm, and the evidence the arm's opener is written from.
+        discoverySource: r.discoverySource,
+        discoverySegment: r.industry,
+        discoveryRole: r.role,
+        newsFacts: r.newsFacts,
+        // MPC context is a CANDIDATE-marketing context: "I placed someone like this
+        // nearby, and they fit the role you posted." A news-arm company has posted no
+        // role and we are not marketing a candidate to them, so stamping it would let
+        // the Day-0 MPC variant swap fire on an email that is not an MPC pitch at all.
+        mpcContext: r.discoverySource === "news" ? undefined : campaignMpc,
       });
       enrolledIds.add(r.id);
       enrolled++;

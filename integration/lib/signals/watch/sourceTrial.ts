@@ -312,6 +312,114 @@ export function compareArms(all: CuratedProspect[], opts: TrialOptions = {}): Tr
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Per-list: which INDUSTRY is working, not just which arm              */
+/* ------------------------------------------------------------------ */
+/*
+ * compareArms answers "jobs or news". It cannot answer "which vertical", and that is the
+ * question a desk actually acts on: turning off a segment that does not produce is a
+ * weekly decision, choosing an arm is a one-time one.
+ *
+ * The trap this is shaped to avoid: reply rate is the WRONG first screen for a vertical.
+ * Six segments across two arms is twelve cells, and at a ~3.5% baseline each needs
+ * hundreds of sends before it can be told from noise — a quarter of waiting to learn
+ * something the upstream funnel reveals in a week. Supply, name rate, contactable rate
+ * and bounce rate all converge in days and will kill the weak segments on their own.
+ *
+ * So every row carries both, and `screenable` marks the ones whose UPSTREAM numbers are
+ * already trustworthy while `replyReadable` stays false. Screen on the funnel first;
+ * compare reply rate only between the two or three that survive.
+ */
+
+export interface ListFunnel extends Omit<ArmFunnel, "arm" | "label"> {
+  listId: string;
+  /** The arm this list belongs to, so a reader never compares a news list's volume
+   *  against a job list's without knowing why they differ by an order of magnitude. */
+  arm?: Arm;
+  /** True once the row has enough CURATED prospects for its upstream rates (name rate,
+   *  contactable rate) to mean something. Reached in days, not months. */
+  screenable: boolean;
+  /** True once the row has enough SENDS for its reply rate to be worth reading. Most
+   *  rows will sit at false for a long time, and that is the honest answer. */
+  replyReadable: boolean;
+  /** Plain-English verdict safe to show a recruiter. */
+  readout: string;
+}
+
+export interface ListTrialOptions extends TrialOptions {
+  /** Curated prospects needed before the upstream rates are reported as screenable. */
+  minProspects?: number;
+  /** Sends needed before this row's reply rate is reported as readable. */
+  minSends?: number;
+  /** listId -> human name, so the report reads as verticals rather than ids. */
+  names?: Record<string, string>;
+}
+
+/**
+ * Funnel per discovery list. Rows with no `discoveryListId` are skipped: they cannot be
+ * attributed to a vertical, and inventing a bucket for them would make the weakest
+ * segment look like the largest.
+ */
+export function compareLists(all: CuratedProspect[], opts: ListTrialOptions = {}): ListFunnel[] {
+  const minProspects = Math.max(1, Math.round(opts.minProspects ?? 30));
+  const minSends = Math.max(1, Math.round(opts.minSends ?? 200));
+  const from = opts.from ? Date.parse(opts.from) : undefined;
+  const to = opts.to ? Date.parse(opts.to) : undefined;
+  const rows = all.filter((r) => inWindow(r, from, to) && r.discoveryListId);
+
+  const byList = new Map<string, CuratedProspect[]>();
+  for (const r of rows) {
+    const key = r.discoveryListId as string;
+    const list = byList.get(key);
+    if (list) list.push(r); else byList.set(key, [r]);
+  }
+
+  const out: ListFunnel[] = [];
+  for (const [listId, listRows] of byList) {
+    // A list belongs to exactly one arm, so funnelFor against that arm counts all of it.
+    const arm = listRows.find((r) => r.discoverySource)?.discoverySource;
+    const f = arm ? funnelFor(listRows, arm) : undefined;
+    const base = f ?? emptyFunnel("jobs");
+    const { arm: _a, label: _l, ...rest } = base;
+    const screenable = rest.prospects >= minProspects;
+    const replyReadable = rest.sent >= minSends;
+    out.push({
+      ...rest,
+      listId,
+      arm,
+      screenable,
+      replyReadable,
+      readout: listReadout(opts.names?.[listId] || listId, rest, screenable, replyReadable, minProspects, minSends),
+    });
+  }
+  // Most-researched first: the rows with the most evidence behind them lead.
+  out.sort((a, b) => b.prospects - a.prospects || b.companies - a.companies);
+  return out;
+}
+
+function listReadout(
+  name: string,
+  f: Omit<ArmFunnel, "arm" | "label">,
+  screenable: boolean,
+  replyReadable: boolean,
+  minProspects: number,
+  minSends: number,
+): string {
+  if (!screenable) {
+    return `${name}: too early even to screen. ${f.companies} companies, ${f.prospects} researched ` +
+      `(need ${minProspects}). Nothing here is a verdict yet.`;
+  }
+  const upstream =
+    `${name}: ${f.companies} companies, ${f.prospects} researched, ` +
+    `${f.contactableRatePct}% reachable, ${f.sent} sent`;
+  if (!replyReadable) {
+    return `${upstream}. Upstream numbers are readable; reply rate is NOT ` +
+      `(${f.sent}/${minSends} sends). Screen this vertical on supply and reachability for now.`;
+  }
+  const bounce = f.bounceRatePct > 2 ? ` Bounce is ${f.bounceRatePct}%, above the 2% ceiling.` : "";
+  return `${upstream}, ${f.replyRatePct}% reply (${f.replied}/${f.sent}).${bounce}`;
+}
+
 function buildReadout(x: {
   arms: Record<Arm, ArmFunnel>;
   sig: SignificanceResult;

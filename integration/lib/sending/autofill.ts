@@ -32,9 +32,34 @@ export interface AutofillSettings {
   targetMin: number;     // daily band low  (default 4000)
   targetMax: number;     // daily band high (default 6000)
   bufferDays: number;    // keep this many days staged ahead (default 5)
+  /**
+   * Share of each day's staging reserved for the NEWS discovery arm, 0..100.
+   *
+   * Both arms feed one queue, and `listCurated` orders by intent score, so without a
+   * reserve the arm that happens to produce more rows takes every slot. That is not a
+   * fair fight and it is not a readable one: the head-to-head in sourceTrial.ts needs
+   * BOTH arms to clear a sample floor before it can say anything, and it explicitly
+   * warns when one arm has three times the other's sends. The jobs arm structurally wins
+   * that race — it polls a paid feed every 15 minutes, and when a company both posts
+   * roles and raises money the global seen-set awards it to whoever touched first.
+   *
+   * The default is 15, not 50, because 50 would be a number the news arm cannot fill.
+   * Measured supply is roughly 19 companies per segment per month; six segments is about
+   * 340 prospects a month, near 11 a day, against a daily target in the thousands. The
+   * news arm is a QUALITY play, not a volume one. An unfillable reserve costs nothing
+   * here — unclaimed share is handed straight back to the other arm — but a share set
+   * to match reality is a number an operator can read and trust.
+   *
+   * Raise it if the news arm ever runs many more segments; 0 turns it off without
+   * deleting its lists.
+   */
+  newsSharePct: number;
 }
 
-const DEFAULTS: AutofillSettings = { enabled: false, workspaceId: "", campaignId: "", targetMin: 4000, targetMax: 6000, bufferDays: 5 };
+const DEFAULTS: AutofillSettings = {
+  enabled: false, workspaceId: "", campaignId: "",
+  targetMin: 4000, targetMax: 6000, bufferDays: 5, newsSharePct: 15,
+};
 
 function clampN(v: unknown, lo: number, hi: number, dflt: number): number {
   const n = Math.round(Number(v));
@@ -58,6 +83,7 @@ export async function setAutofillSettings(patch: Partial<AutofillSettings>): Pro
     targetMin,
     targetMax: Math.max(targetMin, targetMax),
     bufferDays: clampN(patch.bufferDays ?? cur.bufferDays, 1, 14, DEFAULTS.bufferDays),
+    newsSharePct: clampN(patch.newsSharePct ?? cur.newsSharePct, 0, 100, DEFAULTS.newsSharePct),
   };
   await saveSnapshot(SETTINGS_KEY, next);
   return next;
@@ -68,19 +94,84 @@ function dailyTargetOf(s: AutofillSettings): number {
   return Math.round((s.targetMin + s.targetMax) / 2);
 }
 
-/** The effective per-day target: the workspace's daily email pool when set
- *  (e.g. Lume's 3,000/day), otherwise the configured band midpoint — so the
- *  buffer keeper never stages faster than the number the team was given. */
+/**
+ * The effective per-day target: the workspace's daily email pool when set (e.g. Lume's
+ * 3,000/day), otherwise the configured band midpoint — then CLAMPED to what the inbox
+ * fleet can actually send.
+ *
+ * The pool number is a goal the team was given. The fleet number is a physical limit: so
+ * many inboxes, each with a ramp-aware daily cap. When the goal exceeds the limit, staging
+ * to the goal does not produce more sends, it produces a queue that grows every day and
+ * never drains — and upstream of that it spends Reoon verifications, video renders, and
+ * job-feed credits on prospects that will not be emailed for weeks. Worse, the watchlist
+ * marks their companies permanently seen on the way past, so the overflow is not merely
+ * early, it is companies burned.
+ *
+ * Clamping DOWN only, and only on a positive reading: a workspace with no senders
+ * configured yet reports zero capacity, and treating that as a target of zero would stop
+ * a working belt dead. An absent or unreadable senders module leaves the target alone.
+ */
 async function resolveDailyTarget(s: AutofillSettings, fallbackWorkspaceId?: string): Promise<number> {
   const ws = s.workspaceId || fallbackWorkspaceId || "";
+  let target = dailyTargetOf(s);
   if (ws) {
     try {
       const { emailPoolSplit } = await import("../outbound/goals");
       const pool = await emailPoolSplit(ws);
-      if (pool) return pool.total;
+      if (pool) target = pool.total;
     } catch { /* outbound module unavailable — band midpoint applies */ }
+    try {
+      const { fleetDailyCapacity } = await import("../senders");
+      const fleet = await fleetDailyCapacity(ws);
+      if (fleet.inboxes > 0 && fleet.dailyCapacity > 0) target = Math.min(target, fleet.dailyCapacity);
+    } catch { /* senders module unavailable — the goal stands */ }
   }
-  return dailyTargetOf(s);
+  return target;
+}
+
+/** What the target WOULD be without the fleet clamp, and what the fleet allows, so the
+ *  Send Queue can say "staging 1,200/day, not 3,000, because the fleet caps there"
+ *  instead of silently under-filling and looking like a supply problem. */
+export async function dailyTargetExplained(workspaceId?: string): Promise<{
+  target: number; goal: number; fleetCapacity: number | null; inboxes: number; clamped: boolean;
+}> {
+  const s = await getAutofillSettings();
+  const ws = s.workspaceId || workspaceId || "";
+  let goal = dailyTargetOf(s);
+  if (ws) {
+    try {
+      const { emailPoolSplit } = await import("../outbound/goals");
+      const pool = await emailPoolSplit(ws);
+      if (pool) goal = pool.total;
+    } catch { /* band midpoint stands */ }
+  }
+  let fleetCapacity: number | null = null;
+  let inboxes = 0;
+  if (ws) {
+    try {
+      const { fleetDailyCapacity } = await import("../senders");
+      const fleet = await fleetDailyCapacity(ws);
+      inboxes = fleet.inboxes;
+      if (fleet.inboxes > 0 && fleet.dailyCapacity > 0) fleetCapacity = fleet.dailyCapacity;
+    } catch { /* unreadable */ }
+  }
+  const target = fleetCapacity !== null ? Math.min(goal, fleetCapacity) : goal;
+  return { target, goal, fleetCapacity, inboxes, clamped: target < goal };
+}
+
+/** Merge candidate lists, first list wins, ids unique. The backfill draws overlap the
+ *  per-arm draws by design, so this is what keeps a row from being staged twice. */
+function dedupeById<T extends { id: string }>(...lists: T[][]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const list of lists) {
+    for (const row of list) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      out.push(row);
+    }
+  }
+  return out;
 }
 
 interface DayCounter { day: string; enrolled: number }
@@ -142,7 +233,31 @@ async function runAutofillInner(nowIso: string, opts?: { force?: boolean }): Pro
   // so the daily cap isn't wasted on rows enrollToBulk would reject).
   const { listCurated, approveForBulk, enrollToBulk, requireValidatedEmail } = await import("../inmarket/curation");
   const needValid = requireValidatedEmail();
-  const candidates = await listCurated({ status: "contactable", contactableOnly: true, validatedOnly: needValid, limit: want });
+  const pick = (discoverySource?: "jobs" | "news", limit = want) =>
+    listCurated({ status: "contactable", contactableOnly: true, validatedOnly: needValid, discoverySource, limit });
+
+  // PER-ARM RESERVE. Each arm is drawn against its own share, then whatever the other arm
+  // could not fill is offered back — a reserve must not become an idle day. Rows with no
+  // attribution (curated before the trial shipped) top up whatever is left, so the split
+  // shapes new supply without stranding the old.
+  let candidates: Awaited<ReturnType<typeof listCurated>>;
+  const share = Math.min(100, Math.max(0, Math.round(s.newsSharePct)));
+  if (share <= 0 || share >= 100) {
+    // One arm is switched off. Draw it exclusively, then backfill from everything else so
+    // a desk that turned news off does not sit idle when the jobs arm is dry.
+    const only: "jobs" | "news" = share <= 0 ? "jobs" : "news";
+    const primary = await pick(only);
+    candidates = primary.length >= want ? primary : dedupeById(primary, await pick(undefined, want));
+  } else {
+    const newsWant = Math.round((want * share) / 100);
+    const jobsWant = want - newsWant;
+    const [news, jobs] = await Promise.all([pick("news", newsWant), pick("jobs", jobsWant)]);
+    candidates = dedupeById(news, jobs);
+    // Neither arm filled its share: offer the remainder to anyone, including unattributed
+    // rows, rather than under-staging a day the fleet could have sent.
+    if (candidates.length < want) candidates = dedupeById(candidates, await pick(undefined, want));
+  }
+  candidates = candidates.slice(0, want);
   if (!candidates.length) return { enrolled: 0, skipped: 0, reason: "no_ready_supply", ...base };
 
   const ids = candidates.map((r) => r.id);
