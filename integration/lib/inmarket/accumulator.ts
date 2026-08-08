@@ -561,6 +561,15 @@ async function runCurationTickInner(): Promise<void> {
     const { promoteCatchAllParked } = await import("./curation");
     await promoteCatchAllParked();
   } catch { /* best-effort; the next tick retries */ }
+
+  // Keep the naming ceiling stamped on the persisted spend counter. The ops sentinel reads that
+  // file straight off the data volume, and without a periodic touch the ceiling goes stale exactly
+  // when the budget is exhausted — the moment the sentinel most needs to distinguish "spent out"
+  // from "never ran". Cheap: a read that only writes when the ceiling has actually changed.
+  try {
+    const { webSearchBudget } = await import("./webSearch");
+    await webSearchBudget();
+  } catch { /* best-effort; the next tick retries */ }
 }
 
 async function runCurationTick(): Promise<void> {

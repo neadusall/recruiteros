@@ -183,6 +183,19 @@ process.env.INMARKET_SEARCH_DAILY_MAX = "4";
 const nearing = await ws.namingHealth();
 check("percent-used is reported for a warning threshold", nearing.pctUsed === 75);
 
+// The ceiling must reach the persisted file even while the budget is EXHAUSTED. It cannot be
+// written on the spend path: a refused query returns early, and callers stop calling in once
+// webSearchReady() goes false — so the ceiling would be missing from disk for up to a day, exactly
+// while an outside reader needs it to tell "spent out" from "never ran".
+process.env.INMARKET_SEARCH_DAILY_MAX = "3";           // 3 already spent → exhausted
+check("exhausted is exhausted", (await ws.webSearchReady()) === false);
+const { readFileSync } = await import("node:fs");
+const budgetFile = join(process.env.ROS_DATA_DIR!, "snap_inmarket_websearch_budget_v1.json");
+await new Promise((r) => setTimeout(r, 11_000));        // let the debounced save flush
+const persisted = JSON.parse(readFileSync(budgetFile, "utf8"));
+check("the ceiling is on disk even with nothing left to spend", persisted.cap === 3);
+check("…alongside the dollar ceiling", typeof persisted.usdCap === "number");
+
 // An empty query is not chargeable.
 calls = 0;
 process.env.INMARKET_SEARCH_DAILY_MAX = "50";

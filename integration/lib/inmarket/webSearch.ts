@@ -192,10 +192,30 @@ function scheduleBudgetSave(): void {
   (saveTimer as unknown as { unref?: () => void }).unref?.();
 }
 
+/**
+ * Stamp the CURRENT ceiling onto the persisted counter whenever it has drifted.
+ *
+ * This cannot live in spendOne(): a refused query returns before it would run, and callers check
+ * webSearchReady() first and so stop calling in at all once the budget is gone. The ceiling would
+ * therefore be missing from the file precisely while the budget is exhausted — leaving the outside
+ * reader unable to tell "spent out" from "never ran" for up to a whole day, which is the one
+ * question it exists to answer. Recording it on the READ path keeps it fresh either way.
+ */
+function recordCeiling(): void {
+  if (!budget) return;
+  const cap = dailyQueryCap();
+  const usdCap = dailyUsdCap();
+  if (budget.cap === cap && budget.usdCap === usdCap) return;
+  budget.cap = cap;
+  budget.usdCap = usdCap;
+  scheduleBudgetSave();
+}
+
 /** Today's paid-query spend against the ceiling. Surfaced for the engine-health readout. */
 export async function webSearchBudget(): Promise<{ used: number; cap: number; provider: string | null }> {
   await hydrateBudget();
   if (budget && budget.day !== today()) budget = { day: today(), used: 0 };
+  recordCeiling();
   return { used: budget?.used ?? 0, cap: dailyQueryCap(), provider: webSearchProvider() };
 }
 
