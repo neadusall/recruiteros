@@ -713,6 +713,59 @@ function normKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+/** True when two strings differ by at most one insert, delete, or substitution.
+ *  Bounded at 1 on purpose, so it is O(n) and cannot quietly become a fuzzy matcher. */
+function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [s, l] = a.length <= b.length ? [a, b] : [b, a];
+  if (l.length - s.length > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < s.length && j < l.length) {
+    if (s[i] === l[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (s.length === l.length) { i++; j++; } else { j++; }   // substitution vs insertion
+  }
+  return true;
+}
+
+/**
+ * Collapse one company that two outlets spelled differently ("Conner Industries" and
+ * "Connor Industries" off the same board appointment). Left alone, both survive the
+ * exact-key merge, both get curated, and both get emailed — near-identical copy to a
+ * company that exists once, plus a misspelt twin that will never resolve a domain.
+ *
+ * Deliberately narrow, because a false merge is worse than a duplicate: it silently
+ * deletes a real company you would otherwise have contacted. So a pair must clear all
+ * three bars — one edit apart, the SAME signal (a raise and a layoff at similar names
+ * are two different stories), and a name long enough that one character is a typo
+ * rather than the whole brand ("Auger" and "Augur" are plausibly two companies).
+ * The higher-scoring spelling wins and absorbs the other's facts.
+ */
+const NEAR_DUPE_MIN_LEN = 10;
+function collapseNearDuplicates<T extends { lead: InMarketLead; facts: NewsFacts; signal: NewsSignal }>(
+  byCompany: Map<string, T>,
+): number {
+  const keys = [...byCompany.keys()].sort();          // stable order → deterministic winner
+  let merged = 0;
+  for (let i = 0; i < keys.length; i++) {
+    const a = byCompany.get(keys[i]);
+    if (!a) continue;
+    for (let j = i + 1; j < keys.length; j++) {
+      const b = byCompany.get(keys[j]);
+      if (!b) continue;
+      if (a.signal !== b.signal) continue;
+      if (Math.min(keys[i].length, keys[j].length) < NEAR_DUPE_MIN_LEN) continue;
+      if (!withinOneEdit(keys[i], keys[j])) continue;
+      const [win, lose] = (b.lead.score ?? 0) > (a.lead.score ?? 0) ? [b, a] : [a, b];
+      win.facts = { ...lose.facts, ...win.facts };     // never lose a fact the twin carried
+      byCompany.delete(win === a ? keys[j] : keys[i]);
+      merged++;
+      if (win === b) break;                            // a is gone; stop pairing against it
+    }
+  }
+  return merged;
+}
+
 /**
  * Run one segment across its signal queries and return de-duplicated company leads.
  * Never throws: every failure mode (feed down, blocked, garbage XML, timeout) is a
@@ -842,6 +895,11 @@ export async function discoverFromNews(opts: NewsDiscoverOpts): Promise<NewsDisc
     }
   }
 
+  // One company, two spellings, is still one company. Collapse before the reasons are
+  // rebuilt so the survivor's copy is written from the union of both outlets' facts.
+  const collapsed = collapseNearDuplicates(byCompany);
+  if (collapsed > 0) result.warnings.push(`merged ${collapsed} near-duplicate company name(s)`);
+
   // Rebuild the reason AFTER merging, so it reflects every fact any outlet carried.
   // Built at first sighting it would freeze on whichever article happened to be first,
   // which is how Freehand's lead investor and stated purpose went missing from the copy.
@@ -863,3 +921,7 @@ export async function discoverFromNews(opts: NewsDiscoverOpts): Promise<NewsDisc
     .slice(0, limit);
   return result;
 }
+
+/** Internals exposed for the deterministic test suite only (scripts/test-news-neardupe.mts).
+ *  Not part of the module's public surface — import `discoverFromNews` instead. */
+export const __test = { withinOneEdit, collapseNearDuplicates };

@@ -6094,6 +6094,13 @@
           '</div>' +
         '</div>';
     }
+    // The backend's own caveats (unattributed rows, lopsided volume). Shown in every
+    // state, including the waiting one — an arm that is blind is blind either way.
+    function warnHtml(t) {
+      return (t.warnings || []).length
+        ? '<div class="ht-warn">' + (t.warnings || []).map(function (w) { return esc(w); }).join("<br>") + '</div>'
+        : "";
+    }
     function renderTrial() {
       var el = host.querySelector("#imqTrial"); if (!el) return;
       var t = imqTrial;
@@ -6118,6 +6125,28 @@
         : t.verdict === "tie" ? "Too close to separate"
         : t.verdict === "news" ? "News signals ahead" : "Hire Signals ahead";
 
+      // Discovery can be working perfectly while the answer stays unreachable, because the
+      // verdict is judged on REPLIES PER SEND and nothing has been sent. A progress bar here
+      // would tick "0 of 2,800" forever and read as slow progress rather than a stalled
+      // precondition. Say the real thing instead: the arms are filling, sending is what's
+      // missing. (Enroll-only is a deliberate posture, so this is a status, not an error.)
+      var totalSent = (jobs.sent || 0) + (news.sent || 0);
+      var totalReady = (jobs.contactable || 0) + (news.contactable || 0);
+      if (!totalSent && totalReady > 0) {
+        el.innerHTML = '<div class="ht-card">' +
+            '<div class="ht-top"><div>' +
+              '<div class="ht-h">Hire Signals vs news signals</div>' +
+              '<div class="ht-sub">Both arms are filling. Nothing has been emailed yet, so there is no reply rate to compare — the verdict is judged on replies per send, and sending is still off.</div>' +
+            '</div><span class="ht-verdict wait">Waiting on sending</span></div>' +
+            '<div class="ht-arms">' + htArm(jobs, max, false) + htArm(news, max, false) + '</div>' +
+            '<div class="ht-read"><b>' + htNum(totalReady) + '</b> reachable ' +
+              (totalReady === 1 ? 'contact is' : 'contacts are') + ' queued and waiting. ' +
+              'The comparison starts the moment the first emails go out; until then these columns show intake only, which is a volume question, not a quality one.</div>' +
+            warnHtml(t) +
+          '</div>';
+        return;
+      }
+
       // Progress toward a readable answer. This is the number that stops the trial being
       // called on day three off 40 sends: it shows how far the sample still has to go.
       var prog = "";
@@ -6130,9 +6159,7 @@
           ' sends on the smaller arm before this can be called · <b>' + htNum(t.sendsStillNeededPerArm) + '</b> to go</div></div>';
       }
 
-      var warn = (t.warnings || []).length
-        ? '<div class="ht-warn">' + (t.warnings || []).map(function (w) { return esc(w); }).join("<br>") + '</div>'
-        : "";
+      var warn = warnHtml(t);
 
       el.innerHTML = '<div class="ht-card">' +
           '<div class="ht-top"><div>' +
