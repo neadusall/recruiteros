@@ -24,7 +24,8 @@ import { join } from "node:path";
 // Must be set BEFORE lib/db is imported: it is what selects the file backend over memory.
 const DIR = mkdtempSync(join(tmpdir(), "ros-prerender-"));
 process.env.ROS_DATA_DIR = DIR;
-process.env.NODE_ENV = "test";
+// NODE_ENV is typed read-only by @types/node; assign through a plain-record view.
+(process.env as Record<string, string>).NODE_ENV = "test";
 delete process.env.DATABASE_URL;
 delete process.env.POSTGRES_PASSWORD;
 // A clip id is the one hard precondition of a claim (no clip = empty claim, by design).
