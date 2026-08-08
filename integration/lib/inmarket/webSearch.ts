@@ -95,6 +95,11 @@ interface BudgetState {
   used: number;
   /** Which provider spent them (informational; the meter is per-day, not per-provider). */
   provider?: string;
+  /** The ceiling in force when this was last written, so a reader outside the process (the ops
+   *  sentinel reads this file straight off the data volume) can tell "spent out" from "idle"
+   *  without access to the container's env. */
+  cap?: number;
+  usdCap?: number;
 }
 
 let budget: BudgetState | null = null;
@@ -105,10 +110,62 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Hard ceiling on paid queries per UTC day. 0 disables the paid hop outright. */
-export function dailyQueryCap(): number {
+/**
+ * Roughly what one query costs, per provider. Used to keep the ceiling honest in MONEY rather than
+ * in query count — see dailyQueryCap(). Deliberately rounded UP so the guard errs toward spending
+ * less than the stated dollar ceiling, never more.
+ */
+const USD_PER_QUERY: Record<WebSearchProvider, number> = {
+  serper: 0.001,
+  dataforseo: 0.02,   // the pessimistic end of its $0.01–0.02 live/regular range
+  rapidapi: 0.004,
+};
+
+/** The provider the query cap is denominated in: INMARKET_SEARCH_DAILY_MAX means "this many
+ *  Serper queries", because that is the rate it was tuned against. */
+const REFERENCE_PROVIDER: WebSearchProvider = "serper";
+
+/** The operator's query ceiling, before the money guard narrows it. */
+function explicitQueryCap(): number {
   const n = Number(process.env.INMARKET_SEARCH_DAILY_MAX);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 2_000;
+}
+
+/**
+ * The dollar ceiling for a UTC day. Set INMARKET_SEARCH_DAILY_USD to state it directly; otherwise
+ * it is inferred as what the query cap costs at REFERENCE_PROVIDER rates — so raising the query cap
+ * raises the budget exactly as an operator expects, and the two knobs can never disagree.
+ */
+export function dailyUsdCap(): number {
+  const n = Number(process.env.INMARKET_SEARCH_DAILY_USD);
+  if (Number.isFinite(n) && n >= 0) return n;
+  return explicitQueryCap() * USD_PER_QUERY[REFERENCE_PROVIDER];
+}
+
+/**
+ * Hard ceiling on paid queries per UTC day. 0 disables the paid hop outright.
+ *
+ * The ceiling is the LOWER of the query cap and what the dollar cap buys from whichever provider is
+ * ACTUALLY serving. That second term is the failover guard: the query cap is denominated in Serper
+ * queries at ~$0.001, and DataForSEO stands by as automatic failover at 10–20x that. Without this,
+ * Serper credits running dry would silently promote a $2/day ceiling into a $20–40/day one, with no
+ * change in configuration and nothing to notice — the same shape of surprise as Serper running to
+ * zero unnoticed, which is why engine-health exists at all. Money is what has to be bounded, so
+ * money is what gets bounded; the query count is just how the intent is expressed.
+ */
+export function dailyQueryCap(): number {
+  const queryCap = explicitQueryCap();
+  const provider = webSearchProvider();
+  if (!provider) return queryCap;
+  const affordable = Math.floor(dailyUsdCap() / USD_PER_QUERY[provider]);
+  return Math.min(queryCap, affordable);
+}
+
+/** What today's spend has cost, in dollars, at the serving provider's rate. Kept to sub-cent
+ *  precision on purpose: at $0.001/query, rounding to cents reports real spend as $0. */
+export function spentUsd(used: number, provider: WebSearchProvider | null): number {
+  if (!provider) return 0;
+  return Math.round(used * USD_PER_QUERY[provider] * 1000) / 1000;
 }
 
 async function hydrateBudget(): Promise<void> {
@@ -142,14 +199,57 @@ export async function webSearchBudget(): Promise<{ used: number; cap: number; pr
   return { used: budget?.used ?? 0, cap: dailyQueryCap(), provider: webSearchProvider() };
 }
 
+/**
+ * IS DECISION-MAKER NAMING ACTUALLY ALIVE RIGHT NOW?
+ *
+ * The free scrapers are dead on this box, so the paid hop is not an optimization — it IS naming,
+ * and naming is the gate on emails, which is the gate on video supply. When it goes dark the whole
+ * chain drains quietly from the top and the first visible symptom is an empty render queue hours
+ * later, described as a video problem. This is the readout that lets a monitor say so at the source
+ * instead: `dark` is the single field worth alerting on, `reason` is what to put in the alert.
+ *
+ * Deliberately reports a near-exhausted budget as a WARNING while it still has room, because by the
+ * time used === cap the supply damage is already done and cannot be undone until UTC midnight.
+ */
+export async function namingHealth(): Promise<{
+  provider: string | null;
+  used: number;
+  cap: number;
+  pctUsed: number;
+  usdSpent: number;
+  usdCap: number;
+  dark: boolean;
+  warn: boolean;
+  reason: string;
+}> {
+  const b = await webSearchBudget();
+  const provider = webSearchProvider();
+  const pctUsed = b.cap > 0 ? Math.round((b.used / b.cap) * 100) : 100;
+  const dark = !provider || b.cap === 0 || b.used >= b.cap;
+  const warn = !dark && pctUsed >= 80;
+  const reason = !provider
+    ? "no paid search provider is configured — naming has only the free scrapers, which are throttled to zero on this box"
+    : b.cap === 0
+      ? "the paid search ceiling is set to 0, which disables naming entirely"
+      : b.used >= b.cap
+        ? `today's paid search ceiling is spent (${b.used}/${b.cap} queries, ~$${spentUsd(b.used, provider)}), so naming has fallen back to the throttled free engines until UTC midnight`
+        : warn
+          ? `today's paid search budget is ${pctUsed}% spent (${b.used}/${b.cap}) — naming goes dark when it runs out`
+          : `naming is running on ${provider} (${b.used}/${b.cap} queries used today, ~$${spentUsd(b.used, provider)})`;
+  return { provider, used: b.used, cap: b.cap, pctUsed, usdSpent: spentUsd(b.used, provider), usdCap: dailyUsdCap(), dark, warn, reason };
+}
+
 /** Reserve one paid query. False when the ceiling is reached (caller must fall back to free). */
 async function spendOne(provider: WebSearchProvider): Promise<boolean> {
   await hydrateBudget();
   const day = today();
   if (!budget || budget.day !== day) budget = { day, used: 0 };
-  if (budget.used >= dailyQueryCap()) return false;
+  const cap = dailyQueryCap();
+  if (budget.used >= cap) return false;
   budget.used++;
   budget.provider = provider;
+  budget.cap = cap;
+  budget.usdCap = dailyUsdCap();
   scheduleBudgetSave();
   return true;
 }

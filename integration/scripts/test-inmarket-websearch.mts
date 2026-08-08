@@ -94,6 +94,53 @@ process.env.INMARKET_SEARCH_DAILY_MAX = "0";
 check("cap 0 is respected as a real zero", ws.dailyQueryCap() === 0);
 check("cap 0 → not ready (never spends)", (await ws.webSearchReady()) === false);
 
+/* ---------------------------------------------------------------- */
+/* 2b. The money guard on automatic failover                         */
+/* ---------------------------------------------------------------- */
+
+// The query cap is denominated in SERPER queries. DataForSEO is automatic failover at 10-20x the
+// unit price, so if Serper credits run dry the identical configuration must not quietly buy 20x the
+// spend. These pin that the ceiling is enforced in money, and that the two knobs cannot disagree.
+clearProviders();
+delete process.env.INMARKET_SEARCH_DAILY_MAX;
+delete process.env.INMARKET_SEARCH_DAILY_USD;
+process.env.SERPER_API_KEY = "s";
+check("default on serper is unchanged at 2000", ws.dailyQueryCap() === 2_000);
+check("…and states its implied $2/day ceiling", ws.dailyUsdCap() === 2);
+
+// Raising the query cap must actually raise it — the guard must not silently pin it back.
+process.env.INMARKET_SEARCH_DAILY_MAX = "6000";
+check("raising the query cap raises it on serper", ws.dailyQueryCap() === 6_000);
+check("…and carries the dollar ceiling up with it", ws.dailyUsdCap() === 6);
+
+// Same config, Serper gone: DataForSEO takes over and must be held to the SAME dollars.
+delete process.env.SERPER_API_KEY;
+process.env.DATAFORSEO_LOGIN = "l";
+process.env.DATAFORSEO_PASSWORD = "p";
+check("failover keeps the dollar ceiling, not the query count", ws.dailyQueryCap() === 300);
+check("failover spend stays inside the same budget", 300 * 0.02 <= ws.dailyUsdCap());
+
+// An explicit dollar ceiling wins over the inferred one.
+process.env.INMARKET_SEARCH_DAILY_USD = "1";
+check("an explicit usd cap overrides the inferred one", ws.dailyQueryCap() === 50);
+delete process.env.INMARKET_SEARCH_DAILY_USD;
+delete process.env.INMARKET_SEARCH_DAILY_MAX;
+
+/* ---------------------------------------------------------------- */
+/* 2c. Naming darkness — the signal a monitor alerts on              */
+/* ---------------------------------------------------------------- */
+
+clearProviders();
+let nh = await ws.namingHealth();
+check("no provider → naming reports dark", nh.dark === true && nh.provider === null);
+check("…and says why in words an alert can carry", /no paid search provider/.test(nh.reason));
+
+process.env.SERPER_API_KEY = "s";
+process.env.INMARKET_SEARCH_DAILY_MAX = "0";
+nh = await ws.namingHealth();
+check("a zero ceiling reports dark", nh.dark === true && /disables naming/.test(nh.reason));
+delete process.env.INMARKET_SEARCH_DAILY_MAX;
+
 // Spend exactly to the cap and confirm it stops there. Every provider call is stubbed, so this
 // counts reservations without touching a vendor.
 process.env.INMARKET_SEARCH_DAILY_MAX = "3";
@@ -121,6 +168,20 @@ check("a query past the cap returns empty", overrun.length === 0);
 check("a query past the cap never reaches the vendor", calls === 3);
 const after = await ws.webSearchBudget();
 check("a refused query does not inflate the counter", after.used === 3);
+
+// The exhausted state is exactly what the monitor must be able to see, and it must warn BEFORE it
+// goes dark — once used === cap the supply damage is done and cannot be undone until UTC midnight.
+const exhausted = await ws.namingHealth();
+check("an exhausted budget reports dark", exhausted.dark === true);
+check("…and names the fallback consequence", /fallen back to the throttled free engines/.test(exhausted.reason));
+check("…and reports what it spent", exhausted.usdSpent > 0);
+
+process.env.INMARKET_SEARCH_DAILY_MAX = "4";   // 3 of 4 spent → 75%, still healthy
+check("a budget with room is neither dark nor warning", await ws.namingHealth().then((h) => !h.dark && !h.warn));
+process.env.INMARKET_SEARCH_DAILY_MAX = "3.5"; // floors to 3 → 100% but the cap check is >=
+process.env.INMARKET_SEARCH_DAILY_MAX = "4";
+const nearing = await ws.namingHealth();
+check("percent-used is reported for a warning threshold", nearing.pctUsed === 75);
 
 // An empty query is not chargeable.
 calls = 0;

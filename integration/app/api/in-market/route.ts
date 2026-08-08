@@ -138,8 +138,9 @@ export async function POST(req: Request) {
     const { autoCaptureStatus } = await import("../../../lib/inmarket/autoCapture");
     const { autoVideoStatus } = await import("../../../lib/inmarket/autoVideo");
     const { retentionStatus } = await import("../../../lib/inmarket/retention");
-    const [health, autoEnroll, reoon, autoCapture, autoVideo] = await Promise.all([engineHealth(), autoEnrollStatus(), reoonStatus(), autoCaptureStatus(), autoVideoStatus()]);
-    return ok({ health, egress: { enabled: egressEnabled(), ips: egressIps() }, autoEnroll, reoon, autoCapture, autoVideo, retention: retentionStatus() });
+    const { namingHealth } = await import("../../../lib/inmarket/webSearch");
+    const [health, autoEnroll, reoon, autoCapture, autoVideo, naming] = await Promise.all([engineHealth(), autoEnrollStatus(), reoonStatus(), autoCaptureStatus(), autoVideoStatus(), namingHealth()]);
+    return ok({ health, egress: { enabled: egressEnabled(), ips: egressIps() }, autoEnroll, reoon, autoCapture, autoVideo, naming, retention: retentionStatus() });
   }
 
   // Composed-video map (company -> finished outreach video) so the Clients tab can show videos.
