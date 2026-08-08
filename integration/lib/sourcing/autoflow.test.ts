@@ -399,6 +399,21 @@ check("...same but nobody deliverable holds a phone -> not parity due",
     },
   }), NOW), false);
 
+// A run whose send SUCCEEDED is not parked, whatever it went through to get
+// there. sendRun resets attempts to 0 on a clean send; this pins the decision
+// that depends on it — a healthy list with a fresh sentAt belongs to the fresh
+// lane, not to the once-per-day parity lane (2026-08-07: a list carried
+// attempts=20 through a successful send and stayed classified as parked).
+check("recovered list (attempts reset, no error) -> not parity due",
+  parityDue(run({
+    candidates: [enriched(), enriched()], promotedCount: 2,
+    updatedAt: new Date(NOW - 10 * MIN).toISOString(),
+    autoflow: {
+      sentAt: new Date(NOW - 10 * MIN).toISOString(), phonesAtSend: 2, peopleAtSend: 2,
+      sentSignature: "x", attempts: 0,
+    },
+  }), NOW), false);
+
 // Gap 2: MAX_ATTEMPTS-parked runs re-enter through the parity lane...
 check("fresh but parked at 20 attempts -> parity due",
   parityDue(run({ candidates: [enriched()], autoflow: { phonesAtSend: 0, attempts: 20 } }), NOW), true);

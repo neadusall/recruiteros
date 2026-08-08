@@ -486,6 +486,14 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     stamp.sentSignature = signatureNow;
     if (stamp.error?.startsWith("ostext_not_connected") !== true) stamp.error = undefined;
     stamp.outageSince = undefined; // a send got through: whatever outage there was is over
+    // A CLEAN SEND CLEARS THE RECORD. The attempt counter measures one run of bad
+    // luck, not a permanent mark: leaving it at 20 after a send that WORKED left
+    // the list classified as parked forever (observed on this list 2026-08-07,
+    // attempts=20 with a fresh sentAt and no error). Parked is not cosmetic — the
+    // fresh lane's error-retry is gated on attempts < MAX_ATTEMPTS, so the next
+    // outage could never be retried there, and parityDue()'s staleOrParked test
+    // stayed true for good, permanently handing a healthy list to the slow lane.
+    stamp.attempts = 0;
     console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) sent on: ${run.candidates.length} to Candidates, ${contacts.length} phone(s) to OS Text${topup ? " (top-up)" : ""}`);
     // Tell the desk that owns this list RIGHT NOW: new candidates just landed and
     // are waiting for their first outreach. Recipient = the recruiter who ran the
