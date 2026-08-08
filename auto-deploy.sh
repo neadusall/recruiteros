@@ -251,9 +251,31 @@ if [ "$OSTEXT_DEEP" != "200" ]; then
       STAMP="$DIR/.ostext-wrongbuild-rebuild"
       if [ -z "$(find "$STAMP" -mmin -30 2>/dev/null)" ]; then
         touch "$STAMP"
-        echo "$(date -u) FAIL-SAFE: health probe got $OSTEXT_DEEP but the path serves ($OSTEXT_CODE): stale image, rebuilding engine..." >> "$LOG"
+        echo "$(date -u) FAIL-SAFE: health probe got $OSTEXT_DEEP but the path serves ($OSTEXT_CODE): rebuilding engine..." >> "$LOG"
+        # Capture the image identity BEFORE the build. `docker compose build` is a
+        # cache hit whenever the checkout already matches what is serving, so it
+        # returns success in 2-3s having done nothing. This block used to log
+        # "engine rebuilt from current checkout" on that no-op and exit happy,
+        # which is why a wrong pin looked like a repair-in-progress for 40+ min on
+        # 2026-08-07 and ~1.5h on 2026-08-03. A rebuild can only fix a STALE
+        # IMAGE; it can never fix a WRONG PIN, and the two need different words.
+        IMG_BEFORE=$(docker image inspect -f '{{.Id}}' recruiteros-taltxt:latest 2>/dev/null || echo none)
         if docker compose build taltxt >> "$LOG" 2>&1 && docker compose up -d --no-deps taltxt >> "$LOG" 2>&1; then
-          echo "$(date -u) FAIL-SAFE: engine rebuilt from current checkout" >> "$LOG"
+          IMG_AFTER=$(docker image inspect -f '{{.Id}}' recruiteros-taltxt:latest 2>/dev/null || echo none)
+          sleep 20
+          OSTEXT_RECHECK=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -k \
+            --resolve recruitersos.co:443:127.0.0.1 https://recruitersos.co/ostext-app/api/health || echo 000)
+          if [ "$OSTEXT_RECHECK" = "200" ]; then
+            echo "$(date -u) FAIL-SAFE: engine rebuilt and healthy again (health=200)" >> "$LOG"
+          elif [ "$IMG_BEFORE" = "$IMG_AFTER" ]; then
+            # Nothing was rebuilt and it is still wrong: the image already IS the
+            # checkout, so the checkout itself is the wrong build. Name the pin so
+            # the log points at the one thing that actually fixes this.
+            PIN=$(git ls-tree HEAD money-maker-sms 2>/dev/null | awk '{print $3}')
+            echo "$(date -u) FAIL-SAFE: WRONG PIN, not a stale image — rebuild was a cache no-op and health is still $OSTEXT_RECHECK. The engine image already matches the pinned checkout (money-maker-sms ${PIN:-unknown}), so no rebuild can fix this. The pinned build must serve /ostext-app (basePath) to match the edge; repin the submodule and push." >> "$LOG"
+          else
+            echo "$(date -u) FAIL-SAFE: engine rebuilt to a new image but health is still $OSTEXT_RECHECK, will retry after cooldown" >> "$LOG"
+          fi
         else
           echo "$(date -u) FAIL-SAFE: engine rebuild failed, previous image keeps serving" >> "$LOG"
         fi
