@@ -28,6 +28,119 @@ export function jobFeedEnabled(): boolean {
 }
 const PROVIDER = (): string => (process.env.RAPID_JOBS_PROVIDER || "jsearch").toLowerCase();
 
+/* ------------------------------------------------------------------ */
+/* Feed health — telling an outage apart from a quiet market           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * JSearch answers a broken subscription the same way it answers a genuinely empty
+ * search: HTTP 200, `status:"OK"`, `data.jobs: []`. A single such response is
+ * unremarkable — plenty of narrow queries really do return nothing. A RUN of them
+ * across different queries is not: that is the feed being down while looking healthy,
+ * and it is the shape that makes a weekend sweep report "0 net-new companies" instead
+ * of "the feed gave us nothing, do not trust this number".
+ *
+ * So we track consecutive zero-job 200s and expose it, mirroring `newsFeedHealth()`.
+ * We do NOT open a breaker: unlike the RSS 429/403 case, the upstream is not refusing
+ * us and backing off would not help. This is a reporting fix, not a throttle.
+ */
+/* A ROLLING WINDOW, not a consecutive run. Measured against the live feed this matters:
+ * a degraded JSearch still serves a real result roughly one call in twenty-five, and a
+ * consecutive-empty counter resets to zero on that one lucky hit — so a feed that is
+ * 96% dead reports perfect health. A hit RATE over the last N calls survives that. */
+const HEALTH_WINDOW = 20;
+const MIN_SAMPLE = 8;
+const MIN_HIT_RATE = 0.2;
+const feedHealth = {
+  recent: [] as boolean[],       // true = that call returned at least one job
+  consecutiveEmpty: 0,
+  lastJobsAt: 0,
+  lastEmptyQuery: "",
+  lastError: "",
+  lastErrorAt: 0,
+};
+
+function noteFeedResult(kind: "jobs" | "empty" | "error", detail: string): void {
+  if (kind !== "error") {
+    feedHealth.recent.push(kind === "jobs");
+    if (feedHealth.recent.length > HEALTH_WINDOW) feedHealth.recent.shift();
+  }
+  if (kind === "jobs") {
+    feedHealth.consecutiveEmpty = 0;
+    feedHealth.lastJobsAt = Date.now();
+    return;
+  }
+  if (kind === "empty") {
+    feedHealth.consecutiveEmpty++;
+    feedHealth.lastEmptyQuery = detail;
+    return;
+  }
+  feedHealth.lastError = detail;
+  feedHealth.lastErrorAt = Date.now();
+}
+
+function hitRate(): { hits: number; sample: number; rate: number } {
+  const sample = feedHealth.recent.length;
+  const hits = feedHealth.recent.filter(Boolean).length;
+  return { hits, sample, rate: sample ? hits / sample : 1 };
+}
+
+export interface JobFeedHealth {
+  configured: boolean;
+  /** Calls in the rolling window that returned at least one job. */
+  hits: number;
+  /** Size of the rolling window actually observed so far. */
+  sample: number;
+  /** hits / sample, 0..1. Below MIN_HIT_RATE on a real sample is an outage. */
+  hitRate: number;
+  /** Consecutive 200-OK responses that carried zero jobs (diagnostic detail). */
+  consecutiveEmpty: number;
+  /** True once the sample is big enough AND the hit rate is too low to be a narrow query. */
+  suspectOutage: boolean;
+  /** ISO time we last saw ANY job come back. Stale + suspectOutage = the feed died then. */
+  lastJobsAt?: string;
+  lastEmptyQuery?: string;
+  lastError?: string;
+  lastErrorAt?: string;
+  /** Plain-English line for the status panel and the watchdog journal. */
+  note?: string;
+}
+
+/** Feed health, for the watch status endpoint and any monitor that wants it. */
+export function jobFeedHealth(): JobFeedHealth {
+  const { hits, sample, rate } = hitRate();
+  const suspect = sample >= MIN_SAMPLE && rate < MIN_HIT_RATE;
+  return {
+    configured: jobFeedEnabled(),
+    hits,
+    sample,
+    hitRate: +rate.toFixed(3),
+    consecutiveEmpty: feedHealth.consecutiveEmpty,
+    suspectOutage: suspect,
+    lastJobsAt: feedHealth.lastJobsAt ? new Date(feedHealth.lastJobsAt).toISOString() : undefined,
+    lastEmptyQuery: feedHealth.lastEmptyQuery || undefined,
+    lastError: feedHealth.lastError || undefined,
+    lastErrorAt: feedHealth.lastErrorAt ? new Date(feedHealth.lastErrorAt).toISOString() : undefined,
+    note: !jobFeedEnabled()
+      ? "job feed not configured (RAPID_JOBS_KEY / RAPID_JOBS_HOST)"
+      : suspect
+        ? `job feed answered 200 OK with zero jobs on ${sample - hits} of the last ${sample} calls ` +
+          `(last empty: "${feedHealth.lastEmptyQuery}") — treat the job arm's counts as UNKNOWN, ` +
+          `not as a quiet market, until the hit rate recovers`
+        : undefined,
+  };
+}
+
+/** Test hook: clear health state so suites stay deterministic. */
+export function __resetJobFeedHealth(): void {
+  feedHealth.recent = [];
+  feedHealth.consecutiveEmpty = 0;
+  feedHealth.lastJobsAt = 0;
+  feedHealth.lastEmptyQuery = "";
+  feedHealth.lastError = "";
+  feedHealth.lastErrorAt = 0;
+}
+
 /** Defensive raw record — superset of JSearch + Active Jobs DB field names. */
 interface RawJob {
   // JSearch
@@ -200,7 +313,10 @@ async function fetchJobFeedRaw(opts: JobFeedOpts): Promise<{ leads: InMarketLead
     // Credit meter: every response (errors included) carries the JSearch subscription's
     // quota headers; remember the latest reading for the Hire Signals credit chip.
     noteRapidQuota(host, res.headers, "jobs");
-    if (!res.ok) return { leads: [], error: `jobfeed_upstream_${res.status}` };
+    if (!res.ok) {
+      noteFeedResult("error", `jobfeed_upstream_${res.status}`);
+      return { leads: [], error: `jobfeed_upstream_${res.status}` };
+    }
     const data = (await res.json().catch(() => null)) as unknown;
     // Normalize across shapes: flat array, JSearch v2 `{data:{jobs:[…]}}`, legacy
     // `{data:[…]}`, and `{jobs:[…]}`. v2 nests under data.jobs, so check it first.
@@ -210,7 +326,13 @@ async function fetchJobFeedRaw(opts: JobFeedOpts): Promise<{ leads: InMarketLead
       : Array.isArray((root as { data?: RawJob[] })?.data) ? (root as { data: RawJob[] }).data
       : Array.isArray((root as { jobs?: RawJob[] })?.jobs) ? (root as { jobs: RawJob[] }).jobs
       : [];
-  } catch { return { leads: [], error: "jobfeed_unreachable" }; }
+    // A 200 that carried no jobs at all. On its own this is just a narrow query; in a run
+    // it is the feed being down while looking healthy. `jobFeedHealth()` tells them apart.
+    noteFeedResult(arr.length ? "jobs" : "empty", opts.query || "(no query)");
+  } catch {
+    noteFeedResult("error", "jobfeed_unreachable");
+    return { leads: [], error: "jobfeed_unreachable" };
+  }
   return { leads: mapJobsToLeads(arr, opts.query) };
 }
 
