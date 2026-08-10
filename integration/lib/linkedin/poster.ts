@@ -434,6 +434,7 @@ export async function createPlaybookDraft(ws: string, opts: { pillar: string; ve
   s.drafts.unshift(draft);
   if (s.drafts.length > 300) s.drafts.length = 300;
   persist();
+  await autoAttachCard(ws, draft.id);
   return draft;
 }
 
@@ -553,8 +554,7 @@ export async function pullWatchedProfile(ws: string, id: string): Promise<{ adde
     if (s.settings.autoRewrite !== false && process.env.ANTHROPIC_API_KEY) {
       for (const it of fresh.slice(0, 5)) {
         try {
-          const nd = await rewriteToDraft(ws, { inspirationId: it.id });
-          await autoAttachCard(ws, nd.id);
+          await rewriteToDraft(ws, { inspirationId: it.id });
           drafted += 1;
         } catch { break; }
       }
@@ -657,6 +657,7 @@ export async function rewriteToDraft(ws: string, opts: {
   s.drafts.unshift(draft);
   if (s.drafts.length > 300) s.drafts.length = 300;
   persist();
+  await autoAttachCard(ws, draft.id);
   return draft;
 }
 
@@ -675,6 +676,13 @@ export async function regenerateDraft(ws: string, draftId: string, guidance?: st
   d.error = undefined;
   d.updatedAt = nowIso();
   persist();
+  // The graphic tracks the words: a regenerated post refreshes its auto card
+  // so the stat never goes stale. Uploaded photos and carousels stay put.
+  const att = d.imageId ? s.images.find((i) => i.id === d.imageId) : undefined;
+  if (!att || (att.kind === "card" && att.mime === "image/png")) {
+    d.imageId = undefined;
+    await autoAttachCard(ws, d.id);
+  }
   return d;
 }
 
@@ -760,13 +768,21 @@ async function generateOriginal(settings: PosterSettings, angle: string, topic?:
   return scrubDashes(out).slice(0, 3000);
 }
 
-/** Every hands-off draft ships with a creative already attached: a branded
- *  quote card cut from the hook line. One click swaps it for a carousel or a
- *  library image. Best-effort: a render hiccup never blocks the draft. */
+/** Every draft ships with a creative already attached: the dynamic stat card
+ *  built from the post's own numbers (same renderer as "Create media for me";
+ *  headline-only when no AI key). Falls back to the branded quote card if the
+ *  stat render hiccups. Best-effort: a media failure never blocks the draft. */
 async function autoAttachCard(ws: string, draftId: string): Promise<void> {
   const s = wsState(ws);
   const d = s.drafts.find((x) => x.id === draftId);
   if (!d || d.imageId) return;
+  try {
+    const img = await renderStatImage(ws, d.text);
+    d.imageId = img.id;
+    d.updatedAt = nowIso();
+    persist();
+    return;
+  } catch { /* fall through to the quote card */ }
   const hook = (d.text.split("\n")[0] || "").trim();
   if (!hook) return;
   try {
@@ -1658,11 +1674,21 @@ export async function generateStatMedia(ws: string, opts: { draftId: string }): 
   if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
   if (!d.text.trim()) throw Object.assign(new Error("empty_post"), { status: 400 });
 
+  const img = await renderStatImage(ws, d.text);
+  d.imageId = img.id;
+  d.updatedAt = nowIso();
+  persist();
+  return { image: img, draft: d };
+}
+
+/** Spec (AI when available, headline-only fallback) -> stat card PNG -> library. */
+async function renderStatImage(ws: string, text: string): Promise<PosterImage> {
+  const s = wsState(ws);
   let spec: StatMediaSpec | null = null;
   if (process.env.ANTHROPIC_API_KEY) {
-    try { spec = await generateStatSpec(d.text); } catch { spec = null; }
+    try { spec = await generateStatSpec(text); } catch { spec = null; }
   }
-  if (!spec) spec = statSpecNaive(d.text);
+  if (!spec) spec = statSpecNaive(text);
 
   const sharp = (await import("sharp")).default;
   const bytes = await sharp(Buffer.from(statMediaSvg(spec))).png().toBuffer();
@@ -1675,10 +1701,8 @@ export async function generateStatMedia(ws: string, opts: { draftId: string }): 
     createdAt: nowIso(),
   };
   s.images.unshift(img);
-  d.imageId = id;
-  d.updatedAt = nowIso();
   persist();
-  return { image: img, draft: d };
+  return img;
 }
 
 /* --------------------------- reuse + performance -------------------------- */
