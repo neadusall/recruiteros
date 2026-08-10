@@ -7986,6 +7986,7 @@
           '<button class="btn btn-primary btn-sm" id="sndImport">Import inboxes (CSV)</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndAdd">+ Add one</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndSyncFleet">Sync from warm-up fleet</button>' +
+          '<button class="btn btn-ghost btn-sm" id="sndSyncSac">Pull Sending.ac logins</button>' +
           '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
         '</div>' +
       '</div>' +
@@ -8010,6 +8011,28 @@
         if (!r.ok || !rep) { toast("Fleet sync failed"); return; }
         if (!rep.configured) { toast("Warm-up connection is not configured"); return; }
         toast("Fleet synced: " + rep.imported + " new, " + rep.updated + " refreshed (" + rep.withCreds + " sendable here, " + rep.credsless + " upstream-managed)");
+        loadSenders(); loadWarmup(true);
+      });
+    });
+    // Sending.ac mailboxes are provisioned upstream as Microsoft 365 accounts, so the
+    // warm-up mirror above knows they exist but carries no password for them. This pulls
+    // the real logins from Sending.ac so those mailboxes can actually send from here.
+    $("#sndSyncSac").addEventListener("click", function () {
+      var btn = $("#sndSyncSac"); btn.disabled = true; btn.textContent = "Pulling logins…";
+      send("/senders", "POST", { action: "sync-sendingac" }).then(function (r) {
+        btn.disabled = false; btn.textContent = "Pull Sending.ac logins";
+        var rep = (r.data || {}).report;
+        if (!r.ok || !rep) { toast("Could not reach Sending.ac"); return; }
+        if (!rep.configured) { toast("Sending.ac is not connected yet: add the API key on the server, then try again"); return; }
+        if (rep.errors && rep.errors.length && !rep.credentialed) {
+          toast("Sending.ac refused the connection: check the API key");
+          return;
+        }
+        var msg = rep.credentialed + " mailboxes ready to send";
+        if (rep.imported) msg += " · " + rep.imported + " new";
+        if (rep.pending) msg += " · " + rep.pending + " still provisioning";
+        if (rep.sandbox) msg += " (test key)";
+        toast(msg);
         loadSenders(); loadWarmup(true);
       });
     });

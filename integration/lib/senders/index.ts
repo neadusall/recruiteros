@@ -16,8 +16,13 @@ export type { NewInboxInput, RecruiterCapacity, SendCapacity } from "./store";
 
 export { pickSender, poolCapacity, fleetDailyCapacity } from "./pool";
 
-export { syncFleetInboxes, maybeAutoFleetSync } from "./fleetSync";
+export { syncFleetInboxes, maybeAutoFleetSync, buildPortalRouter } from "./fleetSync";
 export type { FleetSyncReport } from "./fleetSync";
+
+export { syncSendingAcFleet, maybeAutoSendingAcSync } from "./sendingAcSync";
+export type { SendingAcSyncReport } from "./sendingAcSync";
+export { sendingAcConfigured, sendingAcIsSandbox, sendingAcKeyHint, pingSendingAc } from "./sendingAcApi";
+export type { SendingAcPing } from "./sendingAcApi";
 
 export { runSenderHealthGuard, guardStatus } from "./healthGuard";
 export type { GuardReport, GuardAction } from "./healthGuard";
@@ -29,6 +34,12 @@ export { COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DO
 
 export { sendViaInbox, verifyInbox } from "./smtp";
 export type { SmtpMessage, SmtpResult } from "./smtp";
+
+export {
+  mailboxApiConfigured, canSendViaMailboxApi, sendViaMailboxApi,
+  listMailboxApiMessages, pingMailboxApi,
+} from "./mailboxApi";
+export type { MailboxApiMessage, MailboxApiPing } from "./mailboxApi";
 
 export { parseCsv, detectColumns, rowsToInboxes } from "./csv";
 export type { ColumnMap, MapRowsResult } from "./csv";
