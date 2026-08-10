@@ -55,9 +55,15 @@ function effectiveQuery(w: Watchlist): string {
   return [w.query, w.industry].map((s) => (s || "").trim()).filter(Boolean).join(" ").trim();
 }
 
+/** What a list searches on, whichever front end it uses. A news list searches its
+ *  segment; a job list its query. Empty either way means there is nothing to poll. */
+function searchTerm(w: Watchlist): string {
+  return w.source === "news" ? (w.segment || "").trim() : effectiveQuery(w);
+}
+
 function isDue(w: Watchlist, now: number): boolean {
   if (!w.active) return false;
-  if (!effectiveQuery(w)) return false;   // nothing to search on
+  if (!searchTerm(w)) return false;   // nothing to search on
   if (!w.lastPolledAt) return true;
   const last = Date.parse(w.lastPolledAt) || 0;
   return now - last >= w.everyMinutes * 60_000;
@@ -93,6 +99,30 @@ async function fetchLeads(w: Watchlist): Promise<InMarketLead[]> {
 }
 
 /**
+ * The news front end. Free and keyless, so unlike the job feed there is nothing to
+ * reserve and no key to check. Warnings are folded into the list's lastError so a
+ * recruiter can see "Google News blocked us" rather than a silent zero, but partial
+ * results still flow: one dead signal query does not discard the four that worked.
+ */
+async function fetchNewsLeads(w: Watchlist): Promise<InMarketLead[]> {
+  const { discoverFromNews } = await import("./newsDiscover");
+  const res = await discoverFromNews({
+    segment: (w.segment || "").trim(),
+    signals: w.newsSignals as never,
+    windowDays: w.newsWindowDays,
+    minAmountUsd: w.minAmountUsd,
+    targetRoles: w.targetRoles,
+    limit: w.limit ?? 40,
+  });
+  // Only surface a warning when the sweep produced nothing at all; a partial sweep that
+  // still found companies is a success, not an error the recruiter needs to see.
+  if (!res.leads.length && res.warnings.length) {
+    throw new Error(res.warnings[0].slice(0, 140));
+  }
+  return res.leads;
+}
+
+/**
  * Run one watchlist: fetch -> dedupe -> curate -> mark seen -> record. Returns an outcome either
  * way; throws only on a truly unexpected fault (the tick catches it). Guarded so the same list is
  * never polled concurrently.
@@ -103,23 +133,29 @@ export async function pollOne(w: Watchlist, todayIso: string): Promise<PollOutco
   if (inFlight.has(w.id)) return { ...base, skipped: "busy" };
   inFlight.add(w.id);
   try {
-    if (!jobFeedEnabled()) {
-      await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error: "job feed not configured (RAPID_JOBS_KEY/HOST)" });
-      return { ...base, skipped: "feed_off" };
+    const isNews = w.source === "news";
+
+    // A news list costs nothing: Google News RSS is keyless, so it neither needs the
+    // RapidAPI key nor draws against the paid daily fetch budget. That is deliberate,
+    // it means signal discovery keeps running on a day the job-feed budget is spent.
+    if (!isNews) {
+      if (!jobFeedEnabled()) {
+        await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error: "job feed not configured (RAPID_JOBS_KEY/HOST)" });
+        return { ...base, skipped: "feed_off" };
+      }
+      // Reserve the paid fetches for this poll against the daily ceiling.
+      const pages = Math.max(1, Math.ceil((w.limit ?? 30) / JOBS_PER_PAGE));
+      const granted = await reserveFetches(pages, todayIso);
+      if (granted <= 0) {
+        await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error: "daily feed budget reached" });
+        return { ...base, skipped: "no_budget" };
+      }
     }
 
-    // Reserve the paid fetches for this poll against the daily ceiling.
-    const pages = Math.max(1, Math.ceil((w.limit ?? 30) / JOBS_PER_PAGE));
-    const granted = await reserveFetches(pages, todayIso);
-    if (granted <= 0) {
-      await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error: "daily feed budget reached" });
-      return { ...base, skipped: "no_budget" };
-    }
-
-    // 1) Pull real postings for this target audience (pure, no side effects, no pool write).
+    // 1) Pull this list's raw companies (pure, no side effects, no pool write).
     let leads: InMarketLead[] = [];
     try {
-      leads = await fetchLeads(w);
+      leads = isNews ? await fetchNewsLeads(w) : await fetchLeads(w);
     } catch (e) {
       const error = (e as Error)?.message?.slice(0, 160) || "feed fetch failed";
       await recordPollResult(w.id, { found: 0, fresh: 0, contactable: 0, error });
@@ -147,6 +183,9 @@ export async function pollOne(w: Watchlist, todayIso: string): Promise<PollOutco
         concurrency: 4,
         minScore,
         nowIso: todayIso,
+        // Which arm found these. Recorded on rows this run CREATES only, so a company
+        // stays credited to whichever front end actually earned it.
+        attribution: { source: isNews ? "news" : "jobs", listId: w.id },
       });
       contactable = report.contactable;
     } catch (e) {
@@ -175,12 +214,89 @@ export interface TickSummary {
   contactableTotal: number;
   budgetRemaining: number;
   outcomes: PollOutcome[];
+  /** Set when the tick discovered nothing because the send queue was already full.
+   *  Distinguishes "paused on purpose" from "found nothing", which otherwise look
+   *  identical in the logs and in every daily count. */
+  pausedForCapacity?: BeltRoom;
 }
 
 /** Bound how many companies one tick may curate, so a tick stays short and the timer never starves. */
 function maxCuratePerTick(): number {
   const n = Number(process.env.SIGNALS_WATCH_MAX_CURATE_PER_TICK);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 60;
+}
+
+/* ------------------------------------------------------------------ */
+/* Back pressure: discovery must not outrun sending                    */
+/* ------------------------------------------------------------------ */
+/*
+ * Discovery has no natural brake. The tick runs every 15 minutes against every active
+ * list, and its only ceilings are per-tick work limits — none of which know anything
+ * about whether the belt downstream can still send. Left alone it curates thousands of
+ * companies a day into a queue that drains at the fleet's rate, which is lower.
+ *
+ * The overflow is not free, and it is not merely early:
+ *
+ *   - step 4 of pollOne marks every curated company SEEN, permanently and globally, so a
+ *     company discovered on a day we could not email it is a company that will never be
+ *     re-picked when we can. Over-curating does not build a backlog, it spends inventory;
+ *   - each company costs three decision-maker researches, email-pattern work and Reoon
+ *     verifications, all of which have their own quotas;
+ *   - on the jobs arm it also spends paid JSearch fetches.
+ *
+ * So the tick asks one question first: does the belt have room? If the staged, send-ready
+ * supply already covers the buffer the operator asked for, this tick discovers NOTHING —
+ * no fetch, no curate, no company burned — and the lists stay due for the next one. The
+ * moment the queue drains, discovery resumes on its own. That is what lets this run for
+ * weeks unattended instead of quietly eating the market it is supposed to work.
+ *
+ * Fails OPEN. If the send-queue modules cannot be read we allow discovery: a wedged belt
+ * that finds nothing is a worse failure than one that finds too much.
+ */
+
+export interface BeltRoom {
+  hasRoom: boolean;
+  readySupply?: number;
+  bufferTarget?: number;
+  dailyTarget?: number;
+  /** Present when the target was cut to what the inbox fleet can physically send. */
+  fleetClamped?: boolean;
+  note?: string;
+}
+
+export async function beltRoom(): Promise<BeltRoom> {
+  if (process.env.SIGNALS_WATCH_RESPECT_CAPACITY === "0") {
+    return { hasRoom: true, note: "capacity back pressure disabled (SIGNALS_WATCH_RESPECT_CAPACITY=0)" };
+  }
+  try {
+    const { getAutofillSettings, dailyTargetExplained } = await import("../../sending/autofill");
+    const s = await getAutofillSettings();
+    // With no campaign chosen, autofill is not staging anything, so there is no queue to
+    // measure and nothing to hold discovery back.
+    if (!s.workspaceId || !s.campaignId) return { hasRoom: true, note: "no send-queue campaign configured" };
+
+    const { target, clamped } = await dailyTargetExplained(s.workspaceId);
+    if (target <= 0) return { hasRoom: true, note: "no readable daily target" };
+
+    const { sendQueueOverview } = await import("../../sending/sendReady");
+    const ov = await sendQueueOverview(s.workspaceId, nowIso());
+    const bufferTarget = s.bufferDays * target;
+    const hasRoom = ov.readySupply < bufferTarget;
+    return {
+      hasRoom,
+      readySupply: ov.readySupply,
+      bufferTarget,
+      dailyTarget: target,
+      fleetClamped: clamped,
+      note: hasRoom
+        ? undefined
+        : `belt is full: ${ov.readySupply} send-ready prospects staged against a ${s.bufferDays}-day buffer of ` +
+          `${bufferTarget} (${target}/day${clamped ? ", capped by inbox fleet capacity" : ""}). ` +
+          `Discovery is paused so companies are not burned faster than they can be emailed.`,
+    };
+  } catch {
+    return { hasRoom: true, note: "send-queue capacity unreadable; discovery allowed" };
+  }
 }
 
 /**
@@ -202,6 +318,26 @@ export async function tickWatchlists(): Promise<TickSummary> {
       .sort((a, b) => (Date.parse(a.lastPolledAt || "") || 0) - (Date.parse(b.lastPolledAt || "") || 0));
     const maxLists = Math.max(1, Number(process.env.SIGNALS_WATCH_MAX_LISTS_PER_TICK) || 50);
     const curateCap = maxCuratePerTick();
+
+    // BACK PRESSURE, checked once per tick and BEFORE any list is touched: a company is
+    // burned by being curated, so the only safe place to stop is upstream of the fetch.
+    // Nothing is marked polled or seen, so every list stays due and resumes untouched.
+    const room = await beltRoom();
+    if (!room.hasRoom) {
+      await recordTickHealth({
+        lastTickAt: nowIso(),
+        lastTickMs: Math.max(0, Date.now() - startedMs),
+        lastDue: due.length,
+        lastPolled: 0,
+        lastFreshTotal: 0,
+        errored: false,
+      });
+      return {
+        ran: true, due: due.length, polled: 0, freshTotal: 0, contactableTotal: 0,
+        budgetRemaining: await fetchBudgetRemaining(today), outcomes: [],
+        pausedForCapacity: room,
+      };
+    }
 
     const outcomes: PollOutcome[] = [];
     let curatedThisTick = 0;

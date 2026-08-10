@@ -11,8 +11,9 @@
 
 import {
   geocodeUsPlace, haversineMi, withinRadius, citiesWithinRadius, parseRadiusMi,
-  radiusBudgetMi, statesWithinRadius, stateOfPlace,
+  radiusBudgetMi, statesWithinRadius, stateOfPlace, enforcedRadiusMi, EXACT_RADIUS_MI,
 } from "../lib/sourcing/geoRadius";
+import { enforceGeo } from "../lib/sourcing/geoEnforce";
 import { pinIcpLocation } from "../lib/sourcing/pinLocation";
 import { generateQueries } from "../lib/sourcing/generateQueries";
 import { geoChips } from "../lib/sourcing/koldinfoDiscovery";
@@ -277,6 +278,76 @@ ok(statesWithinRadius(nyc, 25).includes("NJ"), "a radius straddling a state line
 ok(citiesWithinRadius(nyc, 25, 10).length === 10, "citiesWithinRadius honours its limit");
 ok(citiesWithinRadius(null, 25).length === 0, "no center yields no cities");
 ok(citiesWithinRadius(nyc, 0).length === 0, "radius 0 yields no cities");
+
+/* ---------------- 10. "Exact" is a radius, not an off switch --------------
+ * The loudest leak of all: leaving the dropdown on Exact used to mean radiusMi === 0,
+ * which skipped geocoding the center entirely and handed every row to the keep-biased
+ * name matcher — so the TIGHTEST setting in the product was its loosest filter.
+ */
+
+ok(enforcedRadiusMi(0) === EXACT_RADIUS_MI, '"Exact" enforces a real, tight mileage');
+ok(enforcedRadiusMi(undefined) === EXACT_RADIUS_MI, "a missing pick still enforces something");
+ok(enforcedRadiusMi(25) === 25, "an explicit pick is enforced exactly as picked");
+ok(enforcedRadiusMi(9999) === 250, "an absurd pick still clamps to the dropdown ceiling");
+ok(EXACT_RADIUS_MI < 25, "Exact stays strictly tighter than every other option");
+
+const fairLawn = geocodeUsPlace("Fair Lawn, NJ")!;
+ok(
+  withinRadius("Trenton, NJ", fairLawn, enforcedRadiusMi(0)) === false,
+  "Exact rejects a same-state city 59 miles out (it used to sail through on the shared state token)",
+);
+ok(
+  withinRadius("Trenton, NJ", fairLawn, enforcedRadiusMi(100)) === true,
+  "...and the same person is kept when the recruiter actually asks for +100mi",
+);
+ok(
+  withinRadius("Paterson, NJ", fairLawn, enforcedRadiusMi(0)) === true,
+  "Exact still keeps the town next door",
+);
+ok(
+  withinRadius("Newark, NJ", fairLawn, enforcedRadiusMi(0)) === true,
+  "Exact is a metro footprint, not a pin: the city 14 miles down the road is still local",
+);
+
+/* ---------------- 11. The radius survives the merge ----------------------
+ * The same-role auto-combine strips "+100mi" out of its match key on purpose, so a
+ * tight list and a wide list for one role DO fold together. enforceGeo is what stops
+ * the tight list inheriting the wide search's people.
+ */
+
+const geoRow = (name: string, location: string, outOfArea?: boolean): CandidateRow =>
+  ({ fullName: name, location, fitScore: 60, fitReasons: [], outOfArea });
+
+const folded: CandidateRow[] = [
+  geoRow("Local", "Freehold, NJ"),
+  geoRow("Wide Donor", "Camden, NJ"),        // ~50mi from Howell: inside +100mi, outside +25mi
+  geoRow("Far Donor", "Pittsburgh, PA"),
+  geoRow("Unreadable", "Somewhere Unknown"),
+  geoRow("Wrongly Marked", "Howell, NJ", true), // a donor list called them out-of-area
+];
+const res = enforceGeo(folded, { location: "Howell, NJ +25mi" });
+
+ok(res.enforced, "a list with a readable center enforces its radius");
+ok(res.radiusMi === 25, "the list's OWN mileage is what gets enforced, read off its label");
+ok(!folded[0].outOfArea, "a genuine local survives the fold");
+ok(folded[1].outOfArea === true, "the wider donor's 50mi person is marked out-of-area by the 25mi master");
+ok(folded[2].outOfArea === true, "an out-of-state donor row is marked out-of-area");
+ok(folded[3].outOfArea !== true, "an unmeasurable row is never marked out (never-empty rule holds)");
+ok(folded[3].geoUnverified === true, "an unmeasurable row is flagged for re-measuring later");
+ok(folded[4].outOfArea !== true, "measurement overrules a stale out-of-area label from another list");
+ok(res.cleared === 1, "the pass reports the row it cleared");
+ok(res.marked === 2, "the pass reports the rows it marked");
+ok(folded.every((r) => r.milesFromTarget === undefined || r.milesFromTarget >= 0),
+  "distances are re-measured against THIS list's center");
+
+// Idempotent: running it twice must not keep re-marking the same people.
+const again = enforceGeo(folded, { location: "Howell, NJ +25mi" });
+ok(again.marked === 0 && again.cleared === 0, "enforcement is idempotent");
+
+// No center = no verdict. A list with an unplaceable location changes nothing.
+const untouched: CandidateRow[] = [geoRow("Anyone", "Camden, NJ")];
+const none = enforceGeo(untouched, { location: "" });
+ok(!none.enforced && !untouched[0].outOfArea, "a list with no usable center marks nobody");
 
 /* ---------------- report ---------------- */
 

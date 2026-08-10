@@ -183,8 +183,8 @@ export async function claimVideoJobs(limit: number): Promise<VideoClaim> {
   let shared = false;
   try { shared = (await import("./assetStore")).s3Enabled(); } catch { /* no s3 module */ }
   if (!clipId) {
-    noteSupply({ reason: "no_clip", pending: 0, rebuilds: 0, clip: false, shared });
-    return { jobs: [], clipId: null, durationSec: dur, shared, pending: 0, rebuilds: 0, reason: "no_clip" };
+    noteSupply({ reason: "no_clip", pending: 0, rebuilds: 0, prerender: 0, clip: false, shared });
+    return { jobs: [], clipId: null, durationSec: dur, shared, pending: 0, rebuilds: 0, prerender: 0, reason: "no_clip" };
   }
 
   // Ship the clip METADATA with the claim: the registry lives in the main's Postgres snapshot
@@ -198,15 +198,27 @@ export async function claimVideoJobs(limit: number): Promise<VideoClaim> {
   const map = await loadMap();
   const fails = await loadFails();
   const nowMs = Date.now();
-  const rows = await listCurated({ status: "contactable", contactableOnly: true, limit: 6000 });
+  // ONE read of the book serves both tiers (it is a multi-MB snapshot and this runs on every
+  // worker claim, so it must not be loaded twice). The contactable tier is filtered to exactly
+  // what `{ status: "contactable", contactableOnly: true }` used to return.
+  const book = await listCurated({ limit: 50_000 });
+  const rows = book.filter((r) => r.status === "contactable" && !!r.likelyEmail);
+  // AHEAD-OF-DEMAND tier: researched roles that do not YET have a decision-maker email. See
+  // prerenderEnabled() below for why these are rendered before anyone can be mailed.
+  const ahead = prerenderEnabled()
+    ? book.filter((r) => (r.status === "sourced" || r.status === "named") && !r.likelyEmail)
+    : [];
   const pending: Array<VideoJob> = [];
+  const prerender: Array<VideoJob> = [];
   const rebuilds: Array<VideoJob> = [];
-  const rowByKey = new Map<string, (typeof rows)[number]>();
+  const rowByKey = new Map<string, (typeof book)[number]>();
   const seen = new Set<string>();
   // Every open role per company, so a worker that must fall back to a typeset card can show the
-  // company's full hiring surge instead of a single lonely title.
+  // company's full hiring surge instead of a single lonely title. Built from BOTH tiers: the
+  // related-roles line is the company's real hiring surge, and a role is no less real for having
+  // no decision-maker email attached to it yet.
   const rolesByCompany = new Map<string, string[]>();
-  for (const r of rows) {
+  for (const r of [...rows, ...ahead]) {
     const c = (r.company || "").toLowerCase().trim();
     const t = (r.role || "").trim();
     if (!c || !t) continue;
@@ -232,6 +244,34 @@ export async function claimVideoJobs(limit: number): Promise<VideoClaim> {
       signalReason: r.signalReason, relatedRoles: rolesByCompany.get(company.toLowerCase().trim()),
     });
   }
+  // AHEAD-OF-DEMAND queue, filled only after every contactable role has been accounted for. A key
+  // already claimed by the contactable tier is in `seen`, so a role never queues twice.
+  if (ahead.length) {
+    // Storage bound: count composites that do NOT currently back a contactable role — that is the
+    // ahead-of-demand working set (plus rows that have since aged out of the book). Retention
+    // (INMARKET_RETENTION_DAYS) prunes the tail, so this converges rather than growing forever.
+    let aheadMade = 0;
+    for (const k of Object.keys(map)) if (!seen.has(k)) aheadMade++;
+    let room = Math.max(0, prerenderMax() - aheadMade);
+    for (const r of ahead) {
+      if (room <= 0) break;
+      const company = r.company;
+      const role = r.role || r.managerTitle;
+      if (!company || !role) continue;
+      const key = shotKey(company, role);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rowByKey.set(key, r);
+      if (map[key]) continue;
+      if (isBenched(fails[key], nowMs)) continue;
+      prerender.push({
+        company, role, jobUrl: r.jobUrl, domain: r.domain,
+        location: r.jobLocation, postedAt: r.jobPostedAt, industry: r.industry,
+        signalReason: r.signalReason, relatedRoles: rolesByCompany.get(company.toLowerCase().trim()),
+      });
+      room--;
+    }
+  }
   // ONE-TIME rebuild sweep: composites made before the smooth-PiP compose fix shipped were
   // encoded at the scroll background's sparse VFR timing (~3fps average), so the webcam PiP is
   // choppy. Drive the sweep off the VIDEO MAP itself (every video ever made, regardless of the
@@ -247,16 +287,21 @@ export async function claimVideoJobs(limit: number): Promise<VideoClaim> {
     const row = rowByKey.get(key);
     rebuilds.push({ company: done.company, role: done.role, jobUrl: row?.jobUrl, domain: row?.domain, force: true, targetKey: done.videoKey });
   }
+  // STRICT PRIORITY, so ahead-of-demand work can never delay a role someone is waiting to mail:
+  // rebuilds (finite, links already in inboxes) → contactable → ahead-of-demand.
   const n = Math.max(1, Math.min(limit, 100));
   const batch = rebuilds.slice(0, n);
-  if (batch.length < n && pending.length) {
+  const fill = (queue: Array<VideoJob>) => {
+    if (batch.length >= n || !queue.length) return;
     const room = n - batch.length;
-    const start = pending.length > room ? Math.floor(Math.random() * (pending.length - room)) : 0;
-    batch.push(...pending.slice(start, start + room));
-  }
+    const start = queue.length > room ? Math.floor(Math.random() * (queue.length - room)) : 0;
+    batch.push(...queue.slice(start, start + room));
+  };
+  fill(pending);
+  fill(prerender);
   const reason: VideoClaim["reason"] = !shared ? "no_shared_storage" : batch.length ? "ok" : "queue_empty";
-  noteSupply({ reason, pending: pending.length, rebuilds: rebuilds.length, clip: true, shared });
-  return { jobs: batch, clipId, clip, durationSec: dur, shared, pending: pending.length, rebuilds: rebuilds.length, reason };
+  noteSupply({ reason, pending: pending.length, rebuilds: rebuilds.length, prerender: prerender.length, clip: true, shared });
+  return { jobs: batch, clipId, clip, durationSec: dur, shared, pending: pending.length, rebuilds: rebuilds.length, prerender: prerender.length, reason };
 }
 
 /**
@@ -278,10 +323,12 @@ export interface VideoClaim {
   pending: number;
   /** Composites queued for the one-time re-render sweep (these are served before new work). */
   rebuilds: number;
+  /** Ahead-of-demand depth — researched roles with no decision-maker email yet. Served last. */
+  prerender: number;
   reason: "ok" | "no_clip" | "no_shared_storage" | "queue_empty";
 }
 
-interface Supply { reason: VideoClaim["reason"]; pending: number; rebuilds: number; clip: boolean; shared: boolean; at: number }
+interface Supply { reason: VideoClaim["reason"]; pending: number; rebuilds: number; prerender: number; clip: boolean; shared: boolean; at: number }
 let lastSupply: Supply | null = null;
 function noteSupply(s: Omit<Supply, "at">): void { lastSupply = { ...s, at: Date.now() }; }
 
@@ -296,12 +343,47 @@ export async function videoSupply(maxAgeMs = 120_000): Promise<Supply & { fresh:
   try {
     await claimVideoJobs(1);   // claiming holds no lease, so a read for diagnostics costs nothing
   } catch { /* fall back to whatever we last knew */ }
-  if (!lastSupply) return { reason: "queue_empty", pending: 0, rebuilds: 0, clip: false, shared: false, at: Date.now(), fresh: false };
+  if (!lastSupply) return { reason: "queue_empty", pending: 0, rebuilds: 0, prerender: 0, clip: false, shared: false, at: Date.now(), fresh: false };
   return { ...lastSupply, fresh: false };
 }
 
 /** Composites recorded before this instant get re-rendered once (smooth-PiP compose fix). */
 const REBUILD_BEFORE = (process.env.INMARKET_VIDEO_REBUILD_BEFORE || "2026-08-04T14:00:00.000Z").trim();
+
+/* ------------------------------------------------------------------ */
+/* AHEAD-OF-DEMAND RENDERING                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * WHY WE RENDER ROLES NOBODY CAN BE MAILED ABOUT YET.
+ *
+ * The render gate used to be "contactable" — a curated row with a decision-maker EMAIL. That made
+ * video production strictly SERIAL behind email enrichment, and the fleet spent its day idle:
+ * measured 2026-08-07, all 1,207 contactable company+role pairs already had a video (queue depth 1)
+ * while 1,871 researched roles sat waiting for a name/email, and the ~4,500 videos/day of installed
+ * capacity produced 2-9 an hour. Adding render boxes would have changed nothing.
+ *
+ * But a video does not need the person. The background is the ROLE — the live posting capture, or
+ * the typeset role card built from company/title/location/postedAt/industry/signalReason and the
+ * company's other open reqs (captureRoleCard in roleShot.ts). None of that comes from the
+ * decision-maker, and the video map is keyed by shotKey(company, role), so a video rendered while a
+ * role is still "sourced" is the SAME asset that role needs the moment an email lands on it.
+ *
+ * So the idle capacity now works ahead: researched-but-not-yet-contactable roles are rendered at
+ * the LOWEST priority, and enrichment stops being a serial dependency — when an email finally
+ * resolves, the video is already in S3 and the send goes out immediately instead of waiting on a
+ * render. Contactable work always preempts it (see the strict priority in claimVideoJobs).
+ *
+ *   INMARKET_VIDEO_PRERENDER      = "0"     turn ahead-of-demand rendering OFF (default: on)
+ *   INMARKET_VIDEO_PRERENDER_MAX  = "4000"  cap on the ahead-of-demand working set (storage bound)
+ */
+function prerenderEnabled(): boolean {
+  return !["0", "false", "no", "off"].includes((process.env.INMARKET_VIDEO_PRERENDER || "").toLowerCase());
+}
+function prerenderMax(): number {
+  const n = Number(process.env.INMARKET_VIDEO_PRERENDER_MAX);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 4000;
+}
 
 /** A worker reports the videos it composited (keyed by company+role) → record them so the Clients tab shows them. */
 export async function recordVideoResults(results: Array<{ company: string; role: string; videoKey: string }>): Promise<number> {

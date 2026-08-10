@@ -277,6 +277,44 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         }
         let r = renderTouch(touchToRender, p, { emailStep });
 
+        // ARM-AWARE OPENER: the two discovery arms know different things about the buyer,
+        // so their first emails cannot be the same email.
+        //
+        // A JOBS-arm company posted a role, so the MPC opener's premise is true: there is
+        // a named seat, and we are marketing a candidate against it. A NEWS-arm company
+        // has posted nothing — the role in our system was INFERRED from a funding round
+        // or an exec hire. Sending them "I met someone sharper for your Operations Manager
+        // seat" asserts an opening they never announced, to a reader who knows they never
+        // announced it. That is the one mistake this arm cannot make and still be worth
+        // running, so the news arm gets its own signal-anchored five-beat opener instead.
+        //
+        // Swapped BEFORE the guard, unlike the MPC variant swap below, so the copy that
+        // actually sends is the copy that gets checked. Tokens are cleared with it: the
+        // pitch is fully composed prose with no merge fields, so the guard's data checks
+        // have nothing to assert against and its structural checks do all the work.
+        let newsHold: string[] | null = null;
+        if (t.channel === "email" && emailStep === 1 && p.discoverySource === "news") {
+          try {
+            const { newsOpenerFor } = await import("../signals/watch/newsOpener");
+            const res = await newsOpenerFor(workspaceId, p);
+            if (res.opener) r = { subject: res.opener.subject, body: res.opener.body, tokens: {} };
+            else newsHold = [res.reason || "the news opener could not be composed"];
+          } catch (e) {
+            // The composer is the ONLY correct copy for this prospect. If it faults we
+            // hold; falling through to the MPC template would send the exact email this
+            // branch exists to prevent.
+            newsHold = [`news opener failed: ${(e as Error)?.message?.slice(0, 80) || "unknown"}`];
+          }
+        }
+        if (newsHold) {
+          const changed = p.copyHold?.touch !== t.label || JSON.stringify(p.copyHold?.reasons) !== JSON.stringify(newsHold);
+          p.copyHold = { at: now.toISOString(), touch: t.label, reasons: newsHold };
+          if (changed) await core.saveProspect(p);
+          results.push({ campaignId: c.id, prospectId: p.id, channel: t.channel, touch: t.label, ok: false, held: true, reasons: newsHold });
+          held = true;
+          break;
+        }
+
         // RENDER GUARD (fail-safe): never send a touch whose merged copy has missing data points
         // or reads broken. HOLD the prospect — nothing sends, nothing advances — and record why,
         // so the Send Queue surfaces it. Re-rendered every tick; releases itself once the data is
@@ -301,7 +339,11 @@ export async function runAutopilot(workspaceId: string): Promise<{ campaigns: nu
         // for this template, the per-send Haiku rewrite runs ONLY if explicitly forced
         // (MPC_HUMANIZER=force); otherwise the deterministic render (which already passed the
         // guard above) sends unchanged. Either layer can only improve copy, never break a send.
-        if (t.channel === "email" && emailStep === 1 && p.mpcContext) {
+        // Never on the news arm: its body was already replaced above, and the MPC bank is
+        // keyed by MPC template text, so a swap here would put a candidate pitch back on
+        // an email that deliberately is not one. Enrollment stops stamping mpcContext on
+        // news prospects, but rows enrolled before that change still carry it.
+        if (t.channel === "email" && emailStep === 1 && p.mpcContext && p.discoverySource !== "news") {
           try {
             const { variantRender } = await import("../bd/mpc/variantBank");
             const v = await variantRender(touchToRender, p, emailStep);

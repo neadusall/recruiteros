@@ -65,6 +65,23 @@ export async function route(
   // BD-only A/B experiment gate (candidate outreach is a separate model).
   const bd = await isBdMotion(core, prospect);
 
+  // Close the Hire-Signals tracking loop on the REPLY half. The delivery webhook
+  // (lib/sending/ingest) stamps sent/open/bounce, but Postal never sees a reply: it
+  // arrives in the inbox, not on the delivery stream. Without this, repliedAt is never
+  // written, and reply-rate — the headline metric of the jobs-vs-news discovery trial
+  // (lib/signals/watch/sourceTrial) — reads 0.00% forever no matter how well an arm does.
+  //
+  // Stamped here rather than per-action because a reply is a reply whatever the rule
+  // decides to do about it: a "not interested" still proves the arm reached a human.
+  // Matched by address; non-email channels simply miss and no-op.
+  const replyAddr = (prospect?.email ?? inbound.fromHandle ?? "").trim();
+  if (replyAddr.includes("@")) {
+    try {
+      const { recordSendEvent } = await import("../inmarket/curation");
+      await recordSendEvent(replyAddr, "reply", nowIso());
+    } catch { /* tracking is best-effort; never let it break reply processing */ }
+  }
+
   for (const action of rule.actions) {
     switch (action.kind) {
       case "push_notification": {

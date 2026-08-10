@@ -73,6 +73,7 @@
     devices: { mics: [], speakers: [], micId: "", speakerId: "" },
     endedInfo: null,       // {callId, status} shown briefly after hangup
     micLevel: 0,           // live input level 0..1 while a call is active
+    micPermission: "unknown", // unknown | granted | denied | error | unsupported
   };
   var subs = [];
   function emit() {
@@ -307,6 +308,7 @@
     stopRingtone();
     stopTimer();
     stopMicMeter();
+    clearDialGuard();
     var ended = S.call;
     S.sdkCall = null;
     pendingOutbound = null;
@@ -428,16 +430,99 @@
   }
 
   /* ---------------- devices ---------------- */
+  /**
+   * Ask for the mic once. Until the browser grants it, enumerateDevices returns
+   * entries with blank labels, so a headset is indistinguishable from the
+   * built-in mic and no picker can be honest about what is selected.
+   */
+  function ensureMicPermission() {
+    if (S.micPermission === "granted") return Promise.resolve(true);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      S.micPermission = "unsupported"; emit();
+      return Promise.resolve(false);
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      S.micPermission = "granted"; emit();
+      return true;
+    }, function () {
+      S.micPermission = "denied"; emit();
+      return false;
+    });
+  }
+  /**
+   * List audio devices. Prefers the SDK's view once it is connected, and falls
+   * back to the browser's own enumeration so the picker works on a page where
+   * the softphone has not finished registering yet.
+   */
   function refreshDevices() {
-    if (!client) return;
-    Promise.all([
-      client.getAudioInDevices ? client.getAudioInDevices() : Promise.resolve([]),
-      client.getAudioOutDevices ? client.getAudioOutDevices() : Promise.resolve([]),
-    ]).then(function (r) {
-      S.devices.mics = (r[0] || []).map(function (d) { return { id: d.deviceId, label: d.label || "Microphone" }; });
-      S.devices.speakers = (r[1] || []).map(function (d) { return { id: d.deviceId, label: d.label || "Speaker" }; });
+    var viaSdk = client && client.getAudioInDevices
+      ? Promise.all([
+          client.getAudioInDevices(),
+          client.getAudioOutDevices ? client.getAudioOutDevices() : Promise.resolve([]),
+        ]).then(function (r) { return { mics: r[0] || [], speakers: r[1] || [] }; })
+      : Promise.reject();
+    return viaSdk.catch(function () {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return { mics: [], speakers: [] };
+      return navigator.mediaDevices.enumerateDevices().then(function (all) {
+        return {
+          mics: all.filter(function (d) { return d.kind === "audioinput"; }),
+          speakers: all.filter(function (d) { return d.kind === "audiooutput"; }),
+        };
+      });
+    }).then(function (r) {
+      S.devices.mics = (r.mics || []).map(function (d, i) { return { id: d.deviceId, label: d.label || ("Microphone " + (i + 1)) }; });
+      S.devices.speakers = (r.speakers || []).map(function (d, i) { return { id: d.deviceId, label: d.label || ("Speaker " + (i + 1)) }; });
       emit();
-    }).catch(function () {});
+      return S.devices;
+    }).catch(function () { return S.devices; });
+  }
+  /**
+   * Open the chosen mic and report its live input level until the returned stop
+   * function runs. This is how a recruiter proves the headset is the device the
+   * call will actually use, before dialing a candidate.
+   */
+  function testMic(deviceId, onLevel) {
+    var stopped = false, stream = null, timer = null, src = null, analyser = null;
+    function stop() {
+      stopped = true;
+      if (timer) { clearInterval(timer); timer = null; }
+      try { if (src) src.disconnect(); } catch (e) {}
+      try { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+      stream = null; src = null; analyser = null;
+    }
+    var want = deviceId ? { deviceId: { exact: deviceId } } : true;
+    var p = (navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+      ? navigator.mediaDevices.getUserMedia({ audio: want })
+      : Promise.reject(new Error("unsupported"));
+    p.then(function (s) {
+      if (stopped) { try { s.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} return; }
+      stream = s;
+      S.micPermission = "granted"; emit();
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      // A tab that was never interacted with keeps the context suspended, which
+      // would read as a dead mic rather than a silent one.
+      try { if (audioCtx.state === "suspended" && audioCtx.resume) audioCtx.resume(); } catch (e) {}
+      src = audioCtx.createMediaStreamSource(s);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      var buf = new Uint8Array(analyser.frequencyBinCount);
+      timer = setInterval(function () {
+        if (!analyser) return;
+        analyser.getByteTimeDomainData(buf);
+        var peak = 0;
+        for (var i = 0; i < buf.length; i += 4) {
+          var v = Math.abs(buf[i] - 128) / 128;
+          if (v > peak) peak = v;
+        }
+        try { onLevel(Math.min(1, peak * 1.6), null); } catch (e) {}
+      }, 100);
+    }, function (err) {
+      S.micPermission = (err && err.name === "NotAllowedError") ? "denied" : "error"; emit();
+      try { onLevel(0, err || new Error("mic_unavailable")); } catch (e) {}
+    });
+    return stop;
   }
   function setMic(id) {
     S.devices.micId = id;
@@ -455,15 +540,76 @@
   }
 
   /* ---------------- public actions ---------------- */
-  function dial(number, lineId) {
-    if (!S.leader) return Promise.reject(new Error("Phone is active in another tab."));
-    if (S.phase !== "ready" && S.phase !== "ended") return Promise.reject(new Error("A call is already in progress."));
-    return send("/phone/dial", { to: number, lineId: lineId || (S.summary && S.summary.activeLineId), motion: "bd" })
+  /**
+   * Why this phone cannot place a call right now, in words the caller can act
+   * on — empty when it can. Every not-ready phase used to answer "a call is
+   * already in progress", which sent people hunting for a call that did not
+   * exist while the real problem was a phone that never finished connecting.
+   */
+  function blockReason() {
+    if (!S.leader || S.phase === "leaderelse") {
+      return "Your phone is active in another tab. Switch to that tab to call, or close it and try again here.";
+    }
+    switch (S.phase) {
+      case "ready":
+      case "ended":
+        return "";
+      case "dialing":
+      case "incoming":
+      case "active":
+      case "held":
+        return "A call is already in progress. Finish that call first.";
+      case "nolines":
+        return "You do not have a calling number yet. Ask your admin to assign you one on the Numbers page.";
+      case "error-mic":
+        return "Your browser is blocking the microphone. Allow it for this site, then try again.";
+      case "error-conn":
+        return S.error || "Your browser phone is not connected. Reconnect it and try again.";
+      case "reconnecting":
+        return "Your browser phone lost its connection and is reconnecting. Try again in a moment.";
+      default:
+        return "Your browser phone is still connecting. Try again in a moment.";
+    }
+  }
+
+  /**
+   * A dial that never reaches the browser must not strand the phone in
+   * "dialing". The server tells us a call died only if the poll reaches it, so
+   * an unreachable server would otherwise wedge every later call behind one
+   * that is long over. Armed only while our own leg has yet to ring: once the
+   * browser leg is up the call is genuinely in progress, however long the far
+   * end takes to answer.
+   */
+  var dialGuard = null;
+  function clearDialGuard() { if (dialGuard) { clearTimeout(dialGuard); dialGuard = null; } }
+  function armDialGuard() {
+    clearDialGuard();
+    dialGuard = setTimeout(function () {
+      dialGuard = null;
+      if (S.phase !== "dialing" || S.sdkCall) return;
+      onSdkEnded();
+    }, 45000);
+  }
+
+  // motion picks which of the recruiter's lines answers: "bd" (default) for the
+  // BD Phone, "recruiting" for the candidate Calls console.
+  function dial(number, lineId, motion) {
+    var blocked = blockReason();
+    if (blocked) return Promise.reject(new Error(blocked));
+    var m = motion === "recruiting" ? "recruiting" : "bd";
+    // The cached active line belongs to the BD motion, so a recruiting call
+    // leaves lineId unset and lets the server pick that motion's own line.
+    return send("/phone/dial", {
+      to: number,
+      lineId: lineId || (m === "bd" ? (S.summary && S.summary.activeLineId) : undefined),
+      motion: m,
+    })
       .then(function (d) {
         S.call = d.call;
         pendingOutbound = { callId: d.call.id, until: Date.now() + 45000 };
         setPhase("dialing");
         pollLiveCall();
+        armDialGuard();
         return d.call;
       });
   }
@@ -710,6 +856,7 @@
       return function () { var i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); };
     },
     dial: dial,
+    blockReason: blockReason,
     answer: answer,
     decline: decline,
     hangup: hangup,
@@ -722,6 +869,8 @@
     setMic: setMic,
     setSpeaker: setSpeaker,
     refreshDevices: refreshDevices,
+    ensureMicPermission: ensureMicPermission,
+    testMic: testMic,
     refreshSummary: refreshSummary,
     takeLeader: takeLeader,
     requestNotifications: requestNotifications,

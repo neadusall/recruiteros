@@ -44,14 +44,41 @@ export function hasContactData(p: Prospect): boolean {
   return !!(goodFirst && company && roleAnchor);
 }
 
-/** The strict send-ready gate for one prospect. `missing` lists exactly what's not done yet. */
+/**
+ * The strict send-ready gate for one prospect. `missing` lists exactly what's not done yet.
+ *
+ * THE VIDEO REQUIREMENT IS ARM-SPECIFIC, and getting that wrong makes a whole arm inert.
+ *
+ * The jobs arm's motion is built around a personalized video of the REAL job posting: the
+ * capture pipeline screenshots the company's own careers page for that exact role, and the
+ * second email is that video. No posting, no video, no send — correctly, because for that
+ * motion an unbuilt video means an unfinished email.
+ *
+ * A news-arm company has posted nothing. The role on the row was INFERRED from a funding
+ * round or an exec hire, so roleShot's careers-page search cannot find it and returns
+ * "role not found on the company's own careers site". Applying the video gate to that arm
+ * therefore does not delay it, it stops it permanently: every news prospect sits at
+ * needs-assets forever and the arm never sends a single email, which reads from the
+ * outside as a quiet market rather than a gate nobody could clear.
+ *
+ * The news arm does not need it. Its first touch is the five-beat signal pitch, which is
+ * complete text that never references a video. So video and watch page are dropped from
+ * its readiness, and the checks that ARE about being able to send at all — a real person,
+ * a real company, a verified address — still apply in full.
+ *
+ * (Its second touch is a separate question: a news prospect that reaches a video touch
+ * with no video is held by the render guard rather than sent broken. Until the news arm
+ * has a capture target of its own, treat it as a one-touch motion.)
+ */
 export function prospectReadiness(p: Prospect): Readiness {
   const missing: MissingAsset[] = [];
   if (!hasContactData(p)) missing.push("contact_data");
   if (!(p.email && p.emailVerification?.status === "valid")) missing.push("verified_email");
-  const pv = p.personalizedVideo;
-  if (!(pv && pv.videoKey && pv.gifUrl)) missing.push("video"); // videoKey implies clip + PiP + composite
-  if (!(pv && pv.watchUrl)) missing.push("watch_page");
+  if (p.discoverySource !== "news") {
+    const pv = p.personalizedVideo;
+    if (!(pv && pv.videoKey && pv.gifUrl)) missing.push("video"); // videoKey implies clip + PiP + composite
+    if (!(pv && pv.watchUrl)) missing.push("watch_page");
+  }
   return { ready: missing.length === 0, missing };
 }
 

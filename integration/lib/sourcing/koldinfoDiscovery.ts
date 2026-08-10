@@ -112,11 +112,18 @@ function pipeCell(values: string[]): string {
 export function buildDbDiscoverySpecCsv(
   icp: CandidateICP,
   limit: number,
-  radius?: { location?: string; radiusMi?: number },
+  radius?: { location?: string; radiusMi?: number; remote?: boolean },
 ): string | null {
   const titles = (icp.titles || []).map((t) => t.trim()).filter(Boolean).slice(0, 8);
   if (!titles.length) return null;
-  const { cities, states } = geoChips(icp.geos || [], radius);
+  // REMOTE: the sweep runs on titles alone. The worker ANDs the city and state rules, so
+  // sending ANY chips on a national search would silently turn "these titles anywhere in
+  // the country" into "these titles in whichever handful of cities we happened to send" —
+  // the opposite of what the recruiter asked for. Titles alone is the correct filter here,
+  // and it is also the widest one the database offers.
+  const { cities, states } = radius?.remote
+    ? { cities: [] as string[], states: [] as string[] }
+    : geoChips(icp.geos || [], radius);
   const capped = Math.max(1, Math.min(Math.floor(limit) || 200, 1000));
   return [
     "titles,cities,states,limit",
@@ -157,7 +164,7 @@ export function parseDbDiscoveryCsv(csv: string): CandidateRow[] {
 export async function submitDbDiscovery(
   icp: CandidateICP,
   limit: number,
-  radius?: { location?: string; radiusMi?: number },
+  radius?: { location?: string; radiusMi?: number; remote?: boolean },
 ): Promise<string | null> {
   const spec = buildDbDiscoverySpecCsv(icp, limit, radius);
   if (!spec) return null;

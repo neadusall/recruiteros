@@ -43,15 +43,37 @@ const FLOWS = {
 };
 
 // Which vendor SITE a job kind drives — the unit of the one-session-at-a-time rule.
+//
+// DISCOVERY GETS ITS OWN LANE. "koldinfo-db-search" reads the Business Email DB grid to
+// FIND people; "koldinfo-db" enriches people we already have. They are different pages,
+// different jobs, and they used to share the "koldinfo" lane, which meant a brand new
+// search sat behind whatever enrichment sweep happened to be running. Measured on `ros`
+// 2026-08-07 across 154 job records: enrichment sweeps run 8.7 to 30.9 minutes, and real
+// discovery jobs waited 11.1, 19.4 and 23.6 minutes before they so much as started. That
+// wait was pure scheduling, not work.
+//
+// Splitting them is safe on the vendor side: the DB sweep already drives
+// KOLDINFO_DB_CONCURRENCY sessions of its own, so more than one session at a time is
+// long-established behavior here. It is bounded on OUR side by MAX_ACTIVE_LANES below.
 const LANES = {
   laxis: "laxis",
   koldinfo: "koldinfo",
   "koldinfo-db": "koldinfo",
-  "koldinfo-db-search": "koldinfo",
+  "koldinfo-db-search": "koldinfo-search",
 };
 function laneOf(kind) {
   return LANES[kind] || "laxis";
 }
+
+// How many lanes may run AT ONCE, whatever the lane split allows.
+//
+// The lane split above is about not blocking on the wrong thing; this is about not
+// melting the box. Each running lane is a Chromium (6-8 OS processes), and `ros` has
+// 2 vCPU, so three simultaneous browser flows would trade a scheduling win for CPU
+// starvation and end up slower — the exact failure documented in the sourcing-502
+// post-mortem. Two keeps a fast lane and a slow lane moving together, which is the
+// win we are actually after. Raise it on a bigger box.
+const MAX_ACTIVE_LANES = Math.max(1, Number(process.env.WORKER_MAX_ACTIVE_LANES || 2));
 
 const PORT = Number(process.env.PORT || 3000);
 const TOKEN = process.env.LAXIS_WORKER_TOKEN || "";
@@ -86,6 +108,10 @@ function stampLog(job, line) {
 }
 
 async function drain() {
+  // Global ceiling first: lanes may be free while the BOX is not. Checked before the
+  // scan so a third runnable lane simply waits its turn instead of being started and
+  // then fighting the other two for CPU.
+  if (runningLanes.size >= MAX_ACTIVE_LANES) return;
   // First queued job whose vendor lane is free (FIFO within each lane). The scan,
   // splice, and lane claim below are one synchronous block, so two drain() calls
   // in the same tick can never pick the same job or double-fill a lane.
@@ -332,6 +358,7 @@ const CANARY_HOURS = Number(process.env.LAXIS_CANARY_HOURS || 12);
 if (CANARY_HOURS > 0 && CONFIG.email && CONFIG.password) {
   const tick = async () => {
     if (runningLanes.has("laxis")) return;
+    if (runningLanes.size >= MAX_ACTIVE_LANES) return; // never take CPU from real work
     try {
       const r = await selfTest({ log: (l) => console.log("[canary]", l) });
       lastCanary = { ...r, at: new Date().toISOString() };
@@ -353,7 +380,12 @@ if (CANARY_HOURS > 0 && CONFIG.email && CONFIG.password) {
 const KOLD_CANARY_HOURS = Number(process.env.KOLDINFO_CANARY_HOURS || 24);
 if (KOLD_CANARY_HOURS > 0 && koldinfo.CONFIG.email && koldinfo.CONFIG.password) {
   const koldTick = async () => {
-    if (runningLanes.has("koldinfo")) return; // one browser session per vendor; try again next cadence
+    // Skip while EITHER KoldInfo lane is busy. The canary drives the same vendor site as
+    // both of them, and since the discovery split there are two lanes to check, not one.
+    // Also stand down whenever the box is already at its lane ceiling: a health check is
+    // never worth taking CPU from real work.
+    if (runningLanes.has("koldinfo") || runningLanes.has("koldinfo-search")) return;
+    if (runningLanes.size >= MAX_ACTIVE_LANES) return;
     const at = new Date().toISOString();
     const out = { at };
     for (const kind of ["koldinfo", "koldinfo-db"]) {

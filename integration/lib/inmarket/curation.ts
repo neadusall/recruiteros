@@ -44,6 +44,20 @@ export interface CuratedProspect {
   industry?: string;
   signalType: string;               // hiring_velocity | job_posting | evergreen_role | …
   signalReason: string;             // human "why they're hiring"
+  /* ---- discovery attribution (WHICH front end found them) ----
+   * Set ONCE, on first insert, and never rewritten (see the upsert). A company that is
+   * re-curated later, or that the other front end also surfaces, must keep the arm that
+   * actually earned it, or a head-to-head trial silently reattributes its own winners. */
+  discoverySource?: "jobs" | "news";
+  /** The watchlist that found them, so two lists in the same arm stay separable. */
+  discoveryListId?: string;
+  /** The news arm's parsed headline evidence. The reason STRING alone is not enough at
+   *  send time: "just announced a new senior leader" reads the same whether the seat is
+   *  operating or on the board, and the pitch must never tell a new board member it will
+   *  rebuild the bench underneath them. Carried so the copy layer can tell them apart. */
+  newsFacts?: import("../signals/watch/newsDiscover").NewsFacts;
+  /** When this company first entered the funnel (ISO) — the trial's time window. */
+  discoveredAt?: string;
   role: string;                     // the specific open role this prospect owns
   jobUrl?: string;                  // the actual job-posting / apply URL, so the screen capture targets the REAL job (not just the careers page)
   jobLocation?: string;             // where the role is based (from the posting) — personalization for custom emails
@@ -145,6 +159,9 @@ export interface CurateOptions {
    *  not-yet-done companies and only refreshes the stale ones. This is what walks the whole pool
    *  and keeps the list living instead of re-doing the same top companies every tick. */
   recuratAfterMs?: number;
+  /** Which discovery front end is feeding this run. Recorded on rows this run CREATES,
+   *  never on rows it merely refreshes, so head-to-head attribution stays first-touch. */
+  attribution?: { source: "jobs" | "news"; listId?: string };
   nowIso: string;
 }
 
@@ -171,6 +188,14 @@ interface PoolLeadLite {
   /** The lead's source/apply URL — used to recover the company's own domain when its host is
    *  the company site (not an ATS). One more free signal for the domain resolver. */
   sourceUrl?: string;
+  /* ---- discovery attribution, carried ON the lead so the distributed research
+   *      workers stamp it too without a signature change on buildCuratedRow ---- */
+  discoverySource?: "jobs" | "news";
+  discoveryListId?: string;
+  /** The news arm's parsed headline evidence, carried the same way and for the same
+   *  reason: the send-time opener needs to know a board seat from an operating hire, and
+   *  the reason string alone cannot tell them apart. */
+  newsFacts?: import("../signals/watch/newsDiscover").NewsFacts;
 }
 
 /**
@@ -184,6 +209,18 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
   // Concurrency ceiling raised to 16: egress IP rotation spreads these across source IPs, so the
   // free sources aren't hammered from one address. Keep a ceiling so a bad opts value can't fan out unbounded.
   const concurrency = Math.min(Math.max(opts.concurrency ?? 4, 1), 16);
+
+  // Run-level attribution fills in for leads that carry none, so a caller only has to
+  // say "this run is the news arm" once. A lead that already knows its own origin wins,
+  // which keeps a mixed batch honest.
+  if (opts.attribution) {
+    for (const l of leads) {
+      if (!l.discoverySource) {
+        l.discoverySource = opts.attribution.source;
+        l.discoveryListId = l.discoveryListId ?? opts.attribution.listId;
+      }
+    }
+  }
 
   const store = await load();
   const byId = new Map(store.map((r) => [r.id, r]));
@@ -284,6 +321,10 @@ export function buildCuratedRow(lead: PoolLeadLite, role: string, dm: DecisionMa
     industry: lead.industry,
     signalType: lead.signalType ?? "job_posting",
     signalReason: lead.reason ?? "",
+    discoverySource: lead.discoverySource,
+    discoveryListId: lead.discoveryListId,
+    discoveredAt: lead.discoverySource ? nowIso : undefined,
+    newsFacts: lead.newsFacts,
     role,
     jobUrl: d ? d.url : lead.sourceUrl,
     jobLocation: d?.location || undefined,
@@ -352,6 +393,13 @@ export async function mergeCuratedRows(rows: CuratedProspect[]): Promise<{ newly
         ...row,
         enrolledAt: prev?.enrolledAt, campaignId: prev?.campaignId,
         sentAt: prev?.sentAt, openedAt: prev?.openedAt, repliedAt: prev?.repliedAt, bouncedAt: prev?.bouncedAt,
+        // FIRST TOUCH WINS. The arm that first put this company in the funnel keeps the
+        // credit for whatever it goes on to do. Without this a refresh from the other
+        // front end would quietly move a reply from one arm to the other, and the trial
+        // would be scoring its own bookkeeping instead of the two approaches.
+        discoverySource: prev?.discoverySource ?? row.discoverySource,
+        discoveryListId: prev?.discoveryListId ?? row.discoveryListId,
+        discoveredAt: prev?.discoveredAt ?? row.discoveredAt,
         // Never lose posting details we already have: a resubmit from a worker running older code
         // (or a research pass whose pool lead lost the roleDetails entry) arrives without them.
         jobLocation: row.jobLocation ?? prev?.jobLocation,
@@ -658,6 +706,12 @@ export async function curationFunnel(): Promise<CurationFunnel> {
 /* ------------------------------------------------------------------ */
 
 /** List curated prospects for review, newest-curated first, optionally filtered. */
+/** Every curated row, unfiltered. For analyses that must see the WHOLE population,
+ *  such as the discovery-source trial, where any filter would bias one arm. */
+export async function allCurated(): Promise<CuratedProspect[]> {
+  return load();
+}
+
 export async function listCurated(opts?: {
   status?: CurationStatus;
   signalType?: string;
@@ -670,6 +724,9 @@ export async function listCurated(opts?: {
   validatedOnly?: boolean;
   /** Filter to a single industry (exact match on the curated row's industry). */
   industry?: string;
+  /** Only rows the given discovery arm found. Lets the staging step hold a share for
+   *  each arm instead of letting whichever one polls faster take every send slot. */
+  discoverySource?: "jobs" | "news";
   limit?: number;
 }): Promise<CuratedProspect[]> {
   await sweepJobDetails();   // one-shot persistent posting-details fill (throttled; no-op in steady state)
@@ -678,6 +735,7 @@ export async function listCurated(opts?: {
   if (opts?.signalType) rows = rows.filter((r) => r.signalType === opts.signalType);
   if (opts?.function) rows = rows.filter((r) => r.function === opts.function);
   if (opts?.industry) rows = rows.filter((r) => (r.industry ?? "") === opts.industry);
+  if (opts?.discoverySource) rows = rows.filter((r) => r.discoverySource === opts.discoverySource);
   if (opts?.contactableOnly) rows = rows.filter((r) => !!r.likelyEmail);
   if (opts?.namedOnly) rows = rows.filter((r) => !!r.managerName);
   if (opts?.validatedOnly) rows = rows.filter((r) => r.emailValidated === true && !r.emailInvalid);
@@ -862,7 +920,16 @@ export async function enrollToBulk(
         signalType: r.signalType,
         signalReason: r.signalReason,
         warmth: Math.max(50, r.score),
-        mpcContext: campaignMpc,
+        // The arm, and the evidence the arm's opener is written from.
+        discoverySource: r.discoverySource,
+        discoverySegment: r.industry,
+        discoveryRole: r.role,
+        newsFacts: r.newsFacts,
+        // MPC context is a CANDIDATE-marketing context: "I placed someone like this
+        // nearby, and they fit the role you posted." A news-arm company has posted no
+        // role and we are not marketing a candidate to them, so stamping it would let
+        // the Day-0 MPC variant swap fire on an email that is not an MPC pitch at all.
+        mpcContext: r.discoverySource === "news" ? undefined : campaignMpc,
       });
       enrolledIds.add(r.id);
       enrolled++;

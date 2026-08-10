@@ -13,6 +13,7 @@ import type { CandidateRow, SourcingRun } from "./types";
 import { searchKindOf, type SalesNavRunResult } from "./salesNav";
 import { listSourcingRuns, saveSourcingRun } from "./store";
 import { mergeSourcingRuns } from "./mergeRuns";
+import { enforceRunGeo } from "./geoEnforce";
 import { addSeenKeys } from "./seen";
 
 /** Same stable person key the rest of JD Sourcing uses for the seen-set. */
@@ -96,6 +97,12 @@ export async function applySalesNavResult(
     const before = target.candidates.length;
     const { candidates, overlap } = mergeSourcingRuns([target, incoming]);
     target.candidates = candidates;
+    // A pasted LinkedIn search runs with the strict location drop OFF on purpose (the
+    // URL carries its own filters, usually broader than a typed city + radius). That is
+    // fine while it is its own list — but applying it to a list the recruiter pinned to
+    // a mileage must not smuggle that breadth in. The DESTINATION list's radius decides:
+    // incoming rows outside it are marked out-of-area, visible but not deliverable.
+    enforceRunGeo(target);
     const added = candidates.length - before;
     // New people joined a list whose chunk ledger may already read "fully
     // enriched"; left alone, the Laxis + gap-fill rungs would skip every new

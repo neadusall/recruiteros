@@ -131,6 +131,22 @@ export async function upsertProspectList(workspaceId: string, input: ProspectLis
   return list;
 }
 
+/** Rename a saved list in place, members untouched. upsertProspectList REPLACES
+ *  the member set from its input, so a rename goes through here instead. */
+export async function renameProspectList(
+  workspaceId: string, id: string, name: string,
+): Promise<ProspectList | undefined> {
+  await hydrate();
+  const list = store.find((l) => l.id === id && l.workspaceId === workspaceId);
+  if (!list) return undefined;
+  const next = (name || "").trim();
+  if (!next || next === list.name) return list;
+  list.name = next;
+  list.updatedAt = nowIso();
+  await save();
+  return list;
+}
+
 /* --- Self-healing duplicate fold -------------------------------------------
  * THE GUARANTEE (user mandate 2026-07-21: "no duplicates ever"): even if some
  * path slips a same-name sibling in (old clients, a race, restored backups),

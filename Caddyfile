@@ -26,6 +26,27 @@
 (resilient) {
 	lb_try_duration 90s
 	lb_try_interval 2s
+
+	# ...and the OTHER way a healthy stack still answers 502: the idle keep-alive
+	# race. Caddy pools upstream connections and reuses them; Node closes an idle
+	# connection after 5s (server.keepAliveTimeout, the default every service here
+	# runs on). Caddy's own pool held them for 2 MINUTES, so it routinely picked a
+	# socket Node was closing that instant and the request died with "connection
+	# reset by peer" -> a raw 502. Go retries a request it has not written yet;
+	# it will not replay a POST that is already on the wire, so this landed on
+	# writes: POST /api/sourcing 502'd seven times in 24h against a container with
+	# zero restarts, alongside 502s on a static .js file and on OS Text — proof it
+	# was the transport, not any one route.
+	#
+	# Two seconds is the fix: the pool now always lets go before the upstream
+	# does, so the socket Caddy reuses is one Node still holds. It must stay BELOW
+	# the shortest upstream keep-alive on the network (5s for a stock Node service
+	# like taltxt or lume-jobs; the app itself is raised to 45s in the Dockerfile).
+	# The cost is a TCP handshake on a genuinely idle path, over a local docker
+	# bridge — microseconds, against a 502 in a recruiter's face.
+	transport http {
+		keepalive 2s
+	}
 }
 
 # OS Text (the embedded SMS engine) rides EVERY portal domain under

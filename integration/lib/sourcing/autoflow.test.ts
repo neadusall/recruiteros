@@ -13,7 +13,7 @@
  *      a ledger-less run, so the new rows never got phones or an OS Text push.
  */
 
-import { due, parityDue } from "./autoflow";
+import { due, parityDue, isEngineOutage } from "./autoflow";
 import type { SourcingRun } from "./types";
 
 const NOW = Date.parse("2026-07-20T12:00:00Z");
@@ -194,6 +194,116 @@ check("old stamp without peopleAtSend, people grew, phones didn't -> no topup",
     autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, attempts: 1 },
   }), NOW), null);
 
+/* --- delivery-gap lane: the counters go blind ------------------------------
+ * 2026-08-07: a combined list read "1,892 candidates · 1,762 delivered" and
+ * still said "campaign ready to launch". The Combine handler carried the
+ * master's sentAt and phonesAtSend but DROPPED peopleAtSend, so the fallback
+ * above read it as "people can't have grown" and no lane ever re-pushed the 130
+ * the combine added. deliveryBehind() doesn't consult either counter.
+ */
+
+// Candidates SHORT of the list is the exact fingerprint of that incident.
+const behind = { doneOffsets: [0], total: 2, nextStart: null, updatedAt: new Date(NOW - 6 * MIN).toISOString() } as SourcingRun["laxisProgress"];
+check("promoted fewer than the list holds -> topup even with a legacy stamp",
+  due(run({
+    candidates: [enriched(), cand()], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, attempts: 1 },
+  }), NOW), "topup");
+
+// ...and once the top-up delivered everyone, it must STOP (this converges).
+check("...promoted count caught up -> quiet",
+  due(run({
+    candidates: [enriched(), cand()], promotedCount: 2,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
+  }), NOW), null);
+
+// A run that never recorded a promotedCount is UNKNOWN, not behind — otherwise
+// this deploy drags every pre-stamp list into a re-send.
+check("no promotedCount at all -> not treated as behind",
+  due(run({
+    candidates: [enriched(), cand()],
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
+  }), NOW), null);
+
+// THE BAR IS NOT A SHORTFALL. Delivery deliberately holds back out-of-area rows
+// and rows under the outreach quality bar, so promotedCount is SUPPOSED to trail
+// the raw list. Measuring the gap against candidates.length instead of the
+// deliverable set would top up every 10 minutes forever chasing people the bar is
+// keeping out on purpose.
+check("below-bar row held back -> not behind",
+  due(run({
+    candidates: [enriched(), cand({ fitScore: 10 })], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
+  }), NOW), null);
+check("out-of-area row held back -> not behind",
+  due(run({
+    candidates: [enriched(), cand({ outOfArea: true })], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2, attempts: 1 },
+  }), NOW), null);
+// ...but a QUALIFIED person missing from Candidates still counts, bar or no bar.
+check("one below-bar row plus a qualified one never delivered -> topup",
+  due(run({
+    candidates: [enriched(), cand({ fitScore: 10 }), cand({ fitScore: 90 })], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: { sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 3, attempts: 1 },
+  }), NOW), "topup");
+
+// A FAILED OS TEXT LEG re-arms on its own. 2026-08-07: the engine container
+// restarted through a deploy, the send stamped a generic "could not reach"
+// error, and every other trigger was already satisfied — Candidates had been
+// promoted, so promotedCount was caught up; the signature was never stamped
+// because the send threw first; and phonesAtSend (190, from before the quality
+// bar) sat ABOVE the current deliverable phone count (164), so morePhones was
+// dead too. The list held a campaign that never got its contacts and no lane
+// could see it.
+check("generic OS Text failure with deliverable phones -> retry",
+  due(run({
+    candidates: [enriched(), enriched()], promotedCount: 2,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: {
+      sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 10, error: "Could not reach the OS Text engine. Check that the taltxt container is up.",
+    },
+  }), NOW), "ostext-retry");
+// ...but an engine that is genuinely broken parks instead of retrying forever.
+check("...same but the attempt budget is spent -> park with the reason",
+  due(run({
+    candidates: [enriched(), enriched()], promotedCount: 2,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: {
+      sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 20, error: "Could not reach the OS Text engine. Check that the taltxt container is up.",
+    },
+  }), NOW), null);
+// A failure on a list with nobody textable is not an OS Text retry — there is
+// nothing to re-push, so it must not burn the attempt budget.
+check("...same failure but no deliverable phone -> no retry",
+  due(run({
+    candidates: [cand(), cand({ phone: "+15551230000", fitScore: 10 })], promotedCount: 1,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: {
+      sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 10, error: "Could not reach the OS Text engine. Check that the taltxt container is up.",
+    },
+  }), NOW), null);
+
+// Membership churn with IDENTICAL totals: a combine that deduped one person away
+// and added a different one. Both counters match; the signature doesn't.
+check("same counts, different people -> topup",
+  due(run({
+    candidates: [enriched(), cand({ fullName: "Sam Roe" })], promotedCount: 2,
+    updatedAt: new Date(NOW - 6 * MIN).toISOString(), laxisProgress: behind,
+    autoflow: {
+      sentAt: new Date(NOW - 2 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 2,
+      sentSignature: "2.abc.1.def", attempts: 1,
+    },
+  }), NOW), "topup");
+
 // ostext_not_connected self-heal (2026-07-20 Lume incident): a FRESH sent list
 // stamped not-connected retries through the fresh lane. The tick loop gates the
 // actual send on ostextConfiguredFor(ws), so returning ostext-retry while the
@@ -264,6 +374,46 @@ check("sent list idle 30 days, people grew after send -> parity due",
     autoflow: { sentAt: new Date(NOW - 30 * DAY).toISOString(), phonesAtSend: 1, peopleAtSend: 1, attempts: 1 },
   }), NOW), true);
 
+// A run PARKED at MAX_ATTEMPTS by a failing OS Text leg must be visible to the
+// parity lane — that lane is the one that re-opens the attempt budget, so it is
+// the only way back for a list whose engine outage outlasted 20 attempts. Before
+// this, such a run reported "in parity" while its campaign held none of its
+// contacts (2026-08-07).
+check("parked by a failed OS Text push, still has textable people -> parity due",
+  parityDue(run({
+    candidates: [enriched(), enriched()], promotedCount: 2,
+    updatedAt: new Date(NOW - 10 * MIN).toISOString(),
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 20, error: "Could not reach the OS Text engine at http://taltxt:3000/ostext-app — TimeoutError",
+    },
+  }), NOW), true);
+// ...but not when there is nobody left to text: re-pushing would achieve nothing.
+check("...same but nobody deliverable holds a phone -> not parity due",
+  parityDue(run({
+    candidates: [cand(), cand({ phone: "+15551230000", fitScore: 10 })], promotedCount: 1,
+    updatedAt: new Date(NOW - 10 * MIN).toISOString(),
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 9, peopleAtSend: 2,
+      attempts: 20, error: "Could not reach the OS Text engine at http://taltxt:3000/ostext-app — TimeoutError",
+    },
+  }), NOW), false);
+
+// A run whose send SUCCEEDED is not parked, whatever it went through to get
+// there. sendRun resets attempts to 0 on a clean send; this pins the decision
+// that depends on it — a healthy list with a fresh sentAt belongs to the fresh
+// lane, not to the once-per-day parity lane (2026-08-07: a list carried
+// attempts=20 through a successful send and stayed classified as parked).
+check("recovered list (attempts reset, no error) -> not parity due",
+  parityDue(run({
+    candidates: [enriched(), enriched()], promotedCount: 2,
+    updatedAt: new Date(NOW - 10 * MIN).toISOString(),
+    autoflow: {
+      sentAt: new Date(NOW - 10 * MIN).toISOString(), phonesAtSend: 2, peopleAtSend: 2,
+      sentSignature: "x", attempts: 0,
+    },
+  }), NOW), false);
+
 // Gap 2: MAX_ATTEMPTS-parked runs re-enter through the parity lane...
 check("fresh but parked at 20 attempts -> parity due",
   parityDue(run({ candidates: [enriched()], autoflow: { phonesAtSend: 0, attempts: 20 } }), NOW), true);
@@ -291,6 +441,64 @@ check("stale sent-with-ostext_not_connected list holding phones -> parity due",
     candidates: [enriched()], updatedAt: new Date(NOW - 30 * DAY).toISOString(),
     autoflow: { sentAt: new Date(NOW - 30 * DAY).toISOString(), phonesAtSend: 1, attempts: 1, error: "ostext_not_connected: sent to Candidates only" },
   }), NOW), true);
+
+/* --- engine outages must not spend a run's rescue budget (2026-08-07) --------
+ * A routine ~15-minute taltxt restart parked three healthy lists at 20/20, and
+ * the rescue pass that fired inside that window stamped parityAt, failed against
+ * the down engine, and locked the only lane that re-opens a parked run out for
+ * 20 hours. The engine came back within the hour; the lists stayed stranded with
+ * empty campaigns while the card read "retrying" and the log read "all in parity".
+ */
+const OUTAGE = "Could not reach the OS Text engine at http://taltxt:3000/ostext-app — TypeError: fetch failed";
+
+check("isEngineOutage: the bridge's unreachable message", isEngineOutage(OUTAGE), true);
+check("isEngineOutage: the bridge's older container-is-up message",
+  isEngineOutage("Could not reach the OS Text engine. Check that the taltxt container is up."), true);
+check("isEngineOutage: a real per-run rejection is NOT an outage",
+  isEngineOutage("preflight: every contact is missing a first name"), false);
+check("isEngineOutage: no error at all", isEngineOutage(undefined), false);
+
+// THE INCIDENT: parked by an outage, rescue-locked minutes ago -> still due.
+check("parked by an engine outage, parity-tried 20min ago -> parity due anyway",
+  parityDue(run({
+    candidates: [enriched()], promotedCount: 1,
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, peopleAtSend: 1,
+      attempts: 20, error: OUTAGE, parityAt: new Date(NOW - 20 * MIN).toISOString(),
+    },
+  }), NOW), true);
+
+// ...and the same run an hour into a healthy engine is still due until it lands.
+check("...still due 19h later while the error stands",
+  parityDue(run({
+    candidates: [enriched()], promotedCount: 1,
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, peopleAtSend: 1,
+      attempts: 20, error: OUTAGE, parityAt: new Date(NOW - 19 * HOUR).toISOString(),
+    },
+  }), NOW), true);
+
+// The rate limit still binds for failures that ARE about this run: those repeat
+// identically on every pass, so one attempt per day is exactly right.
+check("parked by a preflight block, parity-tried 20min ago -> NOT due (lockout holds)",
+  parityDue(run({
+    candidates: [enriched()], promotedCount: 1,
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 1, peopleAtSend: 1,
+      attempts: 20, error: "preflight: every contact is missing a first name",
+      parityAt: new Date(NOW - 20 * MIN).toISOString(),
+    },
+  }), NOW), false);
+
+// An outage on a list with nobody textable is still nothing to rescue.
+check("outage-parked run with no deliverable phone -> not parity due",
+  parityDue(run({
+    candidates: [cand()], promotedCount: 1,
+    autoflow: {
+      sentAt: new Date(NOW - 3 * HOUR).toISOString(), phonesAtSend: 0, peopleAtSend: 1,
+      attempts: 20, error: OUTAGE, parityAt: new Date(NOW - 20 * MIN).toISOString(),
+    },
+  }), NOW), false);
 
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
 console.log("\nall green");

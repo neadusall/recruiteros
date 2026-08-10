@@ -18,6 +18,9 @@
  */
 
 import type { CandidateICP, CandidateRow } from "./types";
+import { rowSaysRemote } from "./remoteMode";
+import { type ProofTerm, matchProofTerms, proofScore } from "./proofTerms";
+import { requirementCoverage, shortenRequirement } from "./requirements";
 
 /* ------------------------------------------------------------------ */
 /* Tokenization & boundary-aware matching                              */
@@ -252,17 +255,51 @@ export interface ScoreOptions {
   radiusMi?: number;
   /** The typed location, for the human-readable "12 mi from Fair Lawn, NJ" reason. */
   geoLabel?: string;
+  /**
+   * Remote role: there is no center, so geography stops being a filter and becomes a
+   * preference. Nobody is penalized for where they live; people who already work
+   * remotely get the geography points, everyone else scores neutral on it.
+   */
+  remote?: boolean;
+  /** PROOF EVIDENCE for this run, from buildProofPlan (lib/sourcing/proofPlan). When
+   *  present the scorer looks for qualifying evidence in everything the row carries and
+   *  adds a bounded bonus with a plain-English reason per hit. Absent = historical
+   *  scoring exactly, so old runs and callers that never built a plan are unaffected. */
+  proofTerms?: ProofTerm[];
 }
+
+/** Ceiling on the proof bonus. Evidence is a strong signal but it must never outrank
+ *  the fundamentals: someone with the wrong role in the wrong state is still wrong,
+ *  however many certifications they list. */
+const PROOF_CAP = 24;
 
 export function scoreCandidate(
   row: CandidateRow,
   icp: CandidateICP,
   scoreOpts: ScoreOptions = {},
 ): { fitScore: number; fitReasons: string[] } {
-  const opts = { radiusMi: scoreOpts.radiusMi ?? 0, geoLabel: scoreOpts.geoLabel };
+  const opts = {
+    radiusMi: scoreOpts.radiusMi ?? 0,
+    geoLabel: scoreOpts.geoLabel,
+    remote: scoreOpts.remote === true,
+  };
   const fullText = [row.title, row.headline, row.company, row.location].filter(Boolean).join(" · ");
   const titleText = (row.title || row.headline || "").trim();
   const reasons: string[] = [];
+
+  // EVIDENCE TEXT is deliberately wider than the text the rest of the scorer reads.
+  // Two sources were being thrown away:
+  //   - the search snippet (a line of the About section, now kept on the row), and
+  //   - the profile slug, which routinely spells out credentials that appear nowhere
+  //     else in a search result ("/in/jane-smith-cpa-mst" or "/in/john-doe-rn-bsn").
+  // Both are free: we already paid the search that returned them.
+  const slugWords = (row.linkedinUrl || "")
+    .replace(/^.*\/in\//i, "")
+    .replace(/[-_/]+/g, " ")
+    // A trailing hash ("jane-smith-4b7a91c2") is noise, not evidence.
+    .replace(/\b[0-9a-f]{6,}\b/gi, " ")
+    .trim();
+  const evidenceText = [fullText, row.snippet, slugWords].filter(Boolean).join(" · ");
 
   // Hard disqualifiers zero the row immediately.
   const dq = anyPhrase(fullText, icp.disqualifiers);
@@ -282,8 +319,12 @@ export function scoreCandidate(
   /* 1. Function match (35) — what the person actually does. */
   const titlePhrases = (icp.titles.length ? icp.titles : []).map(functionPhrase).filter(Boolean);
   const exactFn = titlePhrases.find((p) => phraseHit(titleText, p));
+  // Whether the person is plausibly in the right role family at all. Proof evidence is
+  // discounted below when this is false, so a credential cannot float someone doing a
+  // different job to the top of the list.
+  let fnMatched = false;
   if (exactFn) {
-    score += WEIGHTS.fn; reasons.push(`Function match: "${exactFn}"`);
+    score += WEIGHTS.fn; reasons.push(`Function match: "${exactFn}"`); fnMatched = true;
   } else {
     const terms = functionTerms(icp);
     const tt = new Set(tokens(titleText));
@@ -291,6 +332,7 @@ export function scoreCandidate(
     if (hits.length) {
       const partial = Math.min(WEIGHTS.fn - 7, hits.length * 14); // 1 hit→14, 2→28, capped < exact
       score += partial; reasons.push(`Partial function match: ${hits.slice(0, 3).join(", ")}`);
+      fnMatched = true;
     } else {
       reasons.push("No function match — likely a different role family");
     }
@@ -323,7 +365,21 @@ export function scoreCandidate(
   // the string test scores identically (a neighbouring town it never heard of vs. a
   // same-state city three hours away) and lets the nearer of two equal candidates win.
   const miles = row.milesFromTarget;
-  if (opts.radiusMi > 0 && typeof miles === "number") {
+  if (opts.remote) {
+    // REMOTE: no center, no radius, nothing to be outside of. Scoring a national search
+    // on distance would be meaningless, and scoring it on the ICP's geos would be worse —
+    // a remote run clears those, so the name branch below would read "no geos" and go
+    // silent, letting whoever happened to rank first win on title alone. Instead the
+    // geography weight becomes the one thing geography still means here: does this person
+    // already work remotely? A yes is a real signal (proven at it, and open to it); a no
+    // is not a mark against them, so it scores mid-band rather than zero.
+    if (rowSaysRemote(row)) {
+      score += WEIGHTS.geo;
+      reasons.push("Already works remotely");
+    } else {
+      score += Math.round(WEIGHTS.geo * 0.6);
+    }
+  } else if (opts.radiusMi > 0 && typeof miles === "number") {
     // Full geo credit inside the radius, tapering with distance so the local ranks above
     // the commuter; beyond it, the same penalty the name-based branch applies.
     if (miles <= opts.radiusMi) {
@@ -349,15 +405,71 @@ export function scoreCandidate(
     // may still be local. Remote vs on-site is not a qualification signal either.
   }
 
-  /* 5. Domain / must-have signals (15). */
+  /* 5. Domain / must-have signals (15).
+   *
+   * SCORED BY COVERAGE, not by first hit. Two things were wrong here until 2026-08-07:
+   *
+   *  - Requirements arrive from the JD parser as SENTENCES ("Hands-on Power BI
+   *    development including report/dashboard authoring, DAX, and data modeling"), and
+   *    this block phrase-matched them WHOLE against the candidate's text. No headline
+   *    contains a fourteen-word sentence, so the must-have line could not fire and the
+   *    domain component was dead weight on every run. requirementCoverage reduces each
+   *    requirement to the terms a profile would actually state.
+   *
+   *  - It stopped at the first match, so meeting one of five requirements scored the
+   *    same as meeting all five. Coverage is what tells a real match from a coincidence,
+   *    so the award is now proportional to how much of the list a person evidences.
+   *
+   * Industry stays a single phrase test: an industry name IS the phrase people write.
+   */
   let domain = 0;
-  const mh = anyPhrase(fullText, icp.mustHave);
-  if (mh) { domain += 9; reasons.push(`Must-have signal "${mh}"`); }
+  const mhCover = requirementCoverage(fullText, icp.mustHave);
+  if (mhCover.met) {
+    // Meeting all the must-haves earns the full 9; meeting some earns its share, with a
+    // floor so a single genuine credential on a long list still counts for something.
+    domain += Math.max(3, Math.round(9 * mhCover.ratio));
+    reasons.push(
+      mhCover.total > 1
+        ? `Meets ${mhCover.met} of ${mhCover.total} must-haves (${mhCover.matched.slice(0, 2).map((r) => shortenRequirement(r)).join("; ")})`
+        : `Must-have signal "${shortenRequirement(mhCover.matched[0])}"`,
+    );
+  }
   const ind2 = anyPhrase(fullText, icp.industries);
   if (ind2) { domain += 4; reasons.push(`Domain signal "${ind2}"`); }
-  const nh = anyPhrase(fullText, icp.niceToHave);
-  if (nh) { domain += 2; reasons.push(`Nice-to-have "${nh}"`); }
+  const nhCover = requirementCoverage(fullText, icp.niceToHave);
+  if (nhCover.met) {
+    // Nice-to-haves are breadth, not gates: a small award that still rewards the person
+    // showing four of them over the person showing one.
+    domain += Math.min(4, Math.max(1, Math.round(4 * nhCover.ratio) || 1));
+    reasons.push(
+      nhCover.total > 1
+        ? `Also shows ${nhCover.met} of ${nhCover.total} preferred skills (${nhCover.matched.slice(0, 2).map((r) => shortenRequirement(r)).join("; ")})`
+        : `Nice-to-have "${shortenRequirement(nhCover.matched[0])}"`,
+    );
+  }
   score += Math.min(WEIGHTS.domain, domain);
+
+  /* 5b. PROOF EVIDENCE (up to 24, on top of the 100-point base).
+   *
+   * The long-tail layer: licences, certifications, systems and domain phrases that
+   * prove someone has done this work rather than merely holding a similar title. Unlike
+   * the must-have check above (first hit only, +9 flat), this COUNTS the evidence and
+   * weights it by kind, so a CPA who also shows ASC 740 and NetSuite outranks a CPA
+   * alone, which is the actual ordering a recruiter wants.
+   *
+   * Discounted hard without a function match: evidence explains WHY someone is good at
+   * a role, it cannot establish that they are in it. */
+  if (scoreOpts.proofTerms && scoreOpts.proofTerms.length) {
+    const hits = matchProofTerms(evidenceText, scoreOpts.proofTerms);
+    if (hits.length) {
+      const { points, reasons: why } = proofScore(hits, PROOF_CAP);
+      const applied = fnMatched ? points : Math.round(points * 0.4);
+      if (applied > 0) {
+        score += applied;
+        reasons.push(`Qualified: ${why.join(", ")}`);
+      }
+    }
+  }
 
   /* Soft negatives — penalize junior/transient markers on a senior search. */
   if (targetRank >= RANK.director) {

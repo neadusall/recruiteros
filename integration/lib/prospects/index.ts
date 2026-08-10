@@ -54,6 +54,12 @@ export interface NewProspectInput {
   /** Hiring/buying signal that surfaced this prospect (carried into outreach). */
   signalType?: string;
   signalReason?: string;
+  /** Which discovery arm earned this prospect, and the news evidence behind it. Both are
+   *  read at send time to choose the opener, so they must travel with the enrollment. */
+  discoverySource?: Prospect["discoverySource"];
+  discoverySegment?: string;
+  discoveryRole?: string;
+  newsFacts?: Prospect["newsFacts"];
   /** Recruiter-side MPC personalization ({{Your_Name}}, placement city/role), stamped from the
    *  campaign at enrollment so the Day-0 templates render fully personal. */
   mpcContext?: Prospect["mpcContext"];
@@ -98,6 +104,13 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
     ownerId: p.ownerId ?? input.ownerId,
     signalType: input.signalType ?? p.signalType,
     signalReason: input.signalReason ?? p.signalReason,
+    // FIRST-TOUCH, like the curated row it came from: a prospect re-added by the other
+    // arm keeps the arm that actually earned it, so neither the copy branch nor the
+    // head-to-head trial can silently reattribute its own winners.
+    discoverySource: p.discoverySource ?? input.discoverySource,
+    discoverySegment: p.discoverySegment ?? input.discoverySegment,
+    discoveryRole: p.discoveryRole ?? input.discoveryRole,
+    newsFacts: input.newsFacts ?? p.newsFacts,
     mpcContext: input.mpcContext ?? p.mpcContext,
   });
 

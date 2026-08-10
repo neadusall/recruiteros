@@ -29,12 +29,14 @@
  */
 
 import { nowIso } from "../core/ids";
-import type { SourcingRun } from "./types";
+import type { CandidateRow, SourcingRun } from "./types";
 import { listAllSourcingRuns, saveSourcingRun, deleteSourcingRun } from "./store";
 import { promoteSourcingRun } from "./promote";
 import { listNightItems, addNightItem } from "./nightQueue";
 import { mergeSourcingRuns } from "./mergeRuns";
+import { enforceRunGeo } from "./geoEnforce";
 import { combinableGroups } from "./sameRole";
+import { deliverMinFit, qualifiedForOutreach, qualityBarNote } from "./qualityBar";
 import {
   ostextImport, ostextStarterTemplate, ostextConfiguredFor, type OsTextContact,
 } from "../ostextImport";
@@ -50,9 +52,97 @@ const TOPUP_DEBOUNCE_MS = 10 * 60_000; // let a live Boost/gap-fill run accumula
 const MAX_SENDS_PER_TICK = 3;      // bound one tick's work; the rest go next tick
 const RESUME_REARM_MS = 60 * 60_000; // a resume that itself wedged becomes retryable again
 const MAX_RESUMES = 6;             // ...but a chain that will never finish stops asking
+const OUTAGE_GRACE_MS = 24 * 3600_000; // an engine down THIS long stops being "transient"
+
+/**
+ * Was this failure the OS Text ENGINE being unreachable, rather than anything
+ * about this run?
+ *
+ * Matched on the bridge's own message (lib/ostextImport builds exactly this
+ * prefix for both ostext_unreachable and ostext_timeout) rather than on the
+ * error code, because only the MESSAGE is stamped onto the run — which also
+ * means runs parked by an older build are recognized and healed.
+ */
+export function isEngineOutage(err: string | undefined): boolean {
+  return Boolean(err && err.startsWith("Could not reach the OS Text engine"));
+}
 
 function phoneCount(run: SourcingRun): number {
   return run.candidates.reduce((n, c) => n + (c.phone ? 1 : 0), 0);
+}
+
+/** Stable per-candidate key — the same one mergeRuns dedupes on. */
+function personKey(c: CandidateRow): string {
+  return (c.linkedinUrl || `${c.fullName}|${c.company ?? ""}`).toLowerCase().replace(/\/+$/, "");
+}
+
+function hash32(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+/**
+ * The rows a delivery would actually carry — the SAME two exclusions both legs
+ * apply (promote skips out-of-area and below-bar; toOsTextContacts skips the
+ * identical pair). Measuring the gap against the raw candidate count instead
+ * would read every held-back row as "missing" and top up forever chasing people
+ * the bar is deliberately keeping out of outreach.
+ */
+function deliverableRows(run: SourcingRun): CandidateRow[] {
+  const bar = deliverMinFit();
+  return run.candidates.filter((c) => !c.outOfArea && qualifiedForOutreach(c, bar));
+}
+
+/**
+ * Order-independent signature of WHO a delivery would carry right now, and which
+ * of them hold a phone. Summed (not sequenced) on purpose: every merge re-ranks
+ * the rows verified-first, and a reorder must not read as a membership change.
+ * Built from the stable person key, so enrichment filling in an email or a phone
+ * doesn't move the people half of it.
+ */
+function deliverySignature(run: SourcingRun): string {
+  let people = 0, phones = 0, n = 0, p = 0;
+  for (const c of deliverableRows(run)) {
+    const h = hash32(personKey(c));
+    people = (people + h) >>> 0; n++;
+    if (c.phone) { phones = (phones + h) >>> 0; p++; }
+  }
+  return `${n}.${people.toString(36)}.${p}.${phones.toString(36)}`;
+}
+
+/**
+ * Is what we DELIVERED behind what the list holds right now?
+ *
+ * The phonesAtSend/peopleAtSend triggers are aggregates, and aggregates go blind
+ * in two ways that both cost a real recruiter real candidates (2026-08-07: a
+ * combined list showed 1,892 candidates against 1,762 delivered and sat there
+ * saying "campaign ready to launch"):
+ *
+ *  - a stamp carried across a combine that LOST peopleAtSend fell back to
+ *    "people can't have grown", so a list that grew by 130 never topped up;
+ *  - a merge that swaps members 1-for-1 leaves both counters identical while the
+ *    set underneath is different.
+ *
+ * These two reads don't care about the counters. promotedCount is what promote
+ * actually delivered to Candidates, and the signature is who the last push
+ * carried — either falling behind the DELIVERABLE set means someone is missing,
+ * and one top-up (which re-promotes and re-sends the full contact set) puts them
+ * back. Both converge: the top-up rewrites both stamps.
+ *
+ * Both reads measure against deliverableRows(), never the raw list, so the rows
+ * the quality bar and the radius hold back on purpose are not mistaken for a
+ * shortfall. Raising the bar can only shrink the target (promotedCount ends up
+ * ahead, which is not "behind"); lowering it grows the target and correctly tops
+ * up the people who just became eligible.
+ */
+export function deliveryBehind(run: SourcingRun): boolean {
+  // An ABSENT promotedCount means "never recorded", not "delivered nobody" — a
+  // run predating the stamp must not read as behind and drag every old list into
+  // a re-send. Only a number we actually have gets compared.
+  if (typeof run.promotedCount === "number" && run.promotedCount < deliverableRows(run).length) return true;
+  const sig = run.autoflow?.sentSignature;
+  return Boolean(sig) && sig !== deliverySignature(run);
 }
 
 function enrichmentInFlight(run: SourcingRun): boolean {
@@ -143,7 +233,7 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
     // next top-up.
     const morePhones = phoneCount(run) > run.autoflow.phonesAtSend;
     const morePeople = run.candidates.length > (run.autoflow.peopleAtSend ?? run.candidates.length);
-    if (morePhones || morePeople) {
+    if (morePhones || morePeople || deliveryBehind(run)) {
       const sentAt = Date.parse(run.autoflow.sentAt);
       if (Number.isFinite(sentAt) && now - sentAt < TOPUP_DEBOUNCE_MS) return null;
       return "topup";
@@ -164,6 +254,18 @@ export function due(run: SourcingRun, now: number): "send" | "topup" | "resume" 
     // only after ostextConfiguredFor(ws) turns true, so it never spins while
     // unconnected (2026-07-20 incident: Lume lists silently stamped sent-with-error).
     if (run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0) return "ostext-retry";
+    // ...and so does ANY other failed OS Text leg. A transient engine outage (the
+    // taltxt container restarting through a deploy — 2026-08-07) stamps a generic
+    // error, and NOTHING re-armed it: the Candidates leg had already succeeded so
+    // promotedCount is caught up, sentSignature never gets stamped because the send
+    // threw before reaching it, and phonesAtSend can even sit ABOVE the current
+    // deliverable phone count once the quality bar and the radius exclude some
+    // phone-holders — which kills the morePhones trigger too. The list was left
+    // holding a campaign that never received its contacts, with no lane able to see
+    // it. Bounded by MAX_ATTEMPTS, so an engine that is genuinely broken parks with
+    // its reason instead of retrying forever.
+    if (run.autoflow.error && run.autoflow.attempts < MAX_ATTEMPTS &&
+        deliverableRows(run).some((c) => c.phone)) return "ostext-retry";
     return null;
   }
   if ((run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS) return null;
@@ -206,6 +308,18 @@ function toOsTextContacts(run: SourcingRun): OsTextContact[] {
   const out: OsTextContact[] = [];
   for (const c of run.candidates) {
     if (!c.phone) continue;
+    // The radius is a promise about who gets CONTACTED. A row the list marked as
+    // outside it never rides the texting lane, whichever route put it on the list
+    // (out-of-area appendix, never-empty rescue, a folded wider duplicate search, a
+    // Sales Nav URL). It stays on the saved list to be looked at; it does not get a
+    // text (owner mandate 2026-08-06).
+    if (c.outOfArea) continue;
+    // THE QUALITY BAR, the same promise about who gets contacted, made about fit
+    // instead of distance: someone the scorer already judged the wrong role family
+    // stays on the list to be looked at but does not get a text. Before this, every
+    // row on the list was texted, and a third of them scored under 40 (see
+    // lib/sourcing/qualityBar.ts for the measurement that prompted it).
+    if (!qualifiedForOutreach(c, deliverMinFit())) continue;
     const parts = (c.fullName || "").trim().split(/\s+/);
     const custom: Record<string, string> = {};
     if (c.headline) custom.headline = c.headline;
@@ -236,7 +350,14 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     // 1) Candidates. promoteSourcingRun stamps promotedListId back on the run, so a
     //    push the browser chain already made is never repeated (and re-promoting on a
     //    top-up only adds the people enrichment newly reached — dedupe by LinkedIn URL).
+    // Snapshot WHAT THIS SEND CARRIES before any leg runs. The run object is the
+    // shared store entry, so a live enrichment tick can grow it mid-send; stamping
+    // the post-send set would mark people as delivered that this push never saw.
+    // Snapshotting first leaves them behind by exactly what arrived late, and the
+    // next top-up collects them.
     const phonesNow = phoneCount(run);
+    const peopleNow = run.candidates.length;
+    const signatureNow = deliverySignature(run);
     const topup = Boolean(stamp.sentAt);
     // A stale outcome must not outlive this attempt: without this, a retry that
     // SUCCEEDS still carries the old ostext_not_connected stamp (the clear below
@@ -247,10 +368,17 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       // always creates a new one, and a top-up must never duplicate the campaign.
       // Combined lists retag: everyone the merge holds gets the combined list's
       // name as their tag, even people the source lists promoted earlier.
-      await promoteSourcingRun(ws, run.id, {
+      const promoted = await promoteSourcingRun(ws, run.id, {
         listName: run.name, tag: "", campaignId: run.promotedCampaignId,
         retag: Boolean(run.combinedFrom?.length),
       });
+      // Remember what the quality bar held back so the card can say it plainly. A
+      // delivered count smaller than the list must always carry its own explanation.
+      stamp.belowBarHeld = promoted.belowBarHeld ?? 0;
+      stamp.barUsed = deliverMinFit();
+      if (promoted.belowBarHeld) {
+        console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) ${qualityBarNote(promoted.belowBarHeld, deliverMinFit())}`);
+      }
     }
 
     // 2) OS Text. Zero phones is not a failure — the campaign is still created
@@ -286,8 +414,13 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
       }
 
       try {
+        // The engine get-or-creates its campaign BY EXACT NAME, so a renamed run
+        // pushes top-ups under the name its campaign was created with (pinned in
+        // ostextName by the rename) — otherwise the rename would fork a second,
+        // near-empty campaign and split the same list's texts across two.
+        const pushName = run.ostextName || run.name;
         const imported = await ostextImport({
-          name: run.name,
+          name: pushName,
           template,
           positionSummary: `Pushed from JD Sourcing list "${run.name}" (${contacts.length} contacts, server auto-send).`,
           recruiterName: recruiter?.name || "",
@@ -304,6 +437,10 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
         // Keep the engine's answer on the run: "list shows N phones but the
         // campaign holds fewer" is almost always knownNonMobile (Telnyx already
         // judged those numbers not cells), and this stamp makes that checkable.
+        // Remember the name the campaign actually lives under, so a later rename
+        // keeps topping THAT campaign up (the engine answers with its own name,
+        // which is authoritative when it reused an existing campaign).
+        run.ostextName = (typeof imported.campaignName === "string" && imported.campaignName) || pushName;
         stamp.lastImport = {
           at: nowIso(),
           added: Number(imported.added) || 0,
@@ -345,8 +482,18 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
 
     stamp.sentAt = nowIso();
     stamp.phonesAtSend = phonesNow;
-    stamp.peopleAtSend = run.candidates.length;
+    stamp.peopleAtSend = peopleNow;
+    stamp.sentSignature = signatureNow;
     if (stamp.error?.startsWith("ostext_not_connected") !== true) stamp.error = undefined;
+    stamp.outageSince = undefined; // a send got through: whatever outage there was is over
+    // A CLEAN SEND CLEARS THE RECORD. The attempt counter measures one run of bad
+    // luck, not a permanent mark: leaving it at 20 after a send that WORKED left
+    // the list classified as parked forever (observed on this list 2026-08-07,
+    // attempts=20 with a fresh sentAt and no error). Parked is not cosmetic — the
+    // fresh lane's error-retry is gated on attempts < MAX_ATTEMPTS, so the next
+    // outage could never be retried there, and parityDue()'s staleOrParked test
+    // stayed true for good, permanently handing a healthy list to the slow lane.
+    stamp.attempts = 0;
     console.log(`[sourcing-autoflow] "${run.name}" (${run.id}) sent on: ${run.candidates.length} to Candidates, ${contacts.length} phone(s) to OS Text${topup ? " (top-up)" : ""}`);
     // Tell the desk that owns this list RIGHT NOW: new candidates just landed and
     // are waiting for their first outreach. Recipient = the recruiter who ran the
@@ -358,6 +505,22 @@ async function sendRun(run: SourcingRun, opts?: { notify?: boolean }): Promise<v
     } catch { /* delivery is best-effort */ }
   } catch (e) {
     stamp.error = (e as Error).message?.slice(0, 300) || "send failed";
+    // AN OUTAGE IS NOT AN ATTEMPT. The retry budget exists to stop a run whose
+    // OWN push keeps failing; an engine that is down fails every run equally and
+    // has nothing to do with this one. Counting it burned all 20 attempts of
+    // three healthy lists during a routine ~15-minute taltxt restart and parked
+    // them (2026-08-07), so a failure that never reached the engine refunds the
+    // attempt it just spent. Bounded by OUTAGE_GRACE_MS measured from the FIRST
+    // failure of the outage: a container restart never costs a list its budget,
+    // while an engine that has been unreachable for a day resumes burning
+    // attempts and parks with its reason, as it should.
+    if (isEngineOutage(stamp.error)) {
+      stamp.outageSince = stamp.outageSince || nowIso();
+      const since = Date.parse(stamp.outageSince);
+      if (!Number.isFinite(since) || Date.now() - since < OUTAGE_GRACE_MS) {
+        stamp.attempts = Math.max(0, stamp.attempts - 1);
+      }
+    }
     console.error(`[sourcing-autoflow] "${run.name}" (${run.id}) attempt ${stamp.attempts} failed: ${stamp.error}`);
   }
   run.autoflow = stamp;
@@ -446,12 +609,35 @@ export function parityDue(run: SourcingRun, now: number): boolean {
     (run.autoflow?.attempts ?? 0) >= MAX_ATTEMPTS;
   if (!staleOrParked) return false; // the fresh-window lane owns this run
   const parityAt = run.autoflow?.parityAt ? Date.parse(run.autoflow.parityAt) : NaN;
-  if (Number.isFinite(parityAt) && now - parityAt < PARITY_RETRY_MS) return false;
+  // The once-per-day stamp rate-limits REAL attempts. A parity send that died
+  // because the engine was unreachable was never an attempt at all — it could
+  // not have worked for any run — so it must not spend the whole day's rescue.
+  // Without this, a rescue pass that happened to land inside a 15-minute taltxt
+  // restart stamped parityAt, failed, and locked the ONLY lane that re-opens a
+  // parked run out for 20 hours, leaving the list stranded long after the engine
+  // was healthy again (2026-08-07: three lists parked at 20/20 while the card
+  // said "retrying" and the log said "all runs in parity"). What that costs is
+  // not the contacts an earlier push already delivered — it is every top-up from
+  // then on: a parked run is unreachable by both lanes, so newly-enriched phones
+  // never reach the campaign again. The lane stays bounded by PARITY_EVERY_MS.
+  const lockedOut = Number.isFinite(parityAt) && now - parityAt < PARITY_RETRY_MS;
+  if (lockedOut && !isEngineOutage(run.autoflow?.error)) return false;
   if (!run.autoflow?.sentAt) return true;                       // never sent at all
   if (phoneCount(run) > run.autoflow.phonesAtSend) return true; // phones OS Text never got
   // People a later merge added who never reached Candidates (no phone required).
   if (run.candidates.length > (run.autoflow.peopleAtSend ?? run.candidates.length)) return true;
-  return Boolean(run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0);
+  // ...and the counter-blind cases: Candidates short of the list, or a set that
+  // changed membership without changing the totals.
+  if (deliveryBehind(run)) return true;
+  if (run.autoflow.error?.startsWith("ostext_not_connected") && phoneCount(run) > 0) return true;
+  // A push that failed for ANY reason, on a run that still has someone textable,
+  // is out of parity too. Parking at MAX_ATTEMPTS is precisely how such a run
+  // arrives in this lane, and this lane is the one that re-opens the attempt
+  // budget — without this, the fresh lane's bounded retries were the only ones
+  // that ever ran, so an engine outage that outlasted 20 attempts stranded the
+  // list for good (2026-08-07: a parked list read "all runs in parity" while its
+  // campaign held none of its contacts).
+  return Boolean(run.autoflow.error) && deliverableRows(run).some((c) => c.phone);
 }
 
 let lastParity = 0;
@@ -537,6 +723,17 @@ async function autoCombinePass(runs: SourcingRun[], now: number): Promise<Set<st
       const master = g.master;
       const { candidates, overlap } = mergeSourcingRuns([master, ...g.donors]);
       master.candidates = candidates;
+      // THE MASTER'S MILEAGE WINS. The same-role key deliberately ignores radius tokens,
+      // so "VP Ops - Howell NJ" and its "+100mi" twin are one role and DO fold together
+      // — but folding them used to hand the master every one of the wider search's
+      // people, which is precisely how a +25mi list ended up full of candidates two
+      // hours away. Re-measure the whole union against the master's own location and
+      // radius: donor rows outside it are marked out-of-area, so they stay visible in
+      // the list and stay out of the delivery lane (owner mandate 2026-08-06).
+      const geo = enforceRunGeo(master);
+      if (geo.enforced && geo.marked) {
+        console.log(`[sourcing-autoflow] combine: ${geo.marked} merged row(s) fell outside the master's ${geo.radiusMi}mi radius and were marked out-of-area`);
+      }
       master.queries = master.queries.concat(g.donors.flatMap((d) => d.queries));
       master.combinedFrom = [...new Set([...(master.combinedFrom ?? []), ...g.donors.map((d) => d.id)])];
       // The union may hold rows the master's enrichment never saw: wipe the chunk

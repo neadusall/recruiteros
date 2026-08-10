@@ -34,6 +34,13 @@ export function ostextEngineBase(): string {
   return "http://taltxt:3000/ostext-app";
 }
 
+/**
+ * How long to wait on one /api/import. The engine validates every number with
+ * Telnyx before answering, so a few hundred contacts legitimately takes minutes;
+ * 120s cut those pushes off mid-flight and reported the engine as unreachable.
+ */
+const IMPORT_TIMEOUT_MS = 300_000;
+
 export function ostextPushConfigured(): boolean {
   return Boolean(process.env.RECRUITEROS_OSTEXT_TOKEN);
 }
@@ -259,11 +266,26 @@ export async function ostextImport(args: OsTextImportArgs): Promise<Record<strin
         // forgot the flag silently DISABLED the engine's own safe default.
         validate: true,
       }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(IMPORT_TIMEOUT_MS),
     });
-  } catch {
-    const e = new Error("Could not reach the OS Text engine. Check that the taltxt container is up.");
-    (e as Error & { code?: string }).code = "ostext_unreachable";
+  } catch (cause) {
+    // Say what ACTUALLY went wrong. This used to swallow the cause and always
+    // report "check that the taltxt container is up", which sent an operator
+    // chasing a healthy container for an hour (2026-08-07) when the real answers
+    // look nothing alike: a 120s abort means the engine took the push and is slow
+    // (Telnyx validating a few hundred numbers), a DNS/ECONNREFUSED means the
+    // address is wrong or the service is genuinely down. Both arrive here as one
+    // opaque throw, so the distinction has to be carried out by hand.
+    const why = cause as Error & { cause?: { code?: string } };
+    const timedOut = why?.name === "TimeoutError" || why?.name === "AbortError";
+    const detail = timedOut
+      ? `no answer within ${IMPORT_TIMEOUT_MS / 1000}s — the engine may still be validating this push`
+      : `${why?.name || "request failed"}${why?.cause?.code ? ` (${why.cause.code})` : ""}${why?.message ? `: ${why.message}` : ""}`;
+    // The base URL is in the message on purpose: "unreachable" is unactionable
+    // without knowing WHICH address was tried (the workspace's own engine and the
+    // shared house one resolve differently). The bearer token is never included.
+    const e = new Error(`Could not reach the OS Text engine at ${target.base} — ${detail}`);
+    (e as Error & { code?: string }).code = timedOut ? "ostext_timeout" : "ostext_unreachable";
     throw e;
   }
   let data: Record<string, unknown> = {};
