@@ -12,6 +12,12 @@ const ACCOUNTING_ROLE = /\b(controller|comptroller|cpa|certified public accounta
 
 const VALID_DM_TITLE = /\b(cfo|chief financial officer|chief accounting officer|controller|comptroller|vp,? finance|vice president,? finance|head of finance|director of finance|finance director|chief executive|ceo|founder|owner|president|managing partner|chief operating officer|coo|head of talent|head of people|chief people)\b/i;
 
+// Scraper artifacts that slip in as a "name" or email local-part (e.g. "Toggle Description",
+// "measurable.results@..."). These are never a real decision-maker.
+const JUNK_TOKEN = /\b(toggle|description|example|sample|measurable|results|placeholder|lorem|ipsum|undefined|unknown|noreply|no-reply|webmaster|postmaster|mailer|test)\b/i;
+// Role/shared inboxes are never a named person we can pitch.
+const ROLE_ACCOUNT = /^(info|admin|sales|hello|contact|support|careers?|jobs?|hr|team|office|marketing|billing|accounts?|enquir(?:y|ies)|inquiry|general|mail|email|newsletter|press|media|help|service|noreply|no-reply)$/i;
+
 function normCompany(s) {
   return (s || "")
     .toLowerCase()
@@ -63,6 +69,8 @@ export function assessProspect(p) {
     failures.push("no named decision-maker");
   } else if (/coordinator|wellness|\bintern\b|talent (coordinator|solutions)|recruit(?:er|ing)|sourcer/i.test(dmText)) {
     failures.push(`decision-maker "${p.managerName} / ${p.managerTitle}" is not a buyer`);
+  } else if (JUNK_TOKEN.test(p.managerName)) {
+    failures.push(`decision-maker "${p.managerName}" looks like a parsed artifact, not a person`);
   } else if (!VALID_DM_TITLE.test(p.managerTitle || "")) {
     failures.push(`decision-maker title "${p.managerTitle || "?"}" is not a finance buyer`);
   }
@@ -72,6 +80,9 @@ export function assessProspect(p) {
   if (!p.likelyEmail) {
     failures.push("no email");
   } else {
+    const local = p.likelyEmail.split("@")[0]?.toLowerCase().trim() || "";
+    if (ROLE_ACCOUNT.test(local)) failures.push(`email ${p.likelyEmail} is a role/shared inbox, not a person`);
+    if (JUNK_TOKEN.test(local)) failures.push(`email ${p.likelyEmail} local-part looks like a parsed artifact`);
     if (p.emailInvalid) failures.push("email marked undeliverable");
     if (!p.emailValidated) failures.push("email not validated");
     if (p.emailCatchAll) failures.push("email is a catch-all guess (person unconfirmed)");

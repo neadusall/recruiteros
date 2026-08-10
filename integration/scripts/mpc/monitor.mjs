@@ -35,8 +35,10 @@ function loadSent() {
 }
 
 async function inboxOf(boxEmail) {
-  // Pull recent inbound; client-side match so we don't depend on $filter support.
-  const url = `${MAILBOX_BASE}/users/${encodeURIComponent(boxEmail)}/mailFolders/Inbox/messages?$top=200&$select=from,subject,receivedDateTime`;
+  // Pull recent messages (the /messages collection is the route the Mailbox API exposes; a named
+  // mailFolders/Inbox path 404s). We match client-side: a real reply is FROM the person we emailed,
+  // so sent-items (from us) never false-match, no need to scope to a folder.
+  const url = `${MAILBOX_BASE}/users/${encodeURIComponent(boxEmail)}/messages?$top=200`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json" },
     signal: AbortSignal.timeout(30_000),

@@ -12,7 +12,7 @@
 //
 // Read-only against the curated store; writes ONLY its own files under /out.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync } from "node:fs";
 import { assessProspect, metroOf, checkRenderedEmail } from "./gates.mjs";
 import { writeEmail, signature, footer, greetingName } from "./writer.mjs";
 import { pickVariant } from "./variants.mjs";
@@ -31,6 +31,21 @@ function loadArray(file) {
   const s = JSON.parse(readFileSync(file, "utf8"));
   const arrs = []; const walk = o => { if (Array.isArray(o)) { if (o.length && typeof o[0] === "object") arrs.push(o); } else if (o && typeof o === "object") for (const v of Object.values(o)) walk(v); };
   walk(s); return arrs.sort((a, b) => b.length - a.length)[0] || [];
+}
+
+// Everyone we have already emailed (any prior run), so an unattended daily job NEVER
+// double-contacts a decision-maker. Reads its own send logs; deterministic and self-contained.
+function alreadyEmailed() {
+  const seen = new Set();
+  if (!existsSync(OUT)) return seen;
+  for (const f of readdirSync(OUT).filter((n) => /^sent-.*\.jsonl$/.test(n))) {
+    for (const line of readFileSync(`${OUT}/${f}`, "utf8").split("\n")) {
+      const s = line.trim();
+      if (!s) continue;
+      try { const r = JSON.parse(s); if (r && r.to_email) seen.add(String(r.to_email).toLowerCase().trim()); } catch { /* skip */ }
+    }
+  }
+  return seen;
 }
 
 function ryanBoxes() {
@@ -75,7 +90,20 @@ async function main() {
   console.log(`curated: ${curated.length} | passed all gates: ${gated.length}`);
   console.log(`rejected -> role:${rejected.role} decision-maker:${rejected.dm} email:${rejected.email} other:${rejected.other}`);
 
-  const batch = gated.slice(0, LIMIT);
+  // Suppression: never re-email anyone we've already contacted (makes daily autopilot safe),
+  // AND dedupe within this run so a duplicate curated row can't double-send in one batch.
+  const seen = alreadyEmailed();
+  const runSeen = new Set();
+  const fresh = [];
+  for (const p of gated) {
+    const e = String(p.likelyEmail || "").toLowerCase().trim();
+    if (!e || seen.has(e) || runSeen.has(e)) continue;
+    runSeen.add(e);
+    fresh.push(p);
+  }
+  console.log(`already emailed: ${seen.size} | fresh & de-duped (not yet contacted): ${fresh.length}`);
+
+  const batch = fresh.slice(0, LIMIT);
   console.log(`\nwriting ${batch.length} emails (${SEND ? "SEND" : "DRY-RUN"})...\n`);
 
   const drafts = [];
