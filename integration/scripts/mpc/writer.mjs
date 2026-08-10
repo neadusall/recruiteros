@@ -20,9 +20,10 @@ const SYSTEM = [
   "  2. A pointed read on THEIR situation: connect the hiring signal (many open roles / fast scaling) to the real strain it puts on a finance team, and what that means for THIS role specifically.",
   "  3. The actual role and what it truly takes. Use the job-posting excerpt when given: name a concrete responsibility or skill it calls for (technical accounting under tight close cycles, regulatory reporting, board-level FP&A modeling), so it is unmistakably about THIS req and matches the candidates you are offering.",
   "  4. If a metro is given, real local-market nuance, not just 'around <metro>': speak to how tight/competitive that specific market is for this kind of finance talent, and that your candidates are local to it. If the role is remote, speak to the remote/national talent angle instead. NEVER drop the metro when one is provided.",
-  "  5. One soft CTA to see the people (e.g. 'Want me to send a couple over?', 'Worth a quick call?').",
+  "  5. One soft CTA that invites a CONVERSATION, never a profile dump. Ask for a quick call or reply to talk through who you have (e.g. 'Worth a quick call?', 'Open to a quick chat this week?', 'Happy to walk you through a couple, worth 10 minutes?'). Do NOT offer to send, attach, or 'send over' profiles or resumes.",
   "",
   "HARD RULES:",
+  "- If a 'LEAD with:' instruction is given, THAT is the hook of this specific email, make it the opening angle. It only steers the lead, every other rule below still holds.",
   "- Use ONLY the facts and the job-posting excerpt provided. Never invent a metric, a number, or a role detail not given. If the excerpt is thin, lean on the role title, industry and signal, do not fabricate specifics.",
   "- The watering-hole angle is honest AT THE CATEGORY LEVEL: you genuinely run accounting/finance searches and have candidates for this title/market. So you MAY say you recently searched for 'a similar company in your space' / 'another <industry> company' and have a few <title> candidates. You must NOT name a specific competitor company (never say 'your competitor Acme'), and you must NOT claim one specific named individual, invent their employer, or cite fake numbers. Keep it 'a few candidates' / 'a shortlist'.",
   "- Write ONLY the message body: NO greeting, NO 'Hi <name>', NO name (a greeting is added separately). Start with a CAPITAL letter.",
@@ -75,8 +76,10 @@ export async function writeEmail(p, opts = {}) {
     hiring_signal: p.signalReason || null,
   };
   const excerpt = await fetchJobExcerpt(p.jobUrl);
+  const variantLead = opts.variant && opts.variant.lead ? opts.variant.lead : null;
   const userMsg =
     "Facts:\n" + JSON.stringify(facts, null, 2) +
+    (variantLead ? "\n\n" + variantLead : "") +
     (excerpt ? "\n\nActual job-posting excerpt (use it for real specifics about the role):\n" + excerpt : "\n\n(No job-posting text available; lean on the role title and signal, do not fabricate.)") +
     "\n\nWrite the deep, situation-aware email as strict JSON.";
   const res = await fetch("https://api.anthropic.com/v1/messages", {

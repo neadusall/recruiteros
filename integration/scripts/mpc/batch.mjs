@@ -15,6 +15,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { assessProspect, metroOf, checkRenderedEmail } from "./gates.mjs";
 import { writeEmail, signature, footer, greetingName } from "./writer.mjs";
+import { pickVariant } from "./variants.mjs";
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
@@ -78,24 +79,26 @@ async function main() {
   console.log(`\nwriting ${batch.length} emails (${SEND ? "SEND" : "DRY-RUN"})...\n`);
 
   const drafts = [];
-  for (const p of batch) {
+  for (let i = 0; i < batch.length; i++) {
+    const p = batch[i];
     const metro = metroOf(p);
+    const variant = pickVariant(i); // even, reproducible rotation of the tested lead angles
     let email;
-    try { email = await writeEmail(p, { metro }); }
+    try { email = await writeEmail(p, { metro, variant }); }
     catch (e) { console.log(`  SKIP (writer) ${p.company}: ${e.message}`); continue; }
     const check = checkRenderedEmail(email.subject, email.body);
     if (!check.ok) { console.log(`  SKIP (render gate) ${p.company}: ${check.problems.join(", ")}`); continue; }
     // Greeting built deterministically: "Hi <Capitalized First Name>," then a blank line, then the message.
     const fullBody = `Hi ${greetingName(p.managerName)},\n\n${email.body}` + signature() + footer();
-    drafts.push({ company: p.company, role: p.role, metro: metro || "remote", to_name: p.managerName, to_title: p.managerTitle, to_email: p.likelyEmail, subject: email.subject, body: fullBody });
+    drafts.push({ company: p.company, role: p.role, metro: metro || "remote", variant: variant.id, variant_label: variant.label, to_name: p.managerName, to_title: p.managerTitle, to_email: p.likelyEmail, subject: email.subject, body: fullBody });
   }
 
   const draftFile = `${OUT}/drafts-${stamp}.json`;
   writeFileSync(draftFile, JSON.stringify(drafts, null, 2));
   console.log(`\n${drafts.length} drafts passed every gate. Written to ${draftFile}`);
   console.log("\n===== SAMPLES =====");
-  for (const d of drafts.slice(0, 3)) {
-    console.log(`\n--- ${d.company} | ${d.role} | ${d.metro} ---`);
+  for (const d of drafts.slice(0, 5)) {
+    console.log(`\n--- ${d.company} | ${d.role} | ${d.metro} | variant: ${d.variant} (${d.variant_label}) ---`);
     console.log(`to: ${d.to_name} (${d.to_title}) <${d.to_email}>`);
     console.log(`subject: ${d.subject}`);
     console.log(d.body);
