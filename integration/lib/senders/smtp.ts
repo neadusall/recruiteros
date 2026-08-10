@@ -52,8 +52,12 @@ export function hasVerifiableSmtp(m: SenderInbox): boolean {
   }
 }
 
-/** Send one message via the given inbox. Never throws — returns {ok}. */
+/** Send one message via the given inbox. Never throws — returns {ok}.
+ *  Sending.ac mailboxes with no stored SMTP login go over the Mailbox API (Graph proxy);
+ *  everything with a real SMTP credential sends by SMTP as before. */
 export async function sendViaInbox(m: SenderInbox, msg: SmtpMessage): Promise<SmtpResult> {
+  const { canSendViaMailboxApi, sendViaMailboxApi } = await import("./mailboxApi");
+  if (canSendViaMailboxApi(m)) return sendViaMailboxApi(m, msg);
   try {
     const t = transportFor(m);
     const from = m.displayName ? `"${m.displayName.replace(/"/g, "")}" <${m.email}>` : m.email;

@@ -35,6 +35,12 @@ export { COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DO
 export { sendViaInbox, verifyInbox } from "./smtp";
 export type { SmtpMessage, SmtpResult } from "./smtp";
 
+export {
+  mailboxApiConfigured, canSendViaMailboxApi, sendViaMailboxApi,
+  listMailboxApiMessages, pingMailboxApi,
+} from "./mailboxApi";
+export type { MailboxApiMessage, MailboxApiPing } from "./mailboxApi";
+
 export { parseCsv, detectColumns, rowsToInboxes } from "./csv";
 export type { ColumnMap, MapRowsResult } from "./csv";
 

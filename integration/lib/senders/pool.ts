@@ -7,7 +7,14 @@
  */
 import { listInboxes, recordSend, resetDailyIfNewDay } from "./store";
 import { coldCapFor } from "./limits";
+import { canSendViaMailboxApi } from "./mailboxApi";
 import type { SenderInbox } from "./types";
+
+/** An inbox this platform can actually send from: a stored SMTP login, OR a Sending.ac
+ *  mailbox reachable through the Mailbox API (no per-box credential needed). */
+function canSend(m: SenderInbox): boolean {
+  return !!m.smtpPassEnc || canSendViaMailboxApi(m);
+}
 
 /** Minimum minutes between two sends from the SAME inbox, so one Email ID never
  *  bursts. Env-tunable; 0 disables. Sends simply rotate to a rested inbox. */
@@ -25,9 +32,10 @@ function rested(m: SenderInbox): boolean {
 }
 
 function sendable(m: SenderInbox): boolean {
-  // No stored SMTP credentials = an upstream-managed (OAuth) mailbox that this
-  // platform tracks but cannot send from; the rotation never picks it.
-  return (m.status === "active" || m.status === "warming") && !!m.smtpPassEnc && m.sentToday < coldCapFor(m) && rested(m);
+  // Sendable = an SMTP login we hold, OR a Sending.ac mailbox we can drive through the
+  // Mailbox API. A credential-less Sending.ac box with no Mailbox key configured is still
+  // tracked-only and the rotation skips it, exactly as before.
+  return (m.status === "active" || m.status === "warming") && canSend(m) && m.sentToday < coldCapFor(m) && rested(m);
 }
 
 export interface PickOpts { recruiterId?: string; excludeIds?: string[]; }
@@ -51,7 +59,7 @@ export async function poolCapacity(
   // honors status + ramp + credentials, so the numbers recruiters see match what
   // this platform can really send (upstream-managed OAuth mailboxes count 0 here).
   const pool = (await listInboxes(workspaceId, { ownerId: recruiterId }))
-    .filter((m) => (m.status === "active" || m.status === "warming") && !!m.smtpPassEnc && m.sentToday < coldCapFor(m));
+    .filter((m) => (m.status === "active" || m.status === "warming") && canSend(m) && m.sentToday < coldCapFor(m));
   let rem = 0, cap = 0;
   for (const m of pool) { rem += Math.max(0, coldCapFor(m) - m.sentToday); cap += coldCapFor(m); }
   return { inboxes: pool.length, remainingToday: rem, dailyCapacity: cap };

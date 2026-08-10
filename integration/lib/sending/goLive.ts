@@ -19,7 +19,7 @@
  */
 
 import { getCore } from "../core/repository";
-import { listInboxes, coldCap } from "../senders";
+import { listInboxes, coldCap, canSendViaMailboxApi } from "../senders";
 import { automationEnabled } from "../automation/scheduler";
 import { footerAddressMissing } from "./compliance";
 import { unsubSecretIsFallback } from "./unsubscribe";
@@ -65,11 +65,12 @@ export async function goLiveReadiness(
   const totalInboxes = inboxes.length;
   const recruiterId = c?.recruiterId;
   const ownedInboxes = recruiterId ? inboxes.filter((m) => m.ownerId === recruiterId) : [];
-  // Capacity only counts inboxes that hold an SMTP login. The rotation skips a
-  // credential-less mailbox (lib/senders/pool.ts), so counting it here reported a pool
-  // that could never actually be spent: the Sending.ac fleet imported over OAuth with
-  // no password, and the checklist called it "ready" for sends that had nowhere to go.
-  const sendableOwned = ownedInboxes.filter((m) => !!m.smtpPassEnc);
+  // Capacity only counts inboxes this platform can ACTUALLY send from: a stored SMTP
+  // login, or a Sending.ac mailbox reachable through the Mailbox API. The rotation skips
+  // anything else (lib/senders/pool.ts), so counting it here would report a pool that
+  // could never be spent — the failure that let a credential-less OAuth fleet read as
+  // "ready" for sends with nowhere to go.
+  const sendableOwned = ownedInboxes.filter((m) => !!m.smtpPassEnc || canSendViaMailboxApi(m));
   const ownedCapacity = sendableOwned.reduce((n, m) => n + coldCap(m.dailyCap), 0);
   const ownedNoCreds = ownedInboxes.length - sendableOwned.length;
 
