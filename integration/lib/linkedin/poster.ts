@@ -1507,6 +1507,8 @@ Return ONLY a JSON object:
   "hero": { "value": string, "label": string } | null,
   "bars": [ { "label": string, "display": string, "amount": number } ],
   "gap": string | null,
+  "trend": { "startLabel": string, "endLabel": string, "deltaPct": number } | null,
+  "share": { "value": number, "label": string } | null,
   "source": string | null
 }
 
@@ -1516,6 +1518,8 @@ Field rules:
 - hero: the single most striking number, e.g. {"value":"-30%","label":"CPA exam participation since 2016"}. value <= 8 characters including sign and unit; label <= 70 characters. null when the post has no standout number.
 - bars: 0, 2, or 3 quantities from the post that share a unit and are worth comparing, largest story first. label <= 34 characters; display is the formatted figure exactly as the post gives it (e.g. "124,200"); amount is its plain numeric value. Use [] when the post has no comparable pair. Never repeat the hero number as a bar unless it is one side of the comparison.
 - gap: <= 44 characters naming the difference the bars expose (e.g. "69,000 people short every year"), ONLY if the post states or directly implies it. Otherwise null.
+- trend: ONLY when the post states a change over a named period (e.g. "down 30% since 2016"). startLabel = the period start (e.g. "2016"), endLabel = the period end (e.g. "today" or "2026"), deltaPct = the stated percent change as a signed number (e.g. -30). <= 24 characters per label. Otherwise null. Never turn a comparison of two different things into a trend.
+- share: ONLY when the post states a part of a whole as a percentage or a fraction (e.g. "46 of 100 mailboxes" -> {"value":46,"label":"mailboxes blocked"}). value = the percentage 1 to 99; label <= 44 characters. Otherwise null.
 - source: <= 70 characters of attribution ONLY if the post names a source. Otherwise null.
 
 No other text before or after the JSON.`;
@@ -1526,6 +1530,10 @@ export interface StatMediaSpec {
   hero: { value: string; label: string } | null;
   bars: { label: string; display: string; amount: number }[];
   gap: string | null;
+  /** A stated change over a named period; drawn as a trend curve. */
+  trend?: { startLabel: string; endLabel: string; deltaPct: number } | null;
+  /** A stated part-of-a-whole percentage; drawn as a donut. */
+  share?: { value: number; label: string } | null;
   source: string | null;
 }
 
@@ -1558,12 +1566,21 @@ async function generateStatSpec(text: string): Promise<StatMediaSpec> {
     .filter((b: { label: string; display: string; amount: number }) => b.label && b.display && Number.isFinite(b.amount) && b.amount > 0)
     .slice(0, 3);
   if (bars.length < 2) bars = [];
+  const trend = raw.trend && cleanStr(raw.trend.startLabel, 24) && cleanStr(raw.trend.endLabel, 24) &&
+    Number.isFinite(Number(raw.trend.deltaPct)) && Math.abs(Number(raw.trend.deltaPct)) >= 1 && Number(raw.trend.deltaPct) >= -95 && Number(raw.trend.deltaPct) <= 500
+    ? { startLabel: cleanStr(raw.trend.startLabel, 24), endLabel: cleanStr(raw.trend.endLabel, 24), deltaPct: Math.round(Number(raw.trend.deltaPct)) }
+    : null;
+  const share = raw.share && Number.isFinite(Number(raw.share.value)) && Number(raw.share.value) >= 1 && Number(raw.share.value) <= 99 && cleanStr(raw.share.label, 44)
+    ? { value: Math.round(Number(raw.share.value)), label: cleanStr(raw.share.label, 44) }
+    : null;
   return {
     kicker: cleanStr(raw.kicker, 34) || "THE MARKET RIGHT NOW",
     headline,
     hero,
     bars,
     gap: bars.length ? cleanStr(raw.gap, 44) || null : null,
+    trend,
+    share,
     source: cleanStr(raw.source, 70) || null,
   };
 }
@@ -1571,7 +1588,7 @@ async function generateStatSpec(text: string): Promise<StatMediaSpec> {
 /** No-AI fallback: a clean headline card from the draft's own first line. */
 function statSpecNaive(text: string): StatMediaSpec {
   const firstLine = (text.split(/\n/).map((l) => l.trim()).filter(Boolean)[0] ?? text).slice(0, 90);
-  return { kicker: "THE MARKET RIGHT NOW", headline: scrubDashes(firstLine), hero: null, bars: [], gap: null, source: null };
+  return { kicker: "THE MARKET RIGHT NOW", headline: scrubDashes(firstLine), hero: null, bars: [], gap: null, trend: null, share: null, source: null };
 }
 
 /** Bar with a square baseline (left) and 8px-rounded data end (right). */
@@ -1605,14 +1622,19 @@ const CARD_DARK: CardTone = {
   ramp2: ["#5598e7", "#b7d3f6"], ramp3: ["#5598e7", "#86b6ef", "#b7d3f6"],
 };
 
-type CardTemplate = "heroLeft" | "heroPoster" | "barsLead" | "splitDuel" | "heroRail" | "statement";
+type CardTemplate =
+  | "heroLeft" | "heroPoster" | "barsLead" | "splitDuel" | "heroRail" | "statement"
+  | "trendDip" | "donut" | "columns" | "panelSplit" | "photoHead";
 
 /** Which layouts this spec can carry, most distinctive first. */
 function cardTemplates(spec: StatMediaSpec): CardTemplate[] {
   const t: CardTemplate[] = [];
+  if (spec.trend) t.push("trendDip");
+  if (spec.share) t.push("donut");
   if (spec.hero && !spec.bars.length) t.push("heroPoster");
-  if (spec.bars.length >= 2) t.push("barsLead");
+  if (spec.bars.length >= 2) t.push("barsLead", "columns");
   if (spec.bars.length === 2) t.push("splitDuel");
+  if (spec.hero || spec.bars.length || spec.share) t.push("panelSplit");
   if (spec.hero) t.push("heroRail");
   // With no number at all, heroLeft is just a weaker statement card: skip it.
   if (spec.hero || spec.bars.length) t.push("heroLeft");
@@ -1620,10 +1642,13 @@ function cardTemplates(spec: StatMediaSpec): CardTemplate[] {
   return t;
 }
 
-/** Every distinct look for this spec: layouts first in light, then in dark. */
-export function cardCombos(spec: StatMediaSpec): { template: CardTemplate; dark: boolean }[] {
+/** Every distinct look for this spec: layouts in light (plus the photo card
+ *  when the library has uploads), then the same layouts in dark. */
+export function cardCombos(spec: StatMediaSpec, photoCount = 0): { template: CardTemplate; dark: boolean }[] {
   const t = cardTemplates(spec);
-  return [...t.map((x) => ({ template: x, dark: false })), ...t.map((x) => ({ template: x, dark: true }))];
+  const light: { template: CardTemplate; dark: boolean }[] = t.map((x) => ({ template: x, dark: false }));
+  if (photoCount > 0) light.push({ template: "photoHead", dark: false });
+  return [...light, ...t.map((x) => ({ template: x, dark: true }))];
 }
 
 /** Deterministic per-draft starting look, so sibling drafts don't match. */
@@ -1707,6 +1732,46 @@ function barsBlock(parts: string[], T: CardTone, x: number, y: number, spec: Sta
 }
 
 /**
+ * Overlay for the photo card: a solid dark band across the lower third with
+ * the kicker, headline, and hero in white. Composited over a library photo.
+ */
+export function photoOverlaySvg(spec: StatMediaSpec): string {
+  const W = 1200, H = 1500, M = 96;
+  const parts: string[] = [];
+  const hFs = spec.headline.length > 60 ? 56 : 64;
+  const hLines = wrapLines(spec.headline, Math.floor((W - 2 * M) / (hFs * 0.5)), 3);
+  const heroH = spec.hero ? 150 : 0;
+  const bandH = 140 + hLines.length * Math.round(hFs * 1.2) + heroH + 90;
+  const bandY = H - bandH;
+  parts.push(`<rect x="0" y="${bandY}" width="${W}" height="${bandH}" fill="#0a0c10" fill-opacity="0.78"/>`);
+  parts.push(`<rect x="0" y="${bandY}" width="${W}" height="6" fill="#5598e7"/>`);
+  let y = bandY + 92;
+  parts.push(`<rect x="${M}" y="${y - 10}" width="52" height="7" rx="3.5" fill="#5598e7"/>`);
+  parts.push(`<text x="${M + 72}" y="${y}" font-family="${CARD_FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="#c9d4e4">${escXml(spec.kicker.toUpperCase())}</text>`);
+  y += 78;
+  for (const l of hLines) {
+    parts.push(`<text x="${M}" y="${y}" font-family="${CARD_FONT}" font-size="${hFs}" font-weight="800" letter-spacing="-1" fill="#ffffff">${escXml(l)}</text>`);
+    y += Math.round(hFs * 1.2);
+  }
+  if (spec.hero) {
+    y += 26;
+    const negative = /^[-−↓]/.test(spec.hero.value);
+    const fs = fitFs(spec.hero.value, 620, 120);
+    parts.push(`<text x="${M}" y="${y + fs * 0.78}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-3" fill="${negative ? "#ff8d7a" : "#7db4f2"}">${escXml(spec.hero.value)}</text>`);
+    const heroW = Math.round(spec.hero.value.length * fs * 0.58) + 34;
+    let ly = y + 46;
+    for (const l of wrapLines(spec.hero.label, 30, 2)) {
+      parts.push(`<text x="${M + heroW}" y="${ly}" font-family="${CARD_FONT}" font-size="29" fill="#c9d4e4">${escXml(l)}</text>`);
+      ly += 40;
+    }
+  }
+  if (spec.source) {
+    parts.push(`<text x="${M}" y="${H - 34}" font-family="${CARD_FONT}" font-size="21" fill="#8fa0b8">${escXml(spec.source)}</text>`);
+  }
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${parts.join("\n")}</svg>`;
+}
+
+/**
  * 1200x1500 (4:5 portrait, LinkedIn's tallest feed crop) stat card. The
  * template picks the composition, the tone picks the surface; sections are
  * optional and every layout reflows around what the spec actually has.
@@ -1717,7 +1782,112 @@ export function statMediaSvg(spec: StatMediaSpec, template: CardTemplate = "hero
   const parts: string[] = [];
   let y = 150;
 
-  if (template === "heroPoster" && spec.hero) {
+  if (template === "trendDip" && spec.trend) {
+    // A stated change over a period, drawn as an indexed curve (start = 100).
+    const tr = spec.trend;
+    y = kickerRow(parts, T, M, y, spec.kicker);
+    y = headlineBlock(parts, T, M, y, spec.headline, 52, 3) + 60;
+    const negative = tr.deltaPct < 0;
+    const lineC = negative ? T.neg : T.accent;
+    const chartX = M, chartW = W - 2 * M, chartH = 480;
+    const top = y, bottom = y + chartH;
+    const endIdx = 100 + tr.deltaPct;
+    const vMax = Math.max(100, endIdx) * 1.12;
+    const vMin = Math.max(0, Math.min(100, endIdx) * 0.82);
+    const yOf = (v: number) => bottom - ((v - vMin) / (vMax - vMin)) * chartH;
+    const y0 = yOf(100), y1 = yOf(endIdx);
+    for (let i = 1; i <= 3; i++) {
+      parts.push(`<rect x="${chartX}" y="${top + (chartH / 4) * i}" width="${chartW}" height="1" fill="${T.hairline}"/>`);
+    }
+    const x0 = chartX + 14, x1 = chartX + chartW - 14;
+    const c1 = x0 + chartW * 0.42, c2 = x0 + chartW * 0.58;
+    parts.push(`<path d="M${x0} ${y0} C ${c1} ${y0}, ${c2} ${y1}, ${x1} ${y1} L ${x1} ${bottom} L ${x0} ${bottom} Z" fill="${lineC}" fill-opacity="0.14"/>`);
+    parts.push(`<path d="M${x0} ${y0} C ${c1} ${y0}, ${c2} ${y1}, ${x1} ${y1}" stroke="${lineC}" stroke-width="6" fill="none" stroke-linecap="round"/>`);
+    parts.push(`<circle cx="${x0}" cy="${y0}" r="9" fill="${T.muted}"/>`);
+    parts.push(`<circle cx="${x1}" cy="${y1}" r="12" fill="${lineC}"/>`);
+    parts.push(`<circle cx="${x1}" cy="${y1}" r="12" fill="none" stroke="${T.bg}" stroke-width="3"/>`);
+    const deltaTxt = (tr.deltaPct > 0 ? "+" : "") + tr.deltaPct + "%";
+    const dFs = 120;
+    const dY = negative ? top + dFs * 0.9 : bottom - 40;
+    parts.push(`<text x="${x1}" y="${dY}" text-anchor="end" font-family="${CARD_FONT}" font-size="${dFs}" font-weight="800" letter-spacing="-3" fill="${lineC}">${escXml(deltaTxt)}</text>`);
+    y = bottom + 52;
+    parts.push(`<text x="${x0}" y="${y}" font-family="${CARD_FONT}" font-size="30" fill="${T.secondary}">${escXml(tr.startLabel)}</text>`);
+    parts.push(`<text x="${x1}" y="${y}" text-anchor="end" font-family="${CARD_FONT}" font-size="30" fill="${T.secondary}">${escXml(tr.endLabel)}</text>`);
+    y += 20;
+  } else if (template === "donut" && spec.share) {
+    // A part of a whole: donut ring, the percentage in the middle.
+    y = kickerRow(parts, T, M, y, spec.kicker);
+    y = headlineBlock(parts, T, M, y, spec.headline, 52, 3) + 70;
+    const R = 270, ring = 62, cx = W / 2, cy = y + R + 10;
+    const track = (spec.bars.length === 2 ? T.ramp2 : T.ramp3)[spec.bars.length === 2 ? 1 : 2];
+    const circ = 2 * Math.PI * R;
+    parts.push(`<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${track}" stroke-opacity="0.45" stroke-width="${ring}"/>`);
+    parts.push(`<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${T.accent}" stroke-width="${ring}" stroke-linecap="round" stroke-dasharray="${(circ * spec.share.value / 100).toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>`);
+    parts.push(`<text x="${cx}" y="${cy + 52}" text-anchor="middle" font-family="${CARD_FONT}" font-size="150" font-weight="800" letter-spacing="-4" fill="${T.ink}">${escXml(spec.share.value + "%")}</text>`);
+    y = cy + R + ring / 2 + 74;
+    for (const l of wrapLines(spec.share.label, 40, 2)) {
+      parts.push(`<text x="${cx}" y="${y}" text-anchor="middle" font-family="${CARD_FONT}" font-size="35" fill="${T.secondary}">${escXml(l)}</text>`);
+      y += 48;
+    }
+  } else if (template === "columns" && spec.bars.length >= 2) {
+    // The comparison as vertical columns, values on top.
+    y = kickerRow(parts, T, M, y, spec.kicker);
+    y = headlineBlock(parts, T, M, y, spec.headline, 50, 2) + 70;
+    const ramp = spec.bars.length === 2 ? T.ramp2 : T.ramp3;
+    const n = spec.bars.length;
+    const colW = n === 2 ? 300 : 240;
+    const gapW = n === 2 ? 140 : 72;
+    const plotH = 560;
+    const startX = (W - (n * colW + (n - 1) * gapW)) / 2;
+    const maxAmount = Math.max(...spec.bars.map((b) => b.amount));
+    const base = y + plotH;
+    for (let i = 0; i < n; i++) {
+      const b = spec.bars[i];
+      const h = Math.max(46, Math.round((b.amount / maxAmount) * (plotH - 90)));
+      const x = startX + i * (colW + gapW);
+      const r = 10;
+      parts.push(`<path d="M${x} ${base} v-${h - r} a${r} ${r} 0 0 1 ${r} -${r} h${colW - 2 * r} a${r} ${r} 0 0 1 ${r} ${r} v${h - r} Z" fill="${ramp[i]}"/>`);
+      parts.push(`<text x="${x + colW / 2}" y="${base - h - 26}" text-anchor="middle" font-family="${CARD_FONT}" font-size="42" font-weight="800" fill="${T.ink}">${escXml(b.display)}</text>`);
+      let ly = base + 52;
+      for (const l of wrapLines(b.label, 18, 2)) {
+        parts.push(`<text x="${x + colW / 2}" y="${ly}" text-anchor="middle" font-family="${CARD_FONT}" font-size="29" fill="${T.secondary}">${escXml(l)}</text>`);
+        ly += 38;
+      }
+    }
+    parts.push(`<rect x="${M}" y="${base}" width="${W - 2 * M}" height="2" fill="${T.bracket}"/>`);
+    y = base + 140;
+    if (spec.gap) {
+      parts.push(`<text x="${W / 2}" y="${y}" text-anchor="middle" font-family="${CARD_FONT}" font-size="34" font-weight="700" fill="${T.ink}">${escXml(spec.gap)}</text>`);
+      y += 30;
+    }
+  } else if (template === "panelSplit" && (spec.hero || spec.bars.length || spec.share)) {
+    // Color-block: the words live on a solid accent panel, the number below it.
+    const panelH = 660;
+    parts.push(`<rect x="0" y="0" width="${W}" height="${panelH}" fill="${dark ? "#1c4f8f" : T.accent}"/>`);
+    let py = 170;
+    parts.push(`<rect x="${M}" y="${py - 10}" width="52" height="7" rx="3.5" fill="#ffffff" fill-opacity="0.9"/>`);
+    parts.push(`<text x="${M + 72}" y="${py}" font-family="${CARD_FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="#ffffff" fill-opacity="0.75">${escXml(spec.kicker.toUpperCase())}</text>`);
+    py += 92;
+    const pFs = spec.headline.length > 60 ? 58 : 66;
+    for (const l of wrapLines(spec.headline, Math.floor((W - 2 * M) / (pFs * 0.5)), 4)) {
+      parts.push(`<text x="${M}" y="${py}" font-family="${CARD_FONT}" font-size="${pFs}" font-weight="800" letter-spacing="-1" fill="#ffffff">${escXml(l)}</text>`);
+      py += Math.round(pFs * 1.2);
+    }
+    y = panelH + 120;
+    if (spec.hero) {
+      y = heroBlock(parts, T, M, y, spec.hero, 190);
+    } else if (spec.bars.length) {
+      y = barsBlock(parts, T, M, y, spec, { barH: 44, labelFs: 31, valueFs: 35, width: W - 2 * M });
+    } else if (spec.share) {
+      y = heroBlock(parts, T, M, y, { value: spec.share.value + "%", label: spec.share.label }, 190);
+    }
+    // The panel owns the top: pin the group, no vertical centering.
+    const src = spec.source
+      ? `<text x="${M}" y="${H - 76}" font-family="${CARD_FONT}" font-size="21" fill="${T.muted}">${escXml(spec.source)}</text>`
+      : "";
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">` +
+      `<rect width="${W}" height="${H}" fill="${T.bg}"/>${parts.join("\n")}${src}</svg>`;
+  } else if (template === "heroPoster" && spec.hero) {
     // Centered poster: the number IS the card; the headline supports it.
     const cx = W / 2;
     parts.push(`<rect x="${cx - 26}" y="${y - 10}" width="52" height="7" rx="3.5" fill="${T.accent}"/>`);
@@ -1871,10 +2041,29 @@ async function draftStatSpec(d: PosterDraft): Promise<StatMediaSpec> {
 /** Render the spec in the variant's look -> PNG -> library. */
 async function renderStatCard(ws: string, spec: StatMediaSpec, variant: number): Promise<PosterImage> {
   const s = wsState(ws);
-  const combos = cardCombos(spec);
+  // Real photos from the library become card backdrops; generated cards and
+  // PDFs are excluded so a card never sits on top of another card.
+  const photos = s.images.filter((i) => i.kind === "upload" && i.mime.startsWith("image/"));
+  const combos = cardCombos(spec, photos.length);
   const combo = combos[((variant % combos.length) + combos.length) % combos.length];
   const sharp = (await import("sharp")).default;
-  const bytes = await sharp(Buffer.from(statMediaSvg(spec, combo.template, combo.dark))).png().toBuffer();
+  let bytes: Buffer | null = null;
+  if (combo.template === "photoHead" && photos.length) {
+    try {
+      const photo = photos[((variant % photos.length) + photos.length) % photos.length];
+      const base = await fs.readFile(path.join(mediaDir(), photo.file));
+      bytes = await sharp(base)
+        .rotate() // honor EXIF before the cover crop
+        .resize(1200, 1500, { fit: "cover" })
+        .composite([{ input: Buffer.from(photoOverlaySvg(spec)) }])
+        .png()
+        .toBuffer();
+    } catch { bytes = null; /* bad or missing photo file: use an SVG look */ }
+  }
+  if (!bytes) {
+    const t = combo.template === "photoHead" ? cardTemplates(spec)[0] : combo.template;
+    bytes = await sharp(Buffer.from(statMediaSvg(spec, t, combo.dark))).png().toBuffer();
+  }
   const id = rid();
   const file = id + ".png";
   await writeMedia(file, bytes);
