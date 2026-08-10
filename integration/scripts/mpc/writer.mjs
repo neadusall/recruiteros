@@ -17,10 +17,22 @@ const SYSTEM = [
   "- Use ONLY the facts provided. Never invent a candidate, a name, a metric, a competitor, a number, or a detail not given.",
   "- The honest angle: you keep a bench of vetted accounting/finance candidates and can help fill their open role faster. Do NOT claim to have one specific named person.",
   "- Reference their actual company and the actual role. If a metro is given, work the local market in naturally ('candidates right around <metro>' / 'local to <metro>'). If no metro, do not mention location.",
-  "- Under 55 words. Lowercase, casual, reads like a person typed it fast. Exactly ONE soft call to action (e.g. 'worth a quick call?').",
-  "- No hype, no buzzwords, no em-dashes, no signature (it is added later), no subject-line clickbait.",
-  "Return STRICT JSON only: {\"subject\": string, \"body\": string}. Subject lowercase, short, curiosity-driven. Body is the pitch only, no sign-off.",
+  "- Write ONLY the message body: NO greeting, NO 'Hi <name>', NO name at all (a greeting is added separately). Start the body with a CAPITAL letter.",
+  "- Under 50 words. Warm and human but professional; sentences start with capital letters and use normal punctuation. Exactly ONE soft call to action (e.g. 'Worth a quick call?').",
+  "- No hype, no buzzwords, NEVER an em-dash (use a comma or period), no sign-off, no subject-line clickbait.",
+  "Return STRICT JSON only: {\"subject\": string, \"body\": string}. Subject short and lowercase. Body is the message only, no greeting and no sign-off.",
 ].join("\n");
+
+/** Capitalized first name for the greeting, built deterministically (not left to the model). */
+export function greetingName(managerName) {
+  const n = (managerName || "there").trim().split(/\s+/)[0] || "there";
+  return n.charAt(0).toUpperCase() + n.slice(1);
+}
+
+/** Remove any em-dash the model slips in, so a good draft is never dropped by the render gate. */
+function deDash(s) {
+  return (s || "").replace(/\s*—\s*/g, ", ").replace(/\s*–\s*/g, ", ");
+}
 
 export async function writeEmail(p, opts = {}) {
   const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
@@ -49,7 +61,7 @@ export async function writeEmail(p, opts = {}) {
   const data = await res.json();
   const text = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).join("");
   const json = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
-  return { subject: String(json.subject || "").trim(), body: String(json.body || "").trim() };
+  return { subject: deDash(String(json.subject || "").trim()), body: deDash(String(json.body || "").trim()) };
 }
 
 // Fixed signature + CAN-SPAM footer appended to every send (never AI-varied).

@@ -14,7 +14,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { assessProspect, metroOf, checkRenderedEmail } from "./gates.mjs";
-import { writeEmail, signature, footer } from "./writer.mjs";
+import { writeEmail, signature, footer, greetingName } from "./writer.mjs";
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
@@ -85,7 +85,8 @@ async function main() {
     catch (e) { console.log(`  SKIP (writer) ${p.company}: ${e.message}`); continue; }
     const check = checkRenderedEmail(email.subject, email.body);
     if (!check.ok) { console.log(`  SKIP (render gate) ${p.company}: ${check.problems.join(", ")}`); continue; }
-    const fullBody = email.body + signature() + footer();
+    // Greeting built deterministically: "Hi <Capitalized First Name>," then a blank line, then the message.
+    const fullBody = `Hi ${greetingName(p.managerName)},\n\n${email.body}` + signature() + footer();
     drafts.push({ company: p.company, role: p.role, metro: metro || "remote", to_name: p.managerName, to_title: p.managerTitle, to_email: p.likelyEmail, subject: email.subject, body: fullBody });
   }
 
