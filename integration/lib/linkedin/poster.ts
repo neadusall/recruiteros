@@ -71,6 +71,14 @@ export interface PosterDraft {
   createdBy?: string;
   text: string;
   imageId?: string;
+  /** Which stat-card look this draft last rendered. Seeded from the draft id
+   *  so sibling drafts don't match; each "Create media for me" click walks to
+   *  the next look, cycling layouts and light/dark tones. */
+  mediaVariant?: number;
+  /** The extracted numbers behind the card, cached so cycling looks does not
+   *  re-spend an AI call. Invalidated when the text it was cut from changes. */
+  mediaSpec?: StatMediaSpec;
+  mediaSpecFor?: string;
   /** Posted as the post's first comment right after publishing (links belong
    *  there, not in the body: the feed algorithm punishes external links). */
   firstComment?: string;
@@ -777,7 +785,9 @@ async function autoAttachCard(ws: string, draftId: string): Promise<void> {
   const d = s.drafts.find((x) => x.id === draftId);
   if (!d || d.imageId) return;
   try {
-    const img = await renderStatImage(ws, d.text);
+    const spec = await draftStatSpec(d);
+    d.mediaVariant = d.mediaVariant ?? cardSeed(d.id);
+    const img = await renderStatCard(ws, spec, d.mediaVariant);
     d.imageId = img.id;
     d.updatedAt = nowIso();
     persist();
@@ -1502,7 +1512,7 @@ Return ONLY a JSON object:
 
 Field rules:
 - kicker: a 2 to 5 word section label for the top of the card, <= 34 characters, plain words (it is rendered uppercase).
-- headline: the post's sharpest claim in its own words, <= 90 characters.
+- headline: the post's sharpest claim in its own words, <= 90 characters. When a hero number exists, the headline must NOT contain that figure: the hero shows the digits, the headline says what they mean (e.g. hero "-30%" + headline "Fewer people are sitting the CPA exam than at any point in a decade").
 - hero: the single most striking number, e.g. {"value":"-30%","label":"CPA exam participation since 2016"}. value <= 8 characters including sign and unit; label <= 70 characters. null when the post has no standout number.
 - bars: 0, 2, or 3 quantities from the post that share a unit and are worth comparing, largest story first. label <= 34 characters; display is the formatted figure exactly as the post gives it (e.g. "124,200"); amount is its plain numeric value. Use [] when the post has no comparable pair. Never repeat the hero number as a bar unless it is one side of the comparison.
 - gap: <= 44 characters naming the difference the bars expose (e.g. "69,000 people short every year"), ONLY if the post states or directly implies it. Otherwise null.
@@ -1510,7 +1520,7 @@ Field rules:
 
 No other text before or after the JSON.`;
 
-interface StatMediaSpec {
+export interface StatMediaSpec {
   kicker: string;
   headline: string;
   hero: { value: string; label: string } | null;
@@ -1570,84 +1580,242 @@ function barPath(x: number, y: number, w: number, h: number): string {
   return `M${x} ${y} h${w - r} a${r} ${r} 0 0 1 ${r} ${r} v${h - 2 * r} a${r} ${r} 0 0 1 -${r} ${r} h-${w - r} Z`;
 }
 
-/**
- * 1200x1500 (4:5 portrait, LinkedIn's tallest feed crop) stat card: light
- * surface, ink text, single blue ramp for the bars, red reserved for a
- * negative hero. Sections are optional and the layout reflows around them.
+/* ---- stat card looks: layout templates x light/dark tones ----------------
+ * The same extracted numbers render as genuinely different cards. Templates
+ * are eligible by what the spec contains; a variant number walks the combo
+ * list, so cycling "Create media for me" changes the look, not the facts.
  */
-function statMediaSvg(spec: StatMediaSpec): string {
+const CARD_FONT = "FreeSans, DejaVu Sans, Arial, sans-serif";
+
+interface CardTone {
+  bg: string; ink: string; secondary: string; muted: string;
+  hairline: string; bracket: string; accent: string; neg: string;
+  /** Single-hue sequential ramps (lightness-monotonic against this surface;
+   *  every bar carries its own text label, so identity never rides on color). */
+  ramp2: string[]; ramp3: string[];
+}
+const CARD_LIGHT: CardTone = {
+  bg: "#fcfcfb", ink: "#0b0b0b", secondary: "#52514e", muted: "#898781",
+  hairline: "#e1e0d9", bracket: "#c3c2b7", accent: "#2a78d6", neg: "#d03b3b",
+  ramp2: ["#2a78d6", "#86b6ef"], ramp3: ["#2a78d6", "#5598e7", "#86b6ef"],
+};
+const CARD_DARK: CardTone = {
+  bg: "#101014", ink: "#f2f2ee", secondary: "#b9b8b1", muted: "#8b8a84",
+  hairline: "#2a2a30", bracket: "#4a4a52", accent: "#6aa5eb", neg: "#e66a6a",
+  ramp2: ["#5598e7", "#b7d3f6"], ramp3: ["#5598e7", "#86b6ef", "#b7d3f6"],
+};
+
+type CardTemplate = "heroLeft" | "heroPoster" | "barsLead" | "splitDuel" | "heroRail" | "statement";
+
+/** Which layouts this spec can carry, most distinctive first. */
+function cardTemplates(spec: StatMediaSpec): CardTemplate[] {
+  const t: CardTemplate[] = [];
+  if (spec.hero && !spec.bars.length) t.push("heroPoster");
+  if (spec.bars.length >= 2) t.push("barsLead");
+  if (spec.bars.length === 2) t.push("splitDuel");
+  if (spec.hero) t.push("heroRail");
+  // With no number at all, heroLeft is just a weaker statement card: skip it.
+  if (spec.hero || spec.bars.length) t.push("heroLeft");
+  if (!spec.bars.length) t.push("statement");
+  return t;
+}
+
+/** Every distinct look for this spec: layouts first in light, then in dark. */
+export function cardCombos(spec: StatMediaSpec): { template: CardTemplate; dark: boolean }[] {
+  const t = cardTemplates(spec);
+  return [...t.map((x) => ({ template: x, dark: false })), ...t.map((x) => ({ template: x, dark: true }))];
+}
+
+/** Deterministic per-draft starting look, so sibling drafts don't match. */
+function cardSeed(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+/** Font size that keeps `text` inside `maxWidth` at the given width factor. */
+function fitFs(text: string, maxWidth: number, baseFs: number, factor = 0.58): number {
+  return Math.max(40, Math.min(baseFs, Math.floor(maxWidth / (Math.max(1, text.length) * factor))));
+}
+
+function kickerRow(parts: string[], T: CardTone, x: number, y: number, kicker: string): number {
+  parts.push(`<rect x="${x}" y="${y - 10}" width="52" height="7" rx="3.5" fill="${T.accent}"/>`);
+  parts.push(`<text x="${x + 72}" y="${y}" font-family="${CARD_FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="${T.muted}">${escXml(kicker.toUpperCase())}</text>`);
+  return y + 84;
+}
+
+function headlineBlock(parts: string[], T: CardTone, x: number, y: number, headline: string, fs: number, maxLines = 3, width = 1008): number {
+  const lines = wrapLines(headline, Math.floor(width / (fs * 0.5)), maxLines);
+  const lineH = Math.round(fs * 1.18);
+  for (const l of lines) {
+    parts.push(`<text x="${x}" y="${y}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-1" fill="${T.ink}">${escXml(l)}</text>`);
+    y += lineH;
+  }
+  return y;
+}
+
+/** Left-aligned hero figure with the label beside it (or under, when wide). */
+function heroBlock(parts: string[], T: CardTone, x: number, y: number, hero: { value: string; label: string }, heroFs: number): number {
+  const negative = /^[-−↓]/.test(hero.value);
+  const fs = fitFs(hero.value, 1008, heroFs);
+  const heroW = Math.round(hero.value.length * fs * 0.58) + 30;
+  parts.push(`<text x="${x}" y="${y + fs * 0.78}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-4" fill="${negative ? T.neg : T.accent}">${escXml(hero.value)}</text>`);
+  if (heroW <= 560) {
+    let ly = y + 60;
+    for (const l of wrapLines(hero.label, 26, 3)) {
+      parts.push(`<text x="${x + heroW}" y="${ly}" font-family="${CARD_FONT}" font-size="31" fill="${T.secondary}">${escXml(l)}</text>`);
+      ly += 42;
+    }
+    return y + fs + 46;
+  }
+  let ly = y + fs + 34;
+  const labLines = wrapLines(hero.label, 64, 2);
+  for (const l of labLines) {
+    parts.push(`<text x="${x}" y="${ly}" font-family="${CARD_FONT}" font-size="31" fill="${T.secondary}">${escXml(l)}</text>`);
+    ly += 42;
+  }
+  return y + fs + 34 + labLines.length * 42 + 12;
+}
+
+/** Labeled horizontal bars + optional gap callout. Scales with `barH`. */
+function barsBlock(parts: string[], T: CardTone, x: number, y: number, spec: StatMediaSpec, opts: { barH: number; labelFs: number; valueFs: number; width: number }): number {
+  const ramp = spec.bars.length === 2 ? T.ramp2 : T.ramp3;
+  const maxAmount = Math.max(...spec.bars.map((b) => b.amount));
+  const maxW = opts.width - 220; // room for the value at the tip
+  const ends: number[] = [];
+  for (let i = 0; i < spec.bars.length; i++) {
+    const b = spec.bars[i];
+    const w = Math.max(14, Math.round((b.amount / maxAmount) * maxW));
+    ends.push(w);
+    parts.push(`<text x="${x}" y="${y}" font-family="${CARD_FONT}" font-size="${opts.labelFs}" fill="${T.secondary}">${escXml(b.label)}</text>`);
+    y += 22;
+    parts.push(`<path d="${barPath(x, y, w, opts.barH)}" fill="${ramp[i]}"/>`);
+    parts.push(`<text x="${x + w + 22}" y="${y + Math.round(opts.barH * 0.78)}" font-family="${CARD_FONT}" font-size="${opts.valueFs}" font-weight="700" fill="${T.ink}">${escXml(b.display)}</text>`);
+    y += opts.barH + 44;
+  }
+  const gapFs = Math.max(31, opts.labelFs + 1);
+  if (spec.gap && spec.bars.length === 2 && ends[0] - ends[1] > 120) {
+    const x0 = x + Math.min(ends[0], ends[1]), x1 = x + Math.max(ends[0], ends[1]);
+    parts.push(`<path d="M${x0} ${y - 20} v14 h${x1 - x0} v-14" stroke="${T.bracket}" stroke-width="1.5" fill="none"/>`);
+    parts.push(`<text x="${(x0 + x1) / 2}" y="${y + 40}" text-anchor="middle" font-family="${CARD_FONT}" font-size="${gapFs}" font-weight="700" fill="${T.ink}">${escXml(spec.gap)}</text>`);
+    y += 76;
+  } else if (spec.gap) {
+    parts.push(`<text x="${x}" y="${y + 10}" font-family="${CARD_FONT}" font-size="${gapFs}" font-weight="700" fill="${T.ink}">${escXml(spec.gap)}</text>`);
+    y += 56;
+  }
+  return y;
+}
+
+/**
+ * 1200x1500 (4:5 portrait, LinkedIn's tallest feed crop) stat card. The
+ * template picks the composition, the tone picks the surface; sections are
+ * optional and every layout reflows around what the spec actually has.
+ */
+export function statMediaSvg(spec: StatMediaSpec, template: CardTemplate = "heroLeft", dark = false): string {
   const W = 1200, H = 1500, M = 96;
-  const FONT = "FreeSans, DejaVu Sans, Arial, sans-serif";
-  const INK = "#0b0b0b", SECONDARY = "#52514e", MUTED = "#898781";
-  const HAIRLINE = "#e1e0d9", BRACKET = "#c3c2b7", BLUE = "#2a78d6", RED = "#d03b3b";
-  // One blue ramp, darkest first: 2 bars use the far-apart validated pair,
-  // 3 bars insert the middle step between them.
-  const RAMP = spec.bars.length === 2 ? ["#2a78d6", "#86b6ef"] : ["#2a78d6", "#5598e7", "#86b6ef"];
+  const T = dark ? CARD_DARK : CARD_LIGHT;
   const parts: string[] = [];
   let y = 150;
 
-  parts.push(`<rect x="${M}" y="${y - 10}" width="52" height="7" rx="3.5" fill="${BLUE}"/>`);
-  parts.push(`<text x="${M + 72}" y="${y}" font-family="${FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="${MUTED}">${escXml(spec.kicker.toUpperCase())}</text>`);
-  y += 84;
-
-  const hFs = spec.headline.length > 60 ? 58 : 66;
-  const hLines = wrapLines(spec.headline, Math.floor((W - 2 * M) / (hFs * 0.5)), 3);
-  const hLineH = Math.round(hFs * 1.18);
-  for (const l of hLines) {
-    parts.push(`<text x="${M}" y="${y}" font-family="${FONT}" font-size="${hFs}" font-weight="800" letter-spacing="-1" fill="${INK}">${escXml(l)}</text>`);
-    y += hLineH;
-  }
-  y += 40;
-
-  if (spec.hero) {
+  if (template === "heroPoster" && spec.hero) {
+    // Centered poster: the number IS the card; the headline supports it.
+    const cx = W / 2;
+    parts.push(`<rect x="${cx - 26}" y="${y - 10}" width="52" height="7" rx="3.5" fill="${T.accent}"/>`);
+    y += 52;
+    parts.push(`<text x="${cx}" y="${y}" text-anchor="middle" font-family="${CARD_FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="${T.muted}">${escXml(spec.kicker.toUpperCase())}</text>`);
+    y += 120;
     const negative = /^[-−↓]/.test(spec.hero.value);
-    const heroFs = 175;
-    const heroW = Math.round(spec.hero.value.length * heroFs * 0.58) + 30;
-    parts.push(`<text x="${M}" y="${y + heroFs * 0.78}" font-family="${FONT}" font-size="${heroFs}" font-weight="800" letter-spacing="-4" fill="${negative ? RED : BLUE}">${escXml(spec.hero.value)}</text>`);
-    if (heroW <= 560) {
-      // Label beside the number.
-      let ly = y + 60;
-      for (const l of wrapLines(spec.hero.label, 26, 3)) {
-        parts.push(`<text x="${M + heroW}" y="${ly}" font-family="${FONT}" font-size="31" fill="${SECONDARY}">${escXml(l)}</text>`);
-        ly += 42;
-      }
-      y += heroFs + 46;
-    } else {
-      // Wide number: the label drops below it so nothing runs off the edge.
-      let ly = y + heroFs + 34;
-      const labLines = wrapLines(spec.hero.label, 64, 2);
-      for (const l of labLines) {
-        parts.push(`<text x="${M}" y="${ly}" font-family="${FONT}" font-size="31" fill="${SECONDARY}">${escXml(l)}</text>`);
-        ly += 42;
-      }
-      y += heroFs + 34 + labLines.length * 42 + 12;
+    const fs = fitFs(spec.hero.value, W - 2 * M, 290);
+    y += fs;
+    parts.push(`<text x="${cx}" y="${y}" text-anchor="middle" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-6" fill="${negative ? T.neg : T.accent}">${escXml(spec.hero.value)}</text>`);
+    y += 64;
+    for (const l of wrapLines(spec.hero.label, 44, 2)) {
+      parts.push(`<text x="${cx}" y="${y}" text-anchor="middle" font-family="${CARD_FONT}" font-size="34" fill="${T.secondary}">${escXml(l)}</text>`);
+      y += 46;
     }
-  }
-
-  if (spec.bars.length) {
-    parts.push(`<rect x="${M}" y="${y}" width="${W - 2 * M}" height="1" fill="${HAIRLINE}"/>`);
+    y += 56;
+    parts.push(`<rect x="${cx - 220}" y="${y}" width="440" height="1" fill="${T.hairline}"/>`);
     y += 78;
-    const maxAmount = Math.max(...spec.bars.map((b) => b.amount));
-    const maxW = W - 2 * M - 220; // room for the value at the tip
-    const ends: number[] = [];
-    for (let i = 0; i < spec.bars.length; i++) {
-      const b = spec.bars[i];
-      const w = Math.max(14, Math.round((b.amount / maxAmount) * maxW));
-      ends.push(w);
-      parts.push(`<text x="${M}" y="${y}" font-family="${FONT}" font-size="30" fill="${SECONDARY}">${escXml(b.label)}</text>`);
-      y += 22;
-      parts.push(`<path d="${barPath(M, y, w, 40)}" fill="${RAMP[i]}"/>`);
-      parts.push(`<text x="${M + w + 22}" y="${y + 31}" font-family="${FONT}" font-size="33" font-weight="700" fill="${INK}">${escXml(b.display)}</text>`);
-      y += 84;
+    const hFs = 46;
+    const hLines = wrapLines(spec.headline, Math.floor((W - 2 * M) / (hFs * 0.5)), 3);
+    for (const l of hLines) {
+      parts.push(`<text x="${cx}" y="${y}" text-anchor="middle" font-family="${CARD_FONT}" font-size="${hFs}" font-weight="700" letter-spacing="-0.5" fill="${T.ink}">${escXml(l)}</text>`);
+      y += Math.round(hFs * 1.25);
     }
-    if (spec.gap && spec.bars.length === 2 && ends[0] - ends[1] > 120) {
-      const x0 = M + Math.min(ends[0], ends[1]), x1 = M + Math.max(ends[0], ends[1]);
-      parts.push(`<path d="M${x0} ${y - 20} v14 h${x1 - x0} v-14" stroke="${BRACKET}" stroke-width="1.5" fill="none"/>`);
-      parts.push(`<text x="${(x0 + x1) / 2}" y="${y + 40}" text-anchor="middle" font-family="${FONT}" font-size="31" font-weight="700" fill="${INK}">${escXml(spec.gap)}</text>`);
-      y += 76;
-    } else if (spec.gap) {
-      parts.push(`<text x="${M}" y="${y + 10}" font-family="${FONT}" font-size="31" font-weight="700" fill="${INK}">${escXml(spec.gap)}</text>`);
-      y += 56;
+  } else if (template === "barsLead" && spec.bars.length >= 2) {
+    // The comparison is the card: headline compact, bars big.
+    y = kickerRow(parts, T, M, y, spec.kicker);
+    y = headlineBlock(parts, T, M, y, spec.headline, 50, 2) + 56;
+    parts.push(`<rect x="${M}" y="${y}" width="${W - 2 * M}" height="1" fill="${T.hairline}"/>`);
+    y += 90;
+    y = barsBlock(parts, T, M, y, spec, { barH: 64, labelFs: 34, valueFs: 44, width: W - 2 * M });
+  } else if (template === "splitDuel" && spec.bars.length === 2) {
+    // Two figures head to head; the gap line names the difference.
+    y = kickerRow(parts, T, M, y, spec.kicker);
+    y = headlineBlock(parts, T, M, y, spec.headline, 50, 2) + 70;
+    const colW = (W - 2 * M - 80) / 2;
+    const xL = M, xR = M + colW + 80;
+    const topY = y;
+    const fsL = fitFs(spec.bars[0].display, colW, 120);
+    const fsR = fitFs(spec.bars[1].display, colW, 120);
+    const fs = Math.min(fsL, fsR);
+    y += fs;
+    parts.push(`<text x="${xL}" y="${y}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-3" fill="${T.accent}">${escXml(spec.bars[0].display)}</text>`);
+    parts.push(`<text x="${xR}" y="${y}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-3" fill="${T.ink}">${escXml(spec.bars[1].display)}</text>`);
+    y += 56;
+    let lyL = y, lyR = y;
+    for (const l of wrapLines(spec.bars[0].label, 24, 3)) {
+      parts.push(`<text x="${xL}" y="${lyL}" font-family="${CARD_FONT}" font-size="31" fill="${T.secondary}">${escXml(l)}</text>`);
+      lyL += 42;
+    }
+    for (const l of wrapLines(spec.bars[1].label, 24, 3)) {
+      parts.push(`<text x="${xR}" y="${lyR}" font-family="${CARD_FONT}" font-size="31" fill="${T.secondary}">${escXml(l)}</text>`);
+      lyR += 42;
+    }
+    y = Math.max(lyL, lyR) + 24;
+    parts.push(`<rect x="${M + colW + 39}" y="${topY - fs + 10}" width="2" height="${y - (topY - fs) - 34}" fill="${T.hairline}"/>`);
+    if (spec.gap) {
+      y += 40;
+      parts.push(`<rect x="${M}" y="${y - 26}" width="52" height="7" rx="3.5" fill="${T.accent}"/>`);
+      parts.push(`<text x="${M + 72}" y="${y}" font-family="${CARD_FONT}" font-size="36" font-weight="700" fill="${T.ink}">${escXml(spec.gap)}</text>`);
+      y += 30;
+    }
+  } else if (template === "heroRail" && spec.hero) {
+    // Editorial: an accent rail runs the content's full height on the left.
+    const x = M + 56;
+    const railTop = y - 34;
+    parts.push(`<text x="${x}" y="${y}" font-family="${CARD_FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="${T.muted}">${escXml(spec.kicker.toUpperCase())}</text>`);
+    y += 84;
+    y = heroBlock(parts, T, x, y, spec.hero, 190) + 24;
+    y = headlineBlock(parts, T, x, y, spec.headline, spec.headline.length > 60 ? 54 : 62, 3, W - x - M) + 26;
+    if (spec.bars.length) {
+      y += 30;
+      y = barsBlock(parts, T, x, y, spec, { barH: 36, labelFs: 29, valueFs: 31, width: W - x - M });
+    }
+    parts.push(`<rect x="${M}" y="${railTop}" width="10" height="${y - railTop - 40}" rx="5" fill="${T.accent}"/>`);
+  } else if (template === "statement" && !spec.bars.length) {
+    // Typography-led: the claim in display size; the hero rides underneath.
+    y = kickerRow(parts, T, M, y, spec.kicker) + 30;
+    const fs = spec.headline.length > 70 ? 84 : 96;
+    const lines = wrapLines(spec.headline, Math.floor((W - 2 * M) / (fs * 0.5)), 4);
+    const lineH = Math.round(fs * 1.14);
+    for (const l of lines) {
+      parts.push(`<text x="${M}" y="${y}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-2.5" fill="${T.ink}">${escXml(l)}</text>`);
+      y += lineH;
+    }
+    y += 18;
+    parts.push(`<rect x="${M}" y="${y}" width="140" height="14" rx="7" fill="${T.accent}"/>`);
+    y += 110;
+    if (spec.hero) y = heroBlock(parts, T, M, y, spec.hero, 130);
+  } else {
+    // heroLeft: the classic composition, and the fallback for any spec.
+    y = kickerRow(parts, T, M, y, spec.kicker);
+    y = headlineBlock(parts, T, M, y, spec.headline, spec.headline.length > 60 ? 58 : 66) + 40;
+    if (spec.hero) y = heroBlock(parts, T, M, y, spec.hero, 175);
+    if (spec.bars.length) {
+      parts.push(`<rect x="${M}" y="${y}" width="${W - 2 * M}" height="1" fill="${T.hairline}"/>`);
+      y += 78;
+      y = barsBlock(parts, T, M, y, spec, { barH: 40, labelFs: 30, valueFs: 33, width: W - 2 * M });
     }
   }
 
@@ -1655,10 +1823,10 @@ function statMediaSvg(spec: StatMediaSpec): string {
   // source line is pinned to the bottom edge outside the centering group.
   const shift = Math.max(0, Math.floor((H - 130 - y) / 2) - 60);
   const source = spec.source
-    ? `<text x="${M}" y="${H - 76}" font-family="${FONT}" font-size="21" fill="${MUTED}">${escXml(spec.source)}</text>`
+    ? `<text x="${M}" y="${H - 76}" font-family="${CARD_FONT}" font-size="21" fill="${T.muted}">${escXml(spec.source)}</text>`
     : "";
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">` +
-    `<rect width="${W}" height="${H}" fill="#fcfcfb"/>` +
+    `<rect width="${W}" height="${H}" fill="${T.bg}"/>` +
     `<g transform="translate(0 ${shift})">${parts.join("\n")}</g>${source}</svg>`;
 }
 
@@ -1674,24 +1842,39 @@ export async function generateStatMedia(ws: string, opts: { draftId: string }): 
   if (!d) throw Object.assign(new Error("draft_not_found"), { status: 404 });
   if (!d.text.trim()) throw Object.assign(new Error("empty_post"), { status: 400 });
 
-  const img = await renderStatImage(ws, d.text);
+  const spec = await draftStatSpec(d);
+  // Each click walks to the next look; the first lands on the draft's own
+  // seeded start, so two drafts made the same day don't wear the same card.
+  d.mediaVariant = d.mediaVariant == null ? cardSeed(d.id) : d.mediaVariant + 1;
+  const img = await renderStatCard(ws, spec, d.mediaVariant);
   d.imageId = img.id;
   d.updatedAt = nowIso();
   persist();
   return { image: img, draft: d };
 }
 
-/** Spec (AI when available, headline-only fallback) -> stat card PNG -> library. */
-async function renderStatImage(ws: string, text: string): Promise<PosterImage> {
-  const s = wsState(ws);
+/** The card's numbers (AI when available, headline-only fallback), cached on
+ *  the draft so cycling through looks never re-spends the extraction call. */
+async function draftStatSpec(d: PosterDraft): Promise<StatMediaSpec> {
+  if (d.mediaSpec && d.mediaSpecFor === d.text) return d.mediaSpec;
   let spec: StatMediaSpec | null = null;
   if (process.env.ANTHROPIC_API_KEY) {
-    try { spec = await generateStatSpec(text); } catch { spec = null; }
+    try { spec = await generateStatSpec(d.text); } catch { spec = null; }
   }
-  if (!spec) spec = statSpecNaive(text);
+  if (!spec) spec = statSpecNaive(d.text);
+  d.mediaSpec = spec;
+  d.mediaSpecFor = d.text;
+  persist();
+  return spec;
+}
 
+/** Render the spec in the variant's look -> PNG -> library. */
+async function renderStatCard(ws: string, spec: StatMediaSpec, variant: number): Promise<PosterImage> {
+  const s = wsState(ws);
+  const combos = cardCombos(spec);
+  const combo = combos[((variant % combos.length) + combos.length) % combos.length];
   const sharp = (await import("sharp")).default;
-  const bytes = await sharp(Buffer.from(statMediaSvg(spec))).png().toBuffer();
+  const bytes = await sharp(Buffer.from(statMediaSvg(spec, combo.template, combo.dark))).png().toBuffer();
   const id = rid();
   const file = id + ".png";
   await writeMedia(file, bytes);
