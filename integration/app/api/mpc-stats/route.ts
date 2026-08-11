@@ -16,5 +16,8 @@ export async function GET(req: Request) {
   if ("response" in g) return g.response;
   const s = await loadSnapshot<Record<string, unknown>>("mpc_stats_v1");
   if (!s || s.workspaceId !== g.ctx.workspace.id) return ok({ present: false });
-  return ok({ present: true, ...s });
+  // The AI advisor's recommendations (written daily), if present for this workspace.
+  const adv = await loadSnapshot<Record<string, unknown>>("mpc_advisor_v1");
+  const advisor = adv && adv.workspaceId === g.ctx.workspace.id ? adv : null;
+  return ok({ present: true, ...s, advisor });
 }
