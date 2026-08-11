@@ -1579,6 +1579,7 @@
     // tabs; before this hub the last two had no nav entrance at all.
     clients: { title: "Pipeline", crumb: "Business Development", action: null, render: renderPipelineHub, motionOnly: "bd" },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
+    sent: { title: "Sent", crumb: "Operate", action: null, render: renderSent },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run", tool: "inmarket" },
     // Consolidation redirects: these screens moved into hubs (Send Queue into
     // Email, the sending fleet into Admin > Infrastructure). The routes stay
@@ -5117,6 +5118,29 @@
         if (pk) pbOpenModal(pk.icon, pk.title, pk.sub, pk.body);
       }
     });
+  }
+
+  function renderSent(el) {
+    el.innerHTML = head("Sent", "Every message the outbound engine sent in your name, newest first, with the full text, for reference and peace of mind.");
+    var wrap = document.createElement("div");
+    el.appendChild(wrap);
+    wrap.innerHTML = loading();
+    api("/mpc-sent").then(function (d) {
+      var msgs = (d && d.messages) || [];
+      if (!msgs.length) { wrap.innerHTML = '<div class="empty">No sent messages yet. As the engine sends, they appear here.</div>'; return; }
+      var hdr = '<div class="note" style="margin-bottom:12px">' + (d.total || msgs.length) + ' messages sent &middot; showing newest ' + msgs.length + '</div>';
+      wrap.innerHTML = hdr + msgs.map(function (m) {
+        var when = (m.at || "").slice(0, 16).replace("T", " ");
+        var touch = (m.touch && m.touch > 1) ? '<span class="cls" style="margin-left:6px">follow-up ' + m.touch + '</span>' : "";
+        var who = esc(m.to_name || m.to_email) + (m.company ? " &middot; " + esc(m.company) : "");
+        return '<div class="card" style="margin-bottom:12px">' +
+          '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><div><div class="resp-name">' + who + '</div><div class="resp-chan">' + esc(m.to_email) + (m.role ? " &middot; " + esc(m.role) : "") + '</div></div>' +
+          '<div class="note" style="flex:none">' + esc(when) + " UTC" + (m.variant ? " &middot; " + esc(m.variant) : "") + touch + "</div></div>" +
+          '<div style="margin-top:8px;font-weight:600">' + esc(m.subject) + "</div>" +
+          '<div class="resp-text" style="white-space:pre-wrap;margin-top:6px">' + esc(m.body) + "</div>" +
+          "</div>";
+      }).join("");
+    }).catch(function () { wrap.innerHTML = '<div class="empty">Could not load sent messages.</div>'; });
   }
 
   function renderResponse(el) {
