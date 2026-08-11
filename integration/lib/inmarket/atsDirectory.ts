@@ -60,6 +60,28 @@ const SEED_SLUGS: string[] = [
   // Logistics / industrial / other
   "anduril", "navan", "tripactions", "hopper", "getaround", "turo", "intercom", "zendesk", "freshworks",
   "front", "kustomer", "assembled", "forethought", "contentful", "sanity", "storyblok", "builderio",
+  // --- Finance-heavy employers (added to widen the FREE finance-role footprint; every one runs a
+  //     real accounting/FP&A/controller team, so their $0 ATS boards feed the finance gate). ---
+  // More fintech / payments / lending / crypto (big finance orgs)
+  "gusto", "justworks", "wise", "revolut", "monzo", "n26", "current", "dave", "mercuryfinancial",
+  "bill", "billtrust", "melio", "routable", "tipalti", "airbase", "brexinc", "pry", "puzzl",
+  "coinbase", "kraken", "gemini", "circle", "anchorage", "fireblocks", "paxos", "bitgo", "chainalysis",
+  "addepar", "vise", "altruist", "facet", "wealthsimple", "stash", "acorns", "moneylion",
+  "gemini-trust", "figure", "blend", "morty", "valon", "kin", "hippo", "root", "lemonade",
+  "clearcover", "pie", "coalition", "nextinsurance", "newfront", "at-bay", "counterpart",
+  // Insurtech / real estate / proptech (finance-ops heavy)
+  "022", "flyhomes", "orchard", "ribbon", "knock", "sundae", "pacaso", "kindred", "landis",
+  "vts", "cherre", "juniper-square", "cadre", "fundrise", "roofstock", "arrived",
+  // Health systems / bio (large finance/accounting teams)
+  "carbonhealth", "forward", "onemedical", "cricketa", "maven", "kindbody", "carrot", "progyny",
+  "recursion", "insitro", "genesistherapeutics", "generate", "eikontx", "xaira",
+  // Climate / energy / industrials / logistics
+  "watershed", "persefoni", "crusoe", "redwoodmaterials", "form-energy", "commonwealthfusion",
+  "sila", "electrichydrogen", "antora", "twelve", "charm", "arcadia", "palmetto", "aurorasolar",
+  "flexport-inc", "project44", "flock-freight", "convoy", "sennder", "einride", "gatik", "nuro",
+  // Broad scaleups with heavy G&A/finance orgs
+  "ramp-inc", "airtable-inc", "gong-io", "attentive", "iterable", "braze", "movable-ink",
+  "vimeo", "sprig", "airtable-com", "webflow-com", "vanta-com", "notion-so", "sourcegraph-com",
 ];
 
 /** Deduped, lowercased directory of ATS slugs to probe. */
