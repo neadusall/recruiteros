@@ -21119,7 +21119,7 @@
         var body = $("#anBody"); if (!body) return;
         var ov = res[0] || {};
         var prospects = (res[1] && res[1].prospects) || [];
-        var replies = (res[2] && res[2].items) || [];
+        var replies = anReplies((res[2] && res[2].items) || [], prospects);
         var curated = ((res[3] || {})[bd ? "bd" : "recruiting"]) || {};
 
         if (!ov.activeProspects && !prospects.length && !replies.length) {
@@ -21499,6 +21499,37 @@
     "won": { title: "Closed this period", sub: "Deals closed this period and the campaign that earned them." }
   };
 
+  // /response/list serves nested { inbound, classification } rows from the real
+  // backend but flat rows from the demo shim. Analytics must read one shape, so
+  // flatten the real rows (mapProcessed), then join each reply to its prospect
+  // record to fill in the person's name, campaign and recruiter. Rows analytics
+  // should never count are dropped here too: auto-replies (OOO bots) and real
+  // rows with no matched prospect (inbox warm-up traffic, not conversations).
+  function anReplies(items, prospects) {
+    var byId = {};
+    (prospects || []).forEach(function (p) { if (p && p.id) byId[p.id] = p; });
+    var out = [];
+    (items || []).forEach(function (raw) {
+      if (!raw) return;
+      var real = !!raw.inbound;
+      var r = real ? mapProcessed(raw) : raw;
+      if (rClass(r) === "auto_reply") return;
+      if (real && !respVerified(r)) return;
+      var p = r.prospectId ? byId[r.prospectId] : null;
+      if (p) {
+        if (!r.name || r.name === "Unknown") r.name = p.fullName || r.name;
+        r.campaign = p.campaign || r.campaign;
+        r.owner = r.owner || p.owner;
+        r.company = r.company || p.company;
+      }
+      // Demo rows carry the campaign name in `source`; real rows carry a
+      // provider slug there, which must never reach the screen.
+      if (!r.campaign && !real) r.campaign = r.source;
+      out.push(r);
+    });
+    return out;
+  }
+
   function renderAnalyticsDetail(el, detail) {
     var meta = AN_DETAILS[detail];
     if (!meta) { location.hash = "analytics"; return; }
@@ -21528,7 +21559,7 @@
       var host = $("#anDetailBody"); if (!host) return;
       var ov = res[0] || {};
       var prospects = (res[1] && res[1].prospects) || [];
-      var replies = (res[2] && res[2].items) || [];
+      var replies = anReplies((res[2] && res[2].items) || [], prospects);
       host.innerHTML = anDetailHtml(detail, ov, prospects, replies, bd);
     }).catch(function () {
       var host = $("#anDetailBody"); if (host) host.innerHTML = needsSetup();
@@ -21597,7 +21628,7 @@
       var warm = replies.filter(function (r) { return WARM.indexOf(rClass(r)) >= 0; });
       var rows = warm.map(function (r) {
         var cls = rClass(r), ch = rChannel(r);
-        var line = [ch === "sms" ? "SMS" : (ch.charAt(0).toUpperCase() + ch.slice(1)), r.source, r.owner].filter(Boolean).join(" · ");
+        var line = [ch === "sms" ? "SMS" : (ch.charAt(0).toUpperCase() + ch.slice(1)), r.company, r.owner].filter(Boolean).join(" · ");
         var thread = (r.thread || []).map(function (m) {
           return '<div class="an-msg ' + (m.from === "in" ? "in" : "out") + '"><span class="an-msg-at">' + esc(m.at || "") + "</span>" + esc(m.text || "") + "</div>";
         }).join("") || '<div class="an-msg in">' + esc(r.text || "") + "</div>";
@@ -21607,7 +21638,7 @@
             '<div style="flex:1"><div class="lr-main">' + esc(r.name || "Unknown") +
               ' <span class="cls-pill ' + esc(cls) + '">' + esc(clsLabel(cls)) + "</span></div>" +
               '<div class="lr-sub">' + esc(line) + "</div></div>" +
-            (r.source ? '<a class="an-camp clickable" data-go="campaigns" title="Open campaign">' + esc(r.source) + "</a>" : "") +
+            (r.campaign ? '<a class="an-camp clickable" data-go="campaigns" title="Open campaign">' + esc(r.campaign) + "</a>" : "") +
             '<a class="btn btn-ghost btn-sm clickable" data-go="response" style="margin-left:8px">Open thread →</a>' +
           "</div>" +
           '<div class="an-conv-body">' + thread + "</div></div>";
