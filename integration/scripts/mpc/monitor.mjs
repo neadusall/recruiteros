@@ -96,7 +96,7 @@ async function main() {
       const msgId = hit.id || `mpc-${s.from}-${s.to_email}-${hit.received}`;
       if (!seenMsg.has(msgId)) {
         seenMsg.add(msgId);
-        queue.push({ ws: WS, fromEmail: s.to_email.toLowerCase().trim(), messageId: msgId, fromName: s.to_name || undefined, text: hit.bodyPreview || hit.subject || "", receivedAt: new Date(hit.received).toISOString() });
+        queue.push({ ws: WS, fromEmail: s.to_email.toLowerCase().trim(), messageId: msgId, fromName: s.to_name || undefined, text: hit.bodyPreview || hit.subject || "", receivedAt: new Date(hit.received).toISOString(), box: s.from, subject: hit.subject || undefined });
       }
     }
   }

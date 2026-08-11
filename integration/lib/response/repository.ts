@@ -47,6 +47,22 @@ class InboxStore {
       .filter((p) => p.inbound.workspaceId === workspaceId)
       .slice(0, limit);
   }
+
+  /** One response by inbound id, scoped to the workspace (for reply-in-place). */
+  async getById(workspaceId: string, id: string): Promise<ProcessedResponse | undefined> {
+    await this.ready();
+    return this.items.find((p) => p.inbound.id === id && p.inbound.workspaceId === workspaceId);
+  }
+
+  /** Mark a response handled (cleared from the daily worklist) or un-handle it. */
+  async setHandled(workspaceId: string, id: string, handled: boolean): Promise<boolean> {
+    await this.ready();
+    const p = this.items.find((x) => x.inbound.id === id && x.inbound.workspaceId === workspaceId);
+    if (!p) return false;
+    p.handledAt = handled ? new Date().toISOString() : undefined;
+    this.persist();
+    return true;
+  }
 }
 
 const singleton = new InboxStore();

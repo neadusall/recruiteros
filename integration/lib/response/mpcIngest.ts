@@ -26,6 +26,8 @@ interface MpcReplyRow {
   text?: string;
   fromName?: string;
   receivedAt?: string;
+  box?: string;      // the lume box that received the reply (= our sending box)
+  subject?: string;
 }
 
 export async function runMpcReplyIngest(): Promise<{ ingested: number; total: number }> {
@@ -41,6 +43,8 @@ export async function runMpcReplyIngest(): Promise<{ ingested: number; total: nu
         text: r.text,
         receivedAt: r.receivedAt,
         campaignId: "mpc-finance", // identity-verified real reply (never warm-up)
+        toMailbox: r.box,
+        subject: r.subject,
       });
       ingested++;
     } catch { /* skip one bad row; the rest still ingest */ }

@@ -41,6 +41,11 @@ export interface InboundResponse {
   text: string;
   receivedAt: string;
   campaignId?: string;
+  /** The mailbox that RECEIVED this reply (= our sending box), so reply-in-place goes back out
+   *  the same box and threads correctly. Set by replySync (IMAP) and the MPC bridge. */
+  toMailbox?: string;
+  /** The inbound's subject, for building the "Re: ..." reply subject. */
+  subject?: string;
 }
 
 /** Routing SLA buckets from the reference matrix. */
@@ -95,4 +100,6 @@ export interface ProcessedResponse {
   rule: RoutingRule;
   actionsTaken: string[];
   atsEventId?: string;
+  /** Set when the recruiter clears it from the daily worklist (the checklist "Done"). */
+  handledAt?: string;
 }

@@ -33,6 +33,8 @@ function base(
     text: fields.text ?? "",
     receivedAt: fields.receivedAt ?? nowIso(),
     campaignId: fields.campaignId,
+    toMailbox: fields.toMailbox,
+    subject: fields.subject,
   };
 }
 
@@ -90,6 +92,8 @@ export function fromOwnedInbox(workspaceId: string, p: Raw): InboundResponse | n
     // Carry a campaign tag when the caller provides one (the MPC bridge sets "mpc-finance"),
     // so identity-verified campaign replies are distinguishable from unfiltered IMAP inbox noise.
     campaignId: p.campaignId ? String(p.campaignId) : undefined,
+    toMailbox: p.toMailbox ? String(p.toMailbox) : undefined,
+    subject: p.subject ? String(p.subject) : undefined,
   });
 }
 

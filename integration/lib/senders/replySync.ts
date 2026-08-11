@@ -212,6 +212,8 @@ async function syncOneInbox(m: SenderInbox, report: ReplySyncReport): Promise<vo
               fromName: parsed.from?.value?.[0]?.name,
               text: (parsed.text || "").slice(0, 8000) || subject,
               receivedAt: (parsed.date || new Date()).toISOString(),
+              toMailbox: m.email,   // the box that received it, for reply-in-place threading
+              subject,
             },
             async (prospectId: string) => {
               const { replyStopByProspectId } = await import("../linkedin/os/outreachState");
