@@ -13,11 +13,12 @@
 //   node scripts/mpc/growth-engine.mjs
 
 import { readFileSync, readdirSync, existsSync, writeFileSync, renameSync } from "node:fs";
-import { assessProspect, metroOf } from "./gates.mjs";
+import { assessProspect, metroOf, cohortKeyOf, roleFamily } from "./gates.mjs";
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
 const OUT = process.env.MPC_OUT_DIR || "/out";
 const PROPOSALS_FILE = process.env.MPC_GROWTH_FILE || "/data/snap_growth_proposals_v1.json";
+const DECISIONS_FILE = process.env.MPC_DECISIONS_FILE || "/data/snap_growth_decisions_v1.json";
 const SINCE = process.env.MPC_CURATED_SINCE || "2026-08-11";
 const WS = process.env.MPC_WORKSPACE_ID || "ws_mqf6o989003";
 const SAFE_CAPACITY = Number(process.env.MPC_SAFE_CAPACITY || process.env.MPC_DAILY_CAP || 400);
@@ -63,14 +64,25 @@ function score(p) {
   if (p.emailCatchAll) s -= 15;
   return Math.max(0, Math.min(100, s));
 }
-function roleFamily(role) {
-  const r = (role || "").toLowerCase();
-  if (/controller|comptroller|bookkeep|staff accountant|senior accountant|accounting/.test(r)) return "Accounting";
-  if (/fp&a|financial planning|finance manager|director of finance|vp finance|head of finance/.test(r)) return "FP&A / Finance";
-  if (/tax/.test(r)) return "Tax";
-  if (/audit/.test(r)) return "Audit";
-  if (/cfo|chief financial/.test(r)) return "Finance Exec";
-  return "Finance";
+// Recruiter decisions on cohorts, and the LEARNING each reject reason encodes.
+function loadDecisions() {
+  try { const s = JSON.parse(readFileSync(DECISIONS_FILE, "utf8")); return (s && s.decisions) || {}; }
+  catch { return {}; }
+}
+const now = Date.now();
+const decisions = loadDecisions();
+// A cohort is OFF the board (not proposed, not sent) when suppressed, wrong-market-rejected, or
+// still snoozed. Everything else stays proposable; a "messaging" reject keeps the cohort but marks
+// it for a fresh angle so the planner re-proposes it differently rather than dropping the demand.
+function cohortStatus(key) {
+  const d = decisions[key];
+  if (!d) return { blocked: false };
+  if (d.state === "suppressed") return { blocked: true, state: "suppressed" };
+  if (d.state === "rejected" && d.reason === "wrong_market") return { blocked: true, state: "wrong_market" };
+  if (d.state === "snoozed" && d.snoozeUntil && Date.parse(d.snoozeUntil) > now) return { blocked: true, state: "snoozed" };
+  if (d.state === "approved") return { blocked: false, state: "approved" };
+  if (d.state === "rejected" && d.reason === "messaging") return { blocked: false, state: "rewrite", needsRewrite: true };
+  return { blocked: false, state: d.state };
 }
 
 const contacted = contactedSet();
@@ -78,17 +90,17 @@ const curated = loadArray(CURATION).filter((r) => String((r.lead || r).curatedAt
 
 // UNTOUCHED + clean + in-ICP = the idle demand the firm is leaving on the table.
 const cohorts = new Map();
-let untouchedClean = 0;
+let untouchedClean = 0, blockedLeads = 0;
 for (const r of curated) {
   const p = r.lead || r;
   const email = String(p.likelyEmail || "").toLowerCase().trim();
   if (!email || contacted.has(email)) continue;
   if (!assessProspect(p).eligible) continue;
+  const key = cohortKeyOf(p);
+  const st = cohortStatus(key);
+  if (st.blocked) { blockedLeads++; continue; }   // suppressed / wrong-market / snoozed = decided off
   untouchedClean++;
-  const industry = (p.industry || "General").trim();
-  const metro = metroOf(p) || "Remote / National";
-  const key = `${industry} | ${roleFamily(p.role)} | ${metro}`;
-  const c = cohorts.get(key) || { key, industry, family: roleFamily(p.role), metro, companies: new Set(), prospects: 0, scoreSum: 0 };
+  const c = cohorts.get(key) || { key, industry: (p.industry || "General").trim(), family: roleFamily(p.role), metro: metroOf(p) || "Remote / National", companies: new Set(), prospects: 0, scoreSum: 0, state: st.state, needsRewrite: st.needsRewrite };
   c.companies.add((p.domain || p.company || "").toLowerCase());
   c.prospects++; c.scoreSum += score(p);
   cohorts.set(key, c);
@@ -100,6 +112,7 @@ const proposals = [...cohorts.values()]
     companies: c.companies.size, prospects: c.prospects,
     projectedTouches: c.prospects, // one first-touch email per DM
     avgScore: c.prospects ? Math.round(c.scoreSum / c.prospects) : 0,
+    state: c.state || "open", needsRewrite: !!c.needsRewrite,
   }))
   .sort((a, b) => (b.avgScore * b.prospects) - (a.avgScore * a.prospects))
   .slice(0, 6);
@@ -123,7 +136,7 @@ for (const p of proposals) { p.launchable = p.projectedTouches <= budget; if (p.
 const out = {
   generatedAt: new Date().toISOString(),
   workspaceId: WS,
-  growthGap: { untouchedClean, sentToday: sent, safeCapacity: SAFE_CAPACITY, safeRemaining, constraint, message: constraintMsg },
+  growthGap: { untouchedClean, blockedLeads, sentToday: sent, safeCapacity: SAFE_CAPACITY, safeRemaining, constraint, message: constraintMsg },
   proposals,
 };
 const tmp = PROPOSALS_FILE + ".tmp";

@@ -13,9 +13,26 @@
 // Read-only against the curated store; writes ONLY its own files under /out.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync } from "node:fs";
-import { assessProspect, metroOf, checkRenderedEmail } from "./gates.mjs";
+import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf } from "./gates.mjs";
 import { writeEmail, signature, footer, greetingName } from "./writer.mjs";
 import { pickVariant } from "./variants.mjs";
+
+// Recruiter decisions from the Growth cockpit: a suppressed / wrong-market / still-snoozed cohort
+// is OFF, so the autopilot never sends it. This is what makes the "Suppress" button have teeth.
+const DECISIONS_FILE = process.env.MPC_DECISIONS_FILE || "/data/snap_growth_decisions_v1.json";
+function loadBlockedCohorts() {
+  const blocked = new Set(); const now = Date.now();
+  try {
+    const s = JSON.parse(readFileSync(DECISIONS_FILE, "utf8"));
+    for (const [key, d] of Object.entries((s && s.decisions) || {})) {
+      if (!d) continue;
+      if (d.state === "suppressed") blocked.add(key);
+      else if (d.state === "rejected" && d.reason === "wrong_market") blocked.add(key);
+      else if (d.state === "snoozed" && d.snoozeUntil && Date.parse(d.snoozeUntil) > now) blocked.add(key);
+    }
+  } catch { /* no decisions yet */ }
+  return blocked;
+}
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
@@ -98,15 +115,18 @@ async function main() {
   // Suppression: never re-email anyone we've already contacted (makes daily autopilot safe),
   // AND dedupe within this run so a duplicate curated row can't double-send in one batch.
   const seen = alreadyEmailed();
+  const blocked = loadBlockedCohorts();
   const runSeen = new Set();
   const fresh = [];
+  let skippedBlocked = 0;
   for (const p of gated) {
     const e = String(p.likelyEmail || "").toLowerCase().trim();
     if (!e || seen.has(e) || runSeen.has(e)) continue;
+    if (blocked.size && blocked.has(cohortKeyOf(p))) { skippedBlocked++; continue; } // recruiter said "no" to this cohort
     runSeen.add(e);
     fresh.push(p);
   }
-  console.log(`already emailed: ${seen.size} | fresh & de-duped (not yet contacted): ${fresh.length}`);
+  console.log(`already emailed: ${seen.size} | blocked-cohort skipped: ${skippedBlocked} | fresh & ready: ${fresh.length}`);
 
   // Cheap supply check: gates only, no AI spend. Use it to watch the finance pool fill.
   if (args.includes("--count")) {
@@ -114,7 +134,25 @@ async function main() {
     return;
   }
 
-  const batch = fresh.slice(0, LIMIT);
+  // Continuous-autopilot daily cap: count what already went out TODAY across all runs and never
+  // exceed the safe daily max. This lets the sender run every cycle (draining ready leads to
+  // capacity) instead of once a day, without ever over-sending.
+  const DAILY_CAP = Number(process.env.MPC_DAILY_CAP || 490);
+  let sentToday = 0;
+  if (SEND && existsSync(OUT)) {
+    const today = new Date().toISOString().slice(0, 10);
+    for (const f of readdirSync(OUT).filter((n) => /^sent-.*\.jsonl$/.test(n))) {
+      for (const line of readFileSync(`${OUT}/${f}`, "utf8").split("\n")) {
+        const s = line.trim(); if (!s) continue;
+        try { const r = JSON.parse(s); if (r && r.to_email && (r.at || "").slice(0, 10) === today) sentToday++; } catch { /* skip */ }
+      }
+    }
+  }
+  const dailyRemaining = SEND ? Math.max(0, DAILY_CAP - sentToday) : LIMIT;
+  const effLimit = SEND ? Math.min(LIMIT, dailyRemaining) : LIMIT;
+  if (SEND) console.log(`daily cap ${DAILY_CAP} | already sent today ${sentToday} | room left ${dailyRemaining}`);
+
+  const batch = fresh.slice(0, effLimit);
   console.log(`\nwriting ${batch.length} emails (${SEND ? "SEND" : "DRY-RUN"})...\n`);
 
   const drafts = [];
