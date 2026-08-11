@@ -5052,11 +5052,13 @@
     var active = "all";
     el.innerHTML = head("Response, the unified inbox",
       "Every reply across email, LinkedIn and SMS, auto-classified by AI and routed by deterministic rules. Hottest first.");
+    var realOnly = true;   // default: hide Smartlead warm-up, show only identity-verified replies
     var filter = document.createElement("div");
     filter.className = "chan-filter";
     ["all", "email", "linkedin", "sms"].forEach(function (c) {
       filter.innerHTML += '<span class="cf ' + (c === "all" ? "active" : "") + '" data-c="' + c + '">' + (c === "all" ? "All channels" : c.toUpperCase()) + "</span>";
     });
+    filter.innerHTML += '<span class="cf realtog active" data-realtog="1" title="Hide Smartlead warm-up: show only identity-verified replies (matched prospects + verified MPC finance replies)">Real only</span>';
     el.appendChild(filter);
     var listWrap = document.createElement("div");
     el.appendChild(listWrap);
@@ -5065,14 +5067,28 @@
     var loaded = false;
     function paint() {
       if (!loaded) { listWrap.innerHTML = loading(); return; }
-      var items = inbox.filter(function (r) { return active === "all" || r.channel === active; });
-      listWrap.innerHTML = items.map(respItem).join("") ||
-        '<div class="empty">No replies' + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every reply lands here, auto-classified.</div>";
+      var hidden = 0;
+      var items = inbox.filter(function (r) {
+        if (active !== "all" && r.channel !== active) return false;
+        if (realOnly && !respVerified(r)) { hidden++; return false; }
+        return true;
+      });
+      var note = (realOnly && hidden) ? '<div class="note" style="margin:0 0 10px">Hiding ' + hidden + ' warm-up / unverified message' + (hidden === 1 ? "" : "s") + '. <a href="#" data-showall="1">Show all</a></div>' : "";
+      listWrap.innerHTML = note + (items.map(respItem).join("") ||
+        '<div class="empty">No ' + (realOnly ? "verified " : "") + 'replies' + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every real reply lands here, auto-classified.</div>");
     }
     filter.addEventListener("click", function (e) {
+      var rt = e.target.closest(".realtog");
+      if (rt) { realOnly = !realOnly; rt.classList.toggle("active", realOnly); paint(); return; }
       var cf = e.target.closest(".cf"); if (!cf) return;
       active = cf.dataset.c;
-      Array.prototype.forEach.call(filter.children, function (x) { x.classList.toggle("active", x === cf); });
+      Array.prototype.forEach.call(filter.querySelectorAll(".cf:not(.realtog)"), function (x) { x.classList.toggle("active", x === cf); });
+      paint();
+    });
+    listWrap.addEventListener("click", function (e) {
+      var sa = e.target.closest("[data-showall]"); if (!sa) return;
+      e.preventDefault(); realOnly = false;
+      var rtog = filter.querySelector(".realtog"); if (rtog) rtog.classList.remove("active");
       paint();
     });
     paint();
@@ -23062,8 +23078,12 @@
     return l ? (l[motion] || l.status) : s;
   }
   function mapProcessed(p) {
-    return { name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.prospectId || (p.prospect && p.prospect.id) || null };
+    return { name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.prospectId || (p.prospect && p.prospect.id) || null, campaignId: p.inbound.campaignId || null, email: p.inbound.fromHandle || null };
   }
+  // A reply is REAL (not Smartlead warm-up) if it's identity-verified: either matched to a known
+  // prospect, or tagged by the MPC bridge (which only ingests inbound from people we actually
+  // emailed). Warm-up traffic has neither, so this cleanly hides it without fragile word-matching.
+  function respVerified(r) { return r.campaignId === "mpc-finance" || !!r.prospectId; }
   // shared UI states
   /* ============================ Email (Top of Funnel) ============================
      The prep + QA gate before send. A queue of prospects (pushed from Hire Signals
