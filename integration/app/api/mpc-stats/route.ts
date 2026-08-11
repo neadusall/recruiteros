@@ -19,5 +19,8 @@ export async function GET(req: Request) {
   // The AI advisor's recommendations (written daily), if present for this workspace.
   const adv = await loadSnapshot<Record<string, unknown>>("mpc_advisor_v1");
   const advisor = adv && adv.workspaceId === g.ctx.workspace.id ? adv : null;
-  return ok({ present: true, ...s, advisor });
+  // The Growth Engine's campaign proposals + growth gap (the push-more-outbound layer).
+  const gr = await loadSnapshot<Record<string, unknown>>("growth_proposals_v1");
+  const growth = gr && gr.workspaceId === g.ctx.workspace.id ? gr : null;
+  return ok({ present: true, ...s, advisor, growth });
 }
