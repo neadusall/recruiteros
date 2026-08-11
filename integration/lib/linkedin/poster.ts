@@ -64,6 +64,8 @@ export interface PosterDraft {
   photoPost?: boolean;
   /** True when autopilot approved and scheduled this post itself. */
   autopilot?: boolean;
+  /** Hands-off publish retries burned on this draft (autopilot caps at 2). */
+  autopilotRetries?: number;
   /** The recruiter canceled an autopilot schedule: that is a veto, so
    *  autopilot leaves this draft alone and posts nothing that day. */
   autopilotHeld?: boolean;
@@ -1121,11 +1123,29 @@ export async function tickAutopilot(now: Date = new Date()): Promise<number> {
       if (!days.length || !Number.isFinite(hh)) { apNote(s, "Holding: no posting schedule saved in Settings."); continue; }
       const today = tzParts(tz, now);
       if (!days.includes(today.weekday)) continue; // rest day by design
+      const todayKey = tzDayKey(tz, now);
+      // A failed hands-off publish gets two automatic retries, spaced by the
+      // tick cadence; after that it waits for a human Retry, loudly noted.
+      const failed = s.drafts.find((d) => d.autopilot && d.status === "failed" &&
+        tzDayKey(tz, new Date(d.updatedAt)) === todayKey);
+      if (failed) {
+        if ((failed.autopilotRetries ?? 0) >= 2) {
+          apNote(s, "Holding: today's post failed to publish twice (" + (failed.error ?? "unknown") + "). It is waiting on the Retry button in the Studio.");
+          continue;
+        }
+        failed.autopilotRetries = (failed.autopilotRetries ?? 0) + 1;
+        persist();
+        const r = await publishDraft(ws, failed);
+        apNote(s, r.status === "posted"
+          ? "Publish retry worked; today's post is live."
+          : "Publish failed (" + (r.error ?? "unknown") + "); retrying within the half hour.");
+        if (r.status === "posted") queued += 1;
+        continue;
+      }
       const slot = zonedDate(tz, today.y, today.mo, today.d, hh, mm || 0);
       // Late is fine within 3 hours of the slot; later than that reads as
       // erratic, so the day is skipped rather than posted at odd hours.
       if (now.getTime() > slot.getTime() + 3 * 3600_000) continue;
-      const todayKey = tzDayKey(tz, now);
       const handled = s.drafts.some((d) =>
         (d.status === "posted" && d.postedAt && tzDayKey(tz, new Date(d.postedAt)) === todayKey) ||
         (d.status === "approved" && d.scheduledAt && tzDayKey(tz, new Date(d.scheduledAt)) === todayKey));
