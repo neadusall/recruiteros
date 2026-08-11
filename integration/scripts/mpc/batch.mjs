@@ -103,6 +103,12 @@ async function main() {
   }
   console.log(`already emailed: ${seen.size} | fresh & de-duped (not yet contacted): ${fresh.length}`);
 
+  // Cheap supply check: gates only, no AI spend. Use it to watch the finance pool fill.
+  if (args.includes("--count")) {
+    console.log(`\n[COUNT] clean & not-yet-contacted (ready to send): ${fresh.length}`);
+    return;
+  }
+
   const batch = fresh.slice(0, LIMIT);
   console.log(`\nwriting ${batch.length} emails (${SEND ? "SEND" : "DRY-RUN"})...\n`);
 
