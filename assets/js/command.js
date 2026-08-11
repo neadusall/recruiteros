@@ -3726,7 +3726,7 @@
             dk(ov.bounces, "Bounces", ov.bounces > 0 ? "amber" : "good") +
             dk((ov.warmupReputationPct == null ? "-" : ov.warmupReputationPct + "%"), "Inbox placement", placeCls) +
           "</div>" +
-          '<div class="note" style="margin-bottom:8px">' + esc(ov.domainsWarmed + "/" + ov.domainsTotal + " sending domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; inbox placement = live Smartlead warm-up reputation (mail landing in inbox vs spam across the seed network), a measured signal, not a guess &middot; updated " + (d.generatedAt || "").slice(0, 16).replace("T", " ") + " UTC") + "</div>" +
+          '<div class="note" style="margin-bottom:8px">' + ov.domainsWarmed + "/" + ov.domainsTotal + " sending domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; inbox placement = live Smartlead warm-up reputation (mail landing in inbox vs spam across the seed network), a measured signal, not a guess &middot; updated " + esc((d.generatedAt || "").slice(0, 16).replace("T", " ")) + " UTC</div>" +
           drows;
       }
       host.innerHTML =
