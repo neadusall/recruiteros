@@ -36,8 +36,8 @@ export async function GET(req: Request) {
   const now = Date.now();
 
   const quotas = await getRapidQuota();
-  const tools = [];
-  const alerts = [];
+  const tools: Array<Record<string, unknown>> = [];
+  const alerts: Array<{ tool: string; message: string }> = [];
 
   for (const q of quotas) {
     const hist = await getRapidQuotaHistory(q.host, days);
