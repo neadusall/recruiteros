@@ -95,6 +95,31 @@ async function searchPexels(query: string): Promise<StockPhoto[]> {
 
 const OV_OK_TYPES = /\.(jpe?g|png|webp)(\?|$)/i;
 
+/** Openverse is keyless and anonymously rate-limited; a watch pull can fire
+ *  several searches at once, so calls queue with a little daylight between. */
+let ovChain: Promise<unknown> = Promise.resolve();
+const OV_SPACING_MS = 1500;
+function ovThrottled<T>(fn: () => Promise<T>): Promise<T> {
+  const run = ovChain.then(fn, fn);
+  ovChain = run.then(
+    () => new Promise((r) => setTimeout(r, OV_SPACING_MS)),
+    () => new Promise((r) => setTimeout(r, OV_SPACING_MS)),
+  );
+  return run;
+}
+
+const OV_STOPWORDS = new Set(["a", "an", "the", "of", "in", "at", "on", "and", "or", "with", "for", "to"]);
+
+/** Openverse full-text relevance is loose (a "law firm meeting" query returns
+ *  schools and houses); keep only results whose title or tags actually carry
+ *  one of the query's real words. */
+function ovRelevant(query: string, title: string, tags: string[]): boolean {
+  const tokens = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2 && !OV_STOPWORDS.has(t));
+  if (!tokens.length) return true;
+  const hay = (title + " " + tags.join(" ")).toLowerCase();
+  return tokens.some((t) => hay.includes(t));
+}
+
 async function searchOpenverse(query: string): Promise<StockPhoto[]> {
   const u = new URL("https://api.openverse.org/v1/images/");
   u.searchParams.set("q", query);
@@ -104,12 +129,15 @@ async function searchOpenverse(query: string): Promise<StockPhoto[]> {
   // result set; ranking below handles size instead.
   u.searchParams.set("license", "cc0,pdm,by");
   u.searchParams.set("per_page", "20");
-  const r = await timedFetch(u.toString(), { headers: { Accept: "application/json" } });
+  const r = await ovThrottled(() => timedFetch(u.toString(), {
+    headers: { Accept: "application/json", "User-Agent": "RecruitersOS/1.0 (post media; contact: ops@recruitersos.co)" },
+  }));
   if (!r.ok) throw new Error(`openverse_${r.status}`);
   const j = (await r.json()) as { results?: any[] };
   return (j.results ?? [])
     .filter((p) => p?.id && typeof p.url === "string" &&
-      (OV_OK_TYPES.test(p.url) || ["jpg", "jpeg", "png", "webp"].includes(String(p.filetype ?? "").toLowerCase())))
+      (OV_OK_TYPES.test(p.url) || ["jpg", "jpeg", "png", "webp"].includes(String(p.filetype ?? "").toLowerCase())) &&
+      ovRelevant(query, String(p.title ?? ""), Array.isArray(p.tags) ? p.tags.map((t: any) => String(t?.name ?? "")) : []))
     .map((p): StockPhoto => {
       const creator = typeof p.creator === "string" && p.creator.trim() ? p.creator.trim().slice(0, 60) : null;
       const lic = String(p.license ?? "").toUpperCase();
@@ -143,7 +171,23 @@ function rankPhotos(photos: StockPhoto[]): StockPhoto[] {
     if (p.width >= 1200 && p.height >= 1200) s += 2; // full-bleed capable
     return s;
   };
-  return [...photos].filter((p) => score(p) > 0).sort((a, b) => score(b) - score(a));
+  const ranked = [...photos].filter((p) => score(p) > 0).sort((a, b) => score(b) - score(a));
+  // Same shot indexed twice (common on Openverse) and long runs from one
+  // photographer both make variant cycling feel static: collapse exact
+  // download URLs, then cap each creator at two appearances.
+  const seenUrl = new Set<string>();
+  const perCreator = new Map<string, number>();
+  const out: StockPhoto[] = [];
+  for (const p of ranked) {
+    if (seenUrl.has(p.downloadUrl)) continue;
+    seenUrl.add(p.downloadUrl);
+    const c = p.creator ?? p.providerId;
+    const n = perCreator.get(c) ?? 0;
+    if (n >= 2) continue;
+    perCreator.set(c, n + 1);
+    out.push(p);
+  }
+  return out;
 }
 
 /**
