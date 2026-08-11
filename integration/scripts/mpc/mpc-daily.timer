@@ -1,0 +1,10 @@
+[Unit]
+Description=Run RecruitersOS MPC daily outreach on weekday mornings
+
+[Timer]
+# 15:00 UTC = 11:00 ET, Monday-Friday (B2B decision-makers, no weekend sends).
+OnCalendar=Mon..Fri 15:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

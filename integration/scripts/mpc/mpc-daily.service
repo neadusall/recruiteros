@@ -1,0 +1,8 @@
+[Unit]
+Description=RecruitersOS MPC daily outreach (Ryan CPA/Controller) + reply monitor
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/recruiteros/tools/mpc-daily.sh
