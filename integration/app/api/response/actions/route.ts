@@ -1,21 +1,98 @@
 /**
  * POST /api/response/actions
  * Manual inbox actions from the recruiter.
- *   { action: "classify", text }           -> test the classifier on raw text
- *   { action: "book", prospectId }         -> mark booked (booked_at + Loxo activity)
- *   { action: "suppress", prospectId }     -> add to do-not-contact across channels
+ *   { action: "classify", text }                       -> test the classifier on raw text
+ *   { action: "book", prospectId }                     -> mark booked (booked_at + Loxo activity)
+ *   { action: "suppress", prospectId }                 -> add to do-not-contact across channels
+ *   { action: "send", responseId, channel, text }      -> reply on email / linkedin / sms
+ *   { action: "reply", responseId, text }              -> legacy alias for send on email
+ *   { action: "handle", responseId, handled? }         -> clear from / restore to the worklist
+ *   { action: "delete", responseId }                   -> remove from the inbox for good
  */
 
-import { classify, markBooked, suppress } from "../../../../lib/response";
+import { classify, markBooked, suppress, isSuppressed } from "../../../../lib/response";
 import { getInbox } from "../../../../lib/response/repository";
 import { getCore } from "../../../../lib/core/repository";
-import { nowIso } from "../../../../lib/core/ids";
+import { nowIso, rid } from "../../../../lib/core/ids";
 import { requireSession, body, ok, fail } from "../../../../lib/api";
+import type { ProcessedResponse } from "../../../../lib/response/types";
+
+type SendChannel = "email" | "linkedin" | "sms";
+
+/** Human-readable reasons for the toasts, so the recruiter never sees a raw code. */
+const SEND_ERRORS: Record<string, string> = {
+  suppressed: "This person asked not to be contacted, so sending is blocked.",
+  sms_disabled_for_bd: "SMS is turned off for business-development prospects.",
+  no_sending_box: "The mailbox that received this reply is no longer tracked.",
+  mailbox_gone: "The mailbox that received this reply is no longer connected.",
+  no_prospect: "This reply is not linked to a prospect yet, so only email replies work.",
+  no_handle: "No address on file for this channel.",
+};
+
+async function sendOnChannel(
+  ws: string,
+  resp: ProcessedResponse,
+  channel: SendChannel,
+  text: string,
+): Promise<{ ok: true; note: string; provider?: string; toHandle?: string } | { ok: false; error: string; detail?: string }> {
+  const inb = resp.inbound;
+  const prospect = inb.prospectId ? await getCore().getProspect(inb.prospectId) : undefined;
+
+  // Respect STOP / do-not-contact on every manual send, same as campaign sends.
+  const target = channel === "email"
+    ? (inb.channel === "email" ? inb.fromHandle : prospect?.email)
+    : channel === "sms" ? (prospect?.phone || (inb.channel === "sms" ? inb.fromHandle : undefined))
+    : prospect?.linkedinUrl;
+  if (target && (await isSuppressed(ws, target))) return { ok: false, error: "suppressed" };
+
+  if (channel === "email") {
+    // Reply FROM the box that received the person's email, threaded onto it.
+    const inbox = getInbox();
+    const anchorEmail = inb.channel === "email" && inb.toMailbox ? resp
+      : (await inbox.forPerson(ws, { prospectId: inb.prospectId, handles: [prospect?.email, inb.fromHandle] }))
+          .filter((r) => r.inbound.channel === "email" && r.inbound.toMailbox)
+          .sort((a, b) => Date.parse(b.inbound.receivedAt) - Date.parse(a.inbound.receivedAt))[0];
+    if (!anchorEmail) return { ok: false, error: "no_sending_box" };
+    const a = anchorEmail.inbound;
+    const { findInboxByEmail, sendViaInbox } = await import("../../../../lib/senders");
+    const box = await findInboxByEmail(ws, a.toMailbox!);
+    if (!box) return { ok: false, error: "mailbox_gone" };
+    const subject = a.subject ? (/^re:/i.test(a.subject) ? a.subject : "Re: " + a.subject) : "Re: your note";
+    const res = await sendViaInbox(box, { to: a.fromHandle!, subject, text, inReplyTo: a.providerMessageId, references: a.providerMessageId });
+    if (!res.ok) return { ok: false, error: "send_failed", detail: res.error };
+    if (inb.prospectId) {
+      // Best-effort touch log so the ATS/warehouse sees the manual reply too.
+      try {
+        await getCore().recordActivity({
+          id: rid("act"), workspaceId: ws, prospectId: inb.prospectId,
+          channel: "email", type: "email_sent", summary: "Reply from the inbox via " + a.toMailbox,
+          at: nowIso(),
+        });
+      } catch { /* the send already succeeded */ }
+    }
+    return { ok: true, note: "Reply sent", provider: a.toMailbox, toHandle: a.fromHandle };
+  }
+
+  // LinkedIn + SMS ride the shared send layer: suppression, pacing, engine
+  // capacity and the ATS touch log all apply exactly as they do to campaigns.
+  if (!prospect) return { ok: false, error: "no_prospect" };
+  if (channel === "linkedin" && !prospect.linkedinUrl) return { ok: false, error: "no_handle" };
+  if (channel === "sms" && !prospect.phone) return { ok: false, error: "no_handle" };
+  const { sendTouch } = await import("../../../../lib/channels");
+  const res = await sendTouch(ws, { channel, prospect, text });
+  if (!res.ok) return { ok: false, error: res.error || "send_failed" };
+  return {
+    ok: true,
+    note: channel === "linkedin" ? "Queued on your LinkedIn account (sent with normal pacing)" : "Text sent",
+    provider: res.provider,
+    toHandle: channel === "linkedin" ? prospect.linkedinUrl : prospect.phone,
+  };
+}
 
 export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  const b = await body<{ action?: string; text?: string; prospectId?: string; responseId?: string; handled?: boolean }>(req);
+  const b = await body<{ action?: string; text?: string; prospectId?: string; responseId?: string; handled?: boolean; channel?: string }>(req);
   if (!b?.action) return fail("missing_action", 422);
   const ws = g.ctx.workspace.id;
 
@@ -35,22 +112,24 @@ export async function POST(req: Request) {
       await suppress(ws, [p?.email, p?.linkedinUrl, p?.phone], "manual", nowIso());
       return ok({ ok: true });
     }
-    case "reply": {
-      // Reply-in-place: send a plain-text reply FROM the same lume box that received it, threaded.
+    case "reply":
+    case "send": {
       if (!b.responseId || !b.text) return fail("missing_fields", 422);
+      const channel = (b.action === "reply" ? "email" : b.channel) as SendChannel;
+      if (!["email", "linkedin", "sms"].includes(channel)) return fail("unknown_channel", 422);
       const resp = await getInbox().getById(ws, b.responseId);
       if (!resp) return fail("not_found", 404);
-      const inb = resp.inbound;
-      if (inb.channel !== "email" || !inb.fromHandle) return fail("not_email", 422);
-      if (!inb.toMailbox) return fail("no_sending_box", 409); // older replies without a tracked box
-      const { findInboxByEmail, sendViaInbox } = await import("../../../../lib/senders");
-      const inbox = await findInboxByEmail(ws, inb.toMailbox);
-      if (!inbox) return fail("mailbox_gone", 409);
-      const subject = inb.subject ? (/^re:/i.test(inb.subject) ? inb.subject : "Re: " + inb.subject) : "Re: your note";
-      const res = await sendViaInbox(inbox, { to: inb.fromHandle, subject, text: b.text, inReplyTo: inb.providerMessageId, references: inb.providerMessageId });
-      if (!res.ok) return fail("send_failed", 502, { detail: res.error });
-      await getInbox().setHandled(ws, b.responseId, true); // replying clears it from the worklist
-      return ok({ ok: true, messageId: res.messageId });
+      const sent = await sendOnChannel(ws, resp, channel, b.text);
+      if (sent.ok === false) {
+        return fail(sent.error, 409, { detail: SEND_ERRORS[sent.error] || sent.detail || sent.error });
+      }
+      await getInbox().addOutbound({
+        id: rid("out"), workspaceId: ws, responseId: b.responseId,
+        prospectId: resp.inbound.prospectId || null, toHandle: sent.toHandle,
+        channel, text: b.text, at: nowIso(), provider: sent.provider,
+      });
+      await getInbox().setHandled(ws, b.responseId, true); // answering clears it from the worklist
+      return ok({ ok: true, note: sent.note });
     }
     case "handle": {
       // Checklist: clear a reply from the day's worklist (or un-clear it).
