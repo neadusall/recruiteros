@@ -40,6 +40,7 @@ export async function runMpcReplyIngest(): Promise<{ ingested: number; total: nu
         fromName: r.fromName,
         text: r.text,
         receivedAt: r.receivedAt,
+        campaignId: "mpc-finance", // identity-verified real reply (never warm-up)
       });
       ingested++;
     } catch { /* skip one bad row; the rest still ingest */ }

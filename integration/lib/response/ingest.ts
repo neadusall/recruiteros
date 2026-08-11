@@ -87,6 +87,9 @@ export function fromOwnedInbox(workspaceId: string, p: Raw): InboundResponse | n
     fromHandle: from,
     text: String(p.text ?? ""),
     receivedAt: p.receivedAt ? String(p.receivedAt) : undefined,
+    // Carry a campaign tag when the caller provides one (the MPC bridge sets "mpc-finance"),
+    // so identity-verified campaign replies are distinguishable from unfiltered IMAP inbox noise.
+    campaignId: p.campaignId ? String(p.campaignId) : undefined,
   });
 }
 
