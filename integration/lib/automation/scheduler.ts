@@ -172,6 +172,14 @@ async function tickLinkedinWatch(): Promise<void> {
   await tickDailyOriginals(new Date());
 }
 
+/** Top up each workspace's real-photo archive: licensed photos for the desk's
+ *  verticals and recent post scenes, so media creation always has a deep,
+ *  relevant pool to pick from. */
+async function tickLinkedinArchive(): Promise<void> {
+  const { tickStockArchive } = await import("../linkedin/poster");
+  await tickStockArchive();
+}
+
 /** Build the daily LinkedIn BD engagement queue (idempotent per day; standby
  *  until email sending is live and a LinkedIn seat is connected). */
 async function tickLinkedinEngage(): Promise<void> {
@@ -256,6 +264,7 @@ const TICKS: TickSpec[] = [
   { key: "linkedin_os", label: "LinkedIn OS shared engine", env: "RECRUITEROS_LINKEDIN_OS_TICK_MS", defaultMs: 2 * 60_000, firstDelayMs: 40_000, fn: tickLinkedinOs },
   { key: "linkedin_posts", label: "LinkedIn Poster scheduled posts", env: "RECRUITEROS_LINKEDIN_POSTS_TICK_MS", defaultMs: 60_000, firstDelayMs: 35_000, fn: tickLinkedinPosts },
   { key: "linkedin_watch", label: "LinkedIn Poster followed creators", env: "RECRUITEROS_LINKEDIN_WATCH_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 120_000, fn: tickLinkedinWatch },
+  { key: "linkedin_media_archive", label: "LinkedIn Poster photo archive top-up", env: "RECRUITEROS_LINKEDIN_ARCHIVE_TICK_MS", defaultMs: 24 * 60 * 60_000, firstDelayMs: 10 * 60_000, fn: tickLinkedinArchive },
   { key: "booking_sms", label: "Booking reminder texts", env: "RECRUITEROS_BOOKING_SMS_TICK_MS", defaultMs: 60_000, firstDelayMs: 55_000, fn: tickBookingSms },
   { key: "meet_recordings", label: "Meeting recordings -> summary + role brief", env: "RECRUITEROS_MEET_RECORDINGS_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 130_000, fn: tickMeetRecordings },
   { key: "linkedin_engage", label: "LinkedIn BD engagement queue (daily drafts)", env: "RECRUITEROS_LINKEDIN_ENGAGE_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 110_000, fn: tickLinkedinEngage },

@@ -435,6 +435,7 @@
       <div class="btnrow" style="margin-top:0">
         <input type="text" id="stockQ" placeholder="What should the photo show? e.g. law firm meeting" style="flex:1 1 260px;min-width:200px" />
         <button class="btn primary" id="btnStockSearch">Find photos</button>
+        <button class="btn" id="btnArchive" title="Pulls a fresh batch of licensed photos for your markets and recent post topics into the library, so drafts always have real photos on hand.">Grow archive</button>
         <span class="sub" id="stockStatus"></span>
       </div>
       <div class="imggrid" id="stockGrid" style="margin-top:14px"></div>
@@ -1053,6 +1054,15 @@
       }).join("") : '<span class="sub">Library is empty. Upload straight from your computer, or generate a card.</span>') +
       '<button class="btn small" data-act="clear-img" data-id="' + d.id + '">No media</button>' +
       "</div>" : "";
+    var stockPool = S.images.filter(function (i) { return i.kind === "stock" && i.mime.indexOf("image/") === 0; });
+    var pq = d.mediaSpec && d.mediaSpec.photoQuery ? String(d.mediaSpec.photoQuery).toLowerCase() : "";
+    var pqMatch = pq ? stockPool.filter(function (i) { return i.query === pq; }) : [];
+    var photoPool = pqMatch.concat(stockPool.filter(function (i) { return pqMatch.indexOf(i) < 0; })).slice(0, 8);
+    var photoOpts = photoPool.length ?
+      '<div class="imgrow" style="align-items:center"><span class="sub" style="flex:1 1 100%">Photos on hand' + (pq ? ' for "' + esc(pq) + '"' : "") + ": click one and the media is designed around it.</span>" +
+      photoPool.map(function (i) {
+        return '<img class="thumb" src="' + mediaUrl(i.id) + '" title="' + esc(i.name) + '" data-act="use-photo" data-id="' + d.id + '" data-img="' + i.id + '" />';
+      }).join("") + "</div>" : "";
     var hooks = hooksOpen ?
       '<div class="hookpanel">' + HOOKS.map(function (g) {
         return '<div class="hcat">' + esc(g[0]) + "</div>" + g[1].map(function (h) {
@@ -1092,7 +1102,7 @@
       '<button class="btn small" data-act="open-card" data-id="' + d.id + '">Quote card</button>' +
       '<button class="btn small" data-act="make-carousel" data-id="' + d.id + '">Carousel</button>' +
       (img ? '<span class="sub">' + esc(img.name) + "</span>" : '<span class="sub">No media attached.</span>') +
-      "</div>" + chooser +
+      "</div>" + chooser + photoOpts +
       '<div class="schedrow' + (cardOpen ? " open" : "") + '"><input type="text" id="card-headline" style="flex:1;min-width:200px" maxlength="140" value="' + esc(firstLine(d.text).slice(0, 140)) + '" />' +
       '<button class="btn primary small" data-act="card-confirm" data-id="' + d.id + '">Render card</button>' +
       '<button class="btn small" data-act="card-cancel" data-id="' + d.id + '">Cancel</button></div>' + slides +
@@ -1504,6 +1514,16 @@
   document.getElementById("stockQ").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { e.preventDefault(); doStockSearch(); }
   });
+  document.getElementById("btnArchive").addEventListener("click", function () {
+    var btn = this; busy(btn, true, "Building…");
+    api("archive_build", {})
+      .then(function (r) {
+        toast(r.added ? "Archive grew by " + r.added + " photos across " + r.queries + " searches." : "Archive is already stocked for your markets.");
+        return load();
+      })
+      .catch(function () { toast("The archive build hit a snag. Try again in a minute."); })
+      .then(function () { busy(btn, false); });
+  });
 
   document.getElementById("btnSaveSettings").addEventListener("click", function () {
     var btn = this; busy(btn, true, "Saving…");
@@ -1758,6 +1778,12 @@
       api("make_ai_media", { draftId: id })
         .then(function () { pickOpen = false; toast("Media designed from your post and attached. Check the preview, then approve."); return load(); })
         .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
+    } else if (act === "use-photo") {
+      flushDraftText(id);
+      toast("Designing your media around that photo…");
+      api("make_ai_media", { draftId: id, imageId: b.dataset.img })
+        .then(function () { pickOpen = false; toast("Built around your photo and attached. Click it again for a different treatment."); return load(); })
+        .catch(function (err) { toast(err.message); });
     } else if (act === "make-carousel") {
       flushDraftText(id);
       busy(b, true, "Building…");
