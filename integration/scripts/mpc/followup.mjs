@@ -17,6 +17,35 @@
 import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
 
 const OUT = process.env.MPC_OUT_DIR || "/out";
+const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
+const LUME_WS = process.env.MPC_LUME_WS || "ws_mqf6o989003";
+// Follow-ups must sign as WHOEVER sent touch 1, never a fixed name. Resolve the recruiter from the
+// send row's `recruiter` key (new sends carry it) or, for older rows, by mapping the sending mailbox
+// back to its owner in the senders snapshot.
+const RECRUITER_INFO = {
+  "ryan":           { name: "Ryan Nead",      phone: "929-543-0608" },
+  "sam wagner":     { name: "Sam Wagner",     phone: "929-401-0849" },
+  "josh gurin":     { name: "Josh Gurin",     phone: "929-532-0756" },
+  "noah wilkowski": { name: "Noah Wilkowski", phone: "929-543-0584" },
+};
+let _boxOwner = null;
+function boxOwner(email) {
+  if (!_boxOwner) {
+    _boxOwner = new Map();
+    try {
+      const s = JSON.parse(readFileSync(SENDERS, "utf8"));
+      for (const m of (s.inboxes || (s.state && s.state.inboxes) || [])) {
+        if (!m || m.workspaceId !== LUME_WS || !m.email) continue;
+        const info = RECRUITER_INFO[(m.ownerName || "").trim().toLowerCase()];
+        if (info) _boxOwner.set(m.email.toLowerCase(), info);
+      }
+    } catch { /* no senders file */ }
+  }
+  return _boxOwner.get(String(email || "").toLowerCase()) || null;
+}
+function recruiterFor(row) {
+  return RECRUITER_INFO[String(row.recruiter || "").toLowerCase()] || boxOwner(row.from) || RECRUITER_INFO.ryan;
+}
 const INBOX_FILE = process.env.MPC_INBOX_FILE || "/data/snap_inbox.json";
 const MAILBOX_BASE = (process.env.SENDINGAC_MAILBOX_API_BASE || "https://api.customers.ac/api/mailbox/v1alpha1").replace(/\/+$/, "") + "/azure/v1.0";
 const MODEL = process.env.MPC_WRITER_MODEL || "claude-haiku-4-5";
@@ -53,11 +82,12 @@ function repliedOrStopped() {
   return stop;
 }
 
-async function writeFollowup(p, touch) {
+async function writeFollowup(p, touch, rec) {
   const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY not set");
+  const who = (rec && rec.name) || "Ryan Nead";
   const system = [
-    "You are Ryan Nead, a senior recruiter at Lume Search Partners placing accounting/finance talent. You are writing a SHORT follow-up to a hiring decision-maker you already emailed once and who has not replied. This is touch " + touch + " of at most " + MAX_TOUCHES + ".",
+    "You are " + who + ", a senior recruiter at Lume Search Partners placing accounting/finance talent. You are writing a SHORT follow-up to a hiring decision-maker you already emailed once and who has not replied. This is touch " + touch + " of at most " + MAX_TOUCHES + ".",
     "Rules: reference that you reached out before, briefly and without guilt-tripping. Lead with VALUE, not 'just bumping this': a concrete reason to talk now (you have vetted " + (p.role || "finance") + " candidates local to their market who fit this exact opening). Keep it 30 to 55 words. One soft CTA (a quick call/reply). Human, confident, no hype.",
     (touch >= MAX_TOUCHES
       ? "This is the LAST touch: be gracious, leave the door open ('if it comes up, I'm here'), no pressure."
@@ -93,7 +123,7 @@ async function sendViaMailboxApi(fromEmail, to, subject, body) {
 }
 
 function greetingName(name) { const n = (name || "there").trim().split(/\s+/)[0] || "there"; return n.charAt(0).toUpperCase() + n.slice(1); }
-function sig() { return "\n\nBest,\nRyan Nead\nLume Search Partners\n929-543-0608"; }
+function sig(rec) { return "\n\nBest,\n" + ((rec && rec.name) || "Ryan Nead") + "\nLume Search Partners\n" + ((rec && rec.phone) || "929-543-0608"); }
 function foot() { return "\n\nLume Search Partners · 148 Doughty Blvd, Inwood, NY 11096"; }
 
 async function main() {
@@ -139,11 +169,12 @@ async function main() {
   for (const t of batch) {
     const r = t.last;
     const nextTouch = t.touches + 1;
+    const rec = recruiterFor(r); // sign + write as whoever sent touch 1
     let fu;
-    try { fu = await writeFollowup({ company: r.company, role: r.role, to_name: r.to_name, subject: r.subject }, nextTouch); }
+    try { fu = await writeFollowup({ company: r.company, role: r.role, to_name: r.to_name, subject: r.subject }, nextTouch, rec); }
     catch (e) { console.log(`  SKIP ${t.email}: ${e.message}`); continue; }
     if (!fu.subject || !fu.body) continue;
-    const fullBody = `Hi ${greetingName(r.to_name)},\n\n${fu.body}` + sig() + foot();
+    const fullBody = `Hi ${greetingName(r.to_name)},\n\n${fu.body}` + sig(rec) + foot();
     if (!SEND) {
       if (sent < 3) { console.log(`\n--- FOLLOW-UP touch ${nextTouch} | ${r.company} -> ${t.email} ---\nsubject: ${fu.subject}\n${fullBody}`); }
       sent++; continue;

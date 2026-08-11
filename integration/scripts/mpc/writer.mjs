@@ -101,8 +101,13 @@ export async function writeEmail(p, opts = {}) {
 }
 
 // Fixed signature + CAN-SPAM footer appended to every send (never AI-varied).
-export function signature() {
-  return "\n\nBest,\nRyan Nead\nLume Search Partners\n929-543-0608";
+// Per-recruiter sign-off. Each recruiter emails + signs as THEMSELVES (name + their own BD line),
+// so the signature always matches the mailbox that sent it. Falls back to Ryan when the caller
+// passes nothing (keeps older single-identity callers working).
+export function signature(rec) {
+  const name = (rec && rec.name) || "Ryan Nead";
+  const phone = (rec && rec.phone) || "929-543-0608";
+  return "\n\nBest,\n" + name + "\nLume Search Partners\n" + phone;
 }
 export function footer() {
   return "\n\nLume Search Partners · 148 Doughty Blvd, Inwood, NY 11096";

@@ -65,12 +65,29 @@ function alreadyEmailed() {
   return seen;
 }
 
-function ryanBoxes() {
-  const s = JSON.parse(readFileSync(SENDERS, "utf8"));
-  const rows = s.inboxes || (s.state && s.state.inboxes) || [];
-  return rows
-    .filter(m => m && m.workspaceId === LUME_WS && /ryan/i.test(m.ownerName || "") && m.provider === "sending-ac" && !m.smtpPassEnc)
-    .map(m => m.email);
+// Per-recruiter sending identities. Each recruiter owns a fleet of warmed Sending.ac mailboxes and
+// emails + signs as THEMSELVES (name + their BD phone line). Activating all four fleets (not just
+// Ryan's) unlocks the ~655 idle warmed boxes AND spreads load across ~4x more mailboxes, which is
+// strictly better for deliverability at any given send volume. Keyed by the senders snapshot's
+// ownerName. Ariel has no sending boxes (LinkedIn + phone only), so she's not an email identity.
+const RECRUITER_INFO = {
+  "ryan":           { name: "Ryan Nead",      phone: "929-543-0608" },
+  "sam wagner":     { name: "Sam Wagner",     phone: "929-401-0849" },
+  "josh gurin":     { name: "Josh Gurin",     phone: "929-532-0756" },
+  "noah wilkowski": { name: "Noah Wilkowski", phone: "929-543-0584" },
+};
+
+function sendingIdentities() {
+  let rows = [];
+  try { const s = JSON.parse(readFileSync(SENDERS, "utf8")); rows = s.inboxes || (s.state && s.state.inboxes) || []; } catch { rows = []; }
+  const out = [];
+  for (const key of Object.keys(RECRUITER_INFO)) {
+    const boxes = rows
+      .filter(m => m && m.workspaceId === LUME_WS && (m.ownerName || "").trim().toLowerCase() === key && m.provider === "sending-ac" && !m.smtpPassEnc)
+      .map(m => m.email);
+    if (boxes.length) out.push({ key, ...RECRUITER_INFO[key], boxes });
+  }
+  return out;
 }
 
 async function sendViaMailboxApi(fromEmail, to, subject, body) {
@@ -155,19 +172,26 @@ async function main() {
   const batch = fresh.slice(0, effLimit);
   console.log(`\nwriting ${batch.length} emails (${SEND ? "SEND" : "DRY-RUN"})...\n`);
 
+  // Resolve the recruiter fleets up front so each email is written + signed as the recruiter who
+  // will send it. Round-robin across recruiters keeps the load balanced and the identity stable.
+  let idents = sendingIdentities();
+  if (!idents.length) idents = [{ key: "ryan", ...RECRUITER_INFO.ryan, boxes: [] }];
+  console.log(`sending identities: ${idents.map(x => `${x.name} (${x.boxes.length} boxes)`).join(", ")}`);
+
   const drafts = [];
   for (let i = 0; i < batch.length; i++) {
     const p = batch[i];
     const metro = metroOf(p);
     const variant = pickVariant(i); // even, reproducible rotation of the tested lead angles
+    const rec = idents[i % idents.length]; // the recruiter who owns this send (signature matches box)
     let email;
     try { email = await writeEmail(p, { metro, variant }); }
     catch (e) { console.log(`  SKIP (writer) ${p.company}: ${e.message}`); continue; }
     const check = checkRenderedEmail(email.subject, email.body);
     if (!check.ok) { console.log(`  SKIP (render gate) ${p.company}: ${check.problems.join(", ")}`); continue; }
     // Greeting built deterministically: "Hi <Capitalized First Name>," then a blank line, then the message.
-    const fullBody = `Hi ${greetingName(p.managerName)},\n\n${email.body}` + signature() + footer();
-    drafts.push({ company: p.company, role: p.role, metro: metro || "remote", variant: variant.id, variant_label: variant.label, to_name: p.managerName, to_title: p.managerTitle, to_email: p.likelyEmail, subject: email.subject, body: fullBody });
+    const fullBody = `Hi ${greetingName(p.managerName)},\n\n${email.body}` + signature(rec) + footer();
+    drafts.push({ company: p.company, role: p.role, metro: metro || "remote", variant: variant.id, variant_label: variant.label, to_name: p.managerName, to_title: p.managerTitle, to_email: p.likelyEmail, subject: email.subject, body: fullBody, recruiter: rec.key, recruiter_name: rec.name });
   }
 
   const draftFile = `${OUT}/drafts-${stamp}.json`;
@@ -186,17 +210,21 @@ async function main() {
     return;
   }
 
-  const boxes = ryanBoxes();
-  if (!boxes.length) { console.log("no Ryan sending boxes found; aborting send"); return; }
-  console.log(`\n[SEND] rotating across ${boxes.length} Ryan boxes...`);
+  const byKey = Object.fromEntries(idents.map(x => [x.key, x]));
+  const totalBoxes = idents.reduce((n, x) => n + x.boxes.length, 0);
+  if (!totalBoxes) { console.log("no sending boxes found; aborting send"); return; }
+  console.log(`\n[SEND] ${idents.length} recruiter fleets, ${totalBoxes} boxes total...`);
   const logFile = `${OUT}/sent-${stamp}.jsonl`;
   let sent = 0, failed = 0;
+  const cursor = {}; // per-recruiter box cursor so each fleet rotates evenly through its own boxes
   for (let i = 0; i < drafts.length; i++) {
     const d = drafts[i];
-    const from = boxes[i % boxes.length];
+    const rec = byKey[d.recruiter] || idents[0];
+    const c = cursor[rec.key] || 0; cursor[rec.key] = c + 1;
+    const from = rec.boxes[c % rec.boxes.length];
     const r = await sendViaMailboxApi(from, d.to_email, d.subject, d.body);
-    appendFileSync(logFile, JSON.stringify({ at: new Date().toISOString(), from, ...d, result: r }) + "\n");
-    if (r.ok) { sent++; console.log(`  sent ${d.to_email} (as ${from})${r.note ? " [" + r.note + "]" : ""}`); }
+    appendFileSync(logFile, JSON.stringify({ at: new Date().toISOString(), from, recruiter: rec.key, ...d, result: r }) + "\n");
+    if (r.ok) { sent++; console.log(`  sent ${d.to_email} (as ${rec.name} <${from}>)${r.note ? " [" + r.note + "]" : ""}`); }
     else { failed++; console.log(`  FAIL ${d.to_email}: ${r.error}`); }
     await new Promise(res => setTimeout(res, 1200)); // pace under 60/min
   }
