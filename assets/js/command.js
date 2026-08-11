@@ -5133,6 +5133,8 @@
     var stats = null;      // reply-center performance (last 24h / 7d)
     var booking = "";      // the operator's booking link for one-click insert
     var lastDraft = {};    // responseId -> last AI draft text (verbatim/edited telemetry)
+    var lastObj = {};      // responseId -> the drafting objective behind that text
+    var draftPerf = {};    // objective -> { sent, replied } (the outcome loop)
     var kbIndex = -1;      // keyboard triage cursor
 
     el.innerHTML = head("Response, your reply center",
@@ -5222,6 +5224,15 @@
         (quiet ? ' · <b style="color:var(--warn,#b06a00)">' + quiet + " gone quiet after your answer</b>" : "") +
         (v.snoozed ? " · " + v.snoozed + " snoozed" : "") + perf +
         '<span class="muted" style="float:right;font-size:11px" title="Keyboard triage: fastest replies win the meeting. Answering an interested reply inside minutes can multiply your booking rate.">Keys: j / k move · Enter open · e done · s snooze</span>';
+      var dpKeys = Object.keys(draftPerf);
+      if (dpKeys.length) {
+        var objNames = { book_call: "Book a call", send_info: "Send info", nudge: "Nudge", close_polite: "Polite close" };
+        var dpBits = dpKeys.map(function (k) {
+          var p2 = draftPerf[k];
+          return (objNames[k] || k) + " " + p2.replied + "/" + p2.sent + " answered";
+        });
+        strip.innerHTML += '<div class="muted" style="font-size:11px;margin-top:3px" title="How your AI-assisted sends are performing: replies that came back after each draft objective. This is the loop that tunes the drafter on outcomes, not vibes.">AI drafts: ' + esc(dpBits.join(" · ")) + "</div>";
+      }
       var note = (realOnly && v.hidden) ? '<div class="note" style="margin:0 0 10px">Hiding ' + v.hidden + ' warm-up / unverified message' + (v.hidden === 1 ? "" : "s") + '. <a href="#" data-showall="1">Show all</a></div>' : "";
       listWrap.innerHTML = note + (v.items.map(respItem).join("") ||
         '<div class="empty">' + (waiting === 0 && loaded ? "You are all caught up. New replies land here the moment they arrive." : "No " + (realOnly ? "verified " : "") + "replies" + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every real reply lands here, auto-classified.") + "</div>");
@@ -5250,6 +5261,7 @@
         nudges = (d && d.nudges) || {};
         timingUntil = (d && d.timingUntil) || {};
         slaWindows = (d && d.windows) || {};
+        draftPerf = (d && d.draftPerf) || {};
         stats = (d && d.stats) || null;
         booking = (d && d.booking) || "";
         slaRules = {};
@@ -5391,6 +5403,7 @@
       if (box && !box.value && anchorRow && anchorRow.suggested && anchorRow.suggested.text && !lastDraft[ridv]) {
         box.value = anchorRow.suggested.text;
         lastDraft[ridv] = anchorRow.suggested.text;
+        lastObj[ridv] = anchorRow.suggested.objective || "";
         var noteEl = document.createElement("div");
         noteEl.className = "muted";
         noteEl.style.cssText = "font-size:11.5px;margin-top:4px";
@@ -5459,6 +5472,7 @@
             if (r.ok && r.data && r.data.text) {
               if (dta) { dta.value = r.data.text; dta.dispatchEvent(new Event("input", { bubbles: true })); dta.focus(); }
               lastDraft[ridv] = r.data.text;
+              lastObj[ridv] = btn.getAttribute("data-obj") || "";
             } else { toast((r.data && (r.data.detail || r.data.error)) || "Could not draft"); }
           }).catch(function () { btn.disabled = false; btn.textContent = oldLabel; toast("Could not reach the server."); });
         return;
@@ -5510,7 +5524,7 @@
         // Draft telemetry: was the AI draft sent as-is, edited, or not used at all?
         var drafted = lastDraft[ridv] ? (txt === lastDraft[ridv].trim() ? "verbatim" : "edited") : "none";
         btn.disabled = true;
-        send("/response/actions", "POST", { action: "send", responseId: ridv, channel: chosen, text: txt, aiDraft: drafted })
+        send("/response/actions", "POST", { action: "send", responseId: ridv, channel: chosen, text: txt, aiDraft: drafted, aiObjective: lastObj[ridv] || undefined })
           .then(function (r) {
             if (r.ok) { toast((r.data && r.data.note) || "Sent"); delete threads[ridv]; delete lastDraft[ridv]; openRid = null; load(); refreshBadge(); }
             else { toast((r.data && (r.data.detail || r.data.error)) || "Could not send"); btn.disabled = false; }

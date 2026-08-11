@@ -25,6 +25,11 @@ export interface ReplyNotice {
   channel?: string;
   text?: string;            // the reply body
   fromHandle?: string;
+  /** The AI pre-draft, included so the operator reads the answer in the same
+   *  glance as the problem (minutes matter on hot replies). */
+  draft?: string;
+  /** Deep-link override; defaults to Conversations. Escalations point at Replies. */
+  link?: { href: string; label: string };
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -43,7 +48,11 @@ export async function notifyReply(n: ReplyNotice, prospect: Prospect | null): Pr
     `<p><b>${esc(n.detail || "A prospect replied")}</b></p>`,
     `<p>From: ${esc(who)}${prospect?.email ? ` &lt;${esc(prospect.email)}&gt;` : ""}${n.channel ? ` via ${esc(n.channel)}` : ""}</p>`,
     n.text ? `<blockquote style="border-left:3px solid #ccc;margin:8px 0;padding:4px 12px;color:#333">${esc(n.text.slice(0, 1200))}</blockquote>` : "",
-    `<p><a href="${app}/command#conversations">Open Conversations</a> — their sequences are already paused.</p>`,
+    n.draft ? `<p style="margin-bottom:4px"><b>Your reply is already drafted.</b> Open the Replies tab, skim, send:</p>` +
+      `<blockquote style="border-left:3px solid #2e5bd7;margin:8px 0;padding:4px 12px;color:#333;background:#f4f7ff">${esc(n.draft.slice(0, 1200))}</blockquote>` : "",
+    n.link
+      ? `<p><a href="${n.link.href}">${esc(n.link.label)}</a></p>`
+      : `<p><a href="${app}/command#conversations">Open Conversations</a>. Their sequences are already paused.</p>`,
   ].filter(Boolean);
   const html = `<div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5">${lines.join("")}</div>`;
 

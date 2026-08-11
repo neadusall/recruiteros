@@ -70,12 +70,15 @@ async function escalateBlownSlas(ws: string): Promise<void> {
     const hours = Math.round((Date.now() - Date.parse(p.inbound.receivedAt)) / 3600_000);
     const { getCore } = await import("../core/repository");
     const prospect = p.inbound.prospectId ? (await getCore().getProspect(p.inbound.prospectId)) ?? null : null;
+    const app = process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
     const sent = await notifyReply({
       workspaceId: ws,
       detail: `This ${p.classification.class} reply has been waiting ${hours}h, past its response window. Interested replies cool fast; answer it now from the Replies tab.`,
       channel: p.inbound.channel,
       text: p.inbound.text,
       fromHandle: p.inbound.fromHandle,
+      draft: p.suggestedReply?.text,
+      link: { href: `${app}/command#response`, label: "Open the Replies tab (the draft is waiting in the composer)" },
     }, prospect);
     if (sent) await inbox.markEscalated(ws, p.inbound.id);
   }

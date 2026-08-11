@@ -92,7 +92,7 @@ async function sendOnChannel(
 export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  const b = await body<{ action?: string; text?: string; prospectId?: string; responseId?: string; handled?: boolean; channel?: string; objective?: string; until?: string; aiDraft?: string }>(req);
+  const b = await body<{ action?: string; text?: string; prospectId?: string; responseId?: string; handled?: boolean; channel?: string; objective?: string; until?: string; aiDraft?: string; aiObjective?: string }>(req);
   if (!b?.action) return fail("missing_action", 422);
   const ws = g.ctx.workspace.id;
 
@@ -128,6 +128,7 @@ export async function POST(req: Request) {
         prospectId: resp.inbound.prospectId || null, toHandle: sent.toHandle,
         channel, text: b.text, at: nowIso(), provider: sent.provider,
         aiDraft: b.aiDraft === "verbatim" || b.aiDraft === "edited" ? b.aiDraft : "none",
+        objective: typeof b.aiObjective === "string" && b.aiObjective ? b.aiObjective.slice(0, 24) : undefined,
       });
       await getInbox().setHandled(ws, b.responseId, true); // answering clears it from the worklist
       return ok({ ok: true, note: sent.note });

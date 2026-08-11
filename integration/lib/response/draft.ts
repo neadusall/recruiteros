@@ -33,13 +33,33 @@ export interface DraftContext {
 
 const OBJECTIVES: Record<DraftObjective, string> = {
   book_call:
-    "Objective: convert this into a short call. Make ONE low-friction ask with the booking link woven in naturally (never 'click here'). Offer to work around their schedule.",
+    // Active-thread stage: a SPECIFIC time-ask converts about 2.5x an open-ended
+    // interest ask (the reverse is true cold, but a reply means the thread is live).
+    "Objective: convert this into a short call. Propose TWO concrete windows in plain words (e.g. 'Tuesday morning or Wednesday right after lunch'), then add the booking link in one short sentence as the easier path if neither works. One ask total, no 'click here'.",
   send_info:
-    "Objective: give them what they asked for, or promise it concretely. Answer their question directly first, then a soft next step. No booking pressure.",
+    "Objective: give them what they asked for, or promise it concretely. Answer their question directly first, then a soft next step. If they only said 'send me info', comply AND ask exactly one qualifying question (e.g. which role hurts most right now) so the info can be specific instead of a generic deck.",
   nudge:
     "Objective: a light follow-up on a thread that went quiet after interest. One or two sentences, zero guilt-tripping, add one NEW small piece of value or context rather than 'just bumping this'.",
   close_polite:
     "Objective: close gracefully. Thank them, leave the door open in one sentence, make it easy to come back later. No persuasion attempt.",
+};
+
+/**
+ * Evidence-based objection handling for the classes where the person pushed
+ * back. Encoded from staffing-industry playbooks: acknowledge, reposition,
+ * de-risk, never argue.
+ */
+const OBJECTION_GUIDANCE: Record<string, string> = {
+  fit_objection:
+    "They pushed back on fit. Handle it the way top staffing operators do, WITHOUT arguing: " +
+    "if they have internal recruiters, position as the partner for the hard or 60-plus-day searches their team would not fill anyway, not a replacement. " +
+    "If they are happy with a current agency, expect nothing less and ask only to be the call when a niche search stalls. " +
+    "If they had a bad agency experience, acknowledge it plainly, name one specific process difference, and offer references before any commitment.",
+  timing_objection:
+    "They said not now. Agree easily (never fight timing), name the window they gave back to them so they know you actually listened, and say you will circle back then. " +
+    "Optionally offer one zero-effort value in the meantime, like flagging exceptional talent so they do not lose ground.",
+  not_interested:
+    "A clean no. Thank them, close warmly in two sentences, and leave one true sentence about when people usually come back to you. No persuasion.",
 };
 
 const CHANNEL_RULES: Record<DraftContext["channel"], string> = {
@@ -64,6 +84,7 @@ export async function draftReply(resp: ProcessedResponse, objective: DraftObject
     ...ctx.history.slice(-10),
     "",
     OBJECTIVES[objective],
+    OBJECTION_GUIDANCE[ctx.classification] || "",
     CHANNEL_RULES[ctx.channel],
     link ? `Booking link to weave in: ${link}` : "",
     ctx.recruiterName ? `Sign off as ${ctx.recruiterName.split(" ")[0]}.` : "",

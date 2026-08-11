@@ -125,6 +125,26 @@ export async function GET(req: Request) {
     }
   } catch { /* best-effort */ }
 
+  // The outcome loop: per-objective reply rates for AI-assisted sends, so the
+  // drafter is judged on what actually got answered, not on how it reads.
+  const draftPerf: Record<string, { sent: number; replied: number }> = {};
+  try {
+    const notes = await getInbox().outboundForPerson(ws, { responseIds: items.map((i) => i.inbound.id) });
+    for (const n of notes) {
+      if (!n.objective || n.aiDraft === "none" || !n.aiDraft) continue;
+      const perf = (draftPerf[n.objective] ||= { sent: 0, replied: 0 });
+      perf.sent++;
+      // Did the person come back after this send? Any inbound from the same
+      // person (prospect id or the original row's handle) later than the note.
+      const anchor = items.find((i) => i.inbound.id === n.responseId);
+      const cameBack = items.some((i) =>
+        i.inbound.receivedAt > n.at &&
+        ((n.prospectId && i.inbound.prospectId === n.prospectId) ||
+          (anchor?.inbound.fromHandle && i.inbound.fromHandle === anchor.inbound.fromHandle)));
+      if (cameBack) perf.replied++;
+    }
+  } catch { /* best-effort */ }
+
   let booking = "";
   try {
     const { bookingUrl } = await import("../../../../lib/bd/booking");
@@ -139,5 +159,5 @@ export async function GET(req: Request) {
     for (const r of ROUTING_RULES ? Object.keys(ROUTING_RULES) : []) windows[r] = responseWindowHours(r);
   } catch { windows = {}; }
 
-  return ok({ items, people, nudges, timingUntil, stats, booking, windows, rules: ROUTING_RULES, order: CLASS_ORDER });
+  return ok({ items, people, nudges, timingUntil, stats, draftPerf, booking, windows, rules: ROUTING_RULES, order: CLASS_ORDER });
 }
