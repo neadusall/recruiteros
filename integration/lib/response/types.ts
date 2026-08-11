@@ -105,6 +105,8 @@ export interface ProcessedResponse {
   /** Set when the recruiter deletes it from the inbox. Soft: the row is kept in the
    *  snapshot (and the seen-id guard stops re-ingest) but never listed again. */
   deletedAt?: string;
+  /** Snoozed: hidden from the worklist until this moment, then resurfaces on top. */
+  snoozedUntil?: string;
 }
 
 /** An outbound message the recruiter sent FROM the reply center (any channel).
@@ -123,4 +125,7 @@ export interface OutboundNote {
   at: string;
   /** Where the send went out (smtp box, linkedin_engine, taltxt, telnyx...). */
   provider?: string;
+  /** AI-draft telemetry: was this an AI draft sent verbatim, edited, or written by hand?
+   *  (Industry heuristic: a high edit rate means the drafter's tone needs work.) */
+  aiDraft?: "verbatim" | "edited" | "none";
 }

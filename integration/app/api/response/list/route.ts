@@ -56,5 +56,62 @@ export async function GET(req: Request) {
     }
   } catch { /* list still renders without summaries */ }
 
-  return ok({ items, people, rules: ROUTING_RULES, order: CLASS_ORDER });
+  // "Waiting on them": a reply you answered but that went silent resurfaces after
+  // 48h (interested replies sitting 3 days convert at roughly half the rate of ones
+  // nudged inside two). Computed for the newest actionable row per prospect; sending
+  // a nudge updates lastOutAt and naturally restarts the clock.
+  const NUDGE_MS = 48 * 3600_000;
+  const NUDGE_CLASSES = new Set(["positive", "soft_yes", "timing_objection", "referral", "unclassified"]);
+  const nudges: Record<string, number> = {}; // inbound id -> hours silent
+  try {
+    const newestPerProspect = new Map<string, (typeof items)[number]>();
+    for (const it of items) {
+      const pid = it.inbound.prospectId;
+      if (!pid || !NUDGE_CLASSES.has(it.classification.class)) continue;
+      const cur = newestPerProspect.get(pid);
+      if (!cur || it.inbound.receivedAt > cur.inbound.receivedAt) newestPerProspect.set(pid, it);
+    }
+    for (const [pid, it] of newestPerProspect) {
+      const s = people[pid];
+      if (!s || !s.lastOutAt) continue;
+      const answered = !s.lastInAt || s.lastOutAt > s.lastInAt; // ball is in their court
+      const silentMs = Date.now() - Date.parse(s.lastOutAt);
+      if (answered && silentMs > NUDGE_MS && !it.deletedAt) {
+        nudges[it.inbound.id] = Math.round(silentMs / 3600_000);
+      }
+    }
+  } catch { /* best-effort */ }
+
+  // Reply-center performance: how fast and how much, so the recruiter sees the
+  // needle move. First-response = outbound note minus its inbound's receivedAt.
+  const stats = { sent24h: 0, cleared24h: 0, medianFirstResponseMins: -1 };
+  try {
+    const dayAgo = Date.now() - 24 * 3600_000;
+    const weekAgo = Date.now() - 7 * 24 * 3600_000;
+    const byId = new Map(items.map((i) => [i.inbound.id, i]));
+    const deltas: number[] = [];
+    const notes = await getInbox().outboundForPerson(ws, { responseIds: items.map((i) => i.inbound.id) });
+    for (const n of notes) {
+      const at = Date.parse(n.at);
+      if (at >= dayAgo) stats.sent24h++;
+      const anchor = byId.get(n.responseId);
+      if (anchor && at >= weekAgo) {
+        const d = at - Date.parse(anchor.inbound.receivedAt);
+        if (d > 0 && d < 14 * 24 * 3600_000) deltas.push(d / 60_000);
+      }
+    }
+    for (const i of items) if (i.handledAt && Date.parse(i.handledAt) >= dayAgo) stats.cleared24h++;
+    if (deltas.length) {
+      deltas.sort((a, b) => a - b);
+      stats.medianFirstResponseMins = Math.round(deltas[Math.floor(deltas.length / 2)]);
+    }
+  } catch { /* best-effort */ }
+
+  let booking = "";
+  try {
+    const { bookingUrl } = await import("../../../../lib/bd/booking");
+    booking = bookingUrl("consultative");
+  } catch { /* composer just hides the insert button */ }
+
+  return ok({ items, people, nudges, stats, booking, rules: ROUTING_RULES, order: CLASS_ORDER });
 }

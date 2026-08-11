@@ -92,7 +92,7 @@ async function sendOnChannel(
 export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  const b = await body<{ action?: string; text?: string; prospectId?: string; responseId?: string; handled?: boolean; channel?: string }>(req);
+  const b = await body<{ action?: string; text?: string; prospectId?: string; responseId?: string; handled?: boolean; channel?: string; objective?: string; until?: string; aiDraft?: string }>(req);
   if (!b?.action) return fail("missing_action", 422);
   const ws = g.ctx.workspace.id;
 
@@ -127,9 +127,47 @@ export async function POST(req: Request) {
         id: rid("out"), workspaceId: ws, responseId: b.responseId,
         prospectId: resp.inbound.prospectId || null, toHandle: sent.toHandle,
         channel, text: b.text, at: nowIso(), provider: sent.provider,
+        aiDraft: b.aiDraft === "verbatim" || b.aiDraft === "edited" ? b.aiDraft : "none",
       });
       await getInbox().setHandled(ws, b.responseId, true); // answering clears it from the worklist
       return ok({ ok: true, note: sent.note });
+    }
+    case "draft": {
+      // AI-suggested reply for the composer. Never auto-sent; the recruiter edits it.
+      if (!b.responseId) return fail("missing_responseId", 422);
+      const resp = await getInbox().getById(ws, b.responseId);
+      if (!resp) return fail("not_found", 404);
+      const objective = (["book_call", "send_info", "nudge", "close_polite"].includes(String(b.objective)) ? b.objective : "send_info") as import("../../../../lib/response/draft").DraftObjective;
+      const channel = (["email", "linkedin", "sms"].includes(String(b.channel)) ? b.channel : "email") as "email" | "linkedin" | "sms";
+      const prospect = resp.inbound.prospectId ? await getCore().getProspect(resp.inbound.prospectId) : undefined;
+      // The person's recent conversation, oldest first, for grounding.
+      const rows = await getInbox().forPerson(ws, { prospectId: resp.inbound.prospectId, handles: [prospect?.email, prospect?.phone, prospect?.linkedinUrl, resp.inbound.fromHandle] });
+      const notes = await getInbox().outboundForPerson(ws, { prospectId: resp.inbound.prospectId, responseIds: rows.map((r) => r.inbound.id) });
+      const history = [
+        ...rows.map((r) => ({ at: r.inbound.receivedAt, line: "THEM: " + r.inbound.text.slice(0, 500) })),
+        ...notes.map((n) => ({ at: n.at, line: "YOU: " + n.text.slice(0, 500) })),
+      ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at)).map((x) => x.line);
+      try {
+        const { draftReply } = await import("../../../../lib/response/draft");
+        const text = await draftReply(resp, objective, {
+          history,
+          personName: resp.inbound.fromName || prospect?.fullName,
+          personTitle: prospect?.title,
+          personCompany: prospect?.company,
+          recruiterName: g.ctx.user?.name,
+          classification: resp.classification.class,
+          channel,
+        });
+        return ok({ text });
+      } catch (e: any) {
+        return fail("draft_failed", 502, { detail: "The AI drafter is unavailable right now. Write it by hand or try again." });
+      }
+    }
+    case "snooze": {
+      // Hide until a moment, then resurface on top of the worklist.
+      if (!b.responseId) return fail("missing_responseId", 422);
+      const done = await getInbox().setSnooze(ws, b.responseId, b.until);
+      return done ? ok({ ok: true }) : fail("not_found", 404);
     }
     case "handle": {
       // Checklist: clear a reply from the day's worklist (or un-clear it).

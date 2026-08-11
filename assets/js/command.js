@@ -5089,6 +5089,11 @@
     var threads = {};      // responseId -> loaded thread payload
     var people = {};       // prospectId -> cross-channel touch summary (from /list)
     var slaRules = {};     // class -> sla bucket (from /list rules)
+    var nudges = {};       // responseId -> hours silent (answered threads gone quiet)
+    var stats = null;      // reply-center performance (last 24h / 7d)
+    var booking = "";      // the operator's booking link for one-click insert
+    var lastDraft = {};    // responseId -> last AI draft text (verbatim/edited telemetry)
+    var kbIndex = -1;      // keyboard triage cursor
 
     el.innerHTML = head("Response, your reply center",
       "Every reply across email, LinkedIn and SMS in one place. Open a reply to see every touch on every channel, answer without leaving, and work the list to zero.");
@@ -5119,37 +5124,62 @@
       return isNaN(t) ? 0 : Math.max(0, (Date.now() - t) / 3600000);
     }
     function isOverdue(r) { return !r.handled && waitingHours(r) > slaHours(r.cls); }
+    // At risk: past 60% of the window but not blown yet (amber, so it never gets there).
+    function isAtRisk(r) { return !r.handled && !isOverdue(r) && waitingHours(r) > slaHours(r.cls) * 0.6; }
+    function isSnoozed(r) { return !!(r.snoozedUntil && Date.parse(r.snoozedUntil) > Date.now()); }
+    function snoozeReturned(r) { return !!(r.snoozedUntil && Date.parse(r.snoozedUntil) <= Date.now()); }
+    // Worklist priority: blown SLA > back-from-snooze > waiting-on-them nudge > normal.
+    function rowPriority(r) {
+      if (isOverdue(r)) return 4;
+      if (snoozeReturned(r) && !r.handled) return 3;
+      if (nudges[r.id]) return 2;
+      return 1;
+    }
     function clsRank(c) {
       var order = ["positive", "soft_yes", "referral", "timing_objection", "unclassified", "fit_objection", "not_interested", "auto_reply", "stop"];
       var i = order.indexOf(c); return i < 0 ? 5 : i;
     }
 
     function visibleItems() {
-      var hidden = 0;
+      var hidden = 0, snoozedCount = 0;
       var items = inbox.filter(function (r) {
-        if (!showDone && r.handled) return false;    // cleared from the day's worklist
+        // A handled thread that went quiet after your answer comes BACK on the list.
+        if (!showDone && r.handled && !nudges[r.id]) return false;
+        if (isSnoozed(r)) { snoozedCount++; return showDone; } // hidden until due
         if (active !== "all" && r.channel !== active) return false;
         if (realOnly && !respVerified(r)) { hidden++; return false; }
         return true;
       });
-      // Never lose anyone: overdue first, then hottest class, then newest.
+      // Never lose anyone: blown SLA, then snooze returns, then quiet threads, then hottest class.
       items.sort(function (a, b) {
-        var od = (isOverdue(b) ? 1 : 0) - (isOverdue(a) ? 1 : 0); if (od) return od;
+        var pr = rowPriority(b) - rowPriority(a); if (pr) return pr;
         var cr = clsRank(a.cls) - clsRank(b.cls); if (cr) return cr;
         return (b.receivedAt || "").localeCompare(a.receivedAt || "");
       });
-      return { items: items, hidden: hidden };
+      return { items: items, hidden: hidden, snoozed: snoozedCount };
     }
 
     function paint() {
       if (!loaded) { listWrap.innerHTML = loading(); return; }
       var v = visibleItems();
-      var waiting = 0, overdue = 0;
-      inbox.forEach(function (r) { if (!r.handled && (!realOnly || respVerified(r))) { waiting++; if (isOverdue(r)) overdue++; } });
+      var waiting = 0, overdue = 0, quiet = 0;
+      inbox.forEach(function (r) {
+        if (isSnoozed(r)) return;
+        if (nudges[r.id] && r.handled) { quiet++; return; }
+        if (!r.handled && (!realOnly || respVerified(r))) { waiting++; if (isOverdue(r)) overdue++; }
+      });
+      var perf = "";
+      if (stats) {
+        var med = stats.medianFirstResponseMins;
+        perf = ' · Last 24h: ' + stats.sent24h + ' sent, ' + stats.cleared24h + ' cleared' +
+          (med >= 0 ? ' · median first response ' + (med < 60 ? med + 'm' : Math.round(med / 60) + 'h') : "");
+      }
       strip.style.display = "";
       strip.innerHTML = "<b>" + waiting + "</b> waiting for you" +
         (overdue ? ' · <b style="color:var(--danger,#c02929)">' + overdue + " past the response window</b>" : "") +
-        " · every answered or Done reply drops off this list";
+        (quiet ? ' · <b style="color:var(--warn,#b06a00)">' + quiet + " gone quiet after your answer</b>" : "") +
+        (v.snoozed ? " · " + v.snoozed + " snoozed" : "") + perf +
+        '<span class="muted" style="float:right;font-size:11px" title="Keyboard triage: fastest replies win the meeting. Answering an interested reply inside minutes can multiply your booking rate.">Keys: j / k move · Enter open · e done · s snooze</span>';
       var note = (realOnly && v.hidden) ? '<div class="note" style="margin:0 0 10px">Hiding ' + v.hidden + ' warm-up / unverified message' + (v.hidden === 1 ? "" : "s") + '. <a href="#" data-showall="1">Show all</a></div>' : "";
       listWrap.innerHTML = note + (v.items.map(respItem).join("") ||
         '<div class="empty">' + (waiting === 0 && loaded ? "You are all caught up. New replies land here the moment they arrive." : "No " + (realOnly ? "verified " : "") + "replies" + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every real reply lands here, auto-classified.") + "</div>");
@@ -5175,6 +5205,9 @@
       api("/response/list").then(function (d) {
         inbox = ((d && d.items) || []).map(mapProcessed);
         people = (d && d.people) || {};
+        nudges = (d && d.nudges) || {};
+        stats = (d && d.stats) || null;
+        booking = (d && d.booking) || "";
         slaRules = {};
         ((d && d.rules) || []).forEach(function (r) { slaRules[r.class] = r.sla; });
         loaded = true; paint();
@@ -5274,12 +5307,28 @@
           : cur === "linkedin" ? "Goes out through your connected LinkedIn account with normal pacing, so it looks human."
           : cur === "sms" ? "Texts them from your recruiter line."
           : "No channel is available for this person yet.";
+        // Objective-driven AI drafts: pick what the reply should accomplish and the
+        // drafter writes it from the whole conversation. Suggested per class.
+        var suggested = { positive: "book_call", soft_yes: "send_info", referral: "send_info", timing_objection: "close_polite", unclassified: "send_info" };
+        var anchorRow = null;
+        for (var ai = 0; ai < inbox.length; ai++) if (inbox[ai].id === ridv) { anchorRow = inbox[ai]; break; }
+        var sug = nudges[ridv] ? "nudge" : (anchorRow && suggested[anchorRow.cls]) || "send_info";
+        var objDefs = [["book_call", "Book a call"], ["send_info", "Answer & send info"], ["nudge", "Nudge"], ["close_polite", "Polite close"]];
+        var objChips = objDefs.map(function (o) {
+          return '<button class="resp-btn ghost" data-act="draft" data-obj="' + o[0] + '"' + ' data-rid="' + esc(ridv) + '" title="AI drafts this reply from the whole conversation; you edit before sending">' +
+            (o[0] === sug ? "★ " : "") + o[1] + "</button>";
+        }).join(" ");
         chanBar =
           '<div class="chan-filter" style="margin:12px 0 8px">' + tabs + "</div>" +
           (cur
-            ? '<textarea class="resp-reply-text" rows="3" placeholder="Type your reply…" style="width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--border,#d8dbe0);border-radius:8px"></textarea>' +
+            ? '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 6px">' +
+                '<span class="muted" style="font-size:11.5px">Draft with AI:</span>' + objChips +
+              "</div>" +
+              '<textarea class="resp-reply-text" rows="3" placeholder="Type your reply, or let AI draft it above…" style="width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--border,#d8dbe0);border-radius:8px"></textarea>' +
               '<div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">' +
                 '<button class="resp-btn" data-act="sendmsg" data-rid="' + esc(ridv) + '">Send on ' + chanIcon(cur) + "</button>" +
+                (booking ? '<button class="resp-btn ghost" data-act="insertlink" title="Insert your booking link">+ Booking link</button>' : "") +
+                (cur === "sms" ? '<span class="muted resp-sms-count" style="font-size:11.5px">0/300</span>' : "") +
                 '<span class="muted" style="font-size:11.5px">' + hint + "</span>" +
               "</div>"
             : "");
@@ -5343,15 +5392,55 @@
         renderThread(item, ridv);
         return;
       }
+      if (act === "draft") {
+        var dchan = item.getAttribute("data-chan") || "email";
+        var dta = item.querySelector(".resp-thread textarea");
+        btn.disabled = true;
+        var oldLabel = btn.textContent;
+        btn.textContent = "Drafting…";
+        send("/response/actions", "POST", { action: "draft", responseId: ridv, objective: btn.getAttribute("data-obj"), channel: dchan })
+          .then(function (r) {
+            btn.disabled = false; btn.textContent = oldLabel;
+            if (r.ok && r.data && r.data.text) {
+              if (dta) { dta.value = r.data.text; dta.dispatchEvent(new Event("input", { bubbles: true })); dta.focus(); }
+              lastDraft[ridv] = r.data.text;
+            } else { toast((r.data && (r.data.detail || r.data.error)) || "Could not draft"); }
+          }).catch(function () { btn.disabled = false; btn.textContent = oldLabel; toast("Could not reach the server."); });
+        return;
+      }
+      if (act === "insertlink") {
+        var lta = item.querySelector(".resp-thread textarea");
+        if (lta && booking) {
+          lta.value = (lta.value ? lta.value.replace(/\s+$/, "") + "\n\n" : "") + booking;
+          lta.dispatchEvent(new Event("input", { bubbles: true }));
+          lta.focus();
+        }
+        return;
+      }
+      if (act === "snoozemenu") {
+        var pop = btn.parentNode.querySelector(".resp-snooze-pop");
+        if (pop) pop.style.display = pop.style.display === "none" ? "" : "none";
+        return;
+      }
+      if (act === "snooze") {
+        var hrs = parseInt(btn.getAttribute("data-h"), 10) || 24;
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "snooze", responseId: ridv, until: new Date(Date.now() + hrs * 3600000).toISOString() })
+          .then(function (r) { if (r.ok) { toast("Snoozed. It comes back on top."); if (openRid === ridv) openRid = null; load(); } else { toast("Could not snooze"); btn.disabled = false; } })
+          .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
       if (act === "sendmsg") {
         var ta = item.querySelector(".resp-thread textarea");
         var txt = ta ? (ta.value || "").trim() : "";
         if (!txt) { toast("Type a reply first."); return; }
         var chosen = item.getAttribute("data-chan") || "email";
+        // Draft telemetry: was the AI draft sent as-is, edited, or not used at all?
+        var drafted = lastDraft[ridv] ? (txt === lastDraft[ridv].trim() ? "verbatim" : "edited") : "none";
         btn.disabled = true;
-        send("/response/actions", "POST", { action: "send", responseId: ridv, channel: chosen, text: txt })
+        send("/response/actions", "POST", { action: "send", responseId: ridv, channel: chosen, text: txt, aiDraft: drafted })
           .then(function (r) {
-            if (r.ok) { toast((r.data && r.data.note) || "Sent"); delete threads[ridv]; openRid = null; load(); refreshBadge(); }
+            if (r.ok) { toast((r.data && r.data.note) || "Sent"); delete threads[ridv]; delete lastDraft[ridv]; openRid = null; load(); refreshBadge(); }
             else { toast((r.data && (r.data.detail || r.data.error)) || "Could not send"); btn.disabled = false; }
           }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
         return;
@@ -5381,6 +5470,53 @@
           else { toast("Could not " + act + " (" + ((r.data && r.data.error) || r.status) + ")"); btn.disabled = false; }
         }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
     });
+
+    // SMS length counter, live while typing.
+    listWrap.addEventListener("input", function (e) {
+      var ta = e.target;
+      if (!ta || !ta.classList || !ta.classList.contains("resp-reply-text")) return;
+      var item = ta.closest(".resp-item");
+      var counter = item && item.querySelector(".resp-sms-count");
+      if (!counter) return;
+      var n = (ta.value || "").length;
+      counter.textContent = n + "/300";
+      counter.style.color = n > 300 ? "var(--danger,#c02929)" : "";
+    });
+
+    // Keyboard triage: work the list without touching the mouse.
+    function kbRows() { return listWrap.querySelectorAll(".resp-item"); }
+    function kbSelect(i) {
+      var rows = kbRows(); if (!rows.length) return;
+      kbIndex = Math.max(0, Math.min(rows.length - 1, i));
+      Array.prototype.forEach.call(rows, function (x, n) {
+        x.style.outline = n === kbIndex ? "2px solid var(--brand,#2e5bd7)" : "";
+        x.style.outlineOffset = n === kbIndex ? "2px" : "";
+      });
+      rows[kbIndex].scrollIntoView({ block: "nearest" });
+    }
+    function kbKey(e) {
+      if (!document.body.contains(el)) { document.removeEventListener("keydown", kbKey); return; }
+      var t = e.target;
+      if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName || "")) {
+        if (e.key === "Escape" && openRid) { openRid = null; paint(); }
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      var rows = kbRows();
+      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); kbSelect(kbIndex + 1); return; }
+      if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); kbSelect(kbIndex - 1); return; }
+      if (kbIndex < 0 || !rows[kbIndex]) { if (e.key === "Escape" && openRid) { openRid = null; paint(); } return; }
+      var sel = rows[kbIndex];
+      if (e.key === "Enter" || e.key === "o" || e.key === "r") {
+        e.preventDefault();
+        var tb = sel.querySelector('[data-act="thread"]'); if (tb) tb.click();
+      } else if (e.key === "e") {
+        var db = sel.querySelector('[data-act="done"]'); if (db) db.click();
+      } else if (e.key === "s") {
+        var sb = sel.querySelector('[data-act="snoozemenu"]'); if (sb) sb.click();
+      } else if (e.key === "Escape" && openRid) { openRid = null; paint(); }
+    }
+    document.addEventListener("keydown", kbKey);
 
     // rules matrix (product reference: how every reply is classified + routed)
     var rows = REF.rules.map(function (r) {
@@ -5414,18 +5550,22 @@
       var pid = r.prospectId ? ' data-pid="' + esc(r.prospectId) + '"' : "";
       var ridAttr = ' data-rid="' + esc(r.id) + '"';
       var age = r.receivedAt ? respAge(r.receivedAt) : "";
-      var agePill = age
-        ? (isOverdue(r)
-          ? '<span class="cls" style="background:var(--danger,#c02929);color:#fff" title="Waiting past the response window for this reply type">' + esc(age) + " · overdue</span>"
-          : '<span class="cls" style="background:var(--surface-2,#eef1f6);color:var(--text-muted,#5a6172)">' + esc(age) + "</span>")
-        : "";
+      var agePill = "";
+      if (age) {
+        if (isOverdue(r)) agePill = '<span class="cls" style="background:var(--danger,#c02929);color:#fff" title="Past the response window for this reply type. Speed wins: interested replies answered inside minutes book at a multiple of ones that wait days.">' + esc(age) + " · overdue</span>";
+        else if (isAtRisk(r)) agePill = '<span class="cls" style="background:#f6a723;color:#3a2a00" title="Getting close to the response window. Answer now while it is warm.">' + esc(age) + " · due soon</span>";
+        else agePill = '<span class="cls" style="background:var(--surface-2,#eef1f6);color:var(--text-muted,#5a6172)">' + esc(age) + "</span>";
+      }
+      var quietPill = nudges[r.id]
+        ? '<span class="cls" style="background:#f6a723;color:#3a2a00" title="You answered, then it went quiet. A light nudge inside two days keeps the thread alive; three silent days roughly halves the booking odds.">quiet ' + esc(String(nudges[r.id])) + "h · nudge?</span>"
+        : (snoozeReturned(r) && !r.handled ? '<span class="cls" style="background:#f6a723;color:#3a2a00" title="Snooze ended, back on your list">back from snooze</span>' : "");
       var doneBtn = r.handled
         ? '<button class="resp-btn ghost" data-act="undone"' + ridAttr + ' title="Put this reply back on your list">Reopen</button>'
         : '<button class="resp-btn ghost" data-act="done"' + ridAttr + ' title="Clear from today\'s list">Done</button>';
       return '<div class="resp-item"' + ridAttr + (r.handled ? ' style="opacity:.62"' : "") + '><div class="resp-top">' +
         '<span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
         '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + (r.email ? " · " + esc(r.email) : "") + "</div></div>" +
-        agePill +
+        agePill + quietPill +
         '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
         '<div class="resp-text">"' + esc(r.text) + '"</div>' +
         touchLine(r) +
@@ -5436,6 +5576,15 @@
         '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
         '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
         doneBtn +
+        '<span style="position:relative;display:inline-block">' +
+          '<button class="resp-btn ghost" data-act="snoozemenu"' + ridAttr + ' title="Hide this until later; it comes back on top of the list">Snooze</button>' +
+          '<span class="resp-snooze-pop" style="display:none;position:absolute;bottom:110%;left:0;z-index:30;background:var(--surface,#fff);border:1px solid var(--border,#d8dbe0);border-radius:10px;box-shadow:0 8px 24px rgba(20,24,40,.14);padding:6px;white-space:nowrap">' +
+            '<button class="resp-btn ghost" data-act="snooze" data-h="4"' + ridAttr + '>4 hours</button> ' +
+            '<button class="resp-btn ghost" data-act="snooze" data-h="24"' + ridAttr + '>Tomorrow</button> ' +
+            '<button class="resp-btn ghost" data-act="snooze" data-h="72"' + ridAttr + '>3 days</button> ' +
+            '<button class="resp-btn ghost" data-act="snooze" data-h="168"' + ridAttr + '>Next week</button>' +
+          "</span>" +
+        "</span>" +
         '<button class="resp-btn ghost" data-act="delete"' + ridAttr + ' title="Delete from the inbox for good">Delete</button>' +
         "</div></div>";
     }
@@ -23386,7 +23535,7 @@
     return l ? (l[motion] || l.status) : s;
   }
   function mapProcessed(p) {
-    return { id: p.inbound.id, name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.inbound.prospectId || p.prospectId || (p.prospect && p.prospect.id) || null, campaignId: p.inbound.campaignId || null, email: p.inbound.fromHandle || null, canReply: (p.inbound.channel === "email" && !!p.inbound.toMailbox), handled: !!p.handledAt, receivedAt: p.inbound.receivedAt || null };
+    return { id: p.inbound.id, name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.inbound.prospectId || p.prospectId || (p.prospect && p.prospect.id) || null, campaignId: p.inbound.campaignId || null, email: p.inbound.fromHandle || null, canReply: (p.inbound.channel === "email" && !!p.inbound.toMailbox), handled: !!p.handledAt, receivedAt: p.inbound.receivedAt || null, snoozedUntil: p.snoozedUntil || null };
   }
   // A reply is REAL (not Smartlead warm-up) if it's identity-verified: either matched to a known
   // prospect, or tagged by the MPC bridge (which only ingests inbound from people we actually
