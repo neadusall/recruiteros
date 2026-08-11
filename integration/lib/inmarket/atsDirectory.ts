@@ -84,20 +84,56 @@ const SEED_SLUGS: string[] = [
   "vimeo", "sprig", "airtable-com", "webflow-com", "vanta-com", "notion-so", "sourcegraph-com",
 ];
 
-/** Deduped, lowercased directory of ATS slugs to probe. */
-export const ATS_DIRECTORY: string[] = [...new Set(SEED_SLUGS.map((s) => s.trim().toLowerCase()).filter((s) => s.length >= 2))];
+/** Deduped, lowercased SEED directory (the curated bootstrap; sync, always available). */
+const SEED_DIRECTORY: string[] = [...new Set(SEED_SLUGS.map((s) => s.trim().toLowerCase()).filter((s) => s.length >= 2))];
+
+/** Back-compat export (seed only). Live probing uses hydrateDirectory() below. */
+export const ATS_DIRECTORY: string[] = SEED_DIRECTORY;
 
 /**
- * A rotating batch of directory slugs, so each accumulator cycle probes a fresh slice and the
- * whole directory is covered over successive cycles (then loops to refresh). `offset` advances
- * across cycles; returns the next `size` slugs and the new offset to persist.
+ * The DISCOVERED directory: thousands of real ATS slugs found + validated by the discovery tool
+ * (`scripts/mpc/discover-ats-slugs.mjs`), persisted to a snapshot and merged with the seed here.
+ * This is what lets the free volume lever scale to thousands of employers WITHOUT a code deploy:
+ * the tool grows the snapshot, and each cycle picks it up. Cached with a short TTL so updates go
+ * live within minutes; any load failure falls back to the seed so the free arm never breaks.
  */
-export function directoryBatch(offset: number, size: number): { slugs: string[]; nextOffset: number; total: number } {
-  const total = ATS_DIRECTORY.length;
+const EXT_KEY = "inmarket_ats_slugs_ext_v1";
+const HYDRATE_TTL_MS = 10 * 60 * 1000;
+let cachedDir: string[] = SEED_DIRECTORY;
+let cachedAt = 0;
+
+async function hydrateDirectory(): Promise<string[]> {
+  const now = Date.now();
+  if (cachedAt && now - cachedAt < HYDRATE_TTL_MS) return cachedDir;
+  try {
+    const ext = await loadSnapshot<string[]>(EXT_KEY);
+    cachedDir = Array.isArray(ext) && ext.length
+      ? [...new Set([...SEED_DIRECTORY, ...ext.map((s) => String(s).trim().toLowerCase()).filter((s) => s.length >= 2)])]
+      : SEED_DIRECTORY;
+  } catch {
+    cachedDir = SEED_DIRECTORY;
+  }
+  cachedAt = now;
+  return cachedDir;
+}
+
+/** Live directory size (seed + discovered) — for monitoring how wide the free net is. */
+export async function directorySize(): Promise<number> {
+  return (await hydrateDirectory()).length;
+}
+
+/**
+ * A rotating batch of directory slugs (seed + discovered), so each accumulator cycle probes a
+ * fresh slice and the whole directory is covered over successive cycles (then loops to refresh).
+ * `offset` advances across cycles; returns the next `size` slugs and the new offset to persist.
+ */
+export async function directoryBatch(offset: number, size: number): Promise<{ slugs: string[]; nextOffset: number; total: number }> {
+  const dir = await hydrateDirectory();
+  const total = dir.length;
   if (!total) return { slugs: [], nextOffset: 0, total: 0 };
   const slugs: string[] = [];
   for (let i = 0; i < Math.min(size, total); i++) {
-    slugs.push(ATS_DIRECTORY[(offset + i) % total]);
+    slugs.push(dir[(offset + i) % total]);
   }
   return { slugs, nextOffset: (offset + slugs.length) % total, total };
 }

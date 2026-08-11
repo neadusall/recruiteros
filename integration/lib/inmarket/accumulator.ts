@@ -339,7 +339,7 @@ async function runCycleInner(): Promise<void> {
   //    collectLeads so the staffing gate, US filter, scoring, and dedupe all apply. The directory
   //    self-grows from the slugified pool, so coverage compounds toward 10–20K/day over time.
   try {
-    const { slugs, nextOffset } = directoryBatch(directoryCursor, DIRECTORY_BATCH);
+    const { slugs, nextOffset } = await directoryBatch(directoryCursor, DIRECTORY_BATCH);
     if (slugs.length) {
       directoryCursor = nextOffset;
       const leads = await collectLeads({ companyNames: slugs, limit: DIRECTORY_CAP }, now, DIRECTORY_CAP);
