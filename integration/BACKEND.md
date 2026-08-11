@@ -92,7 +92,7 @@ load-bearing and guarded by `lib/response/response.test.ts` (run with
 - **Referrals**: `{action:"referral_prospect"}` creates the referred person as a
   queued prospect inheriting the referrer's campaign/company/motion.
 - **Watchdog** (`lib/response/watchdog.ts`, armed from `instrumentation.ts`):
-  every 10 minutes it escalates blown-window hot replies to
+  every 5 minutes it escalates blown-window hot replies to
   `RECRUITEROS_NOTIFY_EMAIL` (once per row), pre-drafts the nudge for answered
   threads that crossed 48h of silence, and prunes the durable snapshot
   (items/outbound/seen are all bounded).

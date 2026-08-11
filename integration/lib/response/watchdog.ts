@@ -20,7 +20,10 @@ import { ruleFor } from "./rules";
 import { notifyEmail, notifyReply } from "./notify";
 import type { ProcessedResponse, Sla } from "./types";
 
-const CYCLE_MS = positiveIntEnv("RECRUITEROS_REPLY_WATCH_MS", 10 * 60 * 1000);
+// 5 minutes: the tick is cheap (in-memory scans; escalations send once per row;
+// nudge drafts are capped per tick) and the whole point is minute-level latency
+// on hot replies. Override with RECRUITEROS_REPLY_WATCH_MS.
+const CYCLE_MS = positiveIntEnv("RECRUITEROS_REPLY_WATCH_MS", 5 * 60 * 1000);
 const FIRST_DELAY_MS = 30_000;
 const NUDGE_MS = 48 * 3600_000;
 const MAX_NUDGE_DRAFTS_PER_TICK = 5;
