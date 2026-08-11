@@ -98,7 +98,7 @@ function asnFor(rows, ip) {
   }
   return { country: "", org: "" };
 }
-const ISPY = /comcast|verizon|at&t|att-|t-mobile|sprint|spectrum|charter|cox\b|centurylink|lumen|frontier|windstream|vodafone|telstra|telecom|cellular|mobile|wireless|broadband|residential|dsl|fios|cable|google\s*(llc|fiber)|cloudflare|akamai|fastly|amazon|aws|microsoft|azure|oracle|ovh|hetzner|digitalocean|linode|vultr|leaseweb|m247|datacamp|proton|nord|express.?vpn|mullvad|tor\b/i;
+const ISPY = /comcast|verizon|cellco|myvzw|\bvzw\b|at&t|att-|t-mobile|sprint|spectrum|charter|cox\b|centurylink|lumen|frontier|windstream|vodafone|telstra|telecom|telefonica|chinanet|china\s*(telecom|unicom|mobile)|backbone|cellular|mobile|wireless|broadband|residential|dsl|fios|cable|isp\b|google\s*(llc|fiber)|cloudflare|akamai|fastly|amazon|aws|microsoft|azure|oracle|ovh|hetzner|digitalocean|linode|vultr|leaseweb|glesys|serverius|contabo|ionos|godaddy|namecheap|hostinger|hosting|colocation|datacenter|data\s*center|m247|datacamp|proton|nord|express.?vpn|mullvad|tor\b/i;
 
 async function rdns(ip) {
   try { const h = await Promise.race([dnsp.reverse(ip), new Promise((_, rj) => setTimeout(rj, 2500))]); return (h && h[0]) || ""; }
