@@ -81,3 +81,64 @@ export async function draftReply(resp: ProcessedResponse, objective: DraftObject
     .trim();
   return sanitizeDashes(text);
 }
+
+/** The objective the drafter should default to for each reply class. */
+export function objectiveForClass(cls: string): DraftObjective {
+  if (cls === "positive") return "book_call";
+  if (cls === "timing_objection") return "close_polite";
+  return "send_info";
+}
+
+/**
+ * Gather one row's full conversation and draft a reply for it. Shared by the
+ * on-demand composer button and the on-arrival pre-drafter.
+ */
+export async function draftForRow(
+  workspaceId: string,
+  resp: ProcessedResponse,
+  objective: DraftObjective,
+  channel: DraftContext["channel"],
+  recruiterName?: string,
+): Promise<string> {
+  const { getInbox } = await import("./repository");
+  const { getCore } = await import("../core/repository");
+  const prospect = resp.inbound.prospectId ? await getCore().getProspect(resp.inbound.prospectId) : undefined;
+  const rows = await getInbox().forPerson(workspaceId, {
+    prospectId: resp.inbound.prospectId,
+    handles: [prospect?.email, prospect?.phone, prospect?.linkedinUrl, resp.inbound.fromHandle],
+  });
+  const notes = await getInbox().outboundForPerson(workspaceId, { prospectId: resp.inbound.prospectId, responseIds: rows.map((r) => r.inbound.id) });
+  const history = [
+    ...rows.map((r) => ({ at: r.inbound.receivedAt, line: "THEM: " + r.inbound.text.slice(0, 500) })),
+    ...notes.map((n) => ({ at: n.at, line: "YOU: " + n.text.slice(0, 500) })),
+  ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at)).map((x) => x.line);
+  return draftReply(resp, objective, {
+    history,
+    personName: resp.inbound.fromName || prospect?.fullName,
+    personTitle: prospect?.title,
+    personCompany: prospect?.company,
+    recruiterName,
+    classification: resp.classification.class,
+    channel,
+  });
+}
+
+/**
+ * Pre-draft on arrival: the reply is waiting in the composer before the recruiter
+ * even opens the thread. Fire-and-forget from the ingest pipeline; failures are
+ * silent (the composer button still drafts on demand).
+ */
+export async function preDraft(workspaceId: string, resp: ProcessedResponse): Promise<void> {
+  if (!process.env.ANTHROPIC_API_KEY) return;
+  const cls = resp.classification.class;
+  if (!["positive", "soft_yes", "referral", "timing_objection"].includes(cls)) return;
+  // Identity-verified only: never spend a draft on warm-up traffic.
+  if (!resp.inbound.prospectId && !resp.inbound.campaignId) return;
+  const channel = (["email", "linkedin", "sms"].includes(resp.inbound.channel) ? resp.inbound.channel : "email") as DraftContext["channel"];
+  const objective = objectiveForClass(cls);
+  try {
+    const text = await draftForRow(workspaceId, resp, objective, channel);
+    const { getInbox } = await import("./repository");
+    await getInbox().setSuggested(workspaceId, resp.inbound.id, { text, objective, at: new Date().toISOString() });
+  } catch { /* on-demand drafting still works */ }
+}

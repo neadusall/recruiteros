@@ -107,6 +107,8 @@ export interface ProcessedResponse {
   deletedAt?: string;
   /** Snoozed: hidden from the worklist until this moment, then resurfaces on top. */
   snoozedUntil?: string;
+  /** AI reply pre-drafted on arrival, waiting in the composer when the thread opens. */
+  suggestedReply?: { text: string; objective: string; at: string };
 }
 
 /** An outbound message the recruiter sent FROM the reply center (any channel).

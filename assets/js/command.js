@@ -5123,6 +5123,7 @@
     var people = {};       // prospectId -> cross-channel touch summary (from /list)
     var slaRules = {};     // class -> sla bucket (from /list rules)
     var nudges = {};       // responseId -> hours silent (answered threads gone quiet)
+    var timingUntil = {};  // responseId -> iso date parsed from a "not now, try Q4" reply
     var stats = null;      // reply-center performance (last 24h / 7d)
     var booking = "";      // the operator's booking link for one-click insert
     var lastDraft = {};    // responseId -> last AI draft text (verbatim/edited telemetry)
@@ -5205,7 +5206,8 @@
       if (stats) {
         var med = stats.medianFirstResponseMins;
         perf = ' · Last 24h: ' + stats.sent24h + ' sent, ' + stats.cleared24h + ' cleared' +
-          (med >= 0 ? ' · median first response ' + (med < 60 ? med + 'm' : Math.round(med / 60) + 'h') : "");
+          (med >= 0 ? ' · median first response ' + (med < 60 ? med + 'm' : Math.round(med / 60) + 'h') : "") +
+          (stats.booked7d ? ' · <b style="color:var(--success,#1d7a3e)">' + stats.booked7d + ' booked this week</b>' : "");
       }
       strip.style.display = "";
       strip.innerHTML = "<b>" + waiting + "</b> waiting for you" +
@@ -5239,6 +5241,7 @@
         inbox = ((d && d.items) || []).map(mapProcessed);
         people = (d && d.people) || {};
         nudges = (d && d.nudges) || {};
+        timingUntil = (d && d.timingUntil) || {};
         stats = (d && d.stats) || null;
         booking = (d && d.booking) || "";
         slaRules = {};
@@ -5376,6 +5379,17 @@
         '<div style="max-height:340px;overflow:auto;padding:2px 2px 0">' + (bubbles || '<div class="muted" style="font-size:12.5px">No history yet beyond this reply.</div>') + "</div>" +
         chanBar;
       var box = slot.querySelector("textarea");
+      // On-arrival AI pre-draft: waiting in the composer the moment the thread opens.
+      if (box && !box.value && anchorRow && anchorRow.suggested && anchorRow.suggested.text && !lastDraft[ridv]) {
+        box.value = anchorRow.suggested.text;
+        lastDraft[ridv] = anchorRow.suggested.text;
+        var noteEl = document.createElement("div");
+        noteEl.className = "muted";
+        noteEl.style.cssText = "font-size:11.5px;margin-top:4px";
+        noteEl.textContent = "AI drafted this from their reply the moment it arrived. Edit freely or clear it.";
+        box.parentNode.insertBefore(noteEl, box.nextSibling);
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       if (box) box.focus();
     }
 
@@ -5455,11 +5469,28 @@
         if (pop) pop.style.display = pop.style.display === "none" ? "" : "none";
         return;
       }
-      if (act === "snooze") {
-        var hrs = parseInt(btn.getAttribute("data-h"), 10) || 24;
+      if (act === "snooze" || act === "snoozeuntil") {
+        var untilIso = act === "snoozeuntil"
+          ? btn.getAttribute("data-until")
+          : new Date(Date.now() + (parseInt(btn.getAttribute("data-h"), 10) || 24) * 3600000).toISOString();
         btn.disabled = true;
-        send("/response/actions", "POST", { action: "snooze", responseId: ridv, until: new Date(Date.now() + hrs * 3600000).toISOString() })
-          .then(function (r) { if (r.ok) { toast("Snoozed. It comes back on top."); if (openRid === ridv) openRid = null; load(); } else { toast("Could not snooze"); btn.disabled = false; } })
+        send("/response/actions", "POST", { action: "snooze", responseId: ridv, until: untilIso })
+          .then(function (r) {
+            if (r.ok) {
+              toast(act === "snoozeuntil" ? "Scheduled. It comes back on top " + new Date(untilIso).toLocaleDateString(undefined, { month: "short", day: "numeric" }) + "." : "Snoozed. It comes back on top.");
+              if (openRid === ridv) openRid = null; load();
+            } else { toast("Could not snooze"); btn.disabled = false; }
+          })
+          .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      if (act === "refprospect") {
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "referral_prospect", responseId: ridv })
+          .then(function (r) {
+            if (r.ok) { toast((r.data && r.data.detail) || "Added to your pipeline"); btn.textContent = "Added ✓"; }
+            else { toast((r.data && (r.data.detail || r.data.error)) || "Could not add"); btn.disabled = false; }
+          })
           .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
         return;
       }
@@ -5589,6 +5620,9 @@
         else if (isAtRisk(r)) agePill = '<span class="cls" style="background:#f6a723;color:#3a2a00" title="Getting close to the response window. Answer now while it is warm.">' + esc(age) + " · due soon</span>";
         else agePill = '<span class="cls" style="background:var(--surface-2,#eef1f6);color:var(--text-muted,#5a6172)">' + esc(age) + "</span>";
       }
+      var draftPill = (r.suggested && !r.handled)
+        ? '<span class="cls" style="background:#e8f0fe;color:#2e5bd7" title="An AI reply is already drafted and waiting in the composer. Open, skim, send.">draft ready</span>'
+        : "";
       var quietPill = nudges[r.id]
         ? '<span class="cls" style="background:#f6a723;color:#3a2a00" title="You answered, then it went quiet. A light nudge inside two days keeps the thread alive; three silent days roughly halves the booking odds.">quiet ' + esc(String(nudges[r.id])) + "h · nudge?</span>"
         : (snoozeReturned(r) && !r.handled ? '<span class="cls" style="background:#f6a723;color:#3a2a00" title="Snooze ended, back on your list">back from snooze</span>' : "");
@@ -5598,13 +5632,22 @@
       return '<div class="resp-item"' + ridAttr + (r.handled ? ' style="opacity:.62"' : "") + '><div class="resp-top">' +
         '<span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
         '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + (r.email ? " · " + esc(r.email) : "") + "</div></div>" +
-        agePill + quietPill +
+        agePill + quietPill + draftPill +
         '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
         '<div class="resp-text">"' + esc(r.text) + '"</div>' +
         touchLine(r) +
         '<div class="resp-thread"></div>' +
         '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") +
         '<button class="resp-btn" data-act="thread"' + ridAttr + ' title="Open the whole conversation and answer on any channel">Reply</button>' +
+        (timingUntil[r.id] && r.captured && r.captured.timing
+          ? '<button class="resp-btn ghost" data-act="snoozeuntil" data-until="' + esc(timingUntil[r.id]) + '"' + ridAttr + ' title="They said &quot;' + esc(r.captured.timing) + '&quot;. Snooze this until then; it comes back on top when the window opens.">Comeback ' + esc(new Date(timingUntil[r.id]).toLocaleDateString(undefined, { month: "short", day: "numeric" })) + "</button>"
+          : "") +
+        (r.captured && r.captured.referralTo
+          ? (function () {
+              var nm = String(r.captured.referralTo).replace(/^(my|our|the)\s+/i, "").replace(/^(colleague|coworker|co-worker|friend|boss|manager|partner)\s+/i, "").trim();
+              return '<button class="resp-btn ghost" data-act="refprospect"' + ridAttr + ' title="They referred you to ' + esc(r.captured.referralTo) + '. Add them to your pipeline with the referrer as context.">+ Add ' + esc(nm.split(/\s+/).slice(0, 2).join(" ") || "referral") + "</button>";
+            })()
+          : "") +
         (function () { var c = contactFor(r); return contactBtns(c.phone, c.linkedinUrl, c.company, ""); })() +
         '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
         '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
@@ -23568,7 +23611,7 @@
     return l ? (l[motion] || l.status) : s;
   }
   function mapProcessed(p) {
-    return { id: p.inbound.id, name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.inbound.prospectId || p.prospectId || (p.prospect && p.prospect.id) || null, campaignId: p.inbound.campaignId || null, email: p.inbound.fromHandle || null, canReply: (p.inbound.channel === "email" && !!p.inbound.toMailbox), handled: !!p.handledAt, receivedAt: p.inbound.receivedAt || null, snoozedUntil: p.snoozedUntil || null };
+    return { id: p.inbound.id, name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.inbound.prospectId || p.prospectId || (p.prospect && p.prospect.id) || null, campaignId: p.inbound.campaignId || null, email: p.inbound.fromHandle || null, canReply: (p.inbound.channel === "email" && !!p.inbound.toMailbox), handled: !!p.handledAt, receivedAt: p.inbound.receivedAt || null, snoozedUntil: p.snoozedUntil || null, captured: (p.classification && p.classification.captured) || null, suggested: p.suggestedReply || null };
   }
   // A reply is REAL (not Smartlead warm-up) if it's identity-verified: either matched to a known
   // prospect, or tagged by the MPC bridge (which only ingests inbound from people we actually

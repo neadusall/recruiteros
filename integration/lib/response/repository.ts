@@ -96,6 +96,16 @@ class InboxStore {
     return true;
   }
 
+  /** Attach the on-arrival AI pre-draft to a response. */
+  async setSuggested(workspaceId: string, id: string, s: { text: string; objective: string; at: string }): Promise<boolean> {
+    await this.ready();
+    const p = this.items.find((x) => x.inbound.id === id && x.inbound.workspaceId === workspaceId);
+    if (!p) return false;
+    p.suggestedReply = s;
+    this.persist();
+    return true;
+  }
+
   /** Snooze a response until a moment (empty/undefined clears the snooze). */
   async setSnooze(workspaceId: string, id: string, until?: string): Promise<boolean> {
     await this.ready();
