@@ -72,7 +72,12 @@ async function sendViaMailboxApi(fromEmail, to, subject, body) {
 async function main() {
   mkdirSync(OUT, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const curated = loadArray(CURATION);
+  // START FRESH: ignore the pre-finance firehose backlog entirely. Only work records curated on or
+  // after the finance-approach cutoff (all records carry an ISO curatedAt). Override with MPC_CURATED_SINCE.
+  const SINCE = process.env.MPC_CURATED_SINCE || "2026-08-11";
+  const curatedAll = loadArray(CURATION);
+  const curated = SINCE ? curatedAll.filter((r) => String((r.lead || r).curatedAt || "") >= SINCE) : curatedAll;
+  console.log(`curated total: ${curatedAll.length} | finance-era (since ${SINCE}): ${curated.length}`);
 
   // Stage 1-3: role + decision-maker + email gates.
   const gated = [];

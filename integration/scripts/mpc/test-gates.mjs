@@ -72,6 +72,14 @@ test("blocks a role/shared inbox + junk local-part email", () => {
   const q = base(); q.likelyEmail = "info@upstart.com";
   assert.ok(assessProspect(q).failures.some(f => /role\/shared inbox/.test(f)));
 });
+test("blocks web/marketing scraper artifacts (Trending Topics / Founder Managing)", () => {
+  const a = base(); a.company = "CBH"; a.domain = "cbh.com";
+  a.managerName = "Trending Topics"; a.managerTitle = "Chief Financial Officer"; a.likelyEmail = "trending.topics@cbh.com";
+  assert.equal(assessProspect(a).eligible, false);
+  const b = base(); b.company = "Socket"; b.domain = "socket.dev";
+  b.managerName = "Founder Managing"; b.managerTitle = "Founder"; b.likelyEmail = "foundermanaging.ventures@socket.dev";
+  assert.equal(assessProspect(b).eligible, false);
+});
 test("metroOf pulls a real metro, rejects remote", () => {
   assert.equal(metroOf({ jobLocation: "Vernon, CA" }), "Vernon, CA");
   assert.equal(metroOf({ jobLocation: "United States | Remote" }), null);

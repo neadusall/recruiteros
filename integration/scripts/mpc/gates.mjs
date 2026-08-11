@@ -13,8 +13,10 @@ const ACCOUNTING_ROLE = /\b(controller|comptroller|cpa|certified public accounta
 const VALID_DM_TITLE = /\b(cfo|chief financial officer|chief accounting officer|controller|comptroller|vp,? finance|vice president,? finance|head of finance|director of finance|finance director|chief executive|ceo|founder|owner|president|managing partner|chief operating officer|coo|head of talent|head of people|chief people)\b/i;
 
 // Scraper artifacts that slip in as a "name" or email local-part (e.g. "Toggle Description",
-// "measurable.results@..."). These are never a real decision-maker.
-const JUNK_TOKEN = /\b(toggle|description|example|sample|measurable|results|placeholder|lorem|ipsum|undefined|unknown|noreply|no-reply|webmaster|postmaster|mailer|test)\b/i;
+// "Trending Topics", "Founder Managing", "measurable.results@..."). These are never a real person.
+// Applied to the NAME and the email local-part only (NOT the title), so legit titles like
+// "Founder" or "Managing Partner" are unaffected while a NAME of "Founder Managing" is rejected.
+const JUNK_TOKEN = /\b(toggle|description|example|sample|measurable|results|placeholder|lorem|ipsum|undefined|unknown|noreply|no-reply|webmaster|postmaster|mailer|test|trending|topics?|founder|managing|ventures?|latest|news|blog|update|updates|subscribe|newsletter|header|footer|sidebar|cookie|privacy|terms|sitemap|categor(?:y|ies)|archive|featured|popular|related|readmore|learnmore|signup|signin|login|register|download|untitled|anonymous|admin|website|homepage)\b/i;
 // Role/shared inboxes are never a named person we can pitch.
 const ROLE_ACCOUNT = /^(info|admin|sales|hello|contact|support|careers?|jobs?|hr|team|office|marketing|billing|accounts?|enquir(?:y|ies)|inquiry|general|mail|email|newsletter|press|media|help|service|noreply|no-reply)$/i;
 
