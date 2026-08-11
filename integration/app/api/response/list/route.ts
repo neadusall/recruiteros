@@ -82,9 +82,22 @@ export async function GET(req: Request) {
     }
   } catch { /* best-effort */ }
 
+  // Timing objections become scheduled comebacks: parse "Q4" / "next quarter" /
+  // "in 3 months" into a concrete resurface date for one-click snooze-until-then.
+  const timingUntil: Record<string, string> = {};
+  try {
+    const { timingToDate } = await import("../../../../lib/response/timing");
+    for (const it of items) {
+      const captured = it.classification.captured?.timing;
+      if (!captured) continue;
+      const d = timingToDate(captured);
+      if (d && d.getTime() > Date.now()) timingUntil[it.inbound.id] = d.toISOString();
+    }
+  } catch { /* the chip just doesn't render */ }
+
   // Reply-center performance: how fast and how much, so the recruiter sees the
   // needle move. First-response = outbound note minus its inbound's receivedAt.
-  const stats = { sent24h: 0, cleared24h: 0, medianFirstResponseMins: -1 };
+  const stats = { sent24h: 0, cleared24h: 0, medianFirstResponseMins: -1, booked7d: 0 };
   try {
     const dayAgo = Date.now() - 24 * 3600_000;
     const weekAgo = Date.now() - 7 * 24 * 3600_000;
@@ -101,9 +114,34 @@ export async function GET(req: Request) {
       }
     }
     for (const i of items) if (i.handledAt && Date.parse(i.handledAt) >= dayAgo) stats.cleared24h++;
+    // Meetings booked in the last 7 days across the people in this inbox.
+    for (const pid of Object.keys(people)) {
+      const acts = await getCore().listActivity(pid);
+      if (acts.some((a) => /book/.test(a.type) && Date.parse(a.at) >= weekAgo)) stats.booked7d++;
+    }
     if (deltas.length) {
       deltas.sort((a, b) => a - b);
       stats.medianFirstResponseMins = Math.round(deltas[Math.floor(deltas.length / 2)]);
+    }
+  } catch { /* best-effort */ }
+
+  // The outcome loop: per-objective reply rates for AI-assisted sends, so the
+  // drafter is judged on what actually got answered, not on how it reads.
+  const draftPerf: Record<string, { sent: number; replied: number }> = {};
+  try {
+    const notes = await getInbox().outboundForPerson(ws, { responseIds: items.map((i) => i.inbound.id) });
+    for (const n of notes) {
+      if (!n.objective || n.aiDraft === "none" || !n.aiDraft) continue;
+      const perf = (draftPerf[n.objective] ||= { sent: 0, replied: 0 });
+      perf.sent++;
+      // Did the person come back after this send? Any inbound from the same
+      // person (prospect id or the original row's handle) later than the note.
+      const anchor = items.find((i) => i.inbound.id === n.responseId);
+      const cameBack = items.some((i) =>
+        i.inbound.receivedAt > n.at &&
+        ((n.prospectId && i.inbound.prospectId === n.prospectId) ||
+          (anchor?.inbound.fromHandle && i.inbound.fromHandle === anchor.inbound.fromHandle)));
+      if (cameBack) perf.replied++;
     }
   } catch { /* best-effort */ }
 
@@ -113,5 +151,13 @@ export async function GET(req: Request) {
     booking = bookingUrl("consultative");
   } catch { /* composer just hides the insert button */ }
 
-  return ok({ items, people, nudges, stats, booking, rules: ROUTING_RULES, order: CLASS_ORDER });
+  // The worklist's per-class response windows (tighter than the routing matrix
+  // for hot classes), so the UI and the watchdog agree on what "overdue" means.
+  let windows: Record<string, number> = {};
+  try {
+    const { responseWindowHours } = await import("../../../../lib/response/watchdog");
+    for (const r of ROUTING_RULES ? Object.keys(ROUTING_RULES) : []) windows[r] = responseWindowHours(r);
+  } catch { windows = {}; }
+
+  return ok({ items, people, nudges, timingUntil, stats, draftPerf, booking, windows, rules: ROUTING_RULES, order: CLASS_ORDER });
 }

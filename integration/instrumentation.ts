@@ -58,6 +58,15 @@ export async function register(): Promise<void> {
       /* never let an instrumentation hiccup block server startup */
     }
     try {
+      // Reply-center watchdog: blown-SLA hot replies escalate to the operator, quiet
+      // threads get their nudge pre-drafted, and the inbox snapshot stays bounded —
+      // all without anyone having the Replies tab open.
+      const { ensureResponseWatchdog } = await import("./lib/response/watchdog");
+      ensureResponseWatchdog();
+    } catch {
+      /* never let an instrumentation hiccup block server startup */
+    }
+    try {
       // Set-and-forget search queue: re-queue any search interrupted by the restart (so a batch
       // picks up where it left off, not from scratch), then arm the background runner that scrapes
       // + auto-merges each queued search with live per-search progress.

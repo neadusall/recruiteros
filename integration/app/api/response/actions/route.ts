@@ -92,7 +92,7 @@ async function sendOnChannel(
 export async function POST(req: Request) {
   const g = requireSession(req);
   if ("response" in g) return g.response;
-  const b = await body<{ action?: string; text?: string; prospectId?: string; responseId?: string; handled?: boolean; channel?: string; objective?: string; until?: string; aiDraft?: string }>(req);
+  const b = await body<{ action?: string; text?: string; prospectId?: string; responseId?: string; handled?: boolean; channel?: string; objective?: string; until?: string; aiDraft?: string; aiObjective?: string }>(req);
   if (!b?.action) return fail("missing_action", 422);
   const ws = g.ctx.workspace.id;
 
@@ -128,6 +128,7 @@ export async function POST(req: Request) {
         prospectId: resp.inbound.prospectId || null, toHandle: sent.toHandle,
         channel, text: b.text, at: nowIso(), provider: sent.provider,
         aiDraft: b.aiDraft === "verbatim" || b.aiDraft === "edited" ? b.aiDraft : "none",
+        objective: typeof b.aiObjective === "string" && b.aiObjective ? b.aiObjective.slice(0, 24) : undefined,
       });
       await getInbox().setHandled(ws, b.responseId, true); // answering clears it from the worklist
       return ok({ ok: true, note: sent.note });
@@ -139,29 +140,42 @@ export async function POST(req: Request) {
       if (!resp) return fail("not_found", 404);
       const objective = (["book_call", "send_info", "nudge", "close_polite"].includes(String(b.objective)) ? b.objective : "send_info") as import("../../../../lib/response/draft").DraftObjective;
       const channel = (["email", "linkedin", "sms"].includes(String(b.channel)) ? b.channel : "email") as "email" | "linkedin" | "sms";
-      const prospect = resp.inbound.prospectId ? await getCore().getProspect(resp.inbound.prospectId) : undefined;
-      // The person's recent conversation, oldest first, for grounding.
-      const rows = await getInbox().forPerson(ws, { prospectId: resp.inbound.prospectId, handles: [prospect?.email, prospect?.phone, prospect?.linkedinUrl, resp.inbound.fromHandle] });
-      const notes = await getInbox().outboundForPerson(ws, { prospectId: resp.inbound.prospectId, responseIds: rows.map((r) => r.inbound.id) });
-      const history = [
-        ...rows.map((r) => ({ at: r.inbound.receivedAt, line: "THEM: " + r.inbound.text.slice(0, 500) })),
-        ...notes.map((n) => ({ at: n.at, line: "YOU: " + n.text.slice(0, 500) })),
-      ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at)).map((x) => x.line);
       try {
-        const { draftReply } = await import("../../../../lib/response/draft");
-        const text = await draftReply(resp, objective, {
-          history,
-          personName: resp.inbound.fromName || prospect?.fullName,
-          personTitle: prospect?.title,
-          personCompany: prospect?.company,
-          recruiterName: g.ctx.user?.name,
-          classification: resp.classification.class,
-          channel,
-        });
+        const { draftForRow } = await import("../../../../lib/response/draft");
+        const text = await draftForRow(ws, resp, objective, channel, g.ctx.user?.name);
         return ok({ text });
       } catch (e: any) {
         return fail("draft_failed", 502, { detail: "The AI drafter is unavailable right now. Write it by hand or try again." });
       }
+    }
+    case "referral_prospect": {
+      // "Talk to Sam" is a warm lead. One click puts the referred person into the
+      // pipeline, inheriting campaign + company context from the referrer.
+      if (!b.responseId) return fail("missing_responseId", 422);
+      const resp = await getInbox().getById(ws, b.responseId);
+      if (!resp) return fail("not_found", 404);
+      const raw = resp.classification.captured?.referralTo || "";
+      const name = raw.replace(/^(my|our|the)\s+/i, "").replace(/^(colleague|coworker|co-worker|friend|boss|manager|partner)\s+/i, "").trim();
+      if (name.length < 2) return fail("no_referral_name", 409, { detail: "No usable name was captured from the reply. Add them by hand from Candidates." });
+      const referrer = resp.inbound.prospectId ? await getCore().getProspect(resp.inbound.prospectId) : undefined;
+      const prospect = {
+        id: rid("pro"), workspaceId: ws,
+        campaignId: referrer?.campaignId || resp.inbound.campaignId || "",
+        motion: referrer?.motion,
+        fullName: name, firstName: name.split(/\s+/)[0],
+        company: referrer?.company,
+        status: "queued" as const, dripStage: null, warmth: 20,
+      };
+      await getCore().saveProspect(prospect as any);
+      try {
+        await getCore().recordActivity({
+          id: rid("act"), workspaceId: ws, prospectId: prospect.id,
+          channel: "system", type: "referral_captured",
+          summary: "Referred by " + (referrer?.fullName || resp.inbound.fromName || "a reply") + " in the reply center",
+          at: nowIso(),
+        });
+      } catch { /* prospect is already saved */ }
+      return ok({ ok: true, name, detail: name + " added to your pipeline (referred by " + (referrer?.fullName || resp.inbound.fromName || "this reply") + ")" });
     }
     case "snooze": {
       // Hide until a moment, then resurface on top of the worklist.

@@ -107,6 +107,10 @@ export interface ProcessedResponse {
   deletedAt?: string;
   /** Snoozed: hidden from the worklist until this moment, then resurfaces on top. */
   snoozedUntil?: string;
+  /** AI reply pre-drafted on arrival, waiting in the composer when the thread opens. */
+  suggestedReply?: { text: string; objective: string; at: string };
+  /** Stamped when the watchdog escalated this blown-SLA hot reply to the operator (sent once). */
+  escalatedAt?: string;
 }
 
 /** An outbound message the recruiter sent FROM the reply center (any channel).
@@ -128,4 +132,7 @@ export interface OutboundNote {
   /** AI-draft telemetry: was this an AI draft sent verbatim, edited, or written by hand?
    *  (Industry heuristic: a high edit rate means the drafter's tone needs work.) */
   aiDraft?: "verbatim" | "edited" | "none";
+  /** Which drafting objective produced it (book_call / send_info / nudge / close_polite),
+   *  so reply-rate per objective can be measured and the drafter tuned on outcomes. */
+  objective?: string;
 }

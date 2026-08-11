@@ -39,6 +39,11 @@ export async function processInbound(
   const processed = await route(inbound, classification, pauseSequences);
 
   inbox.add(processed);
+
+  // Pre-draft the reply so it is already waiting in the composer when the
+  // recruiter opens the thread. Fire-and-forget: ingest never waits on the AI.
+  import("./draft").then((d) => void d.preDraft(workspaceId, processed).catch(() => {})).catch(() => {});
+
   return processed;
 }
 
