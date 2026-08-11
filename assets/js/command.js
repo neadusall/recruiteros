@@ -3674,6 +3674,13 @@
       var vrows = (m.variants || []).map(function (v) {
         return '<div class="bar-row"><div>' + esc(v.variant) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(2, (v.rate / maxR) * 100) + '%"></div></div><div class="num">' + v.replied + "/" + v.sent + " (" + v.rate + "%)</div></div>";
       }).join("") || '<div class="empty">No sends yet.</div>';
+      var adv = (m.advisor && m.advisor.recommendations) || [];
+      var advHtml = adv.length ? ('<h4 style="margin:16px 0 6px">Advisor &middot; how to move the needle</h4>' +
+        adv.map(function (r) {
+          var pc = r.priority === "high" ? "bad" : r.priority === "medium" ? "amber" : "good";
+          return '<div class="list-row" style="align-items:flex-start"><span class="sv ' + pc + '" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-right:10px;flex:none;align-self:center">' + esc(String(r.priority || "").toUpperCase()) + '</span><div><div class="lr-main">' + esc(r.title) + '</div><div class="lr-sub">' + esc(r.detail) + "</div></div></div>";
+        }).join("") +
+        '<div class="note" style="margin-top:6px">AI read, based on ' + ((m.advisor.basedOn && m.advisor.basedOn.sent) || 0) + " sent &middot; updated " + esc((m.advisor.generatedAt || "").slice(0, 10)) + "</div>") : "";
       host.innerHTML =
         '<div class="card" style="margin-bottom:16px">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc((m.generatedAt || "").slice(11, 16)) + " UTC</span></div>" +
@@ -3685,7 +3692,7 @@
           "</div>" +
           '<div style="margin-top:10px">' + pills + "</div>" +
           '<h4 style="margin:16px 0 6px">What is working &middot; reply rate by angle</h4>' +
-          '<div class="bars">' + vrows + "</div>" +
+          '<div class="bars">' + vrows + "</div>" + advHtml +
         "</div>";
     }).catch(function () { /* cockpit is best-effort; the rest of the Dashboard still loads */ });
 
