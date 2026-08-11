@@ -1,34 +1,57 @@
-// RecruitersOS · MPC · seed the Targeted Search Queue with a finance-role bank.
+// RecruitersOS · MPC · seed the Targeted Search Queue with a finance-role bank (scaled for volume).
 //
-// THE THROUGHPUT FIX. The daily send is only as big as the CLEAN finance pool, and the pool was
-// a generic hiring firehose (97% of records were non-finance roles the gate rightly dropped).
-// This loads the in-market Targeted Search Queue with exact accounting/finance role searches,
-// nationwide, each marked "queued". The app's in-process runner (4s tick) then scrapes each via
-// JSearch and merges the companies into the pool; the 4-min curation tick resolves the finance
-// decision-maker and Reoon-validates the email. Result: the pool goes finance-DENSE, so the same
-// strict gates yield hundreds of clean prospects instead of ~40.
+// THE THROUGHPUT ENGINE. The daily send is only as big as the CLEAN finance pool. This loads the
+// in-market Targeted Search Queue with accounting/finance role searches, nationwide AND per-metro,
+// each marked "queued". The app's in-process runner (4s tick) scrapes each via JSearch and merges
+// companies into the pool; the 4-min curation tick resolves the finance decision-maker and
+// Reoon-validates the email (INMARKET_REQUIRE_VALIDATED=1, so only validated enrolls).
 //
-// Writes the queue snapshot the app reads (/data/snap_inmarket_search_queue_v1.json) directly and
-// atomically. Idempotent: a role already in the queue is RE-QUEUED (fresh pull), never duplicated,
-// so this doubles as the standing-rota re-trigger.
+// SIZING NOTES (learned the hard way):
+//  - JSearch aggregates `num_pages = ceil(limit/10)` pages in ONE call under a 30s timeout. limit>~80
+//    times out ("jobfeed_unreachable"). So per-search LIMIT is kept small (default 50 = 5 pages) and
+//    we get VOLUME from MANY searches instead of few fat ones.
+//  - Per-metro searches for the core roles both multiply supply AND give the sender a real city to
+//    pair (hyper-local targeting). National searches catch remote + everything else.
+//  - JSearch quota is 50k calls/month; ~148 searches x 5 pages = ~740 calls/run, comfortably under.
+//
+// Idempotent: a search already in the queue is RE-QUEUED (fresh pull), never duplicated, so this is
+// also the standing-rota re-trigger. Writes the queue snapshot the app reads, atomically.
 //
 //   node scripts/mpc/seed-finance-searches.mjs
 
 import { readFileSync, writeFileSync, renameSync } from "node:fs";
 
 const FILE = process.env.MPC_QUEUE_FILE || "/data/snap_inmarket_search_queue_v1.json";
-const LOCATION = process.env.MPC_SEARCH_LOCATION || "United States"; // national, per Ryan's scope
-const DATE = process.env.MPC_SEARCH_DATE || "month";                 // wide window to build supply
-const LIMIT = Math.min(Math.max(Number(process.env.MPC_SEARCH_LIMIT || 200), 50), 5000);
+const DATE = process.env.MPC_SEARCH_DATE || "week";                  // rolling window; "3days" for daily re-runs
+const LIMIT = Math.min(Math.max(Number(process.env.MPC_SEARCH_LIMIT || 50), 10), 80); // keep <=80 so JSearch doesn't time out
 
 // Every query maps to the sender's ACCOUNTING_ROLE gate, so what we source is what can send.
 const ROLES = [
-  "Controller", "Assistant Controller", "Corporate Controller",
-  "Accounting Manager", "Senior Accountant", "Staff Accountant",
-  "CPA", "Tax Manager", "Audit Manager",
-  "FP&A Manager", "Financial Planning and Analysis Analyst", "Finance Manager",
-  "Director of Finance", "Cost Accountant", "Revenue Accountant",
+  "Controller", "Assistant Controller", "Corporate Controller", "Divisional Controller",
+  "Accounting Manager", "Senior Accountant", "Staff Accountant", "Senior Accounting Manager",
+  "CPA", "Tax Manager", "Tax Director", "Audit Manager",
+  "FP&A Manager", "FP&A Analyst", "Financial Planning and Analysis Manager", "Finance Manager",
+  "Director of Finance", "VP Finance", "Cost Accountant", "Revenue Accountant",
 ];
+
+// Highest-volume roles get a per-metro pass too (volume + a real city to pair for personalization).
+const CORE_ROLES = [
+  "Controller", "Assistant Controller", "Accounting Manager",
+  "Senior Accountant", "Staff Accountant", "Finance Manager",
+  "FP&A Manager", "Tax Manager",
+];
+
+// Top US metros by finance employment (JSearch reads "<role> in <metro>" natively).
+const METROS = [
+  "New York, NY", "Los Angeles, CA", "Chicago, IL", "Dallas, TX", "Houston, TX",
+  "Atlanta, GA", "Boston, MA", "San Francisco, CA", "Washington, DC", "Philadelphia, PA",
+  "Phoenix, AZ", "Denver, CO", "Seattle, WA", "Miami, FL", "Minneapolis, MN", "Charlotte, NC",
+];
+
+// Build the full search spec list: national for every role, plus core roles x every metro.
+const specs = [];
+for (const role of ROLES) specs.push({ name: `${role} (national)`, query: role, location: "United States" });
+for (const role of CORE_ROLES) for (const metro of METROS) specs.push({ name: `${role} - ${metro}`, query: role, location: metro });
 
 function load() {
   try { const a = JSON.parse(readFileSync(FILE, "utf8")); return Array.isArray(a) ? a : []; }
@@ -45,17 +68,17 @@ const rows = load();
 const byName = new Map(rows.map((r) => [String(r.name || "").toLowerCase(), r]));
 let added = 0, requeued = 0;
 
-for (let i = 0; i < ROLES.length; i++) {
-  const role = ROLES[i];
-  const name = `${role} (national)`;
+for (let i = 0; i < specs.length; i++) {
+  const spec = specs[i];
   const run = { state: "queued", phase: "queued", progress: 0, queuedAt: now };
-  const existing = byName.get(name.toLowerCase());
+  const existing = byName.get(spec.name.toLowerCase());
   if (existing) {
-    existing.run = run; existing.updatedAt = now; requeued++;
+    existing.run = run; existing.query = spec.query; existing.location = spec.location;
+    existing.datePosted = DATE; existing.limit = LIMIT; existing.updatedAt = now; requeued++;
   } else {
     rows.unshift({
       id: "sq_fin_" + i + "_" + Date.now().toString(36),
-      name, query: role, location: LOCATION, datePosted: DATE,
+      name: spec.name, query: spec.query, location: spec.location, datePosted: DATE,
       employmentTypes: ["FULLTIME"], remoteOnly: false, limit: LIMIT,
       createdAt: now, updatedAt: now, runs: 0, status: "draft", run,
     });
@@ -64,5 +87,5 @@ for (let i = 0; i < ROLES.length; i++) {
 }
 save(rows);
 console.log(`finance search bank -> +${added} added, ${requeued} re-queued, ${rows.length} total queued`);
-console.log(`location="${LOCATION}" datePosted=${DATE} limit=${LIMIT} roles=${ROLES.length}`);
-console.log("the app's 4s runner will scrape these into the pool; curation (4min) enriches + validates.");
+console.log(`roles=${ROLES.length} national + ${CORE_ROLES.length}x${METROS.length} metro = ${specs.length} searches | datePosted=${DATE} limit=${LIMIT} (num_pages=${Math.ceil(LIMIT / 10)})`);
+console.log("the app's 4s runner scrapes these into the pool; curation (4min) enriches + Reoon-validates.");
