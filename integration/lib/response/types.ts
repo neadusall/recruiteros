@@ -102,4 +102,25 @@ export interface ProcessedResponse {
   atsEventId?: string;
   /** Set when the recruiter clears it from the daily worklist (the checklist "Done"). */
   handledAt?: string;
+  /** Set when the recruiter deletes it from the inbox. Soft: the row is kept in the
+   *  snapshot (and the seen-id guard stops re-ingest) but never listed again. */
+  deletedAt?: string;
+}
+
+/** An outbound message the recruiter sent FROM the reply center (any channel).
+ *  Kept here with the full text, so the person's thread shows both directions —
+ *  the ActivityEvent log only carries a generic summary. */
+export interface OutboundNote {
+  id: string;
+  workspaceId: string;
+  /** The inbox row this was sent in answer to. */
+  responseId: string;
+  prospectId: string | null;
+  /** The recipient handle actually used (email / phone / linkedin url). */
+  toHandle?: string;
+  channel: Channel;
+  text: string;
+  at: string;
+  /** Where the send went out (smtp box, linkedin_engine, taltxt, telnyx...). */
+  provider?: string;
 }

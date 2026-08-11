@@ -5083,102 +5083,256 @@
 
   function renderResponse(el) {
     var active = "all";
-    el.innerHTML = head("Response, the unified inbox",
-      "Every reply across email, LinkedIn and SMS, auto-classified by AI and routed by deterministic rules. Hottest first.");
     var realOnly = true;   // default: hide Smartlead warm-up, show only identity-verified replies
+    var showDone = false;  // include rows already cleared from the worklist
+    var openRid = null;    // the row whose thread panel is expanded
+    var threads = {};      // responseId -> loaded thread payload
+    var people = {};       // prospectId -> cross-channel touch summary (from /list)
+    var slaRules = {};     // class -> sla bucket (from /list rules)
+
+    el.innerHTML = head("Response, your reply center",
+      "Every reply across email, LinkedIn and SMS in one place. Open a reply to see every touch on every channel, answer without leaving, and work the list to zero.");
+    var strip = document.createElement("div");
+    strip.className = "note";
+    strip.style.cssText = "margin:0 0 10px;display:none";
+    el.appendChild(strip);
     var filter = document.createElement("div");
     filter.className = "chan-filter";
     ["all", "email", "linkedin", "sms"].forEach(function (c) {
       filter.innerHTML += '<span class="cf ' + (c === "all" ? "active" : "") + '" data-c="' + c + '">' + (c === "all" ? "All channels" : c.toUpperCase()) + "</span>";
     });
     filter.innerHTML += '<span class="cf realtog active" data-realtog="1" title="Hide Smartlead warm-up: show only identity-verified replies (matched prospects + verified MPC finance replies)">Real only</span>';
+    filter.innerHTML += '<span class="cf donetog" data-donetog="1" title="Show replies you already cleared with Done or answered">Show done</span>';
     el.appendChild(filter);
     var listWrap = document.createElement("div");
     el.appendChild(listWrap);
 
     var inbox = [];        // loaded from the API
     var loaded = false;
-    function paint() {
-      if (!loaded) { listWrap.innerHTML = loading(); return; }
+
+    function slaHours(cls) {
+      var s = slaRules[cls];
+      return s === "immediate" ? 1 : s === "four_hours" ? 4 : 24; // same_day and unknown: a day
+    }
+    function waitingHours(r) {
+      var t = r.receivedAt ? Date.parse(r.receivedAt) : NaN;
+      return isNaN(t) ? 0 : Math.max(0, (Date.now() - t) / 3600000);
+    }
+    function isOverdue(r) { return !r.handled && waitingHours(r) > slaHours(r.cls); }
+    function clsRank(c) {
+      var order = ["positive", "soft_yes", "referral", "timing_objection", "unclassified", "fit_objection", "not_interested", "auto_reply", "stop"];
+      var i = order.indexOf(c); return i < 0 ? 5 : i;
+    }
+
+    function visibleItems() {
       var hidden = 0;
       var items = inbox.filter(function (r) {
-        if (r.handled) return false;                 // cleared from the day's worklist
+        if (!showDone && r.handled) return false;    // cleared from the day's worklist
         if (active !== "all" && r.channel !== active) return false;
         if (realOnly && !respVerified(r)) { hidden++; return false; }
         return true;
       });
-      var note = (realOnly && hidden) ? '<div class="note" style="margin:0 0 10px">Hiding ' + hidden + ' warm-up / unverified message' + (hidden === 1 ? "" : "s") + '. <a href="#" data-showall="1">Show all</a></div>' : "";
-      listWrap.innerHTML = note + (items.map(respItem).join("") ||
-        '<div class="empty">No ' + (realOnly ? "verified " : "") + 'replies' + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every real reply lands here, auto-classified.</div>");
+      // Never lose anyone: overdue first, then hottest class, then newest.
+      items.sort(function (a, b) {
+        var od = (isOverdue(b) ? 1 : 0) - (isOverdue(a) ? 1 : 0); if (od) return od;
+        var cr = clsRank(a.cls) - clsRank(b.cls); if (cr) return cr;
+        return (b.receivedAt || "").localeCompare(a.receivedAt || "");
+      });
+      return { items: items, hidden: hidden };
     }
+
+    function paint() {
+      if (!loaded) { listWrap.innerHTML = loading(); return; }
+      var v = visibleItems();
+      var waiting = 0, overdue = 0;
+      inbox.forEach(function (r) { if (!r.handled && (!realOnly || respVerified(r))) { waiting++; if (isOverdue(r)) overdue++; } });
+      strip.style.display = "";
+      strip.innerHTML = "<b>" + waiting + "</b> waiting for you" +
+        (overdue ? ' · <b style="color:var(--danger,#c02929)">' + overdue + " past the response window</b>" : "") +
+        " · every answered or Done reply drops off this list";
+      var note = (realOnly && v.hidden) ? '<div class="note" style="margin:0 0 10px">Hiding ' + v.hidden + ' warm-up / unverified message' + (v.hidden === 1 ? "" : "s") + '. <a href="#" data-showall="1">Show all</a></div>' : "";
+      listWrap.innerHTML = note + (v.items.map(respItem).join("") ||
+        '<div class="empty">' + (waiting === 0 && loaded ? "You are all caught up. New replies land here the moment they arrive." : "No " + (realOnly ? "verified " : "") + "replies" + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every real reply lands here, auto-classified.") + "</div>");
+      if (openRid) {
+        var host = listWrap.querySelector('.resp-item[data-rid="' + openRid + '"]');
+        if (host) renderThread(host, openRid); else openRid = null;
+      }
+    }
+
     filter.addEventListener("click", function (e) {
       var rt = e.target.closest(".realtog");
       if (rt) { realOnly = !realOnly; rt.classList.toggle("active", realOnly); paint(); return; }
+      var dt = e.target.closest(".donetog");
+      if (dt) { showDone = !showDone; dt.classList.toggle("active", showDone); paint(); return; }
       var cf = e.target.closest(".cf"); if (!cf) return;
       active = cf.dataset.c;
-      Array.prototype.forEach.call(filter.querySelectorAll(".cf:not(.realtog)"), function (x) { x.classList.toggle("active", x === cf); });
-      paint();
-    });
-    listWrap.addEventListener("click", function (e) {
-      var sa = e.target.closest("[data-showall]"); if (!sa) return;
-      e.preventDefault(); realOnly = false;
-      var rtog = filter.querySelector(".realtog"); if (rtog) rtog.classList.remove("active");
+      Array.prototype.forEach.call(filter.querySelectorAll(".cf:not(.realtog):not(.donetog)"), function (x) { x.classList.toggle("active", x === cf); });
       paint();
     });
     paint();
 
-    function load() {
+    function load(quiet) {
       api("/response/list").then(function (d) {
         inbox = ((d && d.items) || []).map(mapProcessed);
-        loaded = true; paint(); wireActions();
-      }).catch(function () { loaded = true; paint(); });
+        people = (d && d.people) || {};
+        slaRules = {};
+        ((d && d.rules) || []).forEach(function (r) { slaRules[r.class] = r.sla; });
+        loaded = true; paint();
+      }).catch(function () { if (!quiet) { loaded = true; paint(); } });
     }
     load();
 
-    // Working inbox actions: Reply-in-place, Done (clear), Book, Suppress.
-    function wireActions() {
-      Array.prototype.forEach.call(listWrap.querySelectorAll("[data-act]"), function (btn) {
-        btn.addEventListener("click", function () {
-          var act = btn.getAttribute("data-act");
-          var item = btn.closest(".resp-item");
-          // Reply composer toggle (pure UI).
-          if (act === "replytoggle") {
-            var box = item.querySelector(".resp-reply");
-            box.style.display = box.style.display === "none" ? "" : "none";
-            if (box.style.display === "") box.querySelector("textarea").focus();
-            return;
-          }
-          if (act === "replycancel") { item.querySelector(".resp-reply").style.display = "none"; return; }
-          if (act === "replysend") {
-            var ta = item.querySelector(".resp-reply-text"), txt = (ta.value || "").trim();
-            if (!txt) { toast("Type a reply first."); return; }
-            btn.disabled = true;
-            send("/response/actions", "POST", { action: "reply", responseId: btn.getAttribute("data-rid"), text: txt })
-              .then(function (r) {
-                if (r.ok) { toast("Reply sent"); load(); refreshBadge(); }
-                else { toast("Could not send (" + ((r.data && r.data.error) || r.status) + ")"); btn.disabled = false; }
-              }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
-            return;
-          }
-          if (act === "done") {
-            btn.disabled = true;
-            send("/response/actions", "POST", { action: "handle", responseId: btn.getAttribute("data-rid"), handled: true })
-              .then(function (r) { if (r.ok) { toast("Cleared from your list"); load(); refreshBadge(); } else { toast("Could not clear"); btn.disabled = false; } })
-              .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
-            return;
-          }
-          // Prospect actions: book / suppress.
-          var pid = btn.getAttribute("data-pid");
-          if (!pid) { toast("This reply isn't linked to a prospect yet."); return; }
-          btn.disabled = true;
-          send("/response/actions", "POST", { action: act, prospectId: pid })
-            .then(function (r) {
-              if (r.ok) { toast(act === "book" ? "Marked booked" : "Suppressed (do-not-contact)"); load(); refreshBadge(); }
-              else { toast("Could not " + act + " (" + ((r.data && r.data.error) || r.status) + ")"); btn.disabled = false; }
-            }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
-        });
-      });
+    // Live inbox: refresh every 45s unless a thread is open or a draft is typed,
+    // so new replies appear on their own and nothing you typed is ever lost.
+    var timer = setInterval(function () {
+      if (!document.body.contains(el)) { clearInterval(timer); return; }
+      if (openRid) return;
+      var ta = listWrap.querySelector("textarea");
+      if (ta && ta.value.trim()) return;
+      load(true);
+    }, 45000);
+
+    /* ---------- the thread panel: full history + answer on any channel ---------- */
+
+    function chanIcon(c) { return c === "email" ? "Email" : c === "linkedin" ? "LinkedIn" : c === "sms" ? "SMS" : c === "voice" ? "Call" : esc(c); }
+
+    function renderThread(host, ridv) {
+      var slot = host.querySelector(".resp-thread");
+      if (!slot) return;
+      var t = threads[ridv];
+      if (!t) {
+        slot.innerHTML = '<div class="muted" style="padding:10px 0">Loading the conversation…</div>';
+        api("/response/thread?id=" + encodeURIComponent(ridv)).then(function (d) {
+          if (d && d.entries) { threads[ridv] = d; if (openRid === ridv) renderThread(host, ridv); }
+          else slot.innerHTML = '<div class="muted" style="padding:10px 0">Could not load the conversation.</div>';
+        }).catch(function () { slot.innerHTML = '<div class="muted" style="padding:10px 0">Could not load the conversation.</div>'; });
+        return;
+      }
+      var bubbles = t.entries.map(function (en) {
+        var when = respAge(en.at) + " ago";
+        if (en.kind === "event") {
+          return '<div class="muted" style="font-size:11.5px;margin:6px 0;text-align:right">' + chanIcon(en.channel) + " · " + esc(en.text) + " · " + esc(when) + "</div>";
+        }
+        var out = en.dir === "out";
+        return '<div style="display:flex;justify-content:' + (out ? "flex-end" : "flex-start") + ';margin:7px 0">' +
+          '<div style="max-width:78%;padding:9px 12px;border-radius:12px;border:1px solid var(--border,#d8dbe0);' +
+            (out ? "background:var(--surface-2,#eef1f6);border-bottom-right-radius:4px" : "background:var(--surface,#fff);border-bottom-left-radius:4px") + '">' +
+            '<div style="font-size:11px;color:var(--text-dim,#7a8194);margin-bottom:3px">' + (out ? "You · " : "") + chanIcon(en.channel) + " · " + esc(when) + "</div>" +
+            '<div style="font-size:13px;white-space:pre-wrap">' + esc(en.text) + "</div>" +
+          "</div></div>";
+      }).join("");
+      var chanBar = "";
+      if (t.suppressed) {
+        chanBar = '<div class="note" style="margin:10px 0 0">This person asked not to be contacted, so sending is off. Remove them from the do-not-contact list first if this was a mistake.</div>';
+      } else {
+        var opts = [
+          { c: "email", on: t.channels.email, why: "No tracked mailbox for this person yet." },
+          { c: "linkedin", on: t.channels.linkedin, why: "No LinkedIn profile on file for this person." },
+          { c: "sms", on: t.channels.sms, why: "No mobile number on file (SMS is also off for BD prospects)." }
+        ];
+        var cur = host.getAttribute("data-chan") || (t.channels.email ? "email" : t.channels.linkedin ? "linkedin" : t.channels.sms ? "sms" : "");
+        if (cur && !opts.some(function (o) { return o.c === cur && o.on; })) cur = (opts.filter(function (o) { return o.on; })[0] || {}).c || "";
+        host.setAttribute("data-chan", cur);
+        var tabs = opts.map(function (o) {
+          return o.on
+            ? '<span class="cf' + (o.c === cur ? " active" : "") + '" data-chan="' + o.c + '">' + chanIcon(o.c) + "</span>"
+            : '<span class="cf" style="opacity:.45;cursor:not-allowed" title="' + esc(o.why) + '">' + chanIcon(o.c) + "</span>";
+        }).join("");
+        var hint = cur === "email" ? "Sends from the same mailbox that received their email, threaded onto the conversation."
+          : cur === "linkedin" ? "Goes out through your connected LinkedIn account with normal pacing, so it looks human."
+          : cur === "sms" ? "Texts them from your recruiter line."
+          : "No channel is available for this person yet.";
+        chanBar =
+          '<div class="chan-filter" style="margin:12px 0 8px">' + tabs + "</div>" +
+          (cur
+            ? '<textarea class="resp-reply-text" rows="3" placeholder="Type your reply…" style="width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--border,#d8dbe0);border-radius:8px"></textarea>' +
+              '<div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">' +
+                '<button class="resp-btn" data-act="sendmsg" data-rid="' + esc(ridv) + '">Send on ' + chanIcon(cur) + "</button>" +
+                '<span class="muted" style="font-size:11.5px">' + hint + "</span>" +
+              "</div>"
+            : "");
+      }
+      var who = t.person || {};
+      var facts = [who.title, who.company, who.status ? "status: " + String(who.status).replace(/_/g, " ") : null]
+        .filter(Boolean).map(esc).join(" · ");
+      slot.innerHTML =
+        (facts ? '<div class="muted" style="font-size:12px;margin:2px 0 6px">' + facts + "</div>" : "") +
+        '<div style="max-height:340px;overflow:auto;padding:2px 2px 0">' + (bubbles || '<div class="muted" style="font-size:12.5px">No history yet beyond this reply.</div>') + "</div>" +
+        chanBar;
+      var box = slot.querySelector("textarea");
+      if (box) box.focus();
     }
+
+    /* ---------- actions (one delegated listener survives every repaint) ---------- */
+
+    listWrap.addEventListener("click", function (e) {
+      var sa = e.target.closest("[data-showall]");
+      if (sa) {
+        e.preventDefault(); realOnly = false;
+        var rtog = filter.querySelector(".realtog"); if (rtog) rtog.classList.remove("active");
+        paint(); return;
+      }
+      var item = e.target.closest(".resp-item");
+      var chan = e.target.closest(".cf[data-chan]");
+      if (chan && item && chan.getAttribute("data-chan")) {
+        var keep = item.querySelector(".resp-thread textarea");
+        var draft = keep ? keep.value : "";
+        item.setAttribute("data-chan", chan.getAttribute("data-chan"));
+        renderThread(item, item.getAttribute("data-rid"));
+        var ta2 = item.querySelector(".resp-thread textarea");
+        if (ta2 && draft) ta2.value = draft;
+        return;
+      }
+      var btn = e.target.closest("[data-act]");
+      if (!btn || !item) return;
+      var act = btn.getAttribute("data-act");
+      var ridv = btn.getAttribute("data-rid") || item.getAttribute("data-rid");
+
+      if (act === "thread") {
+        if (openRid === ridv) { openRid = null; paint(); return; }
+        openRid = ridv;
+        Array.prototype.forEach.call(listWrap.querySelectorAll(".resp-thread"), function (s) { s.innerHTML = ""; });
+        renderThread(item, ridv);
+        return;
+      }
+      if (act === "sendmsg") {
+        var ta = item.querySelector(".resp-thread textarea");
+        var txt = ta ? (ta.value || "").trim() : "";
+        if (!txt) { toast("Type a reply first."); return; }
+        var chosen = item.getAttribute("data-chan") || "email";
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "send", responseId: ridv, channel: chosen, text: txt })
+          .then(function (r) {
+            if (r.ok) { toast((r.data && r.data.note) || "Sent"); delete threads[ridv]; openRid = null; load(); refreshBadge(); }
+            else { toast((r.data && (r.data.detail || r.data.error)) || "Could not send"); btn.disabled = false; }
+          }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      if (act === "done" || act === "undone") {
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "handle", responseId: ridv, handled: act === "done" })
+          .then(function (r) { if (r.ok) { toast(act === "done" ? "Cleared from your list" : "Back on your list"); load(); refreshBadge(); } else { toast("Could not update"); btn.disabled = false; } })
+          .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      if (act === "delete") {
+        if (!confirm("Delete this reply from your inbox? It will not come back on the next sync.")) return;
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "delete", responseId: ridv })
+          .then(function (r) { if (r.ok) { toast("Deleted"); if (openRid === ridv) openRid = null; load(); refreshBadge(); } else { toast("Could not delete"); btn.disabled = false; } })
+          .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      // Prospect actions: book / suppress.
+      var pid = btn.getAttribute("data-pid");
+      if (!pid) { toast("This reply isn't linked to a prospect yet."); return; }
+      btn.disabled = true;
+      send("/response/actions", "POST", { action: act, prospectId: pid })
+        .then(function (r) {
+          if (r.ok) { toast(act === "book" ? "Marked booked" : "Suppressed (do-not-contact)"); load(); refreshBadge(); }
+          else { toast("Could not " + act + " (" + ((r.data && r.data.error) || r.status) + ")"); btn.disabled = false; }
+        }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+    });
 
     // rules matrix (product reference: how every reply is classified + routed)
     var rows = REF.rules.map(function (r) {
@@ -5192,29 +5346,61 @@
     matrix.style.marginTop = "18px";
     matrix.innerHTML = "<h3>Classification &amp; routing rules</h3><div style=\"overflow:auto\"><table class=\"matrix\"><thead><tr><th>Class</th><th>Triggers</th><th>System action</th><th>SLA</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
     el.appendChild(matrix);
+
+    /* ---------- one reply row ---------- */
+
+    function touchLine(r) {
+      var s = r.prospectId ? people[r.prospectId] : null;
+      if (!s) return "";
+      var bits = [];
+      ["email", "linkedin", "sms", "voice"].forEach(function (c) {
+        var o = (s.out && s.out[c]) || 0, i = (s.in && s.in[c]) || 0;
+        if (o || i) bits.push(chanIcon(c) + " " + (o ? o + " out" : "") + (o && i ? " / " : "") + (i ? i + " in" : ""));
+      });
+      if (!bits.length) return "";
+      var last = s.lastOutAt ? " · last touch " + respAge(s.lastOutAt) + " ago" : "";
+      return '<div class="muted" style="font-size:11.5px;margin:4px 0 0">Every touch: ' + esc(bits.join(" · ") + last) + "</div>";
+    }
+
+    function respItem(r) {
+      var pid = r.prospectId ? ' data-pid="' + esc(r.prospectId) + '"' : "";
+      var ridAttr = ' data-rid="' + esc(r.id) + '"';
+      var age = r.receivedAt ? respAge(r.receivedAt) : "";
+      var agePill = age
+        ? (isOverdue(r)
+          ? '<span class="cls" style="background:var(--danger,#c02929);color:#fff" title="Waiting past the response window for this reply type">' + esc(age) + " · overdue</span>"
+          : '<span class="cls" style="background:var(--surface-2,#eef1f6);color:var(--text-muted,#5a6172)">' + esc(age) + "</span>")
+        : "";
+      var doneBtn = r.handled
+        ? '<button class="resp-btn ghost" data-act="undone"' + ridAttr + ' title="Put this reply back on your list">Reopen</button>'
+        : '<button class="resp-btn ghost" data-act="done"' + ridAttr + ' title="Clear from today\'s list">Done</button>';
+      return '<div class="resp-item"' + ridAttr + (r.handled ? ' style="opacity:.62"' : "") + '><div class="resp-top">' +
+        '<span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
+        '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + (r.email ? " · " + esc(r.email) : "") + "</div></div>" +
+        agePill +
+        '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
+        '<div class="resp-text">"' + esc(r.text) + '"</div>' +
+        touchLine(r) +
+        '<div class="resp-thread"></div>' +
+        '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") +
+        '<button class="resp-btn" data-act="thread"' + ridAttr + ' title="Open the whole conversation and answer on any channel">Reply</button>' +
+        '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
+        '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
+        doneBtn +
+        '<button class="resp-btn ghost" data-act="delete"' + ridAttr + ' title="Delete from the inbox for good">Delete</button>' +
+        "</div></div>";
+    }
   }
 
-  function respItem(r) {
-    var pid = r.prospectId ? ' data-pid="' + esc(r.prospectId) + '"' : "";
-    var rid = ' data-rid="' + esc(r.id) + '"';
-    var replyBtn = r.canReply ? '<button class="resp-btn" data-act="replytoggle"' + rid + '>Reply</button>' : "";
-    var composer = r.canReply
-      ? '<div class="resp-reply" style="display:none;margin-top:10px">' +
-          '<textarea class="resp-reply-text" rows="3" placeholder="Type your reply. It sends from the same mailbox and threads to their message." style="width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--line,#d8dbe0);border-radius:8px"></textarea>' +
-          '<div style="margin-top:6px"><button class="resp-btn" data-act="replysend"' + rid + '>Send reply</button> <button class="resp-btn ghost" data-act="replycancel">Cancel</button></div>' +
-        '</div>'
-      : "";
-    return '<div class="resp-item" data-rid="' + esc(r.id) + '"><div class="resp-top">' +
-      '<span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
-      '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + (r.email ? " · " + esc(r.email) : "") + "</div></div>" +
-      '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
-      '<div class="resp-text">"' + esc(r.text) + '"</div>' + composer +
-      '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") +
-      replyBtn +
-      '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
-      '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
-      '<button class="resp-btn ghost" data-act="done"' + rid + ' title="Clear from today\'s list">Done</button>' +
-      "</div></div>";
+  /** Short human age: 12m, 3h, 2d. */
+  function respAge(iso) {
+    var ms = Date.now() - Date.parse(iso);
+    if (isNaN(ms) || ms < 0) ms = 0;
+    var m = Math.round(ms / 60000);
+    if (m < 60) return m + "m";
+    var h = Math.round(m / 60);
+    if (h < 24) return h + "h";
+    return Math.round(h / 24) + "d";
   }
 
   /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
@@ -23151,7 +23337,7 @@
     return l ? (l[motion] || l.status) : s;
   }
   function mapProcessed(p) {
-    return { id: p.inbound.id, name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.prospectId || (p.prospect && p.prospect.id) || null, campaignId: p.inbound.campaignId || null, email: p.inbound.fromHandle || null, canReply: (p.inbound.channel === "email" && !!p.inbound.toMailbox), handled: !!p.handledAt };
+    return { id: p.inbound.id, name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.inbound.prospectId || p.prospectId || (p.prospect && p.prospect.id) || null, campaignId: p.inbound.campaignId || null, email: p.inbound.fromHandle || null, canReply: (p.inbound.channel === "email" && !!p.inbound.toMailbox), handled: !!p.handledAt, receivedAt: p.inbound.receivedAt || null };
   }
   // A reply is REAL (not Smartlead warm-up) if it's identity-verified: either matched to a known
   // prospect, or tagged by the MPC bridge (which only ingests inbound from people we actually
