@@ -138,7 +138,7 @@ export async function POST(req: Request) {
       if (!b.responseId) return fail("missing_responseId", 422);
       const resp = await getInbox().getById(ws, b.responseId);
       if (!resp) return fail("not_found", 404);
-      const objective = (["book_call", "send_info", "nudge", "close_polite"].includes(String(b.objective)) ? b.objective : "send_info") as import("../../../../lib/response/draft").DraftObjective;
+      const objective = (["book_call", "send_info", "nudge", "close_polite", "forwardable"].includes(String(b.objective)) ? b.objective : "send_info") as import("../../../../lib/response/draft").DraftObjective;
       const channel = (["email", "linkedin", "sms"].includes(String(b.channel)) ? b.channel : "email") as "email" | "linkedin" | "sms";
       try {
         const { draftForRow } = await import("../../../../lib/response/draft");

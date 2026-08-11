@@ -5250,7 +5250,7 @@
         '<span class="muted" style="float:right;font-size:11px" title="Keyboard triage: fastest replies win the meeting. Answering an interested reply inside minutes can multiply your booking rate.">Keys: j / k move · Enter open · e done · s snooze</span>';
       var dpKeys = Object.keys(draftPerf);
       if (dpKeys.length) {
-        var objNames = { book_call: "Book a call", send_info: "Send info", nudge: "Nudge", close_polite: "Polite close" };
+        var objNames = { book_call: "Book a call", send_info: "Send info", nudge: "Nudge", forwardable: "Forwardable", close_polite: "Polite close" };
         var dpBits = dpKeys.map(function (k) {
           var p2 = draftPerf[k];
           return (objNames[k] || k) + " " + p2.replied + "/" + p2.sent + " answered";
@@ -5393,7 +5393,7 @@
         var anchorRow = null;
         for (var ai = 0; ai < inbox.length; ai++) if (inbox[ai].id === ridv) { anchorRow = inbox[ai]; break; }
         var sug = nudges[ridv] ? "nudge" : (anchorRow && suggested[anchorRow.cls]) || "send_info";
-        var objDefs = [["book_call", "Book a call"], ["send_info", "Answer & send info"], ["nudge", "Nudge"], ["close_polite", "Polite close"]];
+        var objDefs = [["book_call", "Book a call"], ["send_info", "Answer & send info"], ["nudge", "Nudge"], ["forwardable", "Forwardable intro"], ["close_polite", "Polite close"]];
         var objChips = objDefs.map(function (o) {
           return '<button class="resp-btn ghost" data-act="draft" data-obj="' + o[0] + '"' + ' data-rid="' + esc(ridv) + '" title="AI drafts this reply from the whole conversation; you edit before sending">' +
             (o[0] === sug ? "★ " : "") + o[1] + "</button>";

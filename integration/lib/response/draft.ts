@@ -18,11 +18,13 @@ import { bookingUrl } from "../bd/booking";
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = process.env.RECRUITEROS_EMAIL_MODEL ?? "claude-haiku-4-5";
 
-export type DraftObjective = "book_call" | "send_info" | "nudge" | "close_polite";
+export type DraftObjective = "book_call" | "send_info" | "nudge" | "close_polite" | "forwardable";
 
 export interface DraftContext {
   /** Recent conversation, oldest first: "THEM: ..." / "YOU: ...". */
   history: string[];
+  /** Extra grounding lines: a fresh company signal, real open calendar slots, ... */
+  extras?: string[];
   personName?: string;
   personTitle?: string;
   personCompany?: string;
@@ -42,6 +44,10 @@ const OBJECTIVES: Record<DraftObjective, string> = {
     "Objective: a light follow-up on a thread that went quiet after interest. One or two sentences, zero guilt-tripping, add one NEW small piece of value or context rather than 'just bumping this'.",
   close_polite:
     "Objective: close gracefully. Thank them, leave the door open in one sentence, make it easy to come back later. No persuasion attempt.",
+  forwardable:
+    // Multithreading: deals with two-plus contacts win materially more often. When the
+    // person is not the decision maker, arm them to carry it inside instead of dying with them.
+    "Objective: they are not the decision maker, or this thread stalled with them. Write a note they can FORWARD internally: open with one short line to them ('if it is easier, feel free to pass this along'), then a self-contained paragraph anyone could read cold: who you are, the specific value for their team, one concrete proof point. End by asking them to send it to whoever owns hiring. No links except the booking link if one is provided.",
 };
 
 /**
@@ -85,6 +91,7 @@ export async function draftReply(resp: ProcessedResponse, objective: DraftObject
     "",
     OBJECTIVES[objective],
     OBJECTION_GUIDANCE[ctx.classification] || "",
+    ...(ctx.extras || []),
     CHANNEL_RULES[ctx.channel],
     link ? `Booking link to weave in: ${link}` : "",
     ctx.recruiterName ? `Sign off as ${ctx.recruiterName.split(" ")[0]}.` : "",
@@ -133,8 +140,43 @@ export async function draftForRow(
     ...rows.map((r) => ({ at: r.inbound.receivedAt, line: "THEM: " + r.inbound.text.slice(0, 500) })),
     ...notes.map((n) => ({ at: n.at, line: "YOU: " + n.text.slice(0, 500) })),
   ].sort((x, y) => Date.parse(x.at) - Date.parse(y.at)).map((x) => x.line);
+
+  // Grounding that measurably lifts outcomes, gathered best-effort: a draft
+  // without extras is always better than no draft.
+  const extras: string[] = [];
+  if (objective === "nudge" && prospect?.company) {
+    // Signal-stacked nudge: a follow-up that arrives BECAUSE something happened
+    // at their company reads like attention, not persistence.
+    try {
+      const { queryPool } = await import("../inmarket/pool");
+      const leads = await queryPool({ companyName: prospect.company } as any, 1);
+      if (leads[0]?.reason) {
+        extras.push(`Fresh signal about ${prospect.company}, use it naturally ONLY if it genuinely fits the thread: ${leads[0].reason}.`);
+      }
+    } catch { /* nudge still drafts without the signal */ }
+  }
+  if (objective === "book_call") {
+    // Real availability: the two concrete windows are actual open slots on the
+    // calendar, so an accepted time never needs a reschedule.
+    try {
+      const { getSettings } = await import("../inmarket/videoSettings");
+      const { listOpenSlots } = await import("../inmarket/booking");
+      const open = await listOpenSlots(workspaceId, await getSettings(workspaceId));
+      const picks: string[] = [];
+      for (const d of open.days) {
+        if (picks.length >= 2) continue;
+        const slot = d.slots[Math.min(2, d.slots.length - 1)];
+        if (slot) picks.push(`${d.label} at ${slot.label} ${open.tzLabel}`);
+      }
+      if (picks.length >= 2) {
+        extras.push(`These two windows are genuinely open on the calendar right now; use them as the concrete options: ${picks[0]} or ${picks[1]}.`);
+      }
+    } catch { /* generic two-windows language still applies */ }
+  }
+
   return draftReply(resp, objective, {
     history,
+    extras,
     personName: resp.inbound.fromName || prospect?.fullName,
     personTitle: prospect?.title,
     personCompany: prospect?.company,

@@ -76,7 +76,7 @@ load-bearing and guarded by `lib/response/response.test.ts` (run with
   shared LinkedIn engine with pacing) or SMS (the send layer's guards apply).
   STOP/do-not-contact blocks every manual send.
 - **AI drafting** (`lib/response/draft.ts`, pinned to the Haiku email-creation
-  model): objective-driven (book_call / send_info / nudge / close_polite),
+  model): objective-driven (book_call / send_info / nudge / forwardable / close_polite); book_call proposes two genuinely open calendar slots (listOpenSlots) and nudges inject the freshest company hiring signal from the In-Market pool,
   whole-conversation context, channel-aware. `preDraft` fires on ingest so
   verified actionable replies arrive with the answer already in the composer.
   Every send records `aiDraft: verbatim|edited|none` for drafter-quality telemetry.
