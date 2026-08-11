@@ -5134,6 +5134,14 @@
               .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
             return;
           }
+          if (act === "delete") {
+            if (!confirm("Delete this reply from your inbox? It will not come back on the next sync.")) return;
+            btn.disabled = true;
+            send("/response/actions", "POST", { action: "delete", responseId: btn.getAttribute("data-rid") })
+              .then(function (r) { if (r.ok) { toast("Deleted"); load(); refreshBadge(); } else { toast("Could not delete"); btn.disabled = false; } })
+              .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+            return;
+          }
           // Prospect actions: book / suppress.
           var pid = btn.getAttribute("data-pid");
           if (!pid) { toast("This reply isn't linked to a prospect yet."); return; }
@@ -5181,6 +5189,7 @@
       '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
       '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
       '<button class="resp-btn ghost" data-act="done"' + rid + ' title="Clear from today\'s list">Done</button>' +
+      '<button class="resp-btn ghost" data-act="delete"' + rid + ' title="Delete from the inbox for good">Delete</button>' +
       "</div></div>";
   }
 

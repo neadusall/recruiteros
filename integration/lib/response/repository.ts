@@ -44,7 +44,7 @@ class InboxStore {
   async list(workspaceId: string, limit = 100): Promise<ProcessedResponse[]> {
     await this.ready();
     return this.items
-      .filter((p) => p.inbound.workspaceId === workspaceId)
+      .filter((p) => p.inbound.workspaceId === workspaceId && !p.deletedAt)
       .slice(0, limit);
   }
 
@@ -52,6 +52,16 @@ class InboxStore {
   async getById(workspaceId: string, id: string): Promise<ProcessedResponse | undefined> {
     await this.ready();
     return this.items.find((p) => p.inbound.id === id && p.inbound.workspaceId === workspaceId);
+  }
+
+  /** Delete a response from the inbox (soft: kept in the snapshot, never listed). */
+  async remove(workspaceId: string, id: string): Promise<boolean> {
+    await this.ready();
+    const p = this.items.find((x) => x.inbound.id === id && x.inbound.workspaceId === workspaceId);
+    if (!p) return false;
+    p.deletedAt = new Date().toISOString();
+    this.persist();
+    return true;
   }
 
   /** Mark a response handled (cleared from the daily worklist) or un-handle it. */

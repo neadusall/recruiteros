@@ -102,4 +102,7 @@ export interface ProcessedResponse {
   atsEventId?: string;
   /** Set when the recruiter clears it from the daily worklist (the checklist "Done"). */
   handledAt?: string;
+  /** Set when the recruiter deletes it from the inbox. Soft: the row is kept in the
+   *  snapshot (and the seen-id guard stops re-ingest) but never listed again. */
+  deletedAt?: string;
 }

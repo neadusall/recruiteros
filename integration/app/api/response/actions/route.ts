@@ -58,6 +58,12 @@ export async function POST(req: Request) {
       const done = await getInbox().setHandled(ws, b.responseId, b.handled !== false);
       return done ? ok({ ok: true }) : fail("not_found", 404);
     }
+    case "delete": {
+      // Remove a reply from the inbox for good (soft-delete; it never lists again).
+      if (!b.responseId) return fail("missing_responseId", 422);
+      const gone = await getInbox().remove(ws, b.responseId);
+      return gone ? ok({ ok: true }) : fail("not_found", 404);
+    }
     default:
       return fail("unknown_action", 400);
   }
