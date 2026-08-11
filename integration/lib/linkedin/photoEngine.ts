@@ -111,13 +111,19 @@ function ovThrottled<T>(fn: () => Promise<T>): Promise<T> {
 const OV_STOPWORDS = new Set(["a", "an", "the", "of", "in", "at", "on", "and", "or", "with", "for", "to"]);
 
 /** Openverse full-text relevance is loose (a "law firm meeting" query returns
- *  schools and houses); keep only results whose title or tags actually carry
- *  one of the query's real words. */
-function ovRelevant(query: string, title: string, tags: string[]): boolean {
+ *  schools and houses); score results by how many of the query's real words
+ *  their title (worth double) and tags actually carry. 0 = drop it. */
+function ovMatchScore(query: string, title: string, tags: string[]): number {
   const tokens = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2 && !OV_STOPWORDS.has(t));
-  if (!tokens.length) return true;
-  const hay = (title + " " + tags.join(" ")).toLowerCase();
-  return tokens.some((t) => hay.includes(t));
+  if (!tokens.length) return 1;
+  const titleHay = title.toLowerCase();
+  const tagHay = tags.join(" ").toLowerCase();
+  let s = 0;
+  for (const t of tokens) {
+    if (titleHay.includes(t)) s += 2;
+    else if (tagHay.includes(t)) s += 1;
+  }
+  return s;
 }
 
 async function searchOpenverse(query: string): Promise<StockPhoto[]> {
@@ -134,11 +140,17 @@ async function searchOpenverse(query: string): Promise<StockPhoto[]> {
   }));
   if (!r.ok) throw new Error(`openverse_${r.status}`);
   const j = (await r.json()) as { results?: any[] };
-  return (j.results ?? [])
+  const scored = (j.results ?? [])
     .filter((p) => p?.id && typeof p.url === "string" &&
-      (OV_OK_TYPES.test(p.url) || ["jpg", "jpeg", "png", "webp"].includes(String(p.filetype ?? "").toLowerCase())) &&
-      ovRelevant(query, String(p.title ?? ""), Array.isArray(p.tags) ? p.tags.map((t: any) => String(t?.name ?? "")) : []))
-    .map((p): StockPhoto => {
+      (OV_OK_TYPES.test(p.url) || ["jpg", "jpeg", "png", "webp"].includes(String(p.filetype ?? "").toLowerCase())))
+    .map((p) => ({
+      p,
+      rel: ovMatchScore(query, String(p.title ?? ""), Array.isArray(p.tags) ? p.tags.map((t: any) => String(t?.name ?? "")) : []),
+    }))
+    .filter((x) => x.rel > 0)
+    .sort((a, b) => b.rel - a.rel);
+  return scored
+    .map(({ p }): StockPhoto => {
       const creator = typeof p.creator === "string" && p.creator.trim() ? p.creator.trim().slice(0, 60) : null;
       const lic = String(p.license ?? "").toUpperCase();
       const free = lic === "CC0" || lic === "PDM";

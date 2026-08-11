@@ -2053,7 +2053,11 @@ export async function generateStatMedia(ws: string, opts: { draftId: string }): 
 /** The card's numbers (AI when available, headline-only fallback), cached on
  *  the draft so cycling through looks never re-spends the extraction call. */
 async function draftStatSpec(d: PosterDraft): Promise<StatMediaSpec> {
-  if (d.mediaSpec && d.mediaSpecFor === d.text) return d.mediaSpec;
+  // Specs cached before the photo engine have no photoQuery field at all
+  // (undefined, vs null for "no scene fits"); re-extract those once so
+  // existing drafts get a real photo scene too.
+  if (d.mediaSpec && d.mediaSpecFor === d.text &&
+      (d.mediaSpec.photoQuery !== undefined || !process.env.ANTHROPIC_API_KEY)) return d.mediaSpec;
   let spec: StatMediaSpec | null = null;
   if (process.env.ANTHROPIC_API_KEY) {
     try { spec = await generateStatSpec(d.text); } catch { spec = null; }
