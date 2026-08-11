@@ -5163,6 +5163,10 @@
 
     el.innerHTML = head("Response, your reply center",
       "Every reply across email, LinkedIn and SMS in one place. Open a reply to see every touch on every channel, answer without leaving, and work the list to zero.");
+    var score = document.createElement("div");
+    score.className = "stat-grid";
+    score.style.cssText = "margin:0 0 14px;display:none";
+    el.appendChild(score);
     var strip = document.createElement("div");
     strip.className = "note";
     strip.style.cssText = "margin:0 0 10px;display:none";
@@ -5235,18 +5239,21 @@
         if (nudges[r.id] && r.handled) { quiet++; return; }
         if (!r.handled && (!realOnly || respVerified(r))) { waiting++; if (isOverdue(r)) overdue++; }
       });
-      var perf = "";
-      if (stats) {
-        var med = stats.medianFirstResponseMins;
-        perf = ' · Last 24h: ' + stats.sent24h + ' sent, ' + stats.cleared24h + ' cleared' +
-          (med >= 0 ? ' · median first response ' + (med < 60 ? med + 'm' : Math.round(med / 60) + 'h') : "") +
-          (stats.booked7d ? ' · <b style="color:var(--success,#1d7a3e)">' + stats.booked7d + ' booked this week</b>' : "");
-      }
+      // The daily scoreboard: every number is server-computed by the tested
+      // metrics module, with honest labels about what each one measures.
+      var med = stats ? stats.medianFirstResponseMins : -1;
+      var medLabel = med < 0 ? "n/a" : med < 60 ? med + "m" : Math.round(med / 6) / 10 + "h";
+      var medColor = med < 0 ? null : med <= 60 ? "var(--success,#1d7a3e)" : med <= 240 ? "#b06a00" : "var(--danger,#c02929)";
+      score.style.display = "";
+      score.innerHTML =
+        obStat(waiting, "Waiting for you", overdue ? overdue + " past the window, top of the list" : "all inside their windows", overdue ? "var(--danger,#c02929)" : null) +
+        obStat(quiet, "Gone quiet", "answered, then silence 48h+; nudge them", quiet ? "#b06a00" : null) +
+        obStat(stats ? stats.sent24h : 0, "Replies sent · 24h", (stats ? stats.cleared24h : 0) + " cleared (answered or done)") +
+        obStat(medLabel, "Median first response · 7d", "answer positives inside 1 hour", medColor) +
+        obStat(stats ? stats.booked7d : 0, "Booked · 7d", "meetings from these replies", stats && stats.booked7d ? "var(--success,#1d7a3e)" : null);
       strip.style.display = "";
-      strip.innerHTML = "<b>" + waiting + "</b> waiting for you" +
-        (overdue ? ' · <b style="color:var(--danger,#c02929)">' + overdue + " past the response window</b>" : "") +
-        (quiet ? ' · <b style="color:var(--warn,#b06a00)">' + quiet + " gone quiet after your answer</b>" : "") +
-        (v.snoozed ? " · " + v.snoozed + " snoozed" : "") + perf +
+      strip.innerHTML = "Answered and Done replies drop off the list; quiet threads come back on top" +
+        (v.snoozed ? " · " + v.snoozed + " snoozed" : "") +
         '<span class="muted" style="float:right;font-size:11px" title="Keyboard triage: fastest replies win the meeting. Answering an interested reply inside minutes can multiply your booking rate.">Keys: j / k move · Enter open · e done · s snooze</span>';
       var dpKeys = Object.keys(draftPerf);
       if (dpKeys.length) {

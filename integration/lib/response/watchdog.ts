@@ -105,10 +105,13 @@ async function preDraftDueNudges(ws: string): Promise<void> {
     const all = await inbox.forPerson(ws, { prospectId: pid });
     const notes = await inbox.outboundForPerson(ws, { prospectId: pid, responseIds: all.map((r) => r.inbound.id) });
     if (!notes.length) continue;
-    const lastOut = notes.map((n) => n.at).sort().pop()!;
-    const lastIn = all.map((r) => r.inbound.receivedAt).sort().pop()!;
-    const quiet = lastOut > lastIn && Date.now() - Date.parse(lastOut) > NUDGE_MS;
-    if (!quiet) continue;
+    // Shared math with the list route: an out-of-office never counts as them
+    // answering, so an OOO can never suppress the nudge.
+    const { personSummary, quietHours } = await import("./metrics");
+    const summary = personSummary(all, [], notes);
+    const quiet = quietHours(summary);
+    if (quiet === null || quiet * 3600_000 <= NUDGE_MS) continue;
+    const lastOut = summary.lastOutAt!;
     // Already have a draft written after the last outbound? Then it IS the nudge draft.
     if (p.suggestedReply && p.suggestedReply.at > lastOut) continue;
     try {

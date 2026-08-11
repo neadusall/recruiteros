@@ -103,6 +103,46 @@ async function main() {
   await inbox.setHandled(WS, hot.inbound.id, true);
   ok(!needsEscalation((await inbox.getById(WS, hot.inbound.id))!), "handled rows never escalate");
 
+  // 8. METRICS: the numbers the recruiter steers by, computed from known fixtures.
+  {
+    const { personSummary, quietHours, computeStats, computeDraftPerf } = await import("./metrics");
+    const now = Date.now();
+    const iso = (hAgo: number) => new Date(now - hAgo * 3600_000).toISOString();
+
+    // A person: replied 80h ago, we answered 60h ago, then their OOO 10h ago.
+    const pRows = [
+      row({ cls: "positive", prospectId: "m1", receivedAt: iso(80) }),
+      row({ cls: "auto_reply", prospectId: "m1", receivedAt: iso(10) }),
+    ];
+    const pNotes = [{ id: "mn1", workspaceId: WS, responseId: pRows[0].inbound.id, prospectId: "m1", channel: "email" as any, text: "answer", at: iso(60) }];
+    const sum = personSummary(pRows, [], pNotes);
+    strictEqual(sum.in.email, 1, "an OOO never counts as an inbound touch");
+    strictEqual(sum.lastInAt, pRows[0].inbound.receivedAt, "an OOO never resets lastInAt");
+    const q = quietHours(sum, now);
+    ok(q !== null && q >= 59 && q <= 61, "quiet clock runs from OUR answer; the OOO does not stop the nudge");
+
+    // Median first response: 30-minute first reply + a 3-day follow-up on the
+    // SAME thread must stay a 30-minute median (follow-ups are not first responses).
+    const t1 = row({ cls: "positive", prospectId: "m2", receivedAt: iso(80) });
+    const statNotes = [
+      { id: "sn1", workspaceId: WS, responseId: t1.inbound.id, prospectId: "m2", channel: "email" as any, text: "fast", at: iso(79.5) },
+      { id: "sn2", workspaceId: WS, responseId: t1.inbound.id, prospectId: "m2", channel: "email" as any, text: "follow-up", at: iso(8) },
+    ];
+    const st = computeStats([t1], statNotes, { m2: [{ id: "a1", workspaceId: WS, prospectId: "m2", channel: "system", type: "discovery_call_booked", summary: "Booked", at: iso(20) } as any] }, now);
+    strictEqual(st.medianFirstResponseMins, 30, "median counts only the FIRST send per thread");
+    strictEqual(st.sent24h, 1, "sent24h counts the follow-up inside 24h only");
+    strictEqual(st.booked7d, 1, "a discovery_call_booked activity inside 7d counts as booked");
+
+    // Draft outcomes: an OOO arriving after the send is NOT a reply.
+    const dNotes = [{ id: "dn1", workspaceId: WS, responseId: t1.inbound.id, prospectId: "m2", channel: "email" as any, text: "x", at: iso(30), aiDraft: "verbatim" as const, objective: "book_call" }];
+    const ooo = row({ cls: "auto_reply", prospectId: "m2", receivedAt: iso(5) });
+    const noReply = computeDraftPerf([t1, ooo], dNotes);
+    strictEqual(noReply.book_call.replied, 0, "an OOO after the send does not count as a reply");
+    const real = row({ cls: "positive", prospectId: "m2", receivedAt: iso(4) });
+    const withReply = computeDraftPerf([t1, ooo, real], dNotes);
+    strictEqual(withReply.book_call.replied, 1, "a real reply after the send counts");
+  }
+
   // 7. Prune bounds the store and keeps the newest.
   for (let i = 0; i < 50; i++) inbox.add(row({ prospectId: null, ws: "ws_prune" }));
   const newestId = (await inbox.list("ws_prune", 1))[0].inbound.id;
