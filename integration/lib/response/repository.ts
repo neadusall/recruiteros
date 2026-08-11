@@ -96,6 +96,16 @@ class InboxStore {
     return true;
   }
 
+  /** Snooze a response until a moment (empty/undefined clears the snooze). */
+  async setSnooze(workspaceId: string, id: string, until?: string): Promise<boolean> {
+    await this.ready();
+    const p = this.items.find((x) => x.inbound.id === id && x.inbound.workspaceId === workspaceId);
+    if (!p) return false;
+    p.snoozedUntil = until || undefined;
+    this.persist();
+    return true;
+  }
+
   /** Mark a response handled (cleared from the daily worklist) or un-handle it. */
   async setHandled(workspaceId: string, id: string, handled: boolean): Promise<boolean> {
     await this.ready();
