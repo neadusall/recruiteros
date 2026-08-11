@@ -62,6 +62,11 @@ export interface PosterDraft {
   jobTitle?: string;
   /** True when the AI wrote the post around a photo the recruiter uploaded. */
   photoPost?: boolean;
+  /** True when autopilot approved and scheduled this post itself. */
+  autopilot?: boolean;
+  /** The recruiter canceled an autopilot schedule: that is a veto, so
+   *  autopilot leaves this draft alone and posts nothing that day. */
+  autopilotHeld?: boolean;
   /** 2026 playbook drafts: which weekday pillar and vertical produced this
    *  (e.g. "Desk story" / "Accounting"), for the UI chips only. */
   pillar?: string;
@@ -144,6 +149,17 @@ export interface PosterSettings {
   postingTimes: string;
   /** Ayrshare user-profile key for this workspace (Business plan); blank = primary. */
   ayrshareProfileKey: string;
+  /** Full hands-off mode: the tool creates the day's post, quality-gates it,
+   *  schedules it into the posting slots, and publishes it from the enabling
+   *  user's own LinkedIn seat. Canceling a queued autopilot post vetoes that
+   *  day. Off by default; the classic approve flow is untouched. */
+  autopilot?: boolean;
+  /** Whose LinkedIn seat autopilot publishes from: stamped server-side with
+   *  the user who switched it on, never client-supplied. */
+  autopilotUserId?: string;
+  /** IANA timezone the posting slots are written in (captured from the
+   *  browser on save, e.g. "America/Chicago"); autopilot schedules with it. */
+  timezone?: string;
 }
 
 /** A LinkedIn creator the recruiter follows: every new post they publish is
@@ -178,6 +194,9 @@ interface WorkspaceState {
   settings: PosterSettings;
   watchlist: WatchedProfile[];
   deskNotes: DeskNote[];
+  /** What autopilot last did (or why it held), surfaced in the UI so a quiet
+   *  day is always explained: nothing fails or skips silently. */
+  autopilotNote?: { at: string; note: string };
 }
 
 interface Store {
@@ -1034,6 +1053,125 @@ export async function tickDailyOriginals(now: Date = new Date()): Promise<number
   return made;
 }
 
+/* ------------------------------ autopilot -------------------------------- */
+
+/** Wall-clock time in an IANA zone -> Date, two-pass offset correction. */
+function zonedDate(tz: string, y: number, mo: number, d: number, hh: number, mm: number): Date {
+  const guess = Date.UTC(y, mo - 1, d, hh, mm);
+  const asTz = (t: number) => {
+    const p = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(new Date(t)).reduce<Record<string, string>>((m, x) => (m[x.type] = x.value, m), {});
+    return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) === 24 ? 0 : Number(p.hour), Number(p.minute));
+  };
+  return new Date(guess - (asTz(guess) - guess));
+}
+
+function tzParts(tz: string, at: Date): { y: number; mo: number; d: number; weekday: number } {
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" })
+    .formatToParts(at).reduce<Record<string, string>>((m, x) => (m[x.type] = x.value, m), {});
+  const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday);
+  return { y: Number(p.year), mo: Number(p.month), d: Number(p.day), weekday: wd };
+}
+
+/** YYYY-MM-DD of an instant in the workspace's zone (posting-day bookkeeping). */
+function tzDayKey(tz: string, at: Date): string {
+  const p = tzParts(tz, at);
+  return p.y + "-" + String(p.mo).padStart(2, "0") + "-" + String(p.d).padStart(2, "0");
+}
+
+/** Best-practice floor for a post that goes out with nobody proofreading it.
+ *  Returns the reason it is not fit to publish, or null when clean. */
+function autopilotUnfit(text: string): string | null {
+  const t = (text || "").trim();
+  if (t.length < 180) return "too short";
+  if (t.length > 1600) return "too long for a feed post";
+  if (/https?:\/\//i.test(t)) return "link in the body";
+  if (/(^|\s)#\w/.test(t)) return "hashtag in the body";
+  const hook = t.split(/\n/).map((l) => l.trim()).filter(Boolean)[0] ?? "";
+  if (hook.split(/\s+/).length > 14) return "hook runs long";
+  return null;
+}
+
+function apNote(s: WorkspaceState, note: string): void {
+  s.autopilotNote = { at: nowIso(), note };
+  persist();
+}
+
+/**
+ * Full hands-off mode. Every run (half-hourly): for each workspace with
+ * autopilot on, make sure today's slot (in the desk's own timezone) has a
+ * post: pick the best existing clean draft, or write a fresh one, attach
+ * media (creation paths do that), and approve it into the slot on the
+ * enabling user's seat. tickDuePosts does the actual publish at the minute.
+ * A canceled autopilot schedule is a veto: that day posts nothing.
+ */
+export async function tickAutopilot(now: Date = new Date()): Promise<number> {
+  await ensureLoaded();
+  let queued = 0;
+  for (const [ws, s] of Object.entries(store.workspaces)) {
+    const st = s.settings;
+    if (!st?.autopilot || !st.autopilotUserId) continue;
+    try {
+      const tz = st.timezone || "America/Chicago";
+      const days = String(st.postingDays || "").split(",").map((x) => parseInt(x, 10)).filter((n) => n >= 0 && n <= 6);
+      const time = String(st.postingTimes || "").split(",")[0]?.trim() || "07:45";
+      const [hh, mm] = time.split(":").map((x) => parseInt(x, 10));
+      if (!days.length || !Number.isFinite(hh)) { apNote(s, "Holding: no posting schedule saved in Settings."); continue; }
+      const today = tzParts(tz, now);
+      if (!days.includes(today.weekday)) continue; // rest day by design
+      const slot = zonedDate(tz, today.y, today.mo, today.d, hh, mm || 0);
+      // Late is fine within 3 hours of the slot; later than that reads as
+      // erratic, so the day is skipped rather than posted at odd hours.
+      if (now.getTime() > slot.getTime() + 3 * 3600_000) continue;
+      const todayKey = tzDayKey(tz, now);
+      const handled = s.drafts.some((d) =>
+        (d.status === "posted" && d.postedAt && tzDayKey(tz, new Date(d.postedAt)) === todayKey) ||
+        (d.status === "approved" && d.scheduledAt && tzDayKey(tz, new Date(d.scheduledAt)) === todayKey));
+      if (handled) continue;
+      if (s.drafts.some((d) => d.autopilotHeld && tzDayKey(tz, new Date(d.updatedAt)) === todayKey)) {
+        apNote(s, "Holding today: you canceled the queued post, so nothing else goes out.");
+        continue;
+      }
+      // Freshest clean draft wins: playbook > watch rewrite > original > rest.
+      const rank = (d: PosterDraft) => (d.pillar ? 3 : d.sourceId || d.sourceText ? 2 : d.aiOriginal ? 1 : 0);
+      const fresh = now.getTime() - 72 * 3600_000;
+      let pick = s.drafts
+        .filter((d) => d.status === "draft" && !d.autopilotHeld && !autopilotUnfit(d.text) &&
+          new Date(d.createdAt).getTime() > fresh)
+        .sort((a, b) => rank(b) - rank(a) || String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+      if (!pick) {
+        if (!process.env.ANTHROPIC_API_KEY) { apNote(s, "Holding: the AI writer is not enabled on the server."); continue; }
+        try {
+          const dayNum = Math.floor(now.getTime() / 86_400_000);
+          if (dayNum % 2 === 0) {
+            try { pick = await createJobSpotlightDraft(ws); } catch { pick = await createOriginalDraft(ws, {}); }
+          } else {
+            pick = await createOriginalDraft(ws, {});
+          }
+        } catch {
+          apNote(s, "Holding: writing today's post failed; will retry within the half hour.");
+          continue;
+        }
+        const bad = autopilotUnfit(pick.text);
+        if (bad) { apNote(s, "Holding: today's generated post did not pass the quality gate (" + bad + "). It is waiting in drafts for your eyes."); continue; }
+      }
+      const when = new Date(Math.max(slot.getTime(), now.getTime() + 5 * 60_000));
+      pick.createdBy = pick.createdBy ?? st.autopilotUserId;
+      pick.autopilot = true;
+      pick.status = "approved";
+      pick.scheduledAt = when.toISOString();
+      pick.error = undefined;
+      pick.updatedAt = nowIso();
+      persist();
+      queued += 1;
+      apNote(s, "Queued today's post for " + time + " (" + tz + "). Cancel it in Calendar any time before then to veto the day.");
+    } catch { /* one workspace's autopilot; never stop the sweep */ }
+  }
+  return queued;
+}
+
 /* ------------------------------ drafts ---------------------------------- */
 
 export async function updateDraft(ws: string, draftId: string, patch: { text?: string; imageId?: string | null; firstComment?: string }): Promise<PosterDraft> {
@@ -1102,6 +1240,9 @@ export async function cancelSchedule(ws: string, draftId: string): Promise<Poste
   if (d.status !== "approved") throw Object.assign(new Error("not_scheduled"), { status: 400 });
   d.status = "draft";
   d.scheduledAt = undefined;
+  // Canceling a post autopilot queued is a veto: autopilot must not re-queue
+  // it (or write a replacement) the same day.
+  if (d.autopilot) { d.autopilot = false; d.autopilotHeld = true; }
   d.updatedAt = nowIso();
   persist();
   return d;
@@ -2535,11 +2676,26 @@ export async function getSettings(ws: string): Promise<PosterSettings> {
   return wsState(ws).settings;
 }
 
-export async function saveSettings(ws: string, patch: Partial<PosterSettings>): Promise<PosterSettings> {
+export async function saveSettings(ws: string, patch: Partial<PosterSettings>, userId?: string): Promise<PosterSettings> {
   await ensureLoaded();
   const s = wsState(ws);
   const clean = (v: unknown, max: number) => (typeof v === "string" ? scrubDashes(v).slice(0, max) : undefined);
+  // Timezone must be a real IANA zone or it is ignored.
+  let tz = s.settings.timezone;
+  if (typeof patch.timezone === "string" && patch.timezone.trim()) {
+    try { new Intl.DateTimeFormat("en-US", { timeZone: patch.timezone.trim() }); tz = patch.timezone.trim().slice(0, 60); } catch { /* keep old */ }
+  }
+  // Autopilot publishes from a real person's seat: stamp whoever turns it on.
+  let autopilot = s.settings.autopilot === true;
+  let autopilotUserId = s.settings.autopilotUserId;
+  if (typeof patch.autopilot === "boolean") {
+    autopilot = patch.autopilot;
+    if (patch.autopilot && userId) autopilotUserId = userId;
+  }
   const next: PosterSettings = {
+    autopilot,
+    autopilotUserId,
+    timezone: tz,
     displayName: clean(patch.displayName, 80) ?? s.settings.displayName,
     headline: clean(patch.headline, 120) ?? s.settings.headline,
     voiceProfile: clean(patch.voiceProfile, 4000) ?? s.settings.voiceProfile,
@@ -2565,6 +2721,7 @@ export interface PosterState {
   settings: PosterSettings;
   watchlist: WatchedProfile[];
   deskNotes: DeskNote[];
+  autopilotNote?: { at: string; note: string };
 }
 
 export async function getState(ws: string): Promise<PosterState> {
@@ -2577,6 +2734,7 @@ export async function getState(ws: string): Promise<PosterState> {
     settings: s.settings,
     watchlist: s.watchlist,
     deskNotes: s.deskNotes,
+    autopilotNote: s.autopilotNote,
   };
 }
 
