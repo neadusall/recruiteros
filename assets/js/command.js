@@ -1622,7 +1622,6 @@
     ostextkpi: { title: "OS Text Performance", crumb: "Admin", action: null, render: function () { location.hash = "#outbound/ostext"; }, cap: "team:manage" },
     // My Outbound: the personal performance view + the 10-15 minute Daily
     // Checklist worksheet. Self-scoped; available in both portals.
-    myoutbound: { title: "My Outbound", crumb: "Operate", action: null, render: renderMyOutbound },
     engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure"; }, cap: "team:manage" },
     // Infrastructure: every piece of system plumbing in one admin hub. Engine /
     // Throughput, the Senders fleet and Mailbox Ops as tabs.
