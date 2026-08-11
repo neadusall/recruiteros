@@ -41,6 +41,10 @@ class InboxStore {
 
   add(p: ProcessedResponse): void {
     this.items.unshift(p);
+    // Belt and braces: the ingest pipeline claims before add, but the seen guard
+    // must hold even for a future path that forgets — especially so a DELETED
+    // row can never be re-ingested by the next sync tick.
+    if (p.inbound.providerMessageId) this.seen.add(p.inbound.providerMessageId);
     this.persist();
   }
 
@@ -94,6 +98,35 @@ class InboxStore {
     p.deletedAt = new Date().toISOString();
     this.persist();
     return true;
+  }
+
+  /** Every distinct workspace that has rows in the store (for background ticks). */
+  async workspaceIds(): Promise<string[]> {
+    await this.ready();
+    return [...new Set(this.items.map((p) => p.inbound.workspaceId))];
+  }
+
+  /** Stamp a row as escalated to the operator (the watchdog sends that email once). */
+  async markEscalated(workspaceId: string, id: string): Promise<void> {
+    await this.ready();
+    const p = this.items.find((x) => x.inbound.id === id && x.inbound.workspaceId === workspaceId);
+    if (p) { p.escalatedAt = new Date().toISOString(); this.persist(); }
+  }
+
+  /** Bound the snapshot so it can never grow without limit. Newest rows are kept
+   *  (items are unshifted); the seen-id guard is rebuilt from the newest entries. */
+  async prune(maxItems = 3000, maxOutbound = 3000, maxSeen = 20000): Promise<number> {
+    await this.ready();
+    let dropped = 0;
+    if (this.items.length > maxItems) { dropped += this.items.length - maxItems; this.items.length = maxItems; }
+    if (this.outbound.length > maxOutbound) { dropped += this.outbound.length - maxOutbound; this.outbound.length = maxOutbound; }
+    if (this.seen.size > maxSeen) {
+      const keep = [...this.seen];
+      this.seen = new Set(keep.slice(keep.length - maxSeen)); // newest claims are appended last
+      dropped += keep.length - maxSeen;
+    }
+    if (dropped) this.persist();
+    return dropped;
   }
 
   /** Attach the on-arrival AI pre-draft to a response. */

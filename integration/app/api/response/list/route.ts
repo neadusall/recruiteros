@@ -131,5 +131,13 @@ export async function GET(req: Request) {
     booking = bookingUrl("consultative");
   } catch { /* composer just hides the insert button */ }
 
-  return ok({ items, people, nudges, timingUntil, stats, booking, rules: ROUTING_RULES, order: CLASS_ORDER });
+  // The worklist's per-class response windows (tighter than the routing matrix
+  // for hot classes), so the UI and the watchdog agree on what "overdue" means.
+  let windows: Record<string, number> = {};
+  try {
+    const { responseWindowHours } = await import("../../../../lib/response/watchdog");
+    for (const r of ROUTING_RULES ? Object.keys(ROUTING_RULES) : []) windows[r] = responseWindowHours(r);
+  } catch { windows = {}; }
+
+  return ok({ items, people, nudges, timingUntil, stats, booking, windows, rules: ROUTING_RULES, order: CLASS_ORDER });
 }

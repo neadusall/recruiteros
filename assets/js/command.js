@@ -886,9 +886,14 @@
   function refreshBadge() {
     api("/response/list").then(function (d) {
       var items = (d && d.items) || [];
+      // Hot AND still yours to answer: unhandled, not snoozed, identity-verified.
+      // (Counting every hot reply ever meant the badge never went down.)
       var hot = items.filter(function (p) {
         var c = p.classification && p.classification.class;
-        return c === "positive" || c === "referral";
+        if (c !== "positive" && c !== "referral") return false;
+        if (p.handledAt || p.deletedAt) return false;
+        if (p.snoozedUntil && Date.parse(p.snoozedUntil) > Date.now()) return false;
+        return !!(p.inbound && (p.inbound.prospectId || p.inbound.campaignId));
       }).length;
       var bd = $("#badgeResponse");
       if (!bd) return;
@@ -5124,6 +5129,7 @@
     var slaRules = {};     // class -> sla bucket (from /list rules)
     var nudges = {};       // responseId -> hours silent (answered threads gone quiet)
     var timingUntil = {};  // responseId -> iso date parsed from a "not now, try Q4" reply
+    var slaWindows = {};   // class -> response window hours (server-authoritative)
     var stats = null;      // reply-center performance (last 24h / 7d)
     var booking = "";      // the operator's booking link for one-click insert
     var lastDraft = {};    // responseId -> last AI draft text (verbatim/edited telemetry)
@@ -5150,6 +5156,7 @@
     var loaded = false;
 
     function slaHours(cls) {
+      if (slaWindows[cls]) return slaWindows[cls]; // server-authoritative windows
       var s = slaRules[cls];
       return s === "immediate" ? 1 : s === "four_hours" ? 4 : 24; // same_day and unknown: a day
     }
@@ -5242,6 +5249,7 @@
         people = (d && d.people) || {};
         nudges = (d && d.nudges) || {};
         timingUntil = (d && d.timingUntil) || {};
+        slaWindows = (d && d.windows) || {};
         stats = (d && d.stats) || null;
         booking = (d && d.booking) || "";
         slaRules = {};

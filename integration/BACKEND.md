@@ -62,6 +62,41 @@ to change inbox behavior). It encodes the reference table exactly:
 | Referral | capture referral, tag advocate, notify | same day |
 | STOP | suppress all channels + ATS do-not-contact | immediate |
 
+### The reply center (the worklist on top of the pipeline)
+
+The Replies tab is a full engagement surface, not a log. Everything below is
+load-bearing and guarded by `lib/response/response.test.ts` (run with
+`npx tsx lib/response/response.test.ts`):
+
+- **Person threads**: `GET /api/response/thread?id=` merges every inbound row,
+  every reply-center send (`OutboundNote`, full text) and the ATS activity log
+  into one cross-channel conversation per person.
+- **Send on any channel**: `POST /api/response/actions {action:"send"}` replies
+  on email (same mailbox that received it, threaded), LinkedIn (through the
+  shared LinkedIn engine with pacing) or SMS (the send layer's guards apply).
+  STOP/do-not-contact blocks every manual send.
+- **AI drafting** (`lib/response/draft.ts`, pinned to the Haiku email-creation
+  model): objective-driven (book_call / send_info / nudge / close_polite),
+  whole-conversation context, channel-aware. `preDraft` fires on ingest so
+  verified actionable replies arrive with the answer already in the composer.
+  Every send records `aiDraft: verbatim|edited|none` for drafter-quality telemetry.
+- **Worklist state on `ProcessedResponse`**: `handledAt` (Done), `deletedAt`
+  (soft delete; the seen guard blocks re-ingest), `snoozedUntil` (hidden until
+  due, back on top), `suggestedReply` (the pre-draft), `escalatedAt`.
+- **Response windows** (`responseWindowHours` in `lib/response/watchdog.ts`):
+  tighter than the routing matrix for hot classes (positive 1h, referral and
+  soft yes 4h) because speed-to-lead compounds; the list route ships them to the
+  UI so both sides agree on "overdue".
+- **Timing objections** (`lib/response/timing.ts`): "try me in Q4" parses to a
+  concrete date and one click schedules the comeback (snooze-until-then).
+- **Referrals**: `{action:"referral_prospect"}` creates the referred person as a
+  queued prospect inheriting the referrer's campaign/company/motion.
+- **Watchdog** (`lib/response/watchdog.ts`, armed from `instrumentation.ts`):
+  every 10 minutes it escalates blown-window hot replies to
+  `RECRUITEROS_NOTIFY_EMAIL` (once per row), pre-drafts the nudge for answered
+  threads that crossed 48h of silence, and prunes the durable snapshot
+  (items/outbound/seen are all bounded).
+
 ## Daily cadence
 
 `lib/campaigns/cadence.ts` runs the 7:00 -> 9:00 loop: pull signals -> score &

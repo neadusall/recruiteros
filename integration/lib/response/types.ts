@@ -109,6 +109,8 @@ export interface ProcessedResponse {
   snoozedUntil?: string;
   /** AI reply pre-drafted on arrival, waiting in the composer when the thread opens. */
   suggestedReply?: { text: string; objective: string; at: string };
+  /** Stamped when the watchdog escalated this blown-SLA hot reply to the operator (sent once). */
+  escalatedAt?: string;
 }
 
 /** An outbound message the recruiter sent FROM the reply center (any channel).
