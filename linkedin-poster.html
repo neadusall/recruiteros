@@ -525,6 +525,7 @@
   var device = "desktop";   // preview device
   var pvOpen = false;       // preview fold expanded
   var pickOpen = false;     // media picker open for selected draft
+  var statsPinged = false;  // one forced stats refresh per session while a post is in its engagement window
   var hooksOpen = false;
   var regenOpen = false;    // inline "direction" row for Regenerate
   var cardOpen = false;     // inline headline row for Quote card
@@ -816,7 +817,15 @@
     var postedToday = S.drafts.some(function (d) { return d.status === "posted" && d.postedAt && new Date(d.postedAt).toDateString() === today; });
     var slot = nextFreeSlot();
     var open = setupSteps().filter(function (s) { return !s.done; }).length;
+    var winLeft = 0;
+    S.drafts.forEach(function (d) {
+      if (d.status === "posted" && d.postedAt) {
+        var m = (Date.now() - new Date(d.postedAt).getTime()) / 60000;
+        if (m >= 0 && m < 90) winLeft = Math.max(winLeft, Math.round(90 - m));
+      }
+    });
     el.innerHTML =
+      (winLeft ? '<span class="tp" data-go="today"><span class="d acc"></span>Engagement window&nbsp;<b>' + winLeft + " min left</b></span>" : "") +
       (open ? '<span class="tp" data-go="studio"><span class="d warn"></span>Finish setup&nbsp;<b>' + (4 - open) + " of 4</b></span>" : "") +
       '<span class="tp" data-go="studio"><span class="d ' + (waiting ? "acc" : "ok") + '"></span>' + (waiting ? "<b>" + waiting + "</b>&nbsp;waiting for your approve" : "Nothing waiting on you") + "</span>" +
       '<span class="tp" data-go="calendar"><span class="d ' + (postedToday ? "ok" : "warn") + '"></span>' + (postedToday ? "Posted today" : "Nothing published yet today") + "</span>" +
@@ -843,6 +852,29 @@
     var names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     var st = S.settings || {};
     var hasSched = String(st.postingDays || "").trim() && String(st.postingTimes || "").trim();
+
+    // Live engagement window: the 90 minutes after a publish decide its total
+    // reach, so when a post is fresh this protocol leads the whole tab.
+    var winPost = null, winMins = 0;
+    S.drafts.forEach(function (d) {
+      if (d.status === "posted" && d.postedAt) {
+        var m = (Date.now() - new Date(d.postedAt).getTime()) / 60000;
+        if (m >= 0 && m < 90 && (!winPost || d.postedAt > winPost.postedAt)) { winPost = d; winMins = Math.round(m); }
+      }
+    });
+    if (winPost && !statsPinged && S.engine && S.engine.ready) {
+      statsPinged = true;
+      api("refresh_stats", {}).then(function () { return load(); }).catch(function () { /* counters catch up later */ });
+    }
+    var engage = "";
+    if (winPost) {
+      var cm = winPost.stats && typeof winPost.stats.comments === "number" ? winPost.stats.comments : null;
+      engage = '<div class="card" style="margin-bottom:14px;border-color:var(--accent)"><h3>Engagement window · about ' + Math.max(1, 90 - winMins) + ' minutes left</h3>' +
+        '<p class="hint">You published ' + (winMins || 1) + ' minute' + (winMins === 1 ? "" : "s") + ' ago. LinkedIn is showing the post to a test slice of your network right now; what happens this hour decides its total reach.</p>' +
+        '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>Reply to every comment, 15 or more words' + (cm !== null ? " (" + cm + " comment" + (cm === 1 ? "" : "s") + " so far)" : "") + '</b><span>Each reply counts as fresh engagement and re-triggers distribution.</span></span></div>' +
+        '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>Leave 10 real comments on buyer posts</b><span>While the algorithm tests your post, an active session lifts it.</span></span></div>' +
+        '<div class="checkrow"><span class="ck">' + ck(false) + '</span><span class="cx"><b>Publish nothing else today</b><span>A second post within 20 hours splits reach. The approve buttons will warn you.</span></span></div></div>';
+    }
 
     var strip = '<div class="weekstrip">' + [1, 2, 3, 4, 5].map(function (d) {
       var p = PILLARS[d];
@@ -932,7 +964,7 @@
       '<div class="kv"><b>Topic authority</b>stay in your lane; it takes 3-4 weeks to build</div>' +
       '<div class="kv"><b>Warm DM threads</b>typically start weeks 6-8. Outlast week 5.</div></div>';
 
-    el.innerHTML = strip + head +
+    el.innerHTML = engage + strip + head +
       '<div class="todaygrid"><div>' + (P ? step2 + step3 + step4 + step1 : step1) + "</div>" +
       "<div>" + after + friday + rules + "</div></div>";
   }
@@ -1325,6 +1357,25 @@
       '<div class="kpi"><div class="kv">' + sum("comments") + '</div><div class="kl">comments, all tracked</div></div>' +
       '<div class="kpi"><div class="kv">' + sum("impressions") + '</div><div class="kl">views, all tracked</div></div>' +
       "</div>";
+    // Baseline: the median views of tracked posts. Spikes get judged against
+    // this, not against each other, so one big Friday never reads as the bar.
+    var imps = posted.map(function (d) { return d.stats && typeof d.stats.impressions === "number" ? d.stats.impressions : null; })
+      .filter(function (v) { return v !== null; }).sort(function (a, b) { return a - b; });
+    var baseline = imps.length >= 3 ? imps[Math.floor(imps.length / 2)] : 0;
+    var reachRows = "";
+    if (baseline) {
+      reachRows = posted.filter(function (d) { return d.stats && typeof d.stats.impressions === "number"; }).slice(0, 5).map(function (d) {
+        var x = d.stats.impressions / baseline;
+        var mult = x >= 10 ? Math.round(x) : Math.round(x * 10) / 10;
+        return '<div class="kv"><b>' + mult + "x baseline</b>" + esc(firstLine(d.text).slice(0, 56)) + " · " + d.stats.impressions + " views</div>";
+      }).join("");
+    }
+    var reach = '<div class="card" style="margin-bottom:16px"><h3>Reach, read right</h3>' +
+      '<p class="hint">LinkedIn shows a new post to a small test slice of your network first, fans it out over the next 24 to 48 hours if that slice engages, then distribution falls to near zero by day 3 or 4. A spike followed by a drop is a post that worked, not one that broke. Weekends crater B2B reach, so a Friday post looks like a cliff by Sunday. Judge every post at the 48 hour mark against your baseline, never against your best day.</p>' +
+      (baseline
+        ? '<div class="kv"><b>Your baseline</b>' + baseline + ' views per post (median of tracked posts)</div>' + reachRows
+        : '<p class="hint" style="margin:8px 0 0">Once a few posts have view counts, your baseline (median views per post) shows here and every post gets scored against it.</p>') +
+      '<div class="kv"><b>What keeps it high</b>reply to every comment in the first hour, hold the weekday morning cadence (Tue-Thu strongest), never two posts within 20 hours</div></div>';
     var bestCard = best
       ? '<div class="card" style="margin-bottom:16px"><h3>Best performer</h3>' +
         '<div class="meta" style="display:flex;gap:8px;margin:6px 0 8px"><span class="statchip">' + best.stats.reactions + ' reactions</span>' +
@@ -1338,7 +1389,7 @@
         ? barChart("Reactions per post (latest tracked)", withStats.map(function (d, i) { return String(i + 1); }), withStats.map(function (d) { return d.stats.reactions; }), withStats.map(function (d) { return firstLine(d.text).slice(0, 60); }))
         : "") +
       "</div>";
-    el.innerHTML = kpis + bestCard + charts +
+    el.innerHTML = kpis + reach + bestCard + charts +
       '<div class="btnrow"><button class="btn small" data-act="stats-refresh">Refresh performance</button><span class="sub">Counters update automatically every few hours once the engine is connected.</span></div>';
   }
 
@@ -1387,6 +1438,23 @@
   }
 
   /* ----------------------------- actions ----------------------------- */
+  // Cadence guard: two posts within 20 hours split each other's reach, so the
+  // first click on any approve path warns and the second goes through.
+  var cadenceOk = {};
+  function cadenceGuard(id, target) {
+    var t = target.getTime(), H20 = 20 * 3600000, hit = null;
+    S.drafts.forEach(function (d) {
+      if (d.id === id) return;
+      var other = d.status === "posted" && d.postedAt ? new Date(d.postedAt).getTime()
+        : d.status === "approved" && d.scheduledAt ? new Date(d.scheduledAt).getTime() : null;
+      if (other !== null && Math.abs(other - t) < H20 && (hit === null || Math.abs(other - t) < Math.abs(hit - t))) hit = other;
+    });
+    if (hit === null || cadenceOk[id]) return true;
+    cadenceOk[id] = true;
+    toast("Another post lands " + new Date(hit).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) +
+      ", within 20 hours of this one. Posts that close split each other's reach. Click again to go ahead anyway, or pick a later slot.");
+    return false;
+  }
   document.getElementById("btnSave").addEventListener("click", function () { saveInspiration(false, this); });
   document.getElementById("btnSaveRewrite").addEventListener("click", function () { saveInspiration(true, this); });
   function saveInspiration(rewrite, btn) {
@@ -1711,6 +1779,7 @@
     } else if (act === "discard") {
       api("discard_draft", { draftId: id }).then(function () { toast("Discarded."); return load(); }).catch(function (err) { toast(err.message); });
     } else if (act === "post-now") {
+      if (!cadenceGuard(id, new Date())) return;
       if (!confirm("Publish this post to LinkedIn now?")) return;
       flushDraftText(id);
       busy(b, true, "Publishing…");
@@ -1720,6 +1789,7 @@
     } else if (act === "post-slot") {
       var slot = nextFreeSlot();
       if (!slot) { toast("Set your posting schedule in Settings first."); showView("settings"); return; }
+      if (!cadenceGuard(id, slot)) return;
       flushDraftText(id);
       busy(b, true, "Scheduling…");
       api("approve", { draftId: id, when: slot.toISOString() })
@@ -1735,6 +1805,7 @@
     } else if (act === "sched-confirm") {
       var v = document.getElementById("when-" + id).value;
       if (!v) { toast("Pick a date and time."); return; }
+      if (!cadenceGuard(id, new Date(v))) return;
       flushDraftText(id);
       api("approve", { draftId: id, when: new Date(v).toISOString() })
         .then(function () { toast("Scheduled."); showView("calendar"); return load(); })
