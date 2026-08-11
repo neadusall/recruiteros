@@ -193,6 +193,16 @@
   var viewTimers = [];
   function clearViewTimers() { viewTimers.forEach(function (t) { clearInterval(t); }); viewTimers = []; }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  // Timestamps arrive as UTC ISO strings; recruiters read them in Central, 12-hour.
+  function fmtCentral(iso, timeOnly) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso).slice(0, 16).replace("T", " ") + " UTC";
+    var opts = timeOnly
+      ? { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" }
+      : { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" };
+    try { return d.toLocaleString("en-US", opts); } catch (e) { return d.toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
+  }
   function toast(t) { var el = $("#toast"); el.textContent = t; el.classList.add("show"); setTimeout(function () { el.classList.remove("show"); }, 2200); }
 
   /* Reusable modal: openModal(title, sub, bodyHtml, onMount) -> returns close fn.
@@ -3739,7 +3749,7 @@
             dk((ov.warmupReputationPct == null ? "-" : ov.warmupReputationPct + "%"), "Inbox placement", placeCls) +
             dk(authedN + "/" + sendingN, "Domains authenticated", authCls) +
           "</div>" + gapHtml +
-          '<div class="note" style="margin-bottom:8px">' + ov.domainsWarmed + "/" + ov.domainsTotal + " domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; authentication = real SPF/DKIM/DMARC/MX DNS checks (the hard signal). Inbox placement = live Smartlead warm-up reputation, a measured proxy for the prospect inbox, not the inbox itself &middot; updated " + esc((d.generatedAt || "").slice(0, 16).replace("T", " ")) + " UTC</div>" +
+          '<div class="note" style="margin-bottom:8px">' + ov.domainsWarmed + "/" + ov.domainsTotal + " domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; authentication = real SPF/DKIM/DMARC/MX DNS checks (the hard signal). Inbox placement = live Smartlead warm-up reputation, a measured proxy for the prospect inbox, not the inbox itself &middot; updated " + esc(fmtCentral(d.generatedAt)) + "</div>" +
           drows;
       }
       // Who sent it: per-recruiter attribution. Every send goes out on a mailbox owned by one
@@ -3757,7 +3767,7 @@
       }
       host.innerHTML =
         '<div class="card" style="margin-bottom:16px">' +
-          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc((m.generatedAt || "").slice(11, 16)) + " UTC</span></div>" +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc(fmtCentral(m.generatedAt, true)) + "</span></div>" +
           '<div class="stat-grid" style="margin-top:12px">' +
             kpi(m.sentToday, "Sent today", "of " + (m.sentTotal || 0) + " total") +
             kpi((m.replyRate || 0) + "%", "Reply rate", (m.repliesTotal || 0) + " real replies") +
@@ -5193,13 +5203,13 @@
           "</div>" : "";
         var hdr = '<div class="note" style="margin-bottom:12px">' + (d.total || msgs.length) + " messages sent &middot; showing " + (activeSender ? show.length + " by " + esc(activeSender) : "newest " + show.length) + "</div>";
         wrap.innerHTML = chips + hdr + (show.map(function (m) {
-          var when = (m.at || "").slice(0, 16).replace("T", " ");
+          var when = fmtCentral(m.at);
           var touch = (m.touch && m.touch > 1) ? '<span class="cls" style="margin-left:6px">follow-up ' + m.touch + '</span>' : "";
           var who = esc(m.to_name || m.to_email) + (m.company ? " &middot; " + esc(m.company) : "");
           var by = m.from_owner ? '<div class="note" style="margin-top:2px">Sent by <b>' + esc(m.from_owner) + "</b></div>" : "";
           return '<div class="card" style="margin-bottom:12px">' +
             '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><div><div class="resp-name">' + who + '</div><div class="resp-chan">' + esc(m.to_email) + (m.role ? " &middot; " + esc(m.role) : "") + "</div>" + by + "</div>" +
-            '<div class="note" style="flex:none">' + esc(when) + " UTC" + (m.variant ? " &middot; " + esc(m.variant) : "") + touch + "</div></div>" +
+            '<div class="note" style="flex:none">' + esc(when) + (m.variant ? " &middot; " + esc(m.variant) : "") + touch + "</div></div>" +
             '<div style="margin-top:8px;font-weight:600">' + esc(m.subject) + "</div>" +
             '<div class="resp-text" style="white-space:pre-wrap;margin-top:6px">' + esc(m.body) + "</div>" +
             "</div>";
