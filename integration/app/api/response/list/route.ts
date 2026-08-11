@@ -18,11 +18,19 @@ export async function GET(req: Request) {
   // Cross-channel context per prospect: inbound counts from the inbox itself,
   // outbound from the activity log + the reply center's own sends. Best-effort:
   // a summary failure must never take down the inbox list.
-  const people: Record<string, { in: Record<string, number>; out: Record<string, number>; lastInAt?: string; lastOutAt?: string }> = {};
+  const people: Record<string, { in: Record<string, number>; out: Record<string, number>; lastInAt?: string; lastOutAt?: string; phone?: string; linkedinUrl?: string; email?: string; company?: string }> = {};
   try {
     const ids = [...new Set(items.map((i) => i.inbound.prospectId).filter(Boolean))] as string[];
     for (const pid of ids) {
-      const summary = { in: {} as Record<string, number>, out: {} as Record<string, number>, lastInAt: undefined as string | undefined, lastOutAt: undefined as string | undefined };
+      const summary = { in: {} as Record<string, number>, out: {} as Record<string, number>, lastInAt: undefined as string | undefined, lastOutAt: undefined as string | undefined, phone: undefined as string | undefined, linkedinUrl: undefined as string | undefined, email: undefined as string | undefined, company: undefined as string | undefined };
+      // Direct-contact handles so the row can offer Call / LinkedIn profile in one click.
+      const prospect = await getCore().getProspect(pid);
+      if (prospect) {
+        summary.phone = prospect.phone;
+        summary.linkedinUrl = prospect.linkedinUrl;
+        summary.email = prospect.email;
+        summary.company = prospect.company;
+      }
       const rows = await getInbox().forPerson(ws, { prospectId: pid });
       for (const r of rows) {
         summary.in[r.inbound.channel] = (summary.in[r.inbound.channel] || 0) + 1;
