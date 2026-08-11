@@ -3681,6 +3681,24 @@
           return '<div class="list-row" style="align-items:flex-start"><span class="sv ' + pc + '" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-right:10px;flex:none;align-self:center">' + esc(String(r.priority || "").toUpperCase()) + '</span><div><div class="lr-main">' + esc(r.title) + '</div><div class="lr-sub">' + esc(r.detail) + "</div></div></div>";
         }).join("") +
         '<div class="note" style="margin-top:6px">AI read, based on ' + ((m.advisor.basedOn && m.advisor.basedOn.sent) || 0) + " sent &middot; updated " + esc((m.advisor.generatedAt || "").slice(0, 10)) + "</div>") : "";
+      // Growth Engine: idle demand + campaign proposals that push more outbound.
+      var g = m.growth || null, grHtml = "";
+      if (g) {
+        var gap = g.growthGap || {};
+        var cc = (gap.constraint === "capacity" || gap.constraint === "supply") ? "amber" : "good";
+        var prop = (g.proposals || []).map(function (p) {
+          var badge = p.launchable ? '<span class="sv good" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-left:8px">LAUNCH</span>' : '<span class="note" style="margin-left:8px">queue</span>';
+          return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(p.industry) + " &middot; " + esc(p.family) + " &middot; " + esc(p.metro) + badge + '</div><div class="lr-sub">' + p.companies + " companies &middot; " + p.prospects + " decision-makers &middot; avg score " + p.avgScore + "</div></div>" +
+            '<div style="flex:none;display:flex;gap:6px;align-items:center"><button class="resp-btn" data-grow="approve" data-key="' + esc(p.key) + '">Launch</button><button class="resp-btn ghost" data-grow="snooze" data-key="' + esc(p.key) + '">Snooze</button><button class="resp-btn ghost" data-grow="suppress" data-key="' + esc(p.key) + '">Suppress</button></div></div>';
+        }).join("") || '<div class="empty">No idle cohorts right now.</div>';
+        grHtml = '<h4 style="margin:18px 0 6px">Growth &middot; push more outbound</h4>' +
+          '<div class="stat-grid" style="margin-bottom:8px">' +
+            '<div class="stat"><div class="sv ' + (gap.untouchedClean ? "amber" : "") + '">' + (gap.untouchedClean || 0) + '</div><div class="sl">Idle clean leads</div></div>' +
+            '<div class="stat"><div class="sv">' + (gap.safeRemaining || 0) + '</div><div class="sl">Safe sends left today</div></div>' +
+            '<div class="stat"><div class="sv ' + cc + '">' + esc(String(gap.constraint || "").toUpperCase()) + '</div><div class="sl">Constraint</div></div>' +
+          "</div>" +
+          '<div class="note" style="margin-bottom:8px">' + esc(gap.message || "") + "</div>" + prop;
+      }
       host.innerHTML =
         '<div class="card" style="margin-bottom:16px">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc((m.generatedAt || "").slice(11, 16)) + " UTC</span></div>" +
@@ -3692,8 +3710,23 @@
           "</div>" +
           '<div style="margin-top:10px">' + pills + "</div>" +
           '<h4 style="margin:16px 0 6px">What is working &middot; reply rate by angle</h4>' +
-          '<div class="bars">' + vrows + "</div>" + advHtml +
+          '<div class="bars">' + vrows + "</div>" + advHtml + grHtml +
         "</div>";
+      // Real buttons: Launch (greenlight the cohort so the always-on sender ships it),
+      // Snooze (7d), Suppress (never send this cohort). The sender obeys these next cycle.
+      host.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-grow]"); if (!b) return;
+        var action = b.getAttribute("data-grow"), key = b.getAttribute("data-key");
+        var payload = { cohortKey: key, action: action };
+        if (action === "snooze") payload.snoozeDays = 7;
+        b.disabled = true;
+        send("/growth/decision", "POST", payload).then(function (r) {
+          if (r.ok) {
+            toast(action === "approve" ? "Launching, the autopilot ships this cohort" : action === "snooze" ? "Snoozed 7 days" : "Suppressed, the sender will skip it");
+            var row = b.closest(".list-row"); if (row && action !== "approve") row.style.opacity = "0.4";
+          } else { toast("Could not " + action + " (" + ((r.data && r.data.error) || r.status) + ")"); b.disabled = false; }
+        }).catch(function () { toast("Could not reach the server."); b.disabled = false; });
+      });
     }).catch(function () { /* cockpit is best-effort; the rest of the Dashboard still loads */ });
 
     if (showRecruiterBar) {

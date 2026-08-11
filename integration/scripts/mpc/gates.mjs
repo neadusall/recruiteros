@@ -108,6 +108,26 @@ export function metroOf(p) {
   return m[1].trim();
 }
 
+// The finance role family, used to group prospects into campaign cohorts.
+export function roleFamily(role) {
+  const r = (role || "").toLowerCase();
+  if (/controller|comptroller|bookkeep|staff accountant|senior accountant|accounting/.test(r)) return "Accounting";
+  if (/fp&a|financial planning|finance manager|director of finance|vp finance|head of finance/.test(r)) return "FP&A / Finance";
+  if (/tax/.test(r)) return "Tax";
+  if (/audit/.test(r)) return "Audit";
+  if (/cfo|chief financial/.test(r)) return "Finance Exec";
+  return "Finance";
+}
+
+// The cohort key a prospect belongs to (industry | role-family | metro). The Growth Engine groups
+// by it, decisions are keyed on it, and the sender skips prospects in a suppressed cohort, so all
+// three stay in lockstep.
+export function cohortKeyOf(p) {
+  const industry = (p.industry || "General").trim();
+  const metro = metroOf(p) || "Remote / National";
+  return `${industry} | ${roleFamily(p.role)} | ${metro}`;
+}
+
 const PLACEHOLDER = /\{\{\s*[a-zA-Z0-9_]+\s*\}\}/;
 const EM_DASH = /—/;
 
