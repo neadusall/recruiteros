@@ -3676,8 +3676,42 @@
       + (showRecruiterBar ? " Pick a recruiter to scope it, or see every recruiter's stats below." : "");
     el.innerHTML = head("Dashboard", sub) +
       '<div id="ovMpc"></div>' +
+      '<div id="ovVisitors"></div>' +
       (showRecruiterBar ? '<div class="ov-recruiters" id="ovRecruiters">' + loading() + "</div>" : "") +
       '<div id="ovBody">' + loading() + "</div>";
+
+    // Who is on your site: first-party visitor intelligence for the marketing site.
+    // A company we emailed shows with the exact people we emailed there (recruiter +
+    // LinkedIn), the LinkedIn-connect shortlist. Hides cleanly when nothing is there.
+    api("/site-visitors").then(function (v) {
+      var host = $("#ovVisitors"); if (!host || !v || !v.present) return;
+      var comps = v.companies || [], corp = v.corporate || [];
+      if (!comps.length && !corp.length) return;
+      var rows = comps.map(function (c) {
+        var when = (c.lastVisit || "").slice(0, 16).replace("T", " ");
+        var conf = c.confident ? "" : ' <span class="note">(network-owner match, less certain)</span>';
+        var people = (c.people || []).map(function (p) {
+          var li = p.linkedin ? ' &middot; <a href="' + esc(p.linkedin) + '" target="_blank" rel="noopener">LinkedIn</a>' : "";
+          var by = p.recruiter ? " &middot; emailed by " + esc(p.recruiter) : "";
+          return '<div class="lr-sub" style="margin-top:2px">' + esc(p.name || p.email) + (p.title ? ", " + esc(p.title) : "") + by + li + "</div>";
+        }).join("");
+        return '<div class="list-row" style="align-items:flex-start;justify-content:space-between;gap:10px"><div>' +
+          '<div class="lr-main">' + esc(c.company) + conf + "</div>" + people + "</div>" +
+          '<div class="note" style="flex:none;text-align:right">' + c.visits + " page view" + (c.visits === 1 ? "" : "s") + "<br>" + esc(when) + " UTC</div></div>";
+      }).join("") || '<div class="empty">No visits matched to emailed companies yet. As outreach lands, matches appear here.</div>';
+      var corpNote = corp.length
+        ? '<details style="margin-top:10px"><summary class="note" style="cursor:pointer">' + corp.length + " other business network" + (corp.length === 1 ? "" : "s") + " visited (no email match yet)</summary>" +
+          corp.slice(0, 15).map(function (u) {
+            return '<div class="lr-sub" style="margin-top:4px">' + esc(u.org || u.rdns || u.ip) + (u.country ? " &middot; " + esc(u.country) : "") + " &middot; " + u.visits + " views &middot; " + esc((u.lastVisit || "").slice(0, 10)) + "</div>";
+          }).join("") + "</details>"
+        : "";
+      host.innerHTML =
+        '<div class="card" style="margin-bottom:16px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Who is on your site</h3><span class="note">lumesp.com &middot; matched to your outreach &middot; updated ' + esc((v.generatedAt || "").slice(11, 16)) + " UTC</span></div>" +
+          '<div class="note" style="margin:6px 0 8px">A company here visited the site AFTER we emailed them. The people listed are exactly who we contacted there, ready for a LinkedIn connect from the recruiter who emailed them.</div>' +
+          rows + corpNote +
+        "</div>";
+    }).catch(function () { /* visitor card is best-effort; the Dashboard still loads */ });
 
     // Finance BD Campaign cockpit: real activity from the MPC engine (sends via Sending.ac + free
     // ATS sourcing + reply bridge) that the app's native /overview can't see. Hides if not present.
