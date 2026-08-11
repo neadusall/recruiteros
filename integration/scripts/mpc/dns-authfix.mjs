@@ -73,16 +73,21 @@ async function fixDomain(domain) {
     return { domain, action: "error", detail: msg };
   }
   const existing = (cur.data.records || []).find((r) => /^v=DMARC1/i.test(r.content || ""));
-  const already = existing && /p=(quarantine|reject)/i.test(existing.content || "");
+  const already = existing && /p=\s*(quarantine|reject)/i.test(existing.content || "");
   if (already) return { domain, action: "skip", detail: "DMARC already enforcing" };
-  if (!APPLY) return { domain, action: existing ? "would-update" : "would-create", detail: want };
+  // Preserve the operator's existing record (rua, fo, etc.) and only raise the policy; fall back to
+  // a clean default when there is no record or it has no p= tag to lift.
+  const target = (existing && /p=\s*none/i.test(existing.content || ""))
+    ? existing.content.replace(/p=\s*none/i, `p=${DMARC_POLICY}`)
+    : want;
+  if (!APPLY) return { domain, action: existing ? "would-update" : "would-create", detail: target };
   const write = existing
-    ? await pb(`/dns/editByNameType/${domain}/TXT/_dmarc`, { content: want, ttl: "600" })
-    : await pb(`/dns/create/${domain}`, { name: "_dmarc", type: "TXT", content: want, ttl: "600" });
+    ? await pb(`/dns/editByNameType/${domain}/TXT/_dmarc`, { content: target, ttl: "600" })
+    : await pb(`/dns/create/${domain}`, { name: "_dmarc", type: "TXT", content: target, ttl: "600" });
   if (!write.httpOk || !write.data || write.data.status !== "SUCCESS") {
     return { domain, action: "error", detail: (write.data && write.data.message) || `http ${write.status}` };
   }
-  return { domain, action: existing ? "updated" : "created", detail: want };
+  return { domain, action: existing ? "updated" : "created", detail: target };
 }
 
 async function main() {
