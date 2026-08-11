@@ -420,7 +420,7 @@
   <section class="view" id="view-media">
     <div class="card" style="margin-bottom:16px">
       <h3>Approved media library</h3>
-      <p class="hint">Upload brand-safe media once; attach it to drafts with one click. Generated quote cards and carousels land here too. A PDF publishes as a native LinkedIn document post (readers swipe through the pages), the format with the highest engagement on the platform right now.</p>
+      <p class="hint">Upload brand-safe media once; attach it to drafts with one click. Found photos, generated media, and carousels land here too. A PDF publishes as a native LinkedIn document post (readers swipe through the pages), the format with the highest engagement on the platform right now.</p>
       <div class="btnrow" style="margin-top:0">
         <label class="btn primary" for="fileInput" id="btnUpload">Upload media</label>
         <label class="btn" for="photoInput" title="Pick a photo from your computer or phone; the AI writes the post around it and drops both in Drafts.">Photo straight to a post</label>
@@ -428,6 +428,16 @@
         <input type="file" id="photoInput" accept="image/png,image/jpeg,image/webp" style="display:none" />
         <span class="sub">PNG, JPG, or WebP up to 8MB. PDF or MP4 video up to 15MB.</span>
       </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3>Find real photos</h3>
+      <p class="hint">Search licensed stock photography and add the winners to your library. Licensing and photo credit are handled for you. Drafts also pull a matching photo in automatically when media is designed for a post.</p>
+      <div class="btnrow" style="margin-top:0">
+        <input type="text" id="stockQ" placeholder="What should the photo show? e.g. law firm meeting" style="flex:1 1 260px;min-width:200px" />
+        <button class="btn primary" id="btnStockSearch">Find photos</button>
+        <span class="sub" id="stockStatus"></span>
+      </div>
+      <div class="imggrid" id="stockGrid" style="margin-top:14px"></div>
     </div>
     <div class="imggrid" id="imgGrid"></div>
     <div class="empty" id="imgEmpty" style="display:none"><b>No media yet</b>Upload a photo, a PDF, or a short video, or generate a quote card or carousel from a draft.</div>
@@ -1078,7 +1088,7 @@
       (d.error ? '<div class="errbox">Publish failed: ' + esc(d.error) + "</div>" : "") +
       '<div class="imgrow">' +
       '<button class="btn small" data-act="choose-img" data-id="' + d.id + '">' + (img ? "Change media" : "Attach media") + "</button>" +
-      '<button class="btn small" data-act="make-ai-media" data-id="' + d.id + '" title="Designs a stat graphic from the numbers in the post. Press it again for a different look: layouts and light or dark styles rotate every click.">Create media for me</button>' +
+      '<button class="btn small" data-act="make-ai-media" data-id="' + d.id + '" title="Designs media from the post itself: real photos with branded treatments, plus stat graphics built from its own numbers. Press it again for the next look.">Create media for me</button>' +
       '<button class="btn small" data-act="open-card" data-id="' + d.id + '">Quote card</button>' +
       '<button class="btn small" data-act="make-carousel" data-id="' + d.id + '">Carousel</button>' +
       (img ? '<span class="sub">' + esc(img.name) + "</span>" : '<span class="sub">No media attached.</span>') +
@@ -1237,8 +1247,11 @@
         ? '<img src="' + mediaUrl(i.id) + '" alt="" />'
         : '<a class="filetile" href="' + mediaUrl(i.id) + '" target="_blank" rel="noopener">' + fileIcon(k) +
           '<span class="ftype">' + kindTag(k) + "</span></a>";
+      var credit = i.kind === "stock"
+        ? '<span style="flex:1 1 100%">' + (i.link ? '<a href="' + esc(i.link) + '" target="_blank" rel="noopener" style="color:inherit">' + esc(i.credit || "Licensed photo") + "</a>" : esc(i.credit || "Licensed photo")) + "</span>"
+        : "";
       return '<div class="imgcard">' + face +
-        '<div class="cap"><span title="' + esc(i.name) + '">' + esc(i.name) + "</span>" +
+        '<div class="cap"><span title="' + esc(i.name) + '">' + esc(i.name) + "</span>" + credit +
         (k === "image" ? '<button class="btn small" data-act="write-from-photo" data-id="' + i.id + '" title="The AI looks at this photo and writes the post around it, in your voice.">Write a post</button>' : "") +
         '<button class="btn danger small" data-act="del-img" data-id="' + i.id + '">Delete</button></div></div>';
     }).join("");
@@ -1462,6 +1475,36 @@
     this.value = "";
   });
 
+  // Real-photo search: licensed stock into the library, credit handled.
+  var lastStock = { query: "", photos: [] };
+  function doStockSearch() {
+    var q = document.getElementById("stockQ").value.trim();
+    var st = document.getElementById("stockStatus");
+    if (!q) { st.textContent = "Type what the photo should show first."; return; }
+    st.textContent = "Searching photos…";
+    document.getElementById("stockGrid").innerHTML = "";
+    api("stock_search", { query: q })
+      .then(function (r) {
+        lastStock = { query: q, photos: r.photos || [] };
+        st.textContent = lastStock.photos.length
+          ? "Pick the ones that fit. They join your library ready to attach."
+          : "No photos found for that. Try more concrete words, like the room or the job.";
+        renderStockGrid();
+      })
+      .catch(function () { st.textContent = "Photo search is unavailable right now. Try again in a minute."; });
+  }
+  function renderStockGrid() {
+    document.getElementById("stockGrid").innerHTML = lastStock.photos.map(function (p, i) {
+      return '<div class="imgcard"><img src="' + esc(p.thumbUrl) + '" alt="" loading="lazy" />' +
+        '<div class="cap"><span title="' + esc(p.creator || "Licensed photo") + '">' + esc(p.creator || "Licensed photo") + "</span>" +
+        '<button class="btn small primary" data-act="stock-add" data-i="' + i + '">Add to library</button></div></div>';
+    }).join("");
+  }
+  document.getElementById("btnStockSearch").addEventListener("click", doStockSearch);
+  document.getElementById("stockQ").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); doStockSearch(); }
+  });
+
   document.getElementById("btnSaveSettings").addEventListener("click", function () {
     var btn = this; busy(btn, true, "Saving…");
     api("save_settings", { settings: {
@@ -1524,6 +1567,16 @@
     }
     var b = e.target.closest("[data-act]"); if (!b) return;
     var act = b.dataset.act, id = b.dataset.id;
+    if (act === "stock-add") {
+      var sp = lastStock.photos[parseInt(b.dataset.i, 10)];
+      if (!sp) return;
+      busy(b, true, "Adding…");
+      api("stock_add", { query: lastStock.query, provider: sp.provider, id: sp.providerId })
+        .then(function () { toast("Photo added to your library."); return load(); })
+        .catch(function () { toast("That photo could not be brought in. Pick another."); })
+        .then(function () { busy(b, false); });
+      return;
+    }
     if (act === "quick-original" || act === "quick-job") {
       busy(b, true, "Writing…");
       api(act === "quick-original" ? "make_original" : "make_job_post", {})

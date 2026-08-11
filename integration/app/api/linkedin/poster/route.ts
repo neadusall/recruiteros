@@ -17,6 +17,8 @@
  *   cancel_schedule   { draftId }
  *   retry             { draftId }
  *   upload_image      { name?, dataUrl }
+ *   stock_search      { query }             (licensed photo search: Pexels/Openverse)
+ *   stock_add         { query, provider, id } (download a result into the library)
  *   delete_image      { id }
  *   make_card         { headline }
  *   make_original     { guidance? }         (AI writes a brand-grounded original)
@@ -44,8 +46,9 @@ import {
   uploadImage, deleteImage, generateQuoteCard, saveSettings, getSettings,
   enginePublishStatus, addWatchedProfile, removeWatchedProfile, pullWatchedProfile,
   generateCarousel, generateStatMedia, duplicateDraft, refreshPostStats, createOriginalDraft, createJobSpotlightDraft,
-  createPlaybookDraft, createPhotoDraft, addDeskNote, deleteDeskNote,
+  createPlaybookDraft, createPhotoDraft, addDeskNote, deleteDeskNote, importStockPhoto,
 } from "../../../../lib/linkedin/poster";
+import { searchStockPhotos, resolveStockPhoto, photoProviders } from "../../../../lib/linkedin/photoEngine";
 import {
   ayrshareConfigured, ayrshareLinkingConfigured, getAccountStatus, createProfile, generateLinkUrl,
 } from "../../../../lib/providers/ayrshare";
@@ -71,6 +74,7 @@ export async function GET(req: Request) {
     ayrshare: { ...ayrshare, linkingConfigured: ayrshareLinkingConfigured() },
     automation: { enabled: automationEnabled(), armed: automationArmed() },
     anthropicConfigured: !!process.env.ANTHROPIC_API_KEY,
+    photoSources: photoProviders(),
   });
 }
 
@@ -94,6 +98,8 @@ interface PosterPost {
   pillar?: string;
   vertical?: string;
   topic?: string;
+  query?: string;
+  provider?: string;
 }
 
 export async function POST(req: Request) {
@@ -145,6 +151,19 @@ export async function POST(req: Request) {
       case "upload_image": {
         if (!b.dataUrl) return fail("dataUrl_required");
         return ok({ image: await uploadImage(ws, { name: b.name, dataUrl: b.dataUrl }) });
+      }
+      case "stock_search": {
+        if (!b.query?.trim()) return fail("query_required");
+        return ok({ photos: await searchStockPhotos(b.query), sources: photoProviders() });
+      }
+      case "stock_add": {
+        // The client sends back only (query, provider, id); the photo and its
+        // download URL are re-resolved server-side from the cached search, so
+        // the server never fetches a client-supplied URL.
+        if (!b.query?.trim() || !b.provider || !b.id) return fail("photo_required");
+        const photo = await resolveStockPhoto(b.query, b.provider, b.id);
+        if (!photo) return fail("photo_expired: run the search again");
+        return ok({ image: await importStockPhoto(ws, photo, b.query.trim().toLowerCase()) });
       }
       case "delete_image": {
         if (!b.id) return fail("id_required");
