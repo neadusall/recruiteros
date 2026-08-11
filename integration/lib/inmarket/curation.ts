@@ -504,15 +504,27 @@ function topRole(l: PoolLeadLite): string | undefined {
  * primary/top role is always included first; additional functions are added in posting order. This
  * is the per-company multiplier: one company hiring eng + sales + ops yields three decision-makers.
  */
+/** Optional function focus (e.g. INMARKET_FOCUS_FUNCTIONS="finance"): when set, curation only
+ *  enriches roles in these functions, so the metered decision-maker budget is spent on the target
+ *  market instead of every function a company happens to hire. Empty (default) = all functions,
+ *  the original behavior. */
+const FOCUS_FUNCTIONS = (process.env.INMARKET_FOCUS_FUNCTIONS || "")
+  .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+function inFocus(fn: string): boolean {
+  return FOCUS_FUNCTIONS.length === 0 || FOCUS_FUNCTIONS.includes(fn);
+}
+
 function rolesByFunction(l: PoolLeadLite, max: number): string[] {
   const primary = topRole(l);
   if (!primary) return [];
   const roles = (l.roleDetails?.map((r) => r.title) ?? l.roles ?? []).map((t) => (t || "").trim()).filter(Boolean);
   const byFn = new Map<string, string>();
-  byFn.set(classifyTitle(primary).function, primary); // the top role always leads
-  for (const r of roles) {
+  // Top role leads, then the rest in posting order; one role per distinct function. In focus mode
+  // (FOCUS_FUNCTIONS set) off-target functions are skipped so their DMs are never researched.
+  for (const r of [primary, ...roles]) {
     if (byFn.size >= max) break;
     const fn = classifyTitle(r).function;
+    if (!inFocus(fn)) continue;
     if (!byFn.has(fn)) byFn.set(fn, r);
   }
   return [...byFn.values()];
