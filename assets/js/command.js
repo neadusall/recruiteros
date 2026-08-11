@@ -3689,7 +3689,7 @@
         var prop = (g.proposals || []).map(function (p) {
           var badge = p.launchable ? '<span class="sv good" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-left:8px">LAUNCH</span>' : '<span class="note" style="margin-left:8px">queue</span>';
           return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(p.industry) + " &middot; " + esc(p.family) + " &middot; " + esc(p.metro) + badge + '</div><div class="lr-sub">' + p.companies + " companies &middot; " + p.prospects + " decision-makers &middot; avg score " + p.avgScore + "</div></div>" +
-            '<div style="flex:none;display:flex;gap:6px;align-items:center"><button class="resp-btn" data-grow="approve" data-key="' + esc(p.key) + '">Launch</button><button class="resp-btn ghost" data-grow="snooze" data-key="' + esc(p.key) + '">Snooze</button><button class="resp-btn ghost" data-grow="suppress" data-key="' + esc(p.key) + '">Suppress</button></div></div>";
+            '<div style="flex:none;display:flex;gap:6px;align-items:center"><button class="resp-btn" data-grow="approve" data-key="' + esc(p.key) + '">Launch</button><button class="resp-btn ghost" data-grow="snooze" data-key="' + esc(p.key) + '">Snooze</button><button class="resp-btn ghost" data-grow="suppress" data-key="' + esc(p.key) + '">Suppress</button></div></div>';
         }).join("") || '<div class="empty">No idle cohorts right now.</div>';
         grHtml = '<h4 style="margin:18px 0 6px">Growth &middot; push more outbound</h4>' +
           '<div class="stat-grid" style="margin-bottom:8px">' +
