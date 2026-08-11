@@ -17,6 +17,7 @@ const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_
 const INBOX_FILE = process.env.MPC_INBOX_FILE || "/data/snap_inbox.json";
 const EXT_SLUGS = process.env.ATS_EXT_FILE || "/data/snap_inmarket_ats_slugs_ext_v1.json";
 const STATS_FILE = process.env.MPC_STATS_FILE || "/data/snap_mpc_stats_v1.json";
+const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
 const SINCE = process.env.MPC_CURATED_SINCE || "2026-08-11";
 const WS = process.env.MPC_WORKSPACE_ID || "ws_mqf6o989003";
 const today = new Date().toISOString().slice(0, 10);
@@ -59,9 +60,29 @@ function inboxReplies() {
 const sent = loadSent();
 const replies = inboxReplies();
 
+// Sending mailbox -> owning recruiter, from the senders store snapshot. Newer send rows carry
+// from_owner directly; this map back-fills the pre-fleet rows (which all went out on owned boxes
+// that the snapshot still attributes), so attribution covers the whole ledger.
+const ownerByBox = new Map();
+try {
+  const s = JSON.parse(readFileSync(SENDERS, "utf8"));
+  for (const m of s.inboxes || (s.state && s.state.inboxes) || []) {
+    if (m && m.email && m.ownerName) ownerByBox.set(String(m.email).toLowerCase().trim(), String(m.ownerName).trim());
+  }
+} catch { /* no senders snapshot: from_owner on the rows still attributes the fleet era */ }
+
+// The senders store labels Ryan's boxes just "Ryan"; every identity elsewhere is the full name.
+// One display name per person, or the roster splits into two rows.
+const CANON_OWNER = { ryan: "Ryan Nead" };
+const canonOwner = (o) => { const t = String(o || "").trim(); return CANON_OWNER[t.toLowerCase()] || t; };
+
 // Per-variant sent + replied + sentiment, keyed off the send log (variant lives there).
 const variants = new Map();
 const bump = (v) => { const s = variants.get(v) || { variant: v, sent: 0, replied: 0 }; variants.set(v, s); return s; };
+// Per-recruiter attribution: every send row belongs to the recruiter whose mailbox carried it.
+const recruiters = new Map();
+const recFor = (name) => { const s = recruiters.get(name) || { name, sentToday: 0, sentTotal: 0, replies: 0 }; recruiters.set(name, s); return s; };
+const lastSenderByLead = new Map(); // lead email -> recruiter who last emailed them (gets the reply credit)
 let sentToday = 0;
 const contacted = new Set();
 for (const r of sent) {
@@ -69,9 +90,22 @@ for (const r of sent) {
   const s = bump(v); s.sent++;
   const email = String(r.to_email || "").toLowerCase().trim();
   contacted.add(email);
-  if ((r.at || "").slice(0, 10) === today) sentToday++;
+  const isToday = (r.at || "").slice(0, 10) === today;
+  if (isToday) sentToday++;
   if (replies.has(email)) s.replied++;
+  const owner = canonOwner(r.from_owner || ownerByBox.get(String(r.from || "").toLowerCase().trim()) || "Unattributed");
+  const rec = recFor(owner);
+  rec.sentTotal++;
+  if (isToday) rec.sentToday++;
+  lastSenderByLead.set(email, owner);
 }
+for (const email of replies.keys()) {
+  const owner = lastSenderByLead.get(email);
+  if (owner) recFor(owner).replies++;
+}
+const recruiterRows = [...recruiters.values()]
+  .map((s) => ({ ...s, replyRate: s.sentTotal ? Math.round((s.replies / s.sentTotal) * 1000) / 10 : 0 }))
+  .sort((a, b) => b.sentToday - a.sentToday || b.sentTotal - a.sentTotal);
 
 // Replies by sentiment (positive / timing / not_interested / ...), across the campaign.
 const bySentiment = {};
@@ -105,6 +139,7 @@ const stats = {
   replyRate: totalSent ? Math.round((totalReplied / totalSent) * 1000) / 10 : 0,
   repliesBySentiment: bySentiment,
   variants: variantRows,          // ranked by reply rate = what's working
+  recruiters: recruiterRows,      // who sent it: per-recruiter sends + reply credit
   supplyReady: sendableNow,
   freeBoards: boards,
 };
@@ -114,3 +149,4 @@ writeFileSync(tmp, JSON.stringify(stats, null, 2));
 renameSync(tmp, STATS_FILE);
 console.log(`mpc-stats -> sent ${totalSent} (today ${sentToday}), replies ${totalReplied} (${stats.replyRate}%), supplyReady ${sendableNow}, boards ${boards}`);
 console.log("by variant:", variantRows.map((v) => `${v.variant} ${v.replied}/${v.sent} (${v.rate}%)`).join(" | "));
+console.log("by recruiter:", recruiterRows.map((r) => `${r.name} today ${r.sentToday} / total ${r.sentTotal} / replies ${r.replies}`).join(" | "));

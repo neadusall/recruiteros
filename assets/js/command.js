@@ -3729,6 +3729,19 @@
           '<div class="note" style="margin-bottom:8px">' + ov.domainsWarmed + "/" + ov.domainsTotal + " sending domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; inbox placement = live Smartlead warm-up reputation (mail landing in inbox vs spam across the seed network), a measured signal, not a guess &middot; updated " + esc((d.generatedAt || "").slice(0, 16).replace("T", " ")) + " UTC</div>" +
           drows;
       }
+      // Who sent it: per-recruiter attribution. Every send goes out on a mailbox owned by one
+      // recruiter, so the engine's activity splits cleanly by person: sends today, total, and
+      // the replies their sends earned.
+      var recs = m.recruiters || [], recHtml = "";
+      if (recs.length) {
+        recHtml = '<h4 style="margin:16px 0 6px">Who sent it &middot; by recruiter</h4>' +
+          '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+          "<th>Recruiter</th><th>Sent today</th><th>Sent total</th><th>Replies</th><th>Reply rate</th>" +
+          "</tr></thead><tbody>" +
+          recs.map(function (r) {
+            return "<tr><td><b>" + esc(r.name) + "</b></td><td>" + (r.sentToday || 0) + "</td><td>" + (r.sentTotal || 0) + "</td><td>" + (r.replies || 0) + "</td><td>" + (r.replyRate || 0) + "%</td></tr>";
+          }).join("") + "</tbody></table></div>";
+      }
       host.innerHTML =
         '<div class="card" style="margin-bottom:16px">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc((m.generatedAt || "").slice(11, 16)) + " UTC</span></div>" +
@@ -3739,6 +3752,7 @@
             kpi((m.freeBoards || 0).toLocaleString(), "Free boards", "$0 sourcing") +
           "</div>" +
           '<div style="margin-top:10px">' + pills + "</div>" +
+          recHtml +
           '<h4 style="margin:16px 0 6px">What is working &middot; reply rate by angle</h4>' +
           '<div class="bars">' + vrows + "</div>" + dlHtml + advHtml + grHtml +
         "</div>";
@@ -5152,18 +5166,39 @@
     api("/mpc-sent").then(function (d) {
       var msgs = (d && d.messages) || [];
       if (!msgs.length) { wrap.innerHTML = '<div class="empty">No sent messages yet. As the engine sends, they appear here.</div>'; return; }
-      var hdr = '<div class="note" style="margin-bottom:12px">' + (d.total || msgs.length) + ' messages sent &middot; showing newest ' + msgs.length + '</div>';
-      wrap.innerHTML = hdr + msgs.map(function (m) {
-        var when = (m.at || "").slice(0, 16).replace("T", " ");
-        var touch = (m.touch && m.touch > 1) ? '<span class="cls" style="margin-left:6px">follow-up ' + m.touch + '</span>' : "";
-        var who = esc(m.to_name || m.to_email) + (m.company ? " &middot; " + esc(m.company) : "");
-        return '<div class="card" style="margin-bottom:12px">' +
-          '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><div><div class="resp-name">' + who + '</div><div class="resp-chan">' + esc(m.to_email) + (m.role ? " &middot; " + esc(m.role) : "") + '</div></div>' +
-          '<div class="note" style="flex:none">' + esc(when) + " UTC" + (m.variant ? " &middot; " + esc(m.variant) : "") + touch + "</div></div>" +
-          '<div style="margin-top:8px;font-weight:600">' + esc(m.subject) + "</div>" +
-          '<div class="resp-text" style="white-space:pre-wrap;margin-top:6px">' + esc(m.body) + "</div>" +
-          "</div>";
-      }).join("");
+      // Every message carries the recruiter whose mailbox sent it; the chips scope the
+      // list to one recruiter so an admin can see exactly who sent what.
+      var senders = [];
+      msgs.forEach(function (m) { if (m.from_owner && senders.indexOf(m.from_owner) < 0) senders.push(m.from_owner); });
+      senders.sort();
+      var activeSender = null;
+      function draw() {
+        var show = activeSender ? msgs.filter(function (m) { return m.from_owner === activeSender; }) : msgs;
+        var chips = senders.length ? '<div class="chan-filter" id="sentSenders">' +
+          '<span class="cf' + (activeSender ? "" : " active") + '" data-sender="">All recruiters</span>' +
+          senders.map(function (s) { return '<span class="cf' + (activeSender === s ? " active" : "") + '" data-sender="' + esc(s) + '">' + esc(s) + "</span>"; }).join("") +
+          "</div>" : "";
+        var hdr = '<div class="note" style="margin-bottom:12px">' + (d.total || msgs.length) + " messages sent &middot; showing " + (activeSender ? show.length + " by " + esc(activeSender) : "newest " + show.length) + "</div>";
+        wrap.innerHTML = chips + hdr + (show.map(function (m) {
+          var when = (m.at || "").slice(0, 16).replace("T", " ");
+          var touch = (m.touch && m.touch > 1) ? '<span class="cls" style="margin-left:6px">follow-up ' + m.touch + '</span>' : "";
+          var who = esc(m.to_name || m.to_email) + (m.company ? " &middot; " + esc(m.company) : "");
+          var by = m.from_owner ? '<div class="note" style="margin-top:2px">Sent by <b>' + esc(m.from_owner) + "</b></div>" : "";
+          return '<div class="card" style="margin-bottom:12px">' +
+            '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><div><div class="resp-name">' + who + '</div><div class="resp-chan">' + esc(m.to_email) + (m.role ? " &middot; " + esc(m.role) : "") + "</div>" + by + "</div>" +
+            '<div class="note" style="flex:none">' + esc(when) + " UTC" + (m.variant ? " &middot; " + esc(m.variant) : "") + touch + "</div></div>" +
+            '<div style="margin-top:8px;font-weight:600">' + esc(m.subject) + "</div>" +
+            '<div class="resp-text" style="white-space:pre-wrap;margin-top:6px">' + esc(m.body) + "</div>" +
+            "</div>";
+        }).join("") || '<div class="empty">No messages from this recruiter yet.</div>');
+        var bar = wrap.querySelector("#sentSenders");
+        if (bar) bar.addEventListener("click", function (e) {
+          var c = e.target.closest("[data-sender]"); if (!c) return;
+          activeSender = c.getAttribute("data-sender") || null;
+          draw();
+        });
+      }
+      draw();
     }).catch(function () { wrap.innerHTML = '<div class="empty">Could not load sent messages.</div>'; });
   }
 

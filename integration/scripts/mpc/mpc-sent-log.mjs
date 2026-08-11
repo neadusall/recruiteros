@@ -12,6 +12,21 @@ const OUT = process.env.MPC_OUT_DIR || "/out";
 const SENT_FILE = process.env.MPC_SENT_FILE || "/data/snap_mpc_sent_v1.json";
 const WS = process.env.MPC_WORKSPACE_ID || "ws_mqf6o989003";
 const KEEP = Number(process.env.MPC_SENT_KEEP || 300); // most-recent messages retained for the view
+const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
+
+// Sending mailbox -> owning recruiter, to attribute pre-fleet rows that predate from_owner.
+const ownerByBox = new Map();
+try {
+  const s = JSON.parse(readFileSync(SENDERS, "utf8"));
+  for (const m of s.inboxes || (s.state && s.state.inboxes) || []) {
+    if (m && m.email && m.ownerName) ownerByBox.set(String(m.email).toLowerCase().trim(), String(m.ownerName).trim());
+  }
+} catch { /* no senders snapshot: fleet-era rows still carry from_owner themselves */ }
+
+// The senders store labels Ryan's boxes just "Ryan"; every identity elsewhere is the full name.
+// One display name per person, or the sender filter splits into two chips.
+const CANON_OWNER = { ryan: "Ryan Nead" };
+const canonOwner = (o) => { const t = String(o || "").trim(); return CANON_OWNER[t.toLowerCase()] || t; };
 
 const rows = [];
 if (existsSync(OUT)) {
@@ -24,6 +39,7 @@ if (existsSync(OUT)) {
         rows.push({
           at: r.at, to_email: r.to_email, to_name: r.to_name || "", company: r.company || "",
           role: r.role || "", variant: r.variant || "", from: r.from || "",
+          from_owner: canonOwner(r.from_owner || ownerByBox.get(String(r.from || "").toLowerCase().trim()) || ""),
           touch: r.touch || 1, subject: r.subject, body: r.body || "",
         });
       } catch { /* skip bad line */ }
