@@ -3705,6 +3705,30 @@
           "</div>" +
           '<div class="note" style="margin-bottom:8px">' + esc(gap.message || "") + "</div>" + prop;
       }
+      // Deliverability: real, documented numbers on whether mail is actually landing. Acceptance,
+      // hard-fail, bounce, complaint are directly measured from send logs + our inboxes; inbox
+      // placement is live Smartlead warm-up reputation (mail landing in inbox vs spam across the
+      // warm-up seed network), a real signal, stated honestly, never a guess.
+      var d = m.deliverability || null, dlHtml = "";
+      if (d && d.overall) {
+        var ov = d.overall;
+        function dk(v, l, cls) { return '<div class="stat"><div class="sv ' + (cls || "") + '">' + esc(String(v)) + '</div><div class="sl">' + esc(l) + "</div></div>"; }
+        var failCls = (ov.hardFailRatePct > 2) ? "bad" : "good";
+        var placeCls = (ov.warmupReputationPct != null && ov.warmupReputationPct < 90) ? "amber" : "good";
+        var drows = (d.byDomain || []).filter(function (x) { return x.sent > 0; }).map(function (x) {
+          var vc = x.verdict === "healthy" ? "good" : "amber";
+          return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(x.domain) + '</div><div class="lr-sub">' + x.sent + " sent &middot; " + (x.acceptanceRatePct == null ? "-" : x.acceptanceRatePct) + "% accepted &middot; " + x.hardFailRatePct + "% fail &middot; " + x.bounces + ' bounces</div></div><div style="flex:none;text-align:right"><div class="sv ' + vc + '" style="font-size:13px">' + (x.warmupReputationPct == null ? "-" : x.warmupReputationPct + "% inbox") + "</div></div></div>";
+        }).join("") || '<div class="empty">No sends yet.</div>';
+        dlHtml = '<h4 style="margin:18px 0 6px">Deliverability &middot; are they landing?</h4>' +
+          '<div class="stat-grid" style="margin-bottom:8px">' +
+            dk((ov.acceptanceRatePct == null ? "-" : ov.acceptanceRatePct) + "%", "Accepted by server", "good") +
+            dk(ov.hardFailRatePct + "%", "Hard-fail rate", failCls) +
+            dk(ov.bounces, "Bounces", ov.bounces > 0 ? "amber" : "good") +
+            dk((ov.warmupReputationPct == null ? "-" : ov.warmupReputationPct + "%"), "Inbox placement", placeCls) +
+          "</div>" +
+          '<div class="note" style="margin-bottom:8px">' + esc(ov.domainsWarmed + "/" + ov.domainsTotal + " sending domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; inbox placement = live Smartlead warm-up reputation (mail landing in inbox vs spam across the seed network), a measured signal, not a guess &middot; updated " + (d.generatedAt || "").slice(0, 16).replace("T", " ") + " UTC") + "</div>" +
+          drows;
+      }
       host.innerHTML =
         '<div class="card" style="margin-bottom:16px">' +
           '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc((m.generatedAt || "").slice(11, 16)) + " UTC</span></div>" +
@@ -3716,7 +3740,7 @@
           "</div>" +
           '<div style="margin-top:10px">' + pills + "</div>" +
           '<h4 style="margin:16px 0 6px">What is working &middot; reply rate by angle</h4>' +
-          '<div class="bars">' + vrows + "</div>" + advHtml + grHtml +
+          '<div class="bars">' + vrows + "</div>" + dlHtml + advHtml + grHtml +
         "</div>";
       // Real buttons: Launch (greenlight the cohort so the always-on sender ships it),
       // Snooze (7d), Suppress (never send this cohort). The sender obeys these next cycle.

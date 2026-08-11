@@ -22,5 +22,9 @@ export async function GET(req: Request) {
   // The Growth Engine's campaign proposals + growth gap (the push-more-outbound layer).
   const gr = await loadSnapshot<Record<string, unknown>>("growth_proposals_v1");
   const growth = gr && gr.workspaceId === g.ctx.workspace.id ? gr : null;
-  return ok({ present: true, ...s, advisor, growth });
+  // Real, documented deliverability (acceptance, hard-fail, bounce, complaint, warm-up reputation
+  // per sending domain, plus 30-day history). Global sending infra; only the owning workspace
+  // reaches this line (gated above), so it's safe to attach without a per-workspace tag.
+  const dl = await loadSnapshot<Record<string, unknown>>("mpc_deliverability_v1");
+  return ok({ present: true, ...s, advisor, growth, deliverability: dl || null });
 }
