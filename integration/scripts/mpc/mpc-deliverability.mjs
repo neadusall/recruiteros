@@ -14,6 +14,7 @@
 // via the `placement.seedTest` slot (left null until seeds exist).
 
 import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync } from "node:fs";
+import { promises as dns } from "node:dns";
 
 const OUT_DIR = process.env.MPC_OUT_DIR || "/out";
 const INBOX_FILE = process.env.MPC_INBOX_FILE || "/data/snap_inbox.json";
@@ -96,6 +97,24 @@ async function warmupByDomain() {
   } catch { return { byDomain, available: false }; }
 }
 
+// 4) REAL authentication audit per sending domain (DNS): SPF, DKIM, DMARC, MX. This is the #1
+//    determinant of inbox placement, and unlike warm-up reputation it is a hard, verifiable fact.
+//    Not a proxy: a domain that publishes SPF -all + DKIM + DMARC enforcing IS authenticated.
+async function authForDomain(domain) {
+  const out = { spf: false, spfPolicy: null, dkim: false, dmarc: false, dmarcPolicy: null, mx: false };
+  try { const txt = (await dns.resolveTxt(domain)).map((r) => r.join("")); const spf = txt.find((t) => /^v=spf1/i.test(t)); if (spf) { out.spf = true; out.spfPolicy = /-all/.test(spf) ? "-all" : /~all/.test(spf) ? "~all" : "?"; } } catch { /* none */ }
+  try { const d = await dns.resolveTxt(`_dmarc.${domain}`); const rec = d.map((r) => r.join("")).find((t) => /^v=DMARC1/i.test(t)); if (rec) { out.dmarc = true; const p = rec.match(/p=(\w+)/i); out.dmarcPolicy = p ? p[1].toLowerCase() : null; } } catch { /* none */ }
+  try { await dns.resolveCname(`selector1._domainkey.${domain}`); out.dkim = true; } catch { try { await dns.resolveTxt(`selector1._domainkey.${domain}`); out.dkim = true; } catch { /* none */ } }
+  try { const mx = await dns.resolveMx(domain); out.mx = mx.length > 0; } catch { /* none */ }
+  out.fullyAuthed = out.spf && out.dkim && out.dmarc && out.mx && out.dmarcPolicy !== "none";
+  return out;
+}
+async function authByDomain(domains) {
+  const map = new Map();
+  await Promise.all(domains.map(async (d) => { map.set(d, await authForDomain(d)); }));
+  return map;
+}
+
 function avg(a) { return a.length ? Math.round(a.reduce((s, x) => s + x, 0) / a.length) : null; }
 function pct(n, d) { return d ? Math.round((n / d) * 1000) / 10 : null; }
 
@@ -103,6 +122,8 @@ async function main() {
   const send = sendFacts();
   const inbox = inboxSignals();
   const warm = await warmupByDomain();
+  // Authenticate only the domains that actually send (keeps DNS lookups bounded).
+  const auth = await authByDomain([...send.byDomain.keys()]);
 
   let replyRate = null, repliesTotal = null;
   try { const st = JSON.parse(readFileSync(STATS_FILE, "utf8")); replyRate = st.replyRate ?? null; repliesTotal = st.repliesTotal ?? null; } catch { /* none */ }
@@ -120,10 +141,11 @@ async function main() {
     else if (rep != null && rep < 90) verdict = "warm-up low";
     else if (failRate > 2) verdict = "failures high";
     else if (bounces > s.sent * 0.02) verdict = "bounces high";
+    const a = auth.get(d) || null;
     return {
       domain: d, sent: s.sent, accepted: s.accepted, failed: s.failed,
       acceptanceRatePct: pct(s.accepted, s.sent), hardFailRatePct: failRate,
-      bounces, warmedBoxes: w.boxes, warmingActive: w.active, warmupReputationPct: rep, verdict,
+      bounces, warmedBoxes: w.boxes, warmingActive: w.active, warmupReputationPct: rep, auth: a, verdict,
     };
   }).sort((a, b) => b.sent - a.sent);
 
@@ -134,6 +156,8 @@ async function main() {
     acceptanceRatePct: pct(send.accepted, send.total), hardFailRatePct: pct(send.failed, send.total) ?? 0,
     bounces: inbox.bounces, complaints: inbox.complaints,
     warmupReputationPct: avg(allReps), domainsWarmed: byDomain.filter((d) => d.warmedBoxes > 0).length, domainsTotal: byDomain.length,
+    domainsSending: [...send.byDomain.keys()].length,
+    domainsFullyAuthed: byDomain.filter((d) => d.auth && d.auth.fullyAuthed).length,
     replyRatePct: replyRate, repliesTotal, campaignAgeDays: ageDays, sentToday: send.sentToday,
   };
 
