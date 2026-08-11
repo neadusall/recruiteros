@@ -17,6 +17,8 @@
  * and are skipped, so the list is safe to grow aggressively.
  */
 
+import { loadSnapshot } from "../db";
+
 /**
  * Curated real public-ATS slugs (Greenhouse + Lever + Ashby), deduped into one flat set —
  * resolveCompanyRoles tries every ATS shape per slug, so grouping by vendor isn't needed here.
