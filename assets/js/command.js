@@ -5213,6 +5213,38 @@
 
     function chanIcon(c) { return c === "email" ? "Email" : c === "linkedin" ? "LinkedIn" : c === "sms" ? "SMS" : c === "voice" ? "Call" : esc(c); }
 
+    // Same popup dialer OS Text uses: the call goes out on the recruiter's assigned
+    // line and lands in call history with recording + AI notes.
+    function openDialer(phone, name, company) {
+      var p = new URLSearchParams({ to: phone });
+      if (name) p.set("name", name);
+      if (company) p.set("company", company);
+      try {
+        var th = localStorage.getItem("ros_theme"), ac = localStorage.getItem("ros_accent");
+        if (th) p.set("theme", th);
+        if (ac) p.set("accent", ac);
+      } catch (err) { /* dialer falls back to its own theme */ }
+      window.open("/phone-widget?" + p.toString(), "ros-phone-widget", "width=380,height=620,popup=yes");
+    }
+    function liProfileUrl(u) { return /^https?:/i.test(u) ? u : "https://" + String(u).replace(/^\/+/, ""); }
+    // Direct-contact handles for a row: the prospect record first, else what the
+    // reply itself carries (an SMS row's handle IS the phone, a LinkedIn row's the profile).
+    function contactFor(r) {
+      var s = r.prospectId ? people[r.prospectId] : null;
+      return {
+        phone: (s && s.phone) || (r.channel === "sms" ? r.email : "") || "",
+        linkedinUrl: (s && s.linkedinUrl) || (r.channel === "linkedin" && /linkedin\./i.test(r.email || "") ? r.email : "") || "",
+        company: (s && s.company) || ""
+      };
+    }
+    function contactBtns(phone, li, company, emailAddr) {
+      var out = "";
+      if (phone) out += '<button class="resp-btn ghost" data-act="call" data-phone="' + esc(phone) + '" data-company="' + esc(company || "") + '" title="Call ' + esc(phone) + ' from your assigned number (recorded, with AI notes)">Call</button>';
+      if (li) out += '<a class="resp-btn ghost" href="' + esc(liProfileUrl(li)) + '" target="_blank" rel="noopener" title="Open their LinkedIn profile in a new tab" style="text-decoration:none;display:inline-block">LinkedIn ↗</a>';
+      if (emailAddr) out += '<button class="resp-btn ghost" data-act="copyemail" data-v="' + esc(emailAddr) + '" title="Copy their email address">Copy email</button>';
+      return out;
+    }
+
     function renderThread(host, ridv) {
       var slot = host.querySelector(".resp-thread");
       if (!slot) return;
@@ -5272,8 +5304,10 @@
       var who = t.person || {};
       var facts = [who.title, who.company, who.status ? "status: " + String(who.status).replace(/_/g, " ") : null]
         .filter(Boolean).map(esc).join(" · ");
+      var reach = contactBtns(who.phone, who.linkedinUrl, who.company, who.email);
       slot.innerHTML =
         (facts ? '<div class="muted" style="font-size:12px;margin:2px 0 6px">' + facts + "</div>" : "") +
+        (reach ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 6px">' + reach + "</div>" : "") +
         '<div style="max-height:340px;overflow:auto;padding:2px 2px 0">' + (bubbles || '<div class="muted" style="font-size:12.5px">No history yet beyond this reply.</div>') + "</div>" +
         chanBar;
       var box = slot.querySelector("textarea");
@@ -5305,6 +5339,20 @@
       var act = btn.getAttribute("data-act");
       var ridv = btn.getAttribute("data-rid") || item.getAttribute("data-rid");
 
+      if (act === "call") {
+        var num = btn.getAttribute("data-phone");
+        if (!num) { toast("No phone number on file."); return; }
+        var nmEl = item.querySelector(".resp-name");
+        openDialer(num, nmEl ? nmEl.textContent : "", btn.getAttribute("data-company") || "");
+        return;
+      }
+      if (act === "copyemail") {
+        var v = btn.getAttribute("data-v") || "";
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(v).then(function () { toast("Email address copied"); }, function () { toast(v); });
+        } else { toast(v); }
+        return;
+      }
       if (act === "thread") {
         if (openRid === ridv) { openRid = null; paint(); return; }
         openRid = ridv;
@@ -5401,6 +5449,7 @@
         '<div class="resp-thread"></div>' +
         '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") +
         '<button class="resp-btn" data-act="thread"' + ridAttr + ' title="Open the whole conversation and answer on any channel">Reply</button>' +
+        (function () { var c = contactFor(r); return contactBtns(c.phone, c.linkedinUrl, c.company, ""); })() +
         '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
         '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
         doneBtn +
