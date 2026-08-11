@@ -73,8 +73,53 @@ function harvestLocal() {
   }
 }
 
+// ENUMERATE real boards straight from the search index (Serper), finance-filtered. `site:<atsHost>
+// <finance-term>` returns actual indexed board URLs, so slugFromUrl yields REAL, finance-hiring
+// slugs at ~100% hit rate (no validation needed). This is the 10-20x lever. One-time-ish + small
+// daily top-up; gated on SERPER_API_KEY so it's a no-op when unset.
+async function enumerateViaSerper() {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) { console.log("serper: no key, skipping enumeration"); return; }
+  const hosts = ["boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com", "apply.workable.com"];
+  const terms = [
+    "controller", "comptroller", "assistant controller", "corporate controller", "accountant",
+    "accounting", "accounting manager", "staff accountant", "senior accountant", "cost accountant",
+    "revenue accountant", "fund accountant", "technical accounting", "finance manager", "finance director",
+    "director of finance", "vp finance", "head of finance", "cfo", "chief financial", "fp&a",
+    "financial planning", "financial analyst", "fpa analyst", "tax", "tax manager", "tax accountant",
+    "audit", "auditor", "internal audit", "treasury", "payroll", "payroll manager", "bookkeeper",
+    "accounts payable", "accounts receivable", "billing", "general ledger", "month-end close",
+    "cpa", "regulatory reporting", "financial reporting", "budget analyst", "fractional cfo",
+  ];
+  const PAGES = Number(process.env.SERPER_PAGES || 2);
+  const MAXQ = Number(process.env.SERPER_MAX_QUERIES || 200);
+  const jobs = [];
+  for (const host of hosts) for (const t of terms) for (let p = 1; p <= PAGES; p++) jobs.push({ host, t, p });
+  const queue = jobs.slice(0, MAXQ);
+  let done = 0, before = urlSlugs.size;
+  const CONC = 5; let i = 0;
+  async function worker() {
+    while (i < queue.length) {
+      const { host, t, p } = queue[i++];
+      try {
+        const r = await fetch("https://google.serper.dev/search", {
+          method: "POST", headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+          body: JSON.stringify({ q: `site:${host} ${t}`, num: 100, page: p }), signal: AbortSignal.timeout(20_000),
+        });
+        if (!r.ok) continue;
+        const d = await r.json().catch(() => null);
+        for (const o of (d?.organic || [])) { const s = slugFromUrl(o.link); if (s) urlSlugs.add(s); }
+        done++;
+      } catch { /* skip this query */ }
+    }
+  }
+  await Promise.all(Array.from({ length: CONC }, () => worker()));
+  console.log(`serper: ${done}/${queue.length} queries -> +${urlSlugs.size - before} board slugs (finance-filtered)`);
+}
+
 async function harvest() {
   harvestLocal();
+  await enumerateViaSerper();
   // YC public dataset (~5k companies, overwhelmingly on Greenhouse/Lever/Ashby) — keyless.
   try {
     const d = await getJson("https://yc-oss.github.io/api/companies/all.json");

@@ -123,6 +123,14 @@ async function tickReplySync(): Promise<void> {
   await runReplySync();
 }
 
+/** MPC reply bridge: ingest Sending.ac/Graph replies the MPC monitor matched (warm-up excluded)
+ *  into the unified inbox. replySync can't reach those mailboxes over IMAP, so without this the
+ *  finance campaign's replies would be invisible in the portal. */
+async function tickMpcReplyIngest(): Promise<void> {
+  const { runMpcReplyIngest } = await import("../response/mpcIngest");
+  await runMpcReplyIngest();
+}
+
 /** SMTP credential sweep: re-verify the stalest pool logins so a dead login is
  *  flagged (and an errored one revived) without anyone opening the Senders tab. */
 async function tickSmtpAuth(): Promise<void> {
@@ -264,6 +272,7 @@ const TICKS: TickSpec[] = [
   { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },
   { key: "sending", label: "Email warm-up + reputation", env: "RECRUITEROS_SENDING_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 75_000, fn: tickSending },
   { key: "reply_sync", label: "Inbox reply + bounce sync (own inboxes)", env: "RECRUITEROS_REPLY_SYNC_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 85_000, fn: tickReplySync },
+  { key: "mpc_reply_ingest", label: "MPC (Sending.ac) reply bridge -> inbox", env: "RECRUITEROS_MPC_REPLY_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 95_000, fn: tickMpcReplyIngest },
   { key: "smtp_auth", label: "SMTP login sweep (pool credentials)", env: "RECRUITEROS_SMTP_AUTH_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 140_000, fn: tickSmtpAuth },
   { key: "warmup_engage", label: "Warm-up engagement rounds", env: "RECRUITEROS_WARMUP_ENGAGE_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 95_000, fn: tickWarmupEngage },
   { key: "outbound", label: "Outbound performance + accountability", env: "RECRUITEROS_OUTBOUND_TICK_MS", defaultMs: 10 * 60_000, firstDelayMs: 100_000, fn: tickOutbound },

@@ -11,9 +11,13 @@
 // A "reply" = an inbound message, in the box we sent from, whose sender is the exact recipient
 // we emailed, received at or after our send. Conservative on purpose (no fuzzy matching).
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, appendFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, appendFileSync, renameSync } from "node:fs";
 
 const OUT = process.env.MPC_OUT_DIR || "/out";
+// The bridge: matched real replies (warm-up excluded) are written here for the app's scheduler to
+// ingest into the unified inbox (processInbound). Needs the /data volume mounted on this run.
+const QUEUE_FILE = process.env.MPC_REPLY_QUEUE_FILE || "/data/snap_mpc_reply_queue_v1.json";
+const WS = process.env.MPC_WORKSPACE_ID || "ws_mqf6o989003"; // Lume workspace
 const MAILBOX_BASE = (process.env.SENDINGAC_MAILBOX_API_BASE || "https://api.customers.ac/api/mailbox/v1alpha1").replace(/\/+$/, "") + "/azure/v1.0";
 const KEY = process.env.SENDINGAC_MAILBOX_API_KEY;
 const SKEW_MS = 60_000; // allow a minute of clock skew on the "received after we sent" test
@@ -46,9 +50,11 @@ async function inboxOf(boxEmail) {
   if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 160)}`);
   const data = await res.json();
   return (data.value || []).map((m) => ({
+    id: m.id || "",
     from: (m.from && m.from.emailAddress && m.from.emailAddress.address || "").toLowerCase().trim(),
     received: Date.parse(m.receivedDateTime || "") || 0,
     subject: m.subject || "",
+    bodyPreview: m.bodyPreview || "",
   }));
 }
 
@@ -74,6 +80,8 @@ async function main() {
   const bump = (v, k) => { const s = stats.get(v) || { sent: 0, replied: 0 }; s[k]++; stats.set(v, s); };
 
   let repliedTotal = 0;
+  const queue = [];          // rows for the inbox bridge (deduped by reply message id)
+  const seenMsg = new Set();
   for (const s of sent) {
     const v = s.variant || "unknown";
     bump(v, "sent");
@@ -84,7 +92,24 @@ async function main() {
       bump(v, "replied");
       repliedTotal++;
       appendFileSync(matchFile, JSON.stringify({ to_email: s.to_email, company: s.company, variant: v, from_box: s.from, sent_at: s.at, reply_subject: hit.subject, reply_at: new Date(hit.received).toISOString() }) + "\n");
+      // Bridge row: a REAL prospect reply (sender == someone we emailed => never warm-up traffic).
+      const msgId = hit.id || `mpc-${s.from}-${s.to_email}-${hit.received}`;
+      if (!seenMsg.has(msgId)) {
+        seenMsg.add(msgId);
+        queue.push({ ws: WS, fromEmail: s.to_email.toLowerCase().trim(), messageId: msgId, fromName: s.to_name || undefined, text: hit.bodyPreview || hit.subject || "", receivedAt: new Date(hit.received).toISOString() });
+      }
     }
+  }
+
+  // Write the bridge queue for the app's scheduler to ingest into the unified inbox. Best-effort:
+  // if /data isn't mounted (e.g. a standalone leaderboard run), skip silently.
+  try {
+    const tmp = QUEUE_FILE + ".tmp";
+    writeFileSync(tmp, JSON.stringify(queue));
+    renameSync(tmp, QUEUE_FILE);
+    if (queue.length) console.log(`bridged ${queue.length} real replies -> ${QUEUE_FILE} (portal inbox)`);
+  } catch (e) {
+    console.log(`(reply bridge skipped: ${e.message})`);
   }
 
   // Leaderboard, best reply-rate first.
