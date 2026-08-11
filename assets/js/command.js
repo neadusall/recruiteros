@@ -1622,7 +1622,6 @@
     ostextkpi: { title: "OS Text Performance", crumb: "Admin", action: null, render: function () { location.hash = "#outbound/ostext"; }, cap: "team:manage" },
     // My Outbound: the personal performance view + the 10-15 minute Daily
     // Checklist worksheet. Self-scoped; available in both portals.
-    myoutbound: { title: "My Outbound", crumb: "Operate", action: null, render: renderMyOutbound },
     engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure"; }, cap: "team:manage" },
     // Infrastructure: every piece of system plumbing in one admin hub. Engine /
     // Throughput, the Senders fleet and Mailbox Ops as tabs.
@@ -3660,8 +3659,35 @@
       : "Your recruiting sending engine, capacity, throughput and what's running right now.")
       + (showRecruiterBar ? " Pick a recruiter to scope it, or see every recruiter's stats below." : "");
     el.innerHTML = head("Dashboard", sub) +
+      '<div id="ovMpc"></div>' +
       (showRecruiterBar ? '<div class="ov-recruiters" id="ovRecruiters">' + loading() + "</div>" : "") +
       '<div id="ovBody">' + loading() + "</div>";
+
+    // Finance BD Campaign cockpit: real activity from the MPC engine (sends via Sending.ac + free
+    // ATS sourcing + reply bridge) that the app's native /overview can't see. Hides if not present.
+    api("/mpc-stats").then(function (m) {
+      var host = $("#ovMpc"); if (!host || !m || !m.present) return;
+      function kpi(v, l, sub) { return '<div class="stat"><div class="sv">' + esc(String(v)) + '</div><div class="sl">' + esc(l) + (sub ? ' &middot; <span class="note">' + esc(sub) + "</span>" : "") + "</div></div>"; }
+      var sent = m.repliesBySentiment || {};
+      var pills = Object.keys(sent).map(function (k) { return '<span class="cls cls-' + k + '" style="margin-right:6px">' + esc(clsLabel(k)) + ": " + sent[k] + "</span>"; }).join("") || '<span class="note">No replies in yet</span>';
+      var maxR = Math.max.apply(null, (m.variants || []).map(function (v) { return v.rate; }).concat([0.1]));
+      var vrows = (m.variants || []).map(function (v) {
+        return '<div class="bar-row"><div>' + esc(v.variant) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(2, (v.rate / maxR) * 100) + '%"></div></div><div class="num">' + v.replied + "/" + v.sent + " (" + v.rate + "%)</div></div>";
+      }).join("") || '<div class="empty">No sends yet.</div>';
+      host.innerHTML =
+        '<div class="card" style="margin-bottom:16px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc((m.generatedAt || "").slice(11, 16)) + " UTC</span></div>" +
+          '<div class="stat-grid" style="margin-top:12px">' +
+            kpi(m.sentToday, "Sent today", "of " + (m.sentTotal || 0) + " total") +
+            kpi((m.replyRate || 0) + "%", "Reply rate", (m.repliesTotal || 0) + " real replies") +
+            kpi(m.supplyReady, "Supply ready", "clean, to send") +
+            kpi((m.freeBoards || 0).toLocaleString(), "Free boards", "$0 sourcing") +
+          "</div>" +
+          '<div style="margin-top:10px">' + pills + "</div>" +
+          '<h4 style="margin:16px 0 6px">What is working &middot; reply rate by angle</h4>' +
+          '<div class="bars">' + vrows + "</div>" +
+        "</div>";
+    }).catch(function () { /* cockpit is best-effort; the rest of the Dashboard still loads */ });
 
     if (showRecruiterBar) {
       api("/team").then(function (d) {

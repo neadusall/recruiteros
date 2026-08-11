@@ -215,7 +215,9 @@ export async function POST(req: Request) {
       case "refresh_stats":
         return ok({ updated: await refreshPostStats(ws, true) });
       case "save_settings":
-        return ok({ settings: await saveSettings(ws, (b.settings ?? {}) as never) });
+        // userId rides along so autopilot, when switched on, is stamped with
+        // the enabling user's seat server-side (never client-supplied).
+        return ok({ settings: await saveSettings(ws, (b.settings ?? {}) as never, g.ctx.user.id) });
       case "watch_add": {
         if (!b.url?.trim()) return fail("url_required");
         return ok({ profile: await addWatchedProfile(ws, { name: b.name, url: b.url }) });

@@ -336,7 +336,7 @@
 <header>
   <div class="brand"><span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l4 4L19 6"/></svg></span><span class="wm">RecruitersOS</span></div>
   <div class="divider"></div>
-  <div><div class="ttl">LinkedIn Poster</div><div class="sub">Inspiration in, your story out. Nothing posts without your approval. <a href="/admin#playbooks/linkedin-poster" target="_top" style="color:var(--accent);font-weight:600;text-decoration:none">How it works</a></div></div>
+  <div><div class="ttl">LinkedIn Poster</div><div class="sub"><span id="headSub">Inspiration in, your story out. Nothing posts without your approval.</span> <a href="/admin#playbooks/linkedin-poster" target="_top" style="color:var(--accent);font-weight:600;text-decoration:none">How it works</a></div></div>
   <div class="spacer"></div>
   <div class="viewtabs" id="tabs">
     <button data-view="today" class="active">Today</button>
@@ -488,6 +488,13 @@
         </div>
       </div>
       <div>
+        <div class="card" style="margin-bottom:16px" id="autopilotCard">
+          <h3>Autopilot · fully hands-off posting</h3>
+          <p class="hint">On, the tool runs the whole daily loop for you: it writes the day's post (rotating brand originals, blind job spotlights, and rewrites from creators you follow), attaches real photo media, checks it against the quality gate (hook length, no links, no hashtags, length band), schedules it into your first posting slot, and publishes it from your own LinkedIn seat. One post per posting day, never two within 20 hours. To veto a day, cancel the queued post in Calendar; nothing else goes out that day. The one thing it never does is fake engagement: replies to comments stay yours, because LinkedIn punishes automated engagement.</p>
+          <label class="chk"><input type="checkbox" id="setAutopilot" /> Run my LinkedIn on autopilot</label>
+          <div id="autopilotInfo"></div>
+          <div class="btnrow"><button class="btn primary" id="btnSaveAutopilot">Save autopilot</button></div>
+        </div>
         <div class="card" style="margin-bottom:16px">
           <h3>Publishing connection</h3>
           <p class="hint">Posts publish through your own connected LinkedIn: press Connect my LinkedIn on the JD Sourcing tab once and the Poster rides it. Each person's posts go out from their own account, never a teammate's. Posting keeps a light footprint (a post or two a day).</p>
@@ -792,6 +799,11 @@
   function renderHeader() {
     var drafts = S.drafts.filter(function (d) { return d.status === "draft" || d.status === "failed"; }).length;
     var queued = S.drafts.filter(function (d) { return d.status === "approved"; }).length;
+    // Honest subtitle: with autopilot on, "nothing posts without your
+    // approval" is no longer literally true, so the line says what is.
+    document.getElementById("headSub").textContent = (S.settings && S.settings.autopilot)
+      ? "Autopilot is on: posts go out on your schedule. Cancel any queued post in Calendar to veto its day."
+      : "Inspiration in, your story out. Nothing posts without your approval.";
     document.getElementById("nInbox").textContent = S.inbox.length;
     document.getElementById("nDrafts").textContent = drafts;
     document.getElementById("nQueue").textContent = queued;
@@ -825,6 +837,7 @@
       }
     });
     el.innerHTML =
+      (S.settings && S.settings.autopilot ? '<span class="tp" data-go="settings"><span class="d ok"></span>Autopilot on</span>' : "") +
       (winLeft ? '<span class="tp" data-go="today"><span class="d acc"></span>Engagement window&nbsp;<b>' + winLeft + " min left</b></span>" : "") +
       (open ? '<span class="tp" data-go="studio"><span class="d warn"></span>Finish setup&nbsp;<b>' + (4 - open) + " of 4</b></span>" : "") +
       '<span class="tp" data-go="studio"><span class="d ' + (waiting ? "acc" : "ok") + '"></span>' + (waiting ? "<b>" + waiting + "</b>&nbsp;waiting for your approve" : "Nothing waiting on you") + "</span>" +
@@ -1415,6 +1428,19 @@
         return '<label><input type="checkbox" data-day="' + p[0] + '"' + (pdays.indexOf(p[0]) >= 0 ? " checked" : "") + ' /> ' + p[1] + "</label>";
       }).join("");
     document.getElementById("setProfileKey").value = st.ayrshareProfileKey || "";
+    document.getElementById("setAutopilot").checked = st.autopilot === true;
+    var apReady = [];
+    if (!S.anthropicConfigured) apReady.push("AI writer is not enabled on the server");
+    if (!(S.engine && S.engine.account)) apReady.push("your LinkedIn is not connected (JD Sourcing tab)");
+    if (!(String(st.postingDays || "").trim() && String(st.postingTimes || "").trim())) apReady.push("no posting schedule saved");
+    var apRows = '<div class="kv"><b>Status</b>' + (st.autopilot
+      ? (apReady.length ? "on, but holding: " + esc(apReady.join("; ")) : "on and running")
+      : "off: every post waits for your approve") + "</div>";
+    if (st.autopilot && st.timezone) apRows += '<div class="kv"><b>Timezone</b>' + esc(st.timezone) + "</div>";
+    if (S.autopilotNote) {
+      apRows += '<div class="kv"><b>Last action</b>' + esc(S.autopilotNote.note) + " · " + esc(fmtTime(S.autopilotNote.at)) + "</div>";
+    }
+    document.getElementById("autopilotInfo").innerHTML = apRows;
     var eng = S.engine || {};
     var erows = "";
     erows += '<div class="kv"><b>Engine</b>' + (eng.configured ? "configured" : "not connected yet") + "</div>";
@@ -1614,12 +1640,29 @@
     var days = Array.prototype.slice.call(document.querySelectorAll("#dayRow input[type=checkbox]"))
       .filter(function (c) { return c.checked; })
       .map(function (c) { return c.dataset.day; }).join(",");
-    api("save_settings", { settings: { postingDays: days, postingTimes: document.getElementById("setTimes").value } })
+    var slotTz = "";
+    try { slotTz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* server default applies */ }
+    api("save_settings", { settings: { postingDays: days, postingTimes: document.getElementById("setTimes").value, timezone: slotTz } })
       .then(function () { toast("Schedule saved."); return load(); })
       .catch(function (e) { toast(e.message); })
       .then(function () { busy(btn, false); });
   });
 
+  document.getElementById("btnSaveAutopilot").addEventListener("click", function () {
+    var btn = this; busy(btn, true, "Saving…");
+    var on = document.getElementById("setAutopilot").checked;
+    var tz = "";
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* server default applies */ }
+    api("save_settings", { settings: { autopilot: on, timezone: tz } })
+      .then(function () {
+        toast(on
+          ? "Autopilot is on. It queues one post per posting day into your first slot and publishes from your own LinkedIn. Veto any day from Calendar."
+          : "Autopilot is off. Everything waits for your approve again.");
+        return load();
+      })
+      .catch(function (e) { toast(e.message); })
+      .then(function () { busy(btn, false); });
+  });
   document.getElementById("btnAyrRefresh").addEventListener("click", function () { load().then(function () { toast("Status refreshed."); }); });
   document.getElementById("btnAyrProfile").addEventListener("click", function () {
     var btn = this; busy(btn, true, "Creating…");
@@ -1698,7 +1741,9 @@
     }
     if (act === "pb-sched") {
       busy(b, true, "Saving…");
-      api("save_settings", { settings: { postingDays: "1,2,3,4,5", postingTimes: "07:45" } })
+      var pbTz = "";
+      try { pbTz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { /* server default applies */ }
+      api("save_settings", { settings: { postingDays: "1,2,3,4,5", postingTimes: "07:45", timezone: pbTz } })
         .then(function () { toast("Schedule saved: Mon-Fri at 7:45 am. Approve + next slot now lands there."); return load(); })
         .catch(function (err) { toast(err.message); })
         .then(function () { busy(b, false); });
