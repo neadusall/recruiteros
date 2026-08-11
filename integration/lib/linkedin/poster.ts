@@ -2032,7 +2032,7 @@ export function statMediaSvg(spec: StatMediaSpec, template: CardTemplate = "hero
  * available, headline-only fallback otherwise), render the stat card, save it
  * to the library, and attach it to the draft for approval.
  */
-export async function generateStatMedia(ws: string, opts: { draftId: string }): Promise<{ image: PosterImage; draft: PosterDraft }> {
+export async function generateStatMedia(ws: string, opts: { draftId: string; imageId?: string }): Promise<{ image: PosterImage; draft: PosterDraft }> {
   await ensureLoaded();
   const s = wsState(ws);
   const d = s.drafts.find((x) => x.id === opts.draftId);
@@ -2043,7 +2043,20 @@ export async function generateStatMedia(ws: string, opts: { draftId: string }): 
   // Each click walks to the next look; the first lands on the draft's own
   // seeded start, so two drafts made the same day don't wear the same card.
   d.mediaVariant = d.mediaVariant == null ? cardSeed(d.id) : d.mediaVariant + 1;
-  const img = await renderStatCard(ws, spec, d.mediaVariant);
+  let img: PosterImage;
+  if (opts.imageId) {
+    // The recruiter picked a specific photo: design around exactly that one,
+    // treatments rotating on repeat picks.
+    const photo = s.images.find((i) => i.id === opts.imageId && (i.kind === "stock" || i.kind === "upload") && i.mime.startsWith("image/"));
+    if (!photo) throw Object.assign(new Error("image_not_found"), { status: 404 });
+    const treats = photoTreatmentsFor(spec);
+    const treatment = treats[((d.mediaVariant % treats.length) + treats.length) % treats.length];
+    const base = await fs.readFile(path.join(mediaDir(), photo.file));
+    const bytes = await renderPhotoLook(base, spec, treatment, s.settings.brandLine || "", photo.credit);
+    img = await saveRenderedCard(s, bytes, spec.headline);
+  } else {
+    img = await renderStatCard(ws, spec, d.mediaVariant);
+  }
   d.imageId = img.id;
   d.updatedAt = nowIso();
   persist();
@@ -2071,7 +2084,7 @@ async function draftStatSpec(d: PosterDraft): Promise<StatMediaSpec> {
 
 /* ----------------------- real photos in the library ----------------------- */
 
-const STOCK_LIBRARY_CAP = 80;
+const STOCK_LIBRARY_CAP = 240;
 
 /** Download a licensed photo into the media library (kind "stock"), normalized
  *  to a clean JPEG. Dedupes on provider id; safe to call repeatedly. */
@@ -2119,6 +2132,65 @@ export async function importStockPhoto(ws: string, photo: StockPhoto, query: str
   }
   persist();
   return img;
+}
+
+/** The suffixes that turn an industry line into archive searches. */
+const ARCHIVE_SUFFIXES = ["professionals working", "office meeting", "team at work"];
+
+/** The searches worth keeping stocked for this desk: its industries crossed
+ *  with workplace scenes, plus the scenes its recent posts actually named. */
+function archiveQueries(s: WorkspaceState): string[] {
+  const qs = new Set<string>();
+  for (const ind of (s.settings.industries || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean).slice(0, 4)) {
+    const base = ind.split(/\s+/).slice(0, 3).join(" ").toLowerCase();
+    for (const suf of ARCHIVE_SUFFIXES) qs.add(base + " " + suf);
+  }
+  for (const d of s.drafts.slice(0, 12)) {
+    const q = d.mediaSpec?.photoQuery;
+    if (q) qs.add(q.trim().toLowerCase());
+  }
+  if (!qs.size) qs.add("business professionals office meeting");
+  return [...qs].slice(0, 10);
+}
+
+/**
+ * Top up the workspace's photo archive: every archive query keeps a few
+ * licensed photos on hand, so media creation picks from a deep local pool
+ * instead of fetching cold. Runs daily via the automation scheduler and on
+ * demand from the Media tab.
+ */
+export async function buildStockArchive(ws: string, perQuery = 4): Promise<{ queries: number; added: number }> {
+  await ensureLoaded();
+  const s = wsState(ws);
+  const queries = archiveQueries(s);
+  let added = 0;
+  for (const q of queries) {
+    const count = () => s.images.filter((i) => i.kind === "stock" && i.query === q).length;
+    if (count() >= perQuery) continue;
+    try {
+      const found = await searchStockPhotos(q);
+      const have = new Set(s.images.filter((i) => i.kind === "stock").map((i) => i.providerId));
+      for (const p of found) {
+        if (count() >= perQuery) break;
+        if (have.has(p.provider + ":" + p.providerId)) continue;
+        try {
+          await importStockPhoto(ws, p, q);
+          added += 1;
+        } catch { /* one bad file; keep going */ }
+      }
+    } catch { /* this query's providers are down; try the next */ }
+  }
+  return { queries: queries.length, added };
+}
+
+/** Automation sweep: archive top-up for every workspace using the Poster. */
+export async function tickStockArchive(): Promise<number> {
+  await ensureLoaded();
+  let added = 0;
+  for (const ws of Object.keys(store.workspaces)) {
+    try { added += (await buildStockArchive(ws)).added; } catch { /* next workspace */ }
+  }
+  return added;
 }
 
 /** The photos available for this spec: library stock matching its search
@@ -2356,12 +2428,17 @@ async function renderStatCard(ws: string, spec: StatMediaSpec, variant: number, 
   if (!bytes) {
     bytes = await sharp(Buffer.from(statMediaSvg(spec, cardTemplates(spec)[0], false))).png().toBuffer();
   }
+  return saveRenderedCard(s, bytes, spec.headline);
+}
+
+/** Finished PNG -> media library entry (kind "card"). */
+async function saveRenderedCard(s: WorkspaceState, bytes: Buffer, headline: string): Promise<PosterImage> {
   const id = rid();
   const file = id + ".png";
   await writeMedia(file, bytes);
   const img: PosterImage = {
     id, file, mime: "image/png", kind: "card",
-    name: ("AI media: " + spec.headline).slice(0, 80),
+    name: ("AI media: " + headline).slice(0, 80),
     createdAt: nowIso(),
   };
   s.images.unshift(img);

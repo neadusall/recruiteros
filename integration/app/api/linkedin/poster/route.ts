@@ -27,7 +27,8 @@
  *   note_delete       { id }
  *   make_job_post     {}                    (blind spotlight of an open Job Library job)
  *   make_carousel     { draftId }           (draft -> branded slide PDF, attached)
- *   make_ai_media     { draftId }           (draft -> stat card from its own numbers, attached)
+ *   make_ai_media     { draftId, imageId? } (draft -> photo/stat media; imageId designs around that photo)
+ *   archive_build     {}                    (top up the licensed photo archive for this desk)
  *   make_from_photo   { imageId, guidance? } (photo -> AI writes the post around it, photo attached)
  *   duplicate         { draftId }           (reuse a post as a fresh draft)
  *   refresh_stats     {}                    (pull engagement counters for posted)
@@ -46,7 +47,7 @@ import {
   uploadImage, deleteImage, generateQuoteCard, saveSettings, getSettings,
   enginePublishStatus, addWatchedProfile, removeWatchedProfile, pullWatchedProfile,
   generateCarousel, generateStatMedia, duplicateDraft, refreshPostStats, createOriginalDraft, createJobSpotlightDraft,
-  createPlaybookDraft, createPhotoDraft, addDeskNote, deleteDeskNote, importStockPhoto,
+  createPlaybookDraft, createPhotoDraft, addDeskNote, deleteDeskNote, importStockPhoto, buildStockArchive,
 } from "../../../../lib/linkedin/poster";
 import { searchStockPhotos, resolveStockPhoto, photoProviders } from "../../../../lib/linkedin/photoEngine";
 import {
@@ -154,7 +155,7 @@ export async function POST(req: Request) {
       }
       case "stock_search": {
         if (!b.query?.trim()) return fail("query_required");
-        return ok({ photos: await searchStockPhotos(b.query), sources: photoProviders() });
+        return ok({ photos: await searchStockPhotos(b.query, { deep: true }), sources: photoProviders() });
       }
       case "stock_add": {
         // The client sends back only (query, provider, id); the photo and its
@@ -198,7 +199,10 @@ export async function POST(req: Request) {
       }
       case "make_ai_media": {
         if (!b.draftId) return fail("draftId_required");
-        return ok(await generateStatMedia(ws, { draftId: b.draftId }));
+        return ok(await generateStatMedia(ws, { draftId: b.draftId, imageId: b.imageId ?? undefined }));
+      }
+      case "archive_build": {
+        return ok(await buildStockArchive(ws));
       }
       case "make_from_photo": {
         if (!b.imageId) return fail("imageId_required");

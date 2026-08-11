@@ -18,7 +18,7 @@
  */
 
 export interface StockPhoto {
-  provider: "pexels" | "openverse" | "ai";
+  provider: "pexels" | "pixabay" | "openverse" | "wikimedia" | "ai";
   /** Provider-side id; used to dedupe and to re-resolve server-side. */
   providerId: string;
   /** Full-resolution download URL (server-side use only). */
@@ -44,7 +44,8 @@ const searchCache = new Map<string, { at: number; photos: StockPhoto[] }>();
 export function photoProviders(): string[] {
   const p: string[] = [];
   if (process.env.PEXELS_API_KEY) p.push("Pexels");
-  p.push("Openverse");
+  if (process.env.PIXABAY_API_KEY) p.push("Pixabay");
+  p.push("Openverse", "Wikimedia");
   if (process.env.GEMINI_API_KEY) p.push("AI studio");
   return p;
 }
@@ -89,6 +90,95 @@ async function searchPexels(query: string): Promise<StockPhoto[]> {
       pageUrl: typeof p.url === "string" ? p.url : null,
       credit: null, // Pexels license: attribution not required
     }));
+}
+
+/* -------------------------------- Pixabay -------------------------------- */
+
+async function searchPixabay(query: string): Promise<StockPhoto[]> {
+  const key = process.env.PIXABAY_API_KEY;
+  if (!key) return [];
+  const u = new URL("https://pixabay.com/api/");
+  u.searchParams.set("key", key);
+  u.searchParams.set("q", query);
+  u.searchParams.set("image_type", "photo");
+  u.searchParams.set("min_width", "1000");
+  u.searchParams.set("per_page", "25");
+  u.searchParams.set("safesearch", "true");
+  const r = await timedFetch(u.toString());
+  if (!r.ok) throw new Error(`pixabay_${r.status}`);
+  const j = (await r.json()) as { hits?: any[] };
+  return (j.hits ?? [])
+    .filter((p) => p?.id && p?.largeImageURL)
+    .map((p): StockPhoto => ({
+      provider: "pixabay",
+      providerId: String(p.id),
+      downloadUrl: String(p.largeImageURL),
+      thumbUrl: String(p.webformatURL ?? p.largeImageURL),
+      width: Number.isFinite(p.imageWidth) ? p.imageWidth : null,
+      height: Number.isFinite(p.imageHeight) ? p.imageHeight : null,
+      creator: typeof p.user === "string" ? p.user.slice(0, 60) : null,
+      pageUrl: typeof p.pageURL === "string" ? p.pageURL : null,
+      credit: null, // Pixabay Content License: attribution not required
+    }));
+}
+
+/* --------------------------- Wikimedia Commons ---------------------------- */
+
+/** Keyless and deep, with real hi-res files, but heavily archival: great for
+ *  the manual photo search where a human curates, wrong for auto-attach (a
+ *  1918 field hospital under a 2026 post). Only unrestricted licenses pass
+ *  (CC0 / public domain / no known restrictions / CC BY); share-alike and
+ *  no-derivative are skipped because rendered composites are derivatives. */
+const WM_OK_LICENSE = /^(cc0|public domain|pd|no restrictions|cc by(?: \d\.\d)?)$/i;
+
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+}
+
+async function searchWikimedia(query: string): Promise<StockPhoto[]> {
+  const u = new URL("https://commons.wikimedia.org/w/api.php");
+  u.searchParams.set("action", "query");
+  u.searchParams.set("format", "json");
+  u.searchParams.set("origin", "*");
+  u.searchParams.set("generator", "search");
+  u.searchParams.set("gsrsearch", query + " filetype:bitmap");
+  u.searchParams.set("gsrnamespace", "6");
+  u.searchParams.set("gsrlimit", "20");
+  u.searchParams.set("prop", "imageinfo");
+  u.searchParams.set("iiprop", "url|size|extmetadata");
+  u.searchParams.set("iiurlwidth", "1600");
+  const r = await timedFetch(u.toString(), {
+    headers: { "User-Agent": "RecruitersOS/1.0 (post media; contact: ops@recruitersos.co)" },
+  });
+  if (!r.ok) throw new Error(`wikimedia_${r.status}`);
+  const j = (await r.json()) as any;
+  const pages: any[] = Object.values(j?.query?.pages ?? {});
+  const out: StockPhoto[] = [];
+  for (const pg of pages) {
+    const ii = pg?.imageinfo?.[0];
+    if (!ii?.thumburl || !ii?.width || !ii?.height) continue;
+    // Newer API responses omit `url` when iiurlwidth is set; the thumburl
+    // carries a utm query string, so test extension ahead of the `?`.
+    if (!OV_OK_TYPES.test(String(ii.thumburl))) continue;
+    const meta = ii.extmetadata ?? {};
+    const license = stripHtml(String(meta.LicenseShortName?.value ?? ""));
+    if (!WM_OK_LICENSE.test(license)) continue;
+    const artist = stripHtml(String(meta.Artist?.value ?? "")).slice(0, 60) || null;
+    const free = /^(cc0|public domain|pd|no restrictions)$/i.test(license);
+    const thumb = String(ii.thumburl).replace(/\/\d+px-/, "/480px-");
+    out.push({
+      provider: "wikimedia",
+      providerId: String(pg.pageid),
+      downloadUrl: String(ii.thumburl), // server-rendered 1600px jpeg, not the 50MB original
+      thumbUrl: thumb,
+      width: Number(ii.width) || null,
+      height: Number(ii.height) || null,
+      creator: artist,
+      pageUrl: typeof ii.descriptionurl === "string" ? ii.descriptionurl : null,
+      credit: free ? null : `Photo: ${artist ?? "Wikimedia Commons"} (${license})`,
+    });
+  }
+  return out;
 }
 
 /* -------------------------------- Openverse ------------------------------ */
@@ -205,32 +295,40 @@ function rankPhotos(photos: StockPhoto[]): StockPhoto[] {
 /**
  * Licensed photos for a query, best-first. Cached in memory for 6h so variant
  * cycling and repeated drafts on the same theme never re-hit the providers.
+ *
+ * `deep` widens the sweep to the archival sources (Wikimedia Commons) too:
+ * right for the Media tab's human-curated search, wrong for auto-attach,
+ * where a century-old archive scan under a fresh post would read as a miss.
  */
-export async function searchStockPhotos(query: string): Promise<StockPhoto[]> {
+export async function searchStockPhotos(query: string, opts: { deep?: boolean } = {}): Promise<StockPhoto[]> {
   const q = normQuery(query);
   if (!q) return [];
-  const hit = searchCache.get(q);
+  const key = (opts.deep ? "deep|" : "") + q;
+  const hit = searchCache.get(key);
   if (hit && Date.now() - hit.at < SEARCH_TTL_MS) return hit.photos;
-  let photos: StockPhoto[] = [];
-  try {
-    photos = await searchPexels(q);
-  } catch { /* fall through to Openverse */ }
-  if (photos.length < 4) {
-    try {
-      const ov = await searchOpenverse(q);
-      const seen = new Set(photos.map((p) => p.provider + ":" + p.providerId));
-      for (const p of ov) if (!seen.has(p.provider + ":" + p.providerId)) photos.push(p);
-    } catch { /* keyless rung down: return whatever we have */ }
+  // Keyed curated sources first, in parallel; the keyless archives join in
+  // whenever the curated pool is thin. A provider that errors contributes
+  // nothing rather than sinking the search.
+  const settle = async (fns: (() => Promise<StockPhoto[]>)[]): Promise<StockPhoto[]> => {
+    const r = await Promise.allSettled(fns.map((f) => f()));
+    return r.flatMap((x) => (x.status === "fulfilled" ? x.value : []));
+  };
+  let photos = await settle([() => searchPexels(q), () => searchPixabay(q)]);
+  if (photos.length < 8 || opts.deep) {
+    const keyless: (() => Promise<StockPhoto[]>)[] = [() => searchOpenverse(q)];
+    if (opts.deep) keyless.push(() => searchWikimedia(q));
+    photos = photos.concat(await settle(keyless));
   }
-  photos = rankPhotos(photos).slice(0, 16);
-  searchCache.set(q, { at: Date.now(), photos });
+  photos = rankPhotos(photos).slice(0, 24);
+  searchCache.set(key, { at: Date.now(), photos });
   return photos;
 }
 
 /** Re-resolve a photo by provider id from the cached search (so the client
- *  never supplies a download URL: no server-side fetch of arbitrary hosts). */
+ *  never supplies a download URL: no server-side fetch of arbitrary hosts).
+ *  Deep search, so anything the Media tab showed is resolvable. */
 export async function resolveStockPhoto(query: string, provider: string, providerId: string): Promise<StockPhoto | null> {
-  const photos = await searchStockPhotos(query);
+  const photos = await searchStockPhotos(query, { deep: true });
   return photos.find((p) => p.provider === provider && p.providerId === providerId) ?? null;
 }
 
