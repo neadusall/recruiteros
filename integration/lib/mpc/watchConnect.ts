@@ -54,10 +54,27 @@ export async function connectWatcher(
     const rec: ConnectRec = { email: w.email, name: w.name, company: w.company, recruiter: w.recruiter, status: "no_profile", at: now, auto: opts.auto };
     return rec; // not persisted: still "ready" once a profile is resolved
   }
+  // Match the emailing recruiter to their team member. The video ledger canonicalizes to full names
+  // ("Ryan Nead") but the auth store often holds the first name or a lowercase handle ("Ryan",
+  // "ariel"), so fall back to a first-name match after an exact one.
   const members = listMembers(ws);
-  const member = members.find((m) => (m.name || "").toLowerCase() === String(w.recruiter || "").toLowerCase());
+  const want = String(w.recruiter || "").trim().toLowerCase();
+  const wantFirst = want.split(/\s+/)[0];
+  const member =
+    members.find((m) => (m.name || "").toLowerCase() === want) ||
+    members.find((m) => (m.name || "").toLowerCase().split(/\s+/)[0] === wantFirst && !!wantFirst);
   const seat = member ? await seatForUser(ws, member.userId) : null;
-  const accountId = seat?.accountId || "default";
+  // No seat resolved: do NOT fire from a wrong/placeholder account. Record it so it is visible + fixable.
+  if (!seat?.accountId) {
+    const rec: ConnectRec = {
+      email: w.email, name: w.name, company: w.company, recruiter: w.recruiter,
+      status: "queued", reason: `No LinkedIn seat for ${w.recruiter || "the emailing recruiter"}`,
+      at: now, by: member?.name || "", auto: opts.auto,
+    };
+    await saveConnect(ws, rec);
+    return rec;
+  }
+  const accountId = seat.accountId;
 
   const res = await requestLinkedInAction({
     workspaceId: ws,
