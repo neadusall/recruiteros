@@ -3075,17 +3075,17 @@
       if (t.peer) return '<span class="lie-chip mut">Peer</span>';
       return '<span class="lie-chip mut">Community</span>';
     }
-    function unlockHours(t) {
-      if (!t.connectAfter) return 0;
-      var ms = new Date(t.connectAfter).getTime() - Date.now();
-      return ms > 0 ? Math.ceil(ms / 3600000) : 0;
-    }
     function replyBlock(t) {
       if (t.replyStatus === "suggested") {
-        return '<textarea class="lie-text" data-lic-reply rows="2">' + esc(t.replyText || "") + "</textarea>" +
+        // Connect-first: a hot commenter's reply stays locked until the
+        // connection request above is sent (or deliberately skipped).
+        var locked = t.tier === "hot" && t.connectStatus === "suggested";
+        return '<textarea class="lie-text" data-lic-reply rows="2"' + (locked ? " disabled" : "") + '>' + esc(t.replyText || "") + "</textarea>" +
           '<div class="lie-actions">' +
-            '<button class="btn btn-sm btn-primary" data-lic="approve">Approve reply</button> ' +
-            '<button class="btn btn-sm btn-ghost" data-lic="skip">Skip</button>' +
+            (locked
+              ? '<button class="btn btn-sm" disabled title="Send or skip the connect request first">Reply unlocks after the connect</button>'
+              : '<button class="btn btn-sm btn-primary" data-lic="approve">Approve reply</button> ' +
+                '<button class="btn btn-sm btn-ghost" data-lic="skip">Skip</button>') +
           "</div>";
       }
       if (t.replyStatus === "approved") return '<div><span class="lie-chip ok">Reply approved, sending from your account</span></div>';
@@ -3096,12 +3096,10 @@
     function connectBlock(t) {
       if (!t.connectStatus) return "";
       if (t.connectStatus === "suggested") {
-        var hrs = unlockHours(t);
-        return '<div class="lie-post muted">Follow-up connect (spaced a day after your reply):</div>' +
+        return '<div class="lie-post muted">Connect first: they hit the benchmarks (hiring decision-maker with open roles), so this connection request leads and the public reply follows.</div>' +
           '<textarea class="lie-text" data-lic-connect rows="2">' + esc(t.connectText || "") + "</textarea>" +
           '<div class="lie-actions">' +
-            '<button class="btn btn-sm btn-primary" data-lic="connect_approve"' + (hrs ? ' disabled title="Unlocks in about ' + hrs + 'h"' : "") + ">" +
-              (hrs ? "Connect unlocks in " + hrs + "h" : "Send connect request") + "</button> " +
+            '<button class="btn btn-sm btn-primary" data-lic="connect_approve">Send connect request</button> ' +
             '<button class="btn btn-sm btn-ghost" data-lic="connect_skip">Skip connect</button>' +
           "</div>";
       }
@@ -3121,7 +3119,7 @@
         '<div class="lie-who">' + who + " " + tierChip(t) + "</div>" +
         '<div class="lie-post muted">On your post: "' + esc((t.postExcerpt || "").slice(0, 140)) + '..."</div>' +
         '<div class="lie-post">Their comment: ' + esc((t.commentText || "").slice(0, 280)) + "</div>" +
-        hiring + replyBlock(t) + connectBlock(t) +
+        hiring + connectBlock(t) + replyBlock(t) +
       "</div>";
     }
     function paint(d) {

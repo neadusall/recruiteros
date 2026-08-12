@@ -12,11 +12,15 @@
  *   5. tiers them hot / warm / community, and
  *   6. for hot + warm, drafts a substance-first reply to their comment.
  *
- * NOTHING posts on its own: replies wait for one-tap approval in the LinkedIn
- * tab and go out through requestLinkedInAction (threaded under the commenter's
- * comment), so account caps, health and the ledger all apply. Approving a HOT
- * reply also stages a connection-note draft that unlocks 24h later, so the
- * follow-up lands after the thread exchange, not on top of it.
+ * NOTHING posts on its own: everything waits for one-tap approval in the
+ * LinkedIn tab and goes out through requestLinkedInAction, so account caps,
+ * health and the ledger all apply.
+ *
+ * CONNECT-FIRST for HOT commenters (owner decision 2026-08-12): a commenter
+ * who is a hiring decision-maker AND whose company has open roles gets a
+ * connection-note draft as the FIRST touch, referencing their comment. The
+ * public reply stays drafted but locked until the connect is sent (or
+ * deliberately skipped). Warm and community commenters stay reply-first.
  */
 
 import { loadSnapshot, debouncedSaver } from "../db";
@@ -31,7 +35,6 @@ const COMMENTS_PER_POST = 100;   // first page is plenty at this volume
 const NEW_PER_TICK = 15;         // commenters fully processed per tick (rest next tick)
 const SEEN_CAP = 8000;           // per-workspace dedupe memory
 const ITEM_TTL_DAYS = 21;
-const CONNECT_DELAY_MS = 24 * 3_600_000;
 
 export type CommentTier = "hot" | "warm" | "community";
 
@@ -63,9 +66,10 @@ export interface CommentLeadItem {
   /** The reply draft + its gate. "none" = not drafted (community default). */
   replyText?: string;
   replyStatus: "none" | "suggested" | "approved" | "skipped" | "blocked";
-  /** Hot tier: connection-note follow-up staged when the reply is approved. */
+  /** Hot tier: the connection note is the FIRST touch, staged at detection. */
   connectText?: string;
   connectStatus?: "suggested" | "approved" | "skipped" | "blocked";
+  /** Legacy field from the reply-first flow; no longer set. */
   connectAfter?: string;
   reason?: string;
   createdAt: string;
@@ -183,11 +187,11 @@ Rules:
 - Never mention AI, never pitch services, never link, never suggest connecting or a call. The only goal is one more genuine exchange in the thread.
 Return ONLY the reply text, nothing else.`;
 
-const CONNECT_RULES = `You write short LinkedIn connection notes for a recruiting agency owner. The recipient recently commented on one of the owner's posts and the owner replied; this note follows that exchange a day later. The reader must never suspect a machine wrote it.
+const CONNECT_RULES = `You write short LinkedIn connection notes for a recruiting agency owner. The recipient just commented on one of the owner's posts; this note is the FIRST direct touch and arrives while their comment is still fresh. The reader must never suspect a machine wrote it.
 Rules:
 - Max 270 characters. Two sentences at most.
-- Reference the thread naturally (their take under the post), not their profile.
-- No pitch, no links, no "synergies", no emoji, no long dashes, no mention of hiring or services. Connecting to continue the conversation is the whole message.
+- Reference their comment naturally (their take under the post), not their profile or their company.
+- No pitch, no links, no "synergies", no emoji, no long dashes, no mention of hiring, roles, or services. Connecting to keep talking is the whole message.
 - Never mention AI.
 Return ONLY the note text, nothing else.`;
 
@@ -406,11 +410,19 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
 
       // Hot and warm commenters get a drafted reply immediately; community
       // stays listed with on-demand drafting so goodwill replies are one tap away.
+      const persona = [c.authorName, title, company ? `at ${company}` : undefined].filter(Boolean).join(", ");
       if (tier === "hot" || tier === "warm") {
-        const persona = [c.authorName, title, company ? `at ${company}` : undefined].filter(Boolean).join(", ");
         const text = await draft(REPLY_RULES,
           `MY POST:\n${postExcerpt || "(no text)"}\n\nTHEIR COMMENT (by ${persona}):\n${c.text}\n\nWrite the reply.`);
         if (text) { item.replyText = text; item.replyStatus = "suggested"; }
+      }
+      // Connect-first: a decision-maker at a company hiring right now gets the
+      // connection note staged as the FIRST touch; the reply stays locked
+      // until the connect is sent or skipped (enforced in approveReply).
+      if (tier === "hot") {
+        const note = await draft(CONNECT_RULES,
+          `The person: ${persona}.\nMy post they commented under:\n${postExcerpt || "(no text)"}\n\nTheir comment:\n${c.text}\n\nWrite the connection note.`);
+        if (note) { item.connectText = note; item.connectStatus = "suggested"; }
       }
 
       state.items.push(item);
@@ -487,7 +499,8 @@ export async function skipReply(workspaceId: string, id: string): Promise<Commen
 }
 
 /** Approve the reply: hand it to the shared engine (caps/health/ledger apply).
- *  A HOT item also stages its connection-note follow-up, unlocked in 24h. */
+ *  HOT items are connect-first: the reply stays locked until the connection
+ *  request went out (or was deliberately skipped). */
 export async function approveReply(
   workspaceId: string, userId: string, userEmail: string, id: string, editedText?: string,
 ): Promise<{ item: CommentLeadItem | null; accepted: boolean; reason?: string }> {
@@ -495,6 +508,9 @@ export async function approveReply(
   const item = findItem(workspaceId, id);
   if (!item || item.replyStatus !== "suggested" || !item.replyText) {
     return { item: item ?? null, accepted: false, reason: "not_open" };
+  }
+  if (item.tier === "hot" && item.connectStatus === "suggested") {
+    return { item, accepted: false, reason: "Connect first: send (or skip) the connection request above, then this reply unlocks." };
   }
   if (editedText && scrub(editedText).length >= 2) item.replyText = scrub(editedText).slice(0, 1200);
 
@@ -525,13 +541,6 @@ export async function approveReply(
     });
     if (result.accepted) {
       item.replyStatus = "approved"; item.reason = undefined;
-      if (item.tier === "hot" && !item.connectStatus) {
-        item.connectAfter = new Date(Date.now() + CONNECT_DELAY_MS).toISOString();
-        const persona = [item.authorName, item.title, item.company ? `at ${item.company}` : undefined].filter(Boolean).join(", ");
-        const note = await draft(CONNECT_RULES,
-          `The person: ${persona}.\nMy post they commented under:\n${item.postExcerpt || "(no text)"}\n\nTheir comment:\n${item.commentText}\n\nWrite the connection note.`);
-        if (note) { item.connectText = note; item.connectStatus = "suggested"; }
-      }
     } else {
       item.replyStatus = "blocked"; item.reason = result.reason || "The engine declined this action.";
     }
@@ -554,8 +563,7 @@ export async function skipConnect(workspaceId: string, id: string): Promise<Comm
   return item;
 }
 
-/** Approve the staged connection note. Held until 24h after the reply so the
- *  follow-up lands after the exchange, not on top of it. */
+/** Approve the staged connection note: the FIRST touch for a hot commenter. */
 export async function approveConnect(
   workspaceId: string, userId: string, userEmail: string, id: string, editedText?: string,
 ): Promise<{ item: CommentLeadItem | null; accepted: boolean; reason?: string }> {
@@ -563,9 +571,6 @@ export async function approveConnect(
   const item = findItem(workspaceId, id);
   if (!item || item.connectStatus !== "suggested" || !item.connectText) {
     return { item: item ?? null, accepted: false, reason: "not_open" };
-  }
-  if (item.connectAfter && item.connectAfter > nowIso()) {
-    return { item, accepted: false, reason: "This connect unlocks 24h after your reply, so it lands after the thread exchange." };
   }
   if (editedText && scrub(editedText).length >= 2) item.connectText = scrub(editedText).slice(0, 280);
 

@@ -7,7 +7,7 @@
  *   skip            { id }
  *   edit            { id, text }
  *   draft           { id }        -> draft a reply on demand (community tier)
- *   connect_approve { id, text? } -> send the staged connection note (24h gate)
+ *   connect_approve { id, text? } -> send the connection note (hot tier's FIRST touch)
  *   connect_skip    { id }
  *   pause / resume  {}
  * Session-gated with outreach:send, same capability as the LinkedIn tab.
