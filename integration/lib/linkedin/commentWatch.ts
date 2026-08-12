@@ -220,17 +220,14 @@ export async function setCommentWatchPaused(workspaceId: string, paused: boolean
   save();
 }
 
-/** Explicit on/off wins; otherwise follow the workspace's BD Autopilot opt-in. */
-export async function commentWatchAutopilot(workspaceId: string): Promise<{ enabled: boolean; source: "manual" | "bd_autopilot" | "off" }> {
+/** Explicit on/off wins; otherwise the radar defaults ON (owner decision
+ *  2026-08-12: "this needs to be automated"). Only workspaces with a
+ *  connected seat ever reach a scan, and the card carries the off switch. */
+export async function commentWatchAutopilot(workspaceId: string): Promise<{ enabled: boolean; source: "manual" | "default_on" | "off" }> {
   await hydrate();
   const manual = state.autoMode[workspaceId];
   if (typeof manual === "boolean") return { enabled: manual, source: manual ? "manual" : "off" };
-  try {
-    const { getCore } = await import("../core/repository");
-    const all = await getCore().listAllCampaigns();
-    const on = all.some((c) => c.workspaceId === workspaceId && c.motion === "bd" && c.status === "active" && c.autoRun);
-    return { enabled: on, source: on ? "bd_autopilot" : "off" };
-  } catch { return { enabled: false, source: "off" }; }
+  return { enabled: true, source: "default_on" };
 }
 
 export async function setCommentWatchAuto(workspaceId: string, on: boolean): Promise<void> {
@@ -566,32 +563,34 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
   }
 
   let created = 0;
+  // Per-gate counters so a zero-yield search names the gate that ate it.
+  const g = { nopost: 0, seen: 0, intent: 0, notperson: 0, weekly: 0, title: 0, dnc: 0, profile: 0, draft: 0 };
   for (const raw of results) {
     if (created >= POSTER_NEW_PER_TICK) break;
     const postId = str(raw.social_id) ?? str(raw.share_url) ?? str(raw.url) ?? str(raw.id) ?? str(raw.post_id);
     const text = (str(raw.text) ?? str(raw.commentary) ?? str(raw.content) ?? "").trim();
-    if (!postId || text.length < 40) continue;
-    if (seenPosts.has(postId)) continue;
+    if (!postId || text.length < 40) { g.nopost++; continue; }
+    if (seenPosts.has(postId)) { g.seen++; continue; }
     seenPosts.add(postId); seenArr.push(postId);
 
     // The post itself must read like hiring intent, not a passing mention.
-    if (!HIRING_INTENT_RE.test(text)) continue;
+    if (!HIRING_INTENT_RE.test(text)) { g.intent++; continue; }
 
     // Author: a person (not a company page), not the owner, decision-maker
     // title, not a peer staffing firm, not touched by this lane this week.
     const author = (typeof raw.author === "object" && raw.author ? raw.author : (typeof raw.author_details === "object" && raw.author_details ? raw.author_details : {})) as Dict;
-    if (author.is_company === true || str(author.type) === "COMPANY" || str(author.type) === "organization") continue;
+    if (author.is_company === true || str(author.type) === "COMPANY" || str(author.type) === "organization") { g.notperson++; continue; }
     const authorId = str(author.id) ?? str(author.provider_id) ?? str(author.public_identifier);
     const authorName = str(author.name) ?? [str(author.first_name), str(author.last_name)].filter(Boolean).join(" ").trim();
-    if (!authorId || !authorName) continue;
-    if (own && authorId === own.providerId) continue;
+    if (!authorId || !authorName) { g.notperson++; continue; }
+    if (own && authorId === own.providerId) { g.notperson++; continue; }
     const lastTouch = seenAuthors[authorId];
-    if (lastTouch && new Date(lastTouch).getTime() >= recheckCutoff) continue;
+    if (lastTouch && new Date(lastTouch).getTime() >= recheckCutoff) { g.weekly++; continue; }
 
     const headline = str(author.headline);
     const { title, company } = parseHeadline(headline);
     const intel = classifyTitle(title ?? headline ?? "");
-    if (!intel.isDecisionMaker || looksLikePeer(title, company)) { seenAuthors[authorId] = nowIso(); continue; }
+    if (!intel.isDecisionMaker || looksLikePeer(title, company)) { g.title++; seenAuthors[authorId] = nowIso(); continue; }
 
     seenAuthors[authorId] = nowIso();
     save();
@@ -603,14 +602,14 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
       const dnc = await checkContactable(workspaceId,
         { fullName: authorName, company, linkedinUrl: str(author.public_identifier) ? `linkedin.com/in/${str(author.public_identifier)}` : undefined },
         { checkRecency: true });
-      if (!dnc.ok) continue;
-    } catch { continue; }
+      if (!dnc.ok) { g.dnc++; continue; }
+    } catch { g.dnc++; continue; }
 
     // Open-profile check FIRST: it decides the channel. Open profile or an
     // existing connection takes a plain direct message (never InMail);
     // closed profiles get the same personalized text as a connection note.
     const prof = await fetchProfileLite(account, authorId);
-    if (!prof.providerId) continue;
+    if (!prof.providerId) { g.profile++; continue; }
     const direct = prof.openProfile === true || prof.networkDistance === "DISTANCE_1";
 
     // Supporting evidence, never a gate: their own board's open roles.
@@ -622,7 +621,7 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
       : "";
     const dmText = await draft(direct ? DM_RULES : POSTER_CONNECT_RULES,
       `THE PERSON: ${persona}.${evidence}\n\nTHEIR HIRING POST:\n${text.slice(0, 700)}\n\nWrite the ${direct ? "message" : "connection note"}.`);
-    if (!dmText) continue;
+    if (!dmText) { g.draft++; continue; }
 
     state.items.push({
       id: rid("licw"), workspaceId, kind: "poster",
@@ -647,6 +646,7 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
 
   if (seenArr.length > SEEN_CAP) state.seen[workspaceId] = seenArr.slice(-SEEN_CAP);
   save();
+  console.log(`[comment-radar] market "${keyword}": results=${results.length} created=${created} gates=${JSON.stringify(g)}`);
   return created;
 }
 
@@ -656,7 +656,7 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
 
 export interface CommentWatchView {
   status: CommentWatchStatus;
-  autopilot: { enabled: boolean; source: "manual" | "bd_autopilot" | "off" };
+  autopilot: { enabled: boolean; source: "manual" | "default_on" | "off" };
   /** The market-scan keyword bank in effect (backend defaults or override). */
   keywords: string[];
   lastScan?: string;

@@ -1049,7 +1049,7 @@
       if (!d.commentWatch) {
         d.commentWatch = {
           status: { active: true, engineReady: true, aiReady: true, paused: false, reasons: [] },
-          autopilot: { enabled: true, source: "bd_autopilot" },
+          autopilot: { enabled: true, source: "default_on" },
           keywords: ["we are hiring", "we're hiring", "now hiring", "looking to hire", "open role", "growing our team"],
           lastScan: new Date().toISOString(),
           items: [
