@@ -1042,6 +1042,80 @@
       return ok({ campaigns: d.campaigns });
     }
 
+    // --- LinkedIn comment listener (offline demo) -----------------------------
+    // Mirrors /api/linkedin/comments (the Post engagement radar) so the panel is
+    // fully clickable with no server. SAMPLE data; the real backend wins when up.
+    if (p === "/linkedin/comments") {
+      if (!d.commentWatch) {
+        d.commentWatch = {
+          status: { active: true, engineReady: true, aiReady: true, paused: false, reasons: [] },
+          lastScan: new Date().toISOString(),
+          items: [
+            {
+              id: "licw_demo1", tier: "hot", decisionMaker: true, peer: false,
+              authorName: "Dana Whitfield", authorHeadline: "VP People at Northgate Health",
+              title: "VP People", company: "Northgate Health",
+              postExcerpt: "Most agencies send resumes. The good ones send proof: here is the exact bar we screen against before you ever see a candidate.",
+              commentText: "This is the part most firms skip. How do you keep the bar consistent when a role drags on for months?",
+              hiring: { checked: true, openRoles: 12, sample: ["Director of Nursing", "Clinical Recruiter", "RN Case Manager"] },
+              replyStatus: "suggested",
+              replyText: "Long searches drift when the scorecard lives in someone's head. We re-run the same rubric on week one and week twelve, so the bar cannot quietly move. What made it drag on your side?",
+              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            },
+            {
+              id: "licw_demo2", tier: "warm", decisionMaker: true, peer: false,
+              authorName: "Marcus Bell", authorHeadline: "Director of Engineering at Corvid Systems",
+              title: "Director of Engineering", company: "Corvid Systems",
+              postExcerpt: "Most agencies send resumes. The good ones send proof: here is the exact bar we screen against before you ever see a candidate.",
+              commentText: "We stopped using agencies because every shortlist needed re-screening anyway.",
+              hiring: { checked: true, openRoles: 0, sample: [] },
+              replyStatus: "suggested",
+              replyText: "Re-screening a shortlist means the agency screened for keywords, not for your bar. What did your own second screen catch that theirs missed?",
+              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            },
+            {
+              id: "licw_demo3", tier: "community", decisionMaker: false, peer: false,
+              authorName: "Sofia Reyes", authorHeadline: "Software Engineer at Meridian Labs",
+              title: "Software Engineer", company: "Meridian Labs",
+              postExcerpt: "Most agencies send resumes. The good ones send proof: here is the exact bar we screen against before you ever see a candidate.",
+              commentText: "Wish more recruiters worked like this honestly.",
+              replyStatus: "none",
+              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            }
+          ]
+        };
+        save(d);
+      }
+      var cw = d.commentWatch;
+      function cwItem(id) { var f = null; cw.items.forEach(function (x) { if (x.id === id) f = x; }); return f; }
+      if (method === "POST" && body) {
+        var it = body.id ? cwItem(body.id) : null;
+        if (body.action === "scan") { cw.lastScan = new Date().toISOString(); save(d); return ok({ scanned: 0, created: 0, view: cw }); }
+        if (body.action === "pause" || body.action === "resume") { cw.status.paused = body.action === "pause"; save(d); return ok({ view: cw }); }
+        if (!it) return ok({ view: cw });
+        if (body.action === "approve") {
+          if (body.text) it.replyText = body.text;
+          it.replyStatus = "approved";
+          if (it.tier === "hot" && !it.connectStatus) {
+            it.connectStatus = "suggested";
+            it.connectAfter = new Date(Date.now() + 24 * 3600000).toISOString();
+            it.connectText = "Enjoyed your take under my screening post. Connecting so the conversation does not get lost in the comments.";
+          }
+          save(d); return ok({ accepted: true, view: cw });
+        }
+        if (body.action === "skip") { it.replyStatus = "skipped"; save(d); return ok({ view: cw }); }
+        if (body.action === "edit") { if (body.text) it.replyText = body.text; save(d); return ok({ view: cw }); }
+        if (body.action === "draft") {
+          it.replyText = "Glad it landed. If you ever see the other side of this, the screening rubric is the piece worth copying.";
+          it.replyStatus = "suggested"; save(d); return ok({ drafted: true, view: cw });
+        }
+        if (body.action === "connect_approve") { it.connectStatus = "approved"; save(d); return ok({ accepted: true, view: cw }); }
+        if (body.action === "connect_skip") { it.connectStatus = "skipped"; save(d); return ok({ view: cw }); }
+        return ok({ view: cw });
+      }
+      return ok(cw);
+    }
+
     // --- JD Sourcing (offline demo) -------------------------------------------
     // Mirrors /api/sourcing so the JD Sourcing tab is fully clickable with no
     // server + no API keys. Data is clearly labeled SAMPLE/demo; once the real

@@ -329,7 +329,7 @@ async function executeOneInner(r: LiActionRecord): Promise<void> {
         const { unipile } = await import("../../providers");
         if (r.actionType === "comment_post" && r.payload.postUrl) {
           const res: { dryRun?: boolean; id?: string } =
-            await unipile.commentOnPost(providerAccountId, r.payload.postUrl, r.payload.text ?? "");
+            await unipile.commentOnPost(providerAccountId, r.payload.postUrl, r.payload.text ?? "", r.payload.commentId);
           out = { ok: true, providerMessageId: res?.id };
         } else if (r.actionType === "like_post" && r.payload.postUrl) {
           const res: { dryRun?: boolean; id?: string } =
