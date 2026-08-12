@@ -8402,8 +8402,17 @@
     return '<span class="wu-repbar"><span class="wu-reptrack"><span class="wu-repfill" style="width:' + Math.max(2, Math.min(100, p)) + '%;background:' + c + '"></span></span><b style="color:' + c + '">' + p + '%</b></span>';
   }
 
-  function wuBadge(r) {
+  // Takes the whole domain row so a warming domain can say WHERE it is on its
+  // clock ("Warming · day 16 of 30") instead of a bare "Warming". The target
+  // comes from the server (readyAfterDays: 14 for Sending.ac/Gmail fleets, 30
+  // for the internal SMTP server); older payloads without it fall back to the
+  // plain label.
+  function wuBadge(d) {
+    var r = d.readiness;
     var label = r === "ready" ? "Ready to send" : r === "attention" ? "Needs attention" : "Warming";
+    if (r === "warming" && d.days != null && d.readyAfterDays) {
+      label = "Warming · day " + Math.min(Math.floor(d.days) + 1, d.readyAfterDays) + " of " + d.readyAfterDays;
+    }
     return '<span class="wu-badge ' + r + '">' + label + '</span>';
   }
 
@@ -8420,16 +8429,23 @@
   // Plain-English reason for a domain's reputation given how long it has been
   // warming, so a low number on a brand-new domain reads as "expected", not
   // "problem". A low number on a MATURE domain is the real signal to act on.
-  function wuRepReason(days, rep) {
+  function wuRepReason(days, rep, target) {
     if (rep == null) return "";
     var d = days == null ? 0 : days;
+    var goal = target || 14;
     var msg, tone = "muted";
     if (d < 3) {
       msg = "Normal for a new domain. It climbs as warm-up sends land, get pulled from spam, opened and replied to. Expect 90%+ within 1 to 2 weeks.";
     } else if (d < 7) {
       msg = rep >= 80 ? "Ramping well, on track to reach 90%+ soon." : "Still early days, reputation is expected to keep rising this week.";
     } else if (d < 14) {
-      msg = rep >= 85 ? "Almost there, nearly warmed." : (rep >= 70 ? "Climbing, give it the rest of the two weeks." : (tone = "warn", "Lower than expected at this age. Watch it. If it does not rise, ease the daily volume."));
+      msg = rep >= 85 ? "Almost there, reputation is nearly warmed." : (rep >= 70 ? "Climbing, give it the rest of the two weeks." : (tone = "warn", "Lower than expected at this age. Watch it. If it does not rise, ease the daily volume."));
+    } else if (d < goal) {
+      // Reputation can max out well before the clock does: on the internal SMTP
+      // server the domain still holds the full warm period before cold sends.
+      if (rep >= 95) { tone = "ok"; msg = "Reputation is fully warmed. Holding for the full " + goal + "-day warm before cold sends, mailbox providers trust age as much as score."; }
+      else if (rep >= 85) { tone = "ok"; msg = "Warming well, on track for the " + goal + "-day mark."; }
+      else { tone = "warn"; msg = "Lower than expected at this age. Watch it. If it does not rise, ease the daily volume."; }
     } else {
       if (rep >= 95) { tone = "ok"; msg = "Fully warmed and steady. Ready to send."; }
       else if (rep >= 85) { tone = "ok"; msg = "Warmed and healthy."; }
@@ -8493,7 +8509,7 @@
         '<span style="flex:1"></span>' +
         '<button class="btn btn-ghost btn-sm" id="wuRefresh"' + (wuLoading ? " disabled" : "") + '>' + (wuLoading ? "Refreshing…" : "↻ Refresh now") + '</button>' +
       '</div>' +
-      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam; a domain is <b>Ready to send</b> after 14+ days warming at 95%+ average reputation. Click a domain for its mailboxes.</div>' +
+      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam. A domain is <b>Ready to send</b> at 95%+ average reputation after its full warm period: <b>14+ days</b> on provider-run mailboxes (Sending.ac, Gmail), <b>30+ days</b> on the Internal SMTP server, which earns its reputation from scratch. Each warming domain shows its day count toward that mark. Click a domain for its mailboxes.</div>' +
       (wuData.portalNote ? '<div class="wu-sub"><b>Portal split:</b> ' + esc(wuData.portalNote) + '</div>' : '');
     // Infrastructure split cards: only providers that actually have mailboxes.
     var infraCards = "";
@@ -8519,11 +8535,11 @@
         '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + wuInfraChip(d.infra) + wuKindChip(d.mailboxKind) + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
         '<td>' + days + '</td>' +
-        '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation) + '</td>' +
+        '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation, d.readyAfterDays) + '</td>' +
         '<td>' + wuHealthChip(d.health) + '</td>' +
         '<td>' + wuDnsPills(d.dns) + '</td>' +
         '<td>' + (d.warmupPerDay != null ? '<b>' + d.warmupPerDay + '</b><span class="muted" style="font-size:11px">/day</span>' + (d.replyRatePct != null ? '<div class="muted" style="font-size:11px">' + d.replyRatePct + '% replies</div>' : '') : '<span class="muted">n/a</span>') + '</td>' +
-        '<td>' + wuBadge(d.readiness) + '</td>' +
+        '<td>' + wuBadge(d) + '</td>' +
       '</tr>';
       if (!open) return main;
       var acts = (d.actions && d.actions.length)

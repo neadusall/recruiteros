@@ -76,6 +76,11 @@ export interface WarmupDomainRow {
   spamCount: number;
   spamRatePct: number | null;
   readiness: "ready" | "warming" | "attention";
+  /** Days of warming this domain must bank before it reads Ready to send:
+   *  14 for provider-run fleets (Sending.ac, Gmail), 30 for the internal SMTP
+   *  server, whose reputation is earned from scratch. The UI renders the
+   *  "day X of Y" progress off this number. */
+  readyAfterDays: number;
   /** Live DNS posture; null while the first probe is still resolving. */
   dns: {
     spf: boolean; dkim: boolean; dmarc: boolean; mx: boolean;
@@ -208,6 +213,7 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
       spamCount,
       spamRatePct,
       readiness,
+      readyAfterDays: 14,
       dns: null,
       health: { score: 0, label: "watch" },
       actions: [],
@@ -281,8 +287,8 @@ function computeActions(d: WarmupDomainRow): string[] {
   }
   if (d.readiness === "ready" && d.emailIds.total === 0) a.push("Warmed and ready, import this domain's mailboxes as Email IDs to start sending");
   if (d.emailIds.error > 0) a.push(`${d.emailIds.error} Email ID${d.emailIds.error === 1 ? "" : "s"} on this portal in SMTP error, open Senders list and Test them`);
-  if (!a.length && d.readiness === "warming" && d.days != null && d.days < 14) {
-    a.push(`On track, ${Math.max(1, Math.ceil(14 - d.days))} more day${14 - d.days > 1 ? "s" : ""} to the 14-day mark`);
+  if (!a.length && d.readiness === "warming" && d.days != null && d.days < d.readyAfterDays) {
+    a.push(`On track, ${Math.max(1, Math.ceil(d.readyAfterDays - d.days))} more day${d.readyAfterDays - d.days > 1 ? "s" : ""} to the ${d.readyAfterDays}-day mark`);
   }
   return a;
 }
@@ -409,6 +415,14 @@ export async function GET(req: Request) {
       const mx = (p?.mxHosts || []).join(" ").toLowerCase();
       if (/google(mail)?\.com/.test(mx)) d.mailboxKind = "google";
     }
+    // Readiness bar by infrastructure, applied once infra is known: provider-run
+    // fleets (Sending.ac, Gmail) inherit provider reputation and are sendable at
+    // 14 days, but the internal SMTP server earns trust from scratch, so its
+    // domains hold "Warming" for a full 30 days regardless of the reputation
+    // number. (The MPC engine separately keeps the own-SMTP lane parked behind a
+    // manual unlock; this keeps the panel from calling those domains ready early.)
+    d.readyAfterDays = d.infra.kind === "internal-smtp" ? 30 : 14;
+    if (d.readiness === "ready" && (d.days == null || d.days < d.readyAfterDays)) d.readiness = "warming";
     d.health = computeHealth(d);
     d.actions = computeActions(d);
   }
