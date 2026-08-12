@@ -1060,6 +1060,8 @@
               hiring: { checked: true, openRoles: 12, sample: ["Director of Nursing", "Clinical Recruiter", "RN Case Manager"] },
               replyStatus: "suggested",
               replyText: "Long searches drift when the scorecard lives in someone's head. We re-run the same rubric on week one and week twelve, so the bar cannot quietly move. What made it drag on your side?",
+              connectStatus: "suggested",
+              connectText: "Your question under my screening post is the one most people never ask. Connecting so the conversation does not get lost in the comments.",
               createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
             },
             {
@@ -1094,13 +1096,13 @@
         if (body.action === "pause" || body.action === "resume") { cw.status.paused = body.action === "pause"; save(d); return ok({ view: cw }); }
         if (!it) return ok({ view: cw });
         if (body.action === "approve") {
+          // Connect-first mirror of the real backend: hot replies stay locked
+          // until the connection request is sent or skipped.
+          if (it.tier === "hot" && it.connectStatus === "suggested") {
+            return ok({ accepted: false, reason: "Connect first: send (or skip) the connection request above, then this reply unlocks.", view: cw });
+          }
           if (body.text) it.replyText = body.text;
           it.replyStatus = "approved";
-          if (it.tier === "hot" && !it.connectStatus) {
-            it.connectStatus = "suggested";
-            it.connectAfter = new Date(Date.now() + 24 * 3600000).toISOString();
-            it.connectText = "Enjoyed your take under my screening post. Connecting so the conversation does not get lost in the comments.";
-          }
           save(d); return ok({ accepted: true, view: cw });
         }
         if (body.action === "skip") { it.replyStatus = "skipped"; save(d); return ok({ view: cw }); }
