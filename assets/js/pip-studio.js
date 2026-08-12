@@ -746,12 +746,26 @@
         '<td><span class="pill-rate">' + pct(v.completionRate) + "</span></td>" +
         '<td class="l"><div class="bar"><i style="width:' + Math.round((v.plays / maxPlays) * 100) + '%"></i></div></td>' +
         "<td>" + (v.lastAt ? ago(v.lastAt) + " ago" : "·") + "</td>" +
+        '<td><button class="ghost small vdrop" data-key="' + esc(v.videoKey) + '" data-who="' + esc((v.company || "this video") + (v.roleTitle ? " · " + v.roleTitle : "")) +
+          '" title="Watched it yourself? Remove this row so your own views stop counting as prospect engagement.">Remove</button></td>' +
         "</tr>";
     }).join("");
     $("leaderboard").innerHTML =
-      '<table class="lbt"><thead><tr><th class="l">Company · Role</th><th>Email</th><th>Visits</th><th>Plays</th><th>Viewers</th><th>Avg watch</th><th>Compl.</th><th class="l">Plays</th><th>Last</th></tr></thead><tbody>' +
-      rows + "</tbody></table>";
+      '<table class="lbt"><thead><tr><th class="l">Company · Role</th><th>Email</th><th>Visits</th><th>Plays</th><th>Viewers</th><th>Avg watch</th><th>Compl.</th><th class="l">Plays</th><th>Last</th><th></th></tr></thead><tbody>' +
+      rows + "</tbody></table>" +
+      '<div class="empty" style="text-align:left;padding:8px 2px 0">Your own views count like a prospect\'s. Remove a row after you check a video so the rates stay honest.</div>';
   }
+
+  // Remove one video's stats: internal views would otherwise inflate every rate.
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".vdrop");
+    if (!b) return;
+    if (!confirm("Remove all stats for " + b.getAttribute("data-who") + "?\n\nUse this for videos you watched yourself. This cannot be undone.")) return;
+    b.disabled = true;
+    api("/api/in-market/track?key=" + encodeURIComponent(b.getAttribute("data-key")), { method: "DELETE" })
+      .then(function () { toast("Removed from performance"); loadPerf(); })
+      .catch(function (err) { b.disabled = false; toast(err && err.message ? err.message : "Could not remove it"); });
+  });
 
   /* ================= BRAND kit ================= */
   var brandFields = { bkName: "brandName", bkLogo: "logoUrl", bkAccent: "accent", bkReply: "replyEmail", bkCtaText: "ctaText", bkCtaUrl: "ctaUrl" };

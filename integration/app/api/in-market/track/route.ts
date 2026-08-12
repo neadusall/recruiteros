@@ -10,6 +10,9 @@
  * GET /api/in-market/track?overview=1   (AUTHED — the PiP Studio "Performance" dashboard)
  *     -> aggregated stats: totals, daily trend, per-video rows, recent activity feed.
  *   GET ?key=<videoKey>  -> stats for one video.
+ *
+ * DELETE /api/in-market/track?key=<videoKey>   (AUTHED)
+ *     -> drop one video's stats, for internal views that would skew the numbers.
  */
 
 import { ok, fail, requireCapability } from "../../../../lib/api";
@@ -77,4 +80,15 @@ export async function GET(req: Request) {
   const { statsOverview } = await import("../../../../lib/inmarket/videoStats");
   const days = Number(url.searchParams.get("days")) || 14;
   return ok(await statsOverview({ days }));
+}
+
+export async function DELETE(req: Request) {
+  const g = requireCapability(req, "sourcing:run");
+  if ("response" in g) return g.response;
+  const key = new URL(req.url).searchParams.get("key") || "";
+  if (!key) return fail("missing_key", 422);
+  const { removeVideoStats } = await import("../../../../lib/inmarket/videoStats");
+  const removed = await removeVideoStats(key);
+  if (!removed) return fail("not_found", 404, { detail: "That video has no stats to remove." });
+  return ok({ removed: true, videoKey: key });
 }

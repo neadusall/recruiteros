@@ -125,6 +125,25 @@ export async function recordVideoEvent(e: VideoEventIn): Promise<void> {
 }
 
 /**
+ * Drop a video's stats for good: the aggregate plus its events in the activity
+ * feed. This is how internal traffic leaves the numbers — when the team watches
+ * its own video to check it, those plays are not prospect engagement and would
+ * otherwise inflate every rate on the dashboard. Returns false if nothing matched.
+ */
+export async function removeVideoStats(videoKey: string): Promise<boolean> {
+  const key = String(videoKey || "").trim();
+  if (!key) return false;
+  const st = await ensure();
+  const had = !!st.byKey[key];
+  delete st.byKey[key];
+  const before = st.feed.length;
+  st.feed = st.feed.filter((f) => f.videoKey !== key);
+  if (!had && st.feed.length === before) return false;
+  scheduleSave();
+  return true;
+}
+
+/**
  * Did THIS prospect engage with their video? Scans the recent-events feed for
  * the prospect's rcpt attribution (the watch link carries &rcpt=<prospectId>).
  * Drives the Day-4 close branch: viewers get the warm variant, non-viewers the
