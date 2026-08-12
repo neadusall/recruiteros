@@ -112,17 +112,30 @@ export function captionsConfigured(): boolean {
   return !!apiKey();
 }
 
+export type TranscribeResult =
+  | { ok: true; captions: ClipCaptions; cached: boolean }
+  | { ok: false; error: string };
+
+/** One transcription per clip at a time: concurrent watch pages must not each buy their own. */
+const inflight = new Map<string, Promise<TranscribeResult>>();
+
 /**
  * Transcribe one recorded clip and cache it forever. Returns the cached copy without spending
  * when we already hold one, which is the whole point: a thousand personalized videos built on
  * the same take cost exactly one transcription.
  */
-export async function transcribeClip(
-  clipId: string,
-  opts?: { force?: boolean },
-): Promise<{ ok: true; captions: ClipCaptions; cached: boolean } | { ok: false; error: string }> {
-  if (!clipId) return { ok: false, error: "missing_clip" };
+export function transcribeClip(clipId: string, opts?: { force?: boolean }): Promise<TranscribeResult> {
+  if (!clipId) return Promise.resolve({ ok: false as const, error: "missing_clip" });
+  const running = inflight.get(clipId);
+  if (running && !opts?.force) return running;
+  const p = transcribeClipOnce(clipId, opts).finally(() => {
+    if (inflight.get(clipId) === p) inflight.delete(clipId);
+  });
+  inflight.set(clipId, p);
+  return p;
+}
 
+async function transcribeClipOnce(clipId: string, opts?: { force?: boolean }): Promise<TranscribeResult> {
   const cache = await readCache();
   if (!opts?.force && cache[clipId]) return { ok: true, captions: cache[clipId], cached: true };
 
@@ -226,10 +239,31 @@ export async function clipIdForVideo(videoKey: string, workspaceId?: string): Pr
   return null;
 }
 
-/** The WebVTT a watch page should show for a video, or null when we have no transcript yet. */
-export async function captionsForVideo(videoKey: string, workspaceId?: string): Promise<string | null> {
+/**
+ * The WebVTT a watch page should show for a video.
+ *
+ * When the recording has never been transcribed, this buys that ONE transcription and caches it,
+ * so captions simply exist without anyone remembering to press a button. It is bounded by the
+ * number of recordings, not by sends: the second viewer of the second video reads from cache,
+ * and so does every viewer after that. `spend: false` opts out and returns only what is cached.
+ */
+export async function captionsForVideo(
+  videoKey: string,
+  workspaceId?: string,
+  opts?: { spend?: boolean; timeoutMs?: number },
+): Promise<string | null> {
   const clipId = await clipIdForVideo(videoKey, workspaceId);
   if (!clipId) return null;
   const c = await cachedCaptions(clipId);
-  return c?.vtt || null;
+  if (c?.vtt) return c.vtt;
+  if (opts?.spend === false || !captionsConfigured()) return null;
+
+  // Never hold the viewer's request open on a slow transcription: it continues in the
+  // background and the next load picks it up from cache.
+  const timeout = Math.max(1000, opts?.timeoutMs ?? 8000);
+  const res = await Promise.race([
+    transcribeClip(clipId),
+    new Promise<null>((r) => setTimeout(() => r(null), timeout)),
+  ]);
+  return res && res.ok ? res.captions.vtt : null;
 }
