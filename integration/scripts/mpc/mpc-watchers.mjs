@@ -81,28 +81,54 @@ function loadConnectStatus() {
   return byEmail;
 }
 
+function bump(map, keyRaw, type, at) {
+  const key = lc(keyRaw);
+  const cur = map.get(key) || { event: "open", at, strength: 0 };
+  const sN = strength[type] || 0;
+  if (sN >= cur.strength) { cur.event = type; cur.strength = sN; }
+  if ((at || "") > (cur.at || "")) cur.at = at;
+  map.set(key, cur);
+}
 function loadWatchEvents() {
-  // email -> { strongest event, lastAt }. Reads the video-stats recent-events feed.
-  const byEmail = new Map();
+  // Two indexes off the video-stats recent-events feed:
+  //   byEmail    - events that carried &rcpt=<email> (exact person; links sent after that fix).
+  //   byVideoKey - events with no rcpt (the first sends), recovered later when a videoKey maps to
+  //                exactly one emailed recipient.
+  const byEmail = new Map(), byVideoKey = new Map();
   let st;
-  try { st = JSON.parse(readFileSync(STATS, "utf8")); } catch { return byEmail; }
+  try { st = JSON.parse(readFileSync(STATS, "utf8")); } catch { return { byEmail, byVideoKey }; }
   for (const ev of (st.feed || [])) {
-    const rcpt = lc(ev.recipient);
-    if (!rcpt || rcpt.indexOf("@") < 0) continue; // only person-attributed events
     if (!["open", "play", "complete"].includes(ev.type)) continue;
-    const cur = byEmail.get(rcpt) || { event: "open", at: ev.at, strength: 0 };
-    const sN = strength[ev.type] || 0;
-    if (sN >= cur.strength) { cur.event = ev.type; cur.strength = sN; }
-    if ((ev.at || "") > (cur.at || "")) cur.at = ev.at;
-    byEmail.set(rcpt, cur);
+    const rcpt = lc(ev.recipient);
+    if (rcpt && rcpt.indexOf("@") > 0) bump(byEmail, rcpt, ev.type, ev.at);
+    else if (ev.videoKey) bump(byVideoKey, ev.videoKey, ev.type, ev.at);
   }
-  return byEmail;
+  return { byEmail, byVideoKey };
 }
 
 const emailed = loadEmailed();
 const linkedin = loadLinkedIn();
 const connectSt = loadConnectStatus();
-const watches = loadWatchEvents();
+const { byEmail: watchByEmail, byVideoKey: watchByKey } = loadWatchEvents();
+
+// videoKey -> the single email we sent it to (used to recover pre-rcpt watches). Keys sent to more
+// than one person stay ambiguous and are left to the exact rcpt attribution only.
+const soleRecipientOfKey = new Map();
+const keyCount = new Map();
+for (const [email, e] of emailed) {
+  if (!e.videoKey) continue;
+  keyCount.set(e.videoKey, (keyCount.get(e.videoKey) || 0) + 1);
+  soleRecipientOfKey.set(e.videoKey, email);
+}
+// Merge the two watch sources into one email -> event map.
+const watches = new Map(watchByEmail);
+for (const [videoKey, w] of watchByKey) {
+  if ((keyCount.get(videoKey) || 0) !== 1) continue; // ambiguous: needs the exact rcpt tag
+  const email = soleRecipientOfKey.get(videoKey);
+  if (!email) continue;
+  const cur = watches.get(email);
+  if (!cur || (strength[w.event] || 0) > cur.strength) watches.set(email, w);
+}
 
 const cutoff = new Date(Date.now() - KEEP_DAYS * 864e5).toISOString();
 const rows = [];
