@@ -23,7 +23,7 @@
  * SECOND LANE, "poster leads" (owner decision 2026-08-12): decision-makers in
  * the BD pool who are POSTING on LinkedIn while their company has open roles.
  * No public comment on their post; instead a direct custom message
- * referencing the post: open profiles get it as a free direct InMail, and
+ * referencing the post: open profiles get it as a plain direct message, and
  * non-open profiles (who cannot receive a stranger's DM) get the same
  * personalized text shaped as a connection note.
  */
@@ -567,7 +567,7 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
 /* ------------------------------------------------------------------ */
 /* The poster lane: decision-makers in the BD pool who are posting      */
 /* while their company has open roles. No public comment; a direct      */
-/* custom message instead (free InMail to open profiles, plain message  */
+/* custom message instead (plain direct message to open profiles and   */
 /* to existing connections, connection note otherwise).                 */
 /* ------------------------------------------------------------------ */
 
@@ -809,8 +809,9 @@ export async function skipDm(workspaceId: string, id: string): Promise<CommentLe
   return item;
 }
 
-/** Approve the poster-lane message. Open profiles get a free direct InMail,
- *  1st-degree connections a plain message, everyone else a connection note. */
+/** Approve the poster-lane message. Open profiles and 1st-degree connections
+ *  get a plain direct message (never an InMail); everyone else a connection
+ *  note, since LinkedIn will not deliver a stranger's DM to a closed profile. */
 export async function approveDm(
   workspaceId: string, userId: string, userEmail: string, id: string, editedText?: string,
 ): Promise<{ item: CommentLeadItem | null; accepted: boolean; reason?: string }> {
@@ -829,8 +830,9 @@ export async function approveDm(
     return { item, accepted: false, reason: item.reason };
   }
 
-  const actionType = !direct ? "connect_note"
-    : item.networkDistance === "DISTANCE_1" ? "message" : "inmail";
+  // NEVER "inmail" (owner decision 2026-08-12): open profiles take a plain
+  // message with no connection needed, so the paid InMail channel stays unused.
+  const actionType = direct ? "message" : "connect_note";
   try {
     const result = await requestLinkedInAction({
       workspaceId,
@@ -843,11 +845,7 @@ export async function approveDm(
       actionType,
       payload: actionType === "connect_note"
         ? { note: item.dmText, providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl }
-        : {
-            text: item.dmText,
-            ...(actionType === "inmail" ? { subject: `Your post: "${item.postExcerpt.split(/\s+/).slice(0, 6).join(" ")}..."` } : {}),
-            providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl,
-          },
+        : { text: item.dmText, providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl },
       businessUnit: "bd",
       sourceType: "manual",
       approvedBy: userEmail,

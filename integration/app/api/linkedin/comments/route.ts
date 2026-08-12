@@ -10,8 +10,9 @@
  *   connect_approve { id, text? } -> send the connection note
  *   connect_skip    { id }
  *   dm_approve      { id, text? } -> poster lane: send the direct message
- *                                    (InMail to open profiles, message to
- *                                    connections, connect note otherwise)
+ *                                    (plain message to open profiles and
+ *                                    connections, never InMail; connect
+ *                                    note otherwise)
  *   dm_skip         { id }
  *   dm_edit         { id, text }
  *   pause / resume  {}
