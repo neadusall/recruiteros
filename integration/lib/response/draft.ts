@@ -200,7 +200,16 @@ export async function preDraft(workspaceId: string, resp: ProcessedResponse): Pr
   const channel = (["email", "linkedin", "sms"].includes(resp.inbound.channel) ? resp.inbound.channel : "email") as DraftContext["channel"];
   const objective = objectiveForClass(cls);
   try {
-    const text = await draftForRow(workspaceId, resp, objective, channel);
+    // Sign as the recruiter whose mailbox the reply sends from, so the draft
+    // waiting in the composer already carries the right identity.
+    let signAs: string | undefined;
+    if (channel === "email") {
+      try {
+        const { sendAsFor } = await import("./sendAs");
+        signAs = (await sendAsFor(workspaceId, resp))?.name || undefined;
+      } catch { /* drafts without a sign-off are still useful */ }
+    }
+    const text = await draftForRow(workspaceId, resp, objective, channel, signAs);
     const { getInbox } = await import("./repository");
     await getInbox().setSuggested(workspaceId, resp.inbound.id, { text, objective, at: new Date().toISOString() });
   } catch { /* on-demand drafting still works */ }

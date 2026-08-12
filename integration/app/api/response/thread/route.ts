@@ -85,6 +85,16 @@ export async function GET(req: Request) {
     c[e.dir]++;
   }
 
+  // Whose identity an email reply goes out under (the recruiter owning the
+  // sending mailbox), so the composer can say exactly who it sends as.
+  let sendsAs: { name: string | null; email: string } | null = null;
+  if (lastEmailWithBox) {
+    try {
+      const { sendAsFor } = await import("../../../../lib/response/sendAs");
+      sendsAs = await sendAsFor(ws, lastEmailWithBox);
+    } catch { /* the composer label just stays generic */ }
+  }
+
   return ok({
     person: {
       name: anchor.inbound.fromName || prospect?.fullName || "Unknown",
@@ -100,5 +110,6 @@ export async function GET(req: Request) {
     channels,
     counts,
     entries,
+    sendsAs,
   });
 }

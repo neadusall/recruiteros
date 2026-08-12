@@ -98,5 +98,20 @@ export async function GET(req: Request) {
     for (const r of Object.keys(ROUTING_RULES)) windows[r] = responseWindowHours(r);
   } catch { windows = {}; }
 
-  return ok({ items, people, nudges, timingUntil, stats, draftPerf, booking, windows, rules: ROUTING_RULES, order: CLASS_ORDER });
+  // Whose identity each email row replies under (the recruiter owning the
+  // receiving mailbox). The admin works the whole team's list from one screen,
+  // so every row says who the answer sends as. Best-effort, cached per mailbox.
+  const sendAs: Record<string, { name: string | null; email: string }> = {};
+  try {
+    const { ownerOfMailbox } = await import("../../../../lib/response/sendAs");
+    const byBox = new Map<string, string | null>();
+    for (const it of items) {
+      const mb = it.inbound.channel === "email" ? it.inbound.toMailbox : undefined;
+      if (!mb) continue;
+      if (!byBox.has(mb)) byBox.set(mb, await ownerOfMailbox(ws, mb));
+      sendAs[it.inbound.id] = { name: byBox.get(mb) ?? null, email: mb };
+    }
+  } catch { /* rows just skip the identity chip */ }
+
+  return ok({ items, people, nudges, timingUntil, stats, draftPerf, booking, windows, sendAs, rules: ROUTING_RULES, order: CLASS_ORDER });
 }

@@ -5290,6 +5290,7 @@
     var lastDraft = {};    // responseId -> last AI draft text (verbatim/edited telemetry)
     var lastObj = {};      // responseId -> the drafting objective behind that text
     var draftPerf = {};    // objective -> { sent, replied } (the outcome loop)
+    var sendAsMap = {};    // responseId -> { name, email }: whose identity the answer sends under
     var kbIndex = -1;      // keyboard triage cursor
 
     el.innerHTML = head("Response, your reply center",
@@ -5424,6 +5425,7 @@
         timingUntil = (d && d.timingUntil) || {};
         slaWindows = (d && d.windows) || {};
         draftPerf = (d && d.draftPerf) || {};
+        sendAsMap = (d && d.sendAs) || {};
         stats = (d && d.stats) || null;
         booking = (d && d.booking) || "";
         slaRules = {};
@@ -5521,7 +5523,10 @@
             ? '<span class="cf' + (o.c === cur ? " active" : "") + '" data-chan="' + o.c + '">' + chanIcon(o.c) + "</span>"
             : '<span class="cf" style="opacity:.45;cursor:not-allowed" title="' + esc(o.why) + '">' + chanIcon(o.c) + "</span>";
         }).join("");
-        var hint = cur === "email" ? "Sends from the same mailbox that received their email, threaded onto the conversation."
+        var hint = cur === "email"
+          ? (t.sendsAs && t.sendsAs.name
+              ? "Sends as <b>" + esc(t.sendsAs.name) + "</b> (" + esc(t.sendsAs.email) + "), threaded onto the conversation. The AI draft signs as them too."
+              : "Sends from the same mailbox that received their email, threaded onto the conversation.")
           : cur === "linkedin" ? "Goes out through your connected LinkedIn account with normal pacing, so it looks human."
           : cur === "sms" ? "Texts them from your recruiter line."
           : "No channel is available for this person yet.";
@@ -5815,7 +5820,9 @@
         : '<button class="resp-btn ghost" data-act="done"' + ridAttr + ' title="Clear from today\'s list">Done</button>';
       return '<div class="resp-item"' + ridAttr + (r.handled ? ' style="opacity:.62"' : "") + '><div class="resp-top">' +
         '<span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
-        '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + (r.email ? " · " + esc(r.email) : "") + "</div></div>" +
+        '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + (r.email ? " · " + esc(r.email) : "") +
+          (sendAsMap[r.id] && sendAsMap[r.id].name ? ' · <span title="Answers go out from ' + esc(sendAsMap[r.id].email) + ', this recruiter\'s own mailbox, threaded onto the conversation.">replies as <b>' + esc(sendAsMap[r.id].name) + "</b></span>" : "") +
+          "</div></div>" +
         agePill + quietPill + draftPill +
         '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
         '<div class="resp-text">"' + esc(r.text) + '"</div>' +

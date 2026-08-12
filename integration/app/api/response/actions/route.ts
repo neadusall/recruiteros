@@ -65,7 +65,8 @@ async function sendOnChannel(
       try {
         await getCore().recordActivity({
           id: rid("act"), workspaceId: ws, prospectId: inb.prospectId,
-          channel: "email", type: "email_sent", summary: "Reply from the inbox via " + a.toMailbox,
+          channel: "email", type: "email_sent",
+          summary: "Reply sent as " + (box.ownerName || box.displayName || a.toMailbox) + " via " + a.toMailbox,
           at: nowIso(),
         });
       } catch { /* the send already succeeded */ }
@@ -142,7 +143,16 @@ export async function POST(req: Request) {
       const channel = (["email", "linkedin", "sms"].includes(String(b.channel)) ? b.channel : "email") as "email" | "linkedin" | "sms";
       try {
         const { draftForRow } = await import("../../../../lib/response/draft");
-        const text = await draftForRow(ws, resp, objective, channel, g.ctx.user?.name);
+        // Sign as the recruiter whose mailbox the reply sends from, not whoever
+        // is logged in: the admin answering Josh's thread writes as Josh.
+        let signAs = g.ctx.user?.name;
+        if (channel === "email") {
+          try {
+            const { sendAsFor } = await import("../../../../lib/response/sendAs");
+            signAs = (await sendAsFor(ws, resp))?.name || signAs;
+          } catch { /* session name is still a fine sign-off */ }
+        }
+        const text = await draftForRow(ws, resp, objective, channel, signAs);
         return ok({ text });
       } catch (e: any) {
         return fail("draft_failed", 502, { detail: "The AI drafter is unavailable right now. Write it by hand or try again." });
