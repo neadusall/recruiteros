@@ -7,15 +7,20 @@
  *   skip            { id }
  *   edit            { id, text }
  *   draft           { id }        -> draft a reply on demand (community tier)
- *   connect_approve { id, text? } -> send the connection note (hot tier's FIRST touch)
+ *   connect_approve { id, text? } -> send the connection note
  *   connect_skip    { id }
+ *   dm_approve      { id, text? } -> poster lane: send the direct message
+ *                                    (InMail to open profiles, message to
+ *                                    connections, connect note otherwise)
+ *   dm_skip         { id }
+ *   dm_edit         { id, text }
  *   pause / resume  {}
  * Session-gated with outreach:send, same capability as the LinkedIn tab.
  */
 import { ok, fail, body, requireCapability } from "../../../../lib/api";
 import {
   commentWatchView, scanWorkspace, approveReply, skipReply, editReply, draftReply,
-  approveConnect, skipConnect, setCommentWatchPaused,
+  approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -58,6 +63,19 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (b.action === "connect_skip") {
     await skipConnect(ws, String(b.id));
+    return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "dm_approve") {
+    const r = await approveDm(ws, g.ctx.user.id, g.ctx.user.email, String(b.id), b.text);
+    return ok({ accepted: r.accepted, reason: r.reason, view: await commentWatchView(ws) });
+  }
+  if (b.action === "dm_skip") {
+    await skipDm(ws, String(b.id));
+    return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "dm_edit") {
+    if (!b.text) return fail("missing_text");
+    await editDm(ws, String(b.id), String(b.text));
     return ok({ view: await commentWatchView(ws) });
   }
   if (b.action === "edit") {

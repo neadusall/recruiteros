@@ -3494,15 +3494,10 @@
     }
     function replyBlock(t) {
       if (t.replyStatus === "suggested") {
-        // Connect-first: a hot commenter's reply stays locked until the
-        // connection request above is sent (or deliberately skipped).
-        var locked = t.tier === "hot" && t.connectStatus === "suggested";
-        return '<textarea class="lie-text" data-lic-reply rows="2"' + (locked ? " disabled" : "") + '>' + esc(t.replyText || "") + "</textarea>" +
+        return '<textarea class="lie-text" data-lic-reply rows="2">' + esc(t.replyText || "") + "</textarea>" +
           '<div class="lie-actions">' +
-            (locked
-              ? '<button class="btn btn-sm" disabled title="Send or skip the connect request first">Reply unlocks after the connect</button>'
-              : '<button class="btn btn-sm btn-primary" data-lic="approve">Approve reply</button> ' +
-                '<button class="btn btn-sm btn-ghost" data-lic="skip">Skip</button>') +
+            '<button class="btn btn-sm btn-primary" data-lic="approve">Approve reply</button> ' +
+            '<button class="btn btn-sm btn-ghost" data-lic="skip">Skip</button>' +
           "</div>";
       }
       if (t.replyStatus === "approved") return '<div><span class="lie-chip ok">Reply approved, sending from your account</span></div>';
@@ -3513,7 +3508,7 @@
     function connectBlock(t) {
       if (!t.connectStatus) return "";
       if (t.connectStatus === "suggested") {
-        return '<div class="lie-post muted">Connect first: they hit the benchmarks (hiring decision-maker with open roles), so this connection request leads and the public reply follows.</div>' +
+        return '<div class="lie-post muted">They hit the benchmarks (hiring decision-maker with open roles), so a connection request is drafted alongside the reply.</div>' +
           '<textarea class="lie-text" data-lic-connect rows="2">' + esc(t.connectText || "") + "</textarea>" +
           '<div class="lie-actions">' +
             '<button class="btn btn-sm btn-primary" data-lic="connect_approve">Send connect request</button> ' +
@@ -3524,6 +3519,25 @@
       if (t.connectStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Connect blocked") + "</span></div>";
       return '<div><span class="lie-chip mut">Connect skipped</span></div>';
     }
+    function dmBlock(t) {
+      var direct = t.openProfile === true || t.networkDistance === "DISTANCE_1";
+      if (t.dmStatus === "suggested") {
+        return '<div class="lie-post muted">' + (direct
+            ? (t.networkDistance === "DISTANCE_1"
+                ? "Already connected: this sends as a normal message."
+                : "Open profile: this lands as a direct message, no connection needed.")
+            : "Their profile does not take messages from strangers, so this sends as a connection note instead.") + "</div>" +
+          '<textarea class="lie-text" data-lic-dm rows="3">' + esc(t.dmText || "") + "</textarea>" +
+          '<div class="lie-actions">' +
+            '<button class="btn btn-sm btn-primary" data-lic="dm_approve">' + (direct ? "Send direct message" : "Send connect request") + "</button> " +
+            '<button class="btn btn-sm btn-ghost" data-lic="dm_skip">Skip</button>' +
+          "</div>";
+      }
+      if (t.dmStatus === "approved") return '<div><span class="lie-chip ok">' + (direct ? "Message approved, sending from your account" : "Connect request approved and queued") + "</span></div>";
+      if (t.dmStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Blocked") + "</span></div>";
+      if (t.dmStatus === "skipped") return '<div><span class="lie-chip mut">Skipped</span></div>';
+      return "";
+    }
     function row(t) {
       var who = esc(t.authorName) +
         (t.authorHeadline ? ' <span class="muted">' + esc(t.authorHeadline.slice(0, 120)) + "</span>" : "");
@@ -3531,6 +3545,16 @@
         ? '<div class="lie-post">Hiring now: ' + t.hiring.openRoles + " open role" + (t.hiring.openRoles === 1 ? "" : "s") +
           (t.hiring.sample && t.hiring.sample.length ? " (" + esc(t.hiring.sample.join(", ")) + ")" : "") + "</div>"
         : "";
+      // Poster lane: a BD decision-maker published a post while their company
+      // is hiring. No public comment; a direct custom message instead.
+      if (t.kind === "poster") {
+        var openP = t.dmStatus === "suggested";
+        return '<div class="lie-row' + (openP ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
+          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Posting now: decision-maker, hiring</span></div>' +
+          '<div class="lie-post">Their post: ' + esc((t.postExcerpt || "").slice(0, 280)) + (t.postExcerpt && t.postExcerpt.length > 280 ? "..." : "") + "</div>" +
+          hiring + dmBlock(t) +
+        "</div>";
+      }
       var open = t.replyStatus === "suggested" || t.connectStatus === "suggested";
       return '<div class="lie-row' + (open ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
         '<div class="lie-who">' + who + " " + tierChip(t) + "</div>" +
@@ -3553,11 +3577,11 @@
           "</div>";
         return;
       }
-      var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested"; }).length;
+      var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested" || t.dmStatus === "suggested"; }).length;
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Post engagement radar</b>' +
-            '<div class="muted liops-sub">People commenting on your posts, scored for buying signals. Replies thread under their comment and send only after your approval.</div></div>' +
+            '<div class="muted liops-sub">Commenters on your posts scored for buying signals, plus hiring decision-makers who are posting (those get a direct message, never a public comment). Nothing sends without your approval.</div></div>' +
             '<span class="liops-progress' + (open ? "" : " ok") + '">' + (open ? open + " to review" : "All caught up") + "</span></div>" +
           (items.length
             ? items.map(row).join("")
@@ -3571,7 +3595,8 @@
           var act = btn.getAttribute("data-lic");
           var payload = { action: act, id: id };
           var ta = act === "approve" ? rowEl.querySelector("[data-lic-reply]")
-            : act === "connect_approve" ? rowEl.querySelector("[data-lic-connect]") : null;
+            : act === "connect_approve" ? rowEl.querySelector("[data-lic-connect]")
+            : act === "dm_approve" ? rowEl.querySelector("[data-lic-dm]") : null;
           if (ta) payload.text = ta.value;
           btn.disabled = true;
           send("/linkedin/comments", "POST", payload).then(function (r) {
