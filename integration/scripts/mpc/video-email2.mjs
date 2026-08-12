@@ -118,10 +118,13 @@ function loadVideoMap() {
   } catch { /* no map */ }
   return byCR;
 }
-function watchLink(videoKey) {
+function watchLink(videoKey, recipientEmail) {
   const exp = SHARE_TTL_DAYS > 0 ? Date.now() + Math.round(SHARE_TTL_DAYS * 86400000) : 0;
   const sig = createHmac("sha256", SHARE_SECRET).update(`share:${videoKey}:${exp}`).digest("base64url").slice(0, 24);
-  return `${APP_HOST}/watch?k=${encodeURIComponent(videoKey)}&exp=${exp}&sig=${sig}`;
+  // rcpt attributes every watch (open/play/complete) to THIS exact person, so the watchers
+  // read + the LinkedIn connect-on-watch key off who we emailed, not just the shared company+role.
+  const rcpt = recipientEmail ? `&rcpt=${encodeURIComponent(String(recipientEmail).toLowerCase())}` : "";
+  return `${APP_HOST}/watch?k=${encodeURIComponent(videoKey)}&exp=${exp}&sig=${sig}${rcpt}`;
 }
 
 const stripDash = (s) => String(s || "").replace(/\s*[—–]\s*/g, ", ").trim();
@@ -245,7 +248,7 @@ async function main() {
     const r = item.r, from = r.from, fromLc = String(from).toLowerCase();
     if (resting.has(fromLc.split("@")[1] || "")) { deferredRest++; continue; } // domain resting: touch 2 waits
     if ((boxCount.get(fromLc) || 0) >= PER_BOX_DAILY) { capped++; continue; } // box at its daily floor
-    const link = watchLink(item.video.videoKey);
+    const link = watchLink(item.video.videoKey, r.to_email);
     let note;
     try { note = await writeVideoNote(r, recInfo); }
     catch (e) { console.log(`  ! writer failed for ${r.to_email}: ${e.message}`); continue; }

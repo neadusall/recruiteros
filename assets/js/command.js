@@ -12002,22 +12002,30 @@
     Promise.all([
       api("/mpc-stats").catch(function () { return null; }),
       api("/site-visitors").catch(function () { return null; }),
-      api("/linkedin/os?view=watch_connect").catch(function () { return null; })
+      api("/linkedin/os?view=watch_connect").catch(function () { return null; }),
+      api("/mpc-watchers").catch(function () { return null; })
     ]).then(function (res) {
       var m = res[0] || {}, v = res[1] || {}, w = res[2] || {};
+      var wt = (res[3] && res[3].present) ? res[3] : { summary: {}, watchers: [] };
+      var wsum = wt.summary || {};
       var body = $("#rpBody"); if (!body) return;
 
       var comps = (v && v.present && v.companies) || [];
       var identifiedPeople = comps.reduce(function (n, c) { return n + ((c.people || []).length); }, 0);
+      // Watchers feed both the funnel's tail and their own action table. Prefer the real MPC watcher
+      // count; fall back to the in-app watch_connect funnel when present.
+      var watched = wsum.watched || 0;
+      var connectSent = (wsum.connectSent || 0) || (w.sent || 0);
+      var accepted = (wsum.accepted || 0) || (w.accepted || 0);
 
       // ---- The funnel, left to right. Each stage is a real measured number. ----
       var stages = [
         { k: "Emails sent", val: (m.sentTotal || 0), sub: (m.sentToday || 0) + " today", acc: "b" },
         { k: "Replies", val: (m.repliesTotal || 0), sub: (m.replyRate || 0) + "% reply rate", acc: "g" },
-        { k: "Companies back on site", val: comps.length, sub: "matched to your outreach", acc: "c" },
-        { k: "People identified", val: identifiedPeople, sub: "exact contacts we emailed", acc: "c" },
-        { k: "LinkedIn requests", val: (w.requested || 0), sub: (w.sent || 0) + " sent", acc: "v" },
-        { k: "Connections accepted", val: (w.accepted || 0), sub: (w.meetings || 0) + " to meetings", acc: "p" }
+        { k: "Videos watched", val: watched, sub: (wsum.completed || 0) + " watched to end", acc: "c" },
+        { k: "People identified", val: (identifiedPeople + watched), sub: "site + video watchers", acc: "c" },
+        { k: "LinkedIn requests", val: connectSent, sub: "sent to watchers", acc: "v" },
+        { k: "Connections accepted", val: accepted, sub: (w.meetings || 0) + " to meetings", acc: "p" }
       ];
       var funnel = '<div class="rp-funnel">' + stages.map(function (s, i) {
         var arrow = i < stages.length - 1 ? '<div class="rp-arrow">&rsaquo;</div>' : "";
@@ -12050,25 +12058,69 @@
           "</tr></thead><tbody>" + connectRows + "</tbody></table></div>"
         : '<div class="empty">No site visitors identified yet. When a company we emailed returns to the site, the exact people we contacted there appear here, ready to connect on LinkedIn.</div>';
 
-      // The watch-to-connect recent list (fires when a prospect watches the video email).
-      var recent = (w.recent || []);
-      var recentHtml = recent.length
-        ? recent.map(function (r) {
-            var st = String(r.status || "");
-            var cls = /accepted/.test(st) ? "good" : /sent/.test(st) ? "" : /skip/.test(st) ? "bad" : "amber";
-            return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(r.prospectName || "Prospect") + "</div><div class=\"lr-sub\">" + (r.recruiterName ? "via " + esc(r.recruiterName) + " &middot; " : "") + "watched " + esc((r.watchedAt || "").slice(0, 10)) + "</div></div>" +
-              '<span class="sv ' + cls + '" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;flex:none;align-self:center">' + esc(st.toUpperCase()) + "</span></div>";
-          }).join("")
-        : '<div class="empty">No video-watch connections yet. Once the video email is live, a watch fires a connection request from the recruiter who sent it, and each one lands here.</div>';
+      // ---- Watched the video -> send the LinkedIn connection request. The action table. ----
+      // Each row is someone who OPENED/PLAYED/COMPLETED their personalized video. The button files a
+      // real connection request through LinkedIn OS from the recruiter who emailed them.
+      var evLabel = { complete: "Watched to end", play: "Played", open: "Opened" };
+      var evCls = { complete: "good", play: "good", open: "amber" };
+      function connectBtn(r) {
+        var st = String(r.connectStatus || "");
+        if (st === "accepted") return '<span class="sv good" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">ACCEPTED</span>';
+        if (st === "sent" || st === "queued") return '<span class="sv" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">REQUEST ' + esc(st.toUpperCase()) + "</span>";
+        if (st === "suppressed") return '<span class="sv bad" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">SUPPRESSED</span>';
+        if (!r.linkedin) return '<span class="note">no profile yet</span>';
+        return '<button class="resp-btn" data-connect="' + esc(r.email) + '">Send request</button>';
+      }
+      var watchers = wt.watchers || [];
+      var watcherRows = watchers.map(function (r) {
+        var li = r.linkedin ? ' &middot; <a href="' + esc(r.linkedin) + '" target="_blank" rel="noopener">profile</a>' : "";
+        return '<tr data-row="' + esc(r.email) + '"><td><b>' + esc(r.name || r.email) + "</b>" + (r.title ? '<div class="lr-sub">' + esc(r.title) + "</div>" : "") + "</td>" +
+          "<td>" + esc(r.company || "-") + '<div class="lr-sub">' + esc(r.role || "") + "</div></td>" +
+          '<td><span class="sv ' + (evCls[r.event] || "amber") + '" style="font-size:11px">' + esc(evLabel[r.event] || r.event) + "</span></td>" +
+          "<td>" + esc(r.recruiter || "-") + li + "</td>" +
+          "<td>" + esc((r.watchedAt || "").slice(0, 10)) + "</td>" +
+          '<td class="rp-connect-cell">' + connectBtn(r) + "</td></tr>";
+      }).join("");
+      var watcherTable = watchers.length
+        ? '<div class="stat-grid" style="margin-bottom:12px">' +
+            '<div class="stat"><div class="sv">' + watched + '</div><div class="sl">Watched their video</div></div>' +
+            '<div class="stat"><div class="sv">' + (wsum.completed || 0) + '</div><div class="sl">Watched to the end</div></div>' +
+            '<div class="stat"><div class="sv">' + connectSent + '</div><div class="sl">Requests sent</div></div>' +
+            '<div class="stat"><div class="sv good">' + accepted + '</div><div class="sl">Accepted</div></div>' +
+          "</div>" +
+          '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+            "<th>Person</th><th>Company &amp; role</th><th>Engagement</th><th>Emailed by</th><th>Watched</th><th>Connect</th>" +
+          "</tr></thead><tbody>" + watcherRows + "</tbody></table></div>"
+        : '<div class="empty">No one has watched their video yet. As recipients open the video email, whoever watches shows here with a one-click connection request from the recruiter who emailed them.</div>';
 
       body.innerHTML =
         '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 12px">The funnel &middot; email to connection</h3>' + funnel +
-          '<div class="note" style="margin-top:10px">Left to right: every number is measured, not estimated. Site identification is company-level from first-party traffic; person-level naming comes from matching your send ledger and, for the video email, the watch page.</div></div>' +
+          '<div class="note" style="margin-top:10px">Left to right: every number is measured, not estimated. A watch is attributed to the exact person we emailed (the video link carries their id), and the connection request goes out from the recruiter who sent them the email.</div></div>' +
         '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 12px">Team scoreboard &middot; who is doing what</h3>' + scoreboard + "</div>" +
-        '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 6px">Who we are connecting with</h3>' +
-          '<div class="note" style="margin-bottom:10px">People at companies that came back to lumesp.com after we emailed them. Each row is exactly who we contacted there, and who to connect with on LinkedIn.</div>' + connectTable + "</div>" +
-        '<div class="card"><h3 style="margin:0 0 6px">Video-watch connections</h3>' +
-          '<div class="note" style="margin-bottom:10px">When a prospect watches their personalized video, a LinkedIn connection request goes out from the recruiter who emailed them. Newest first.</div>' + recentHtml + "</div>";
+        '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 6px">Watched the video &middot; send the LinkedIn request</h3>' +
+          '<div class="note" style="margin-bottom:10px">Everyone who opened or played their personalized video. Send a connection request from the recruiter who emailed them, in one click.</div>' + watcherTable + "</div>" +
+        '<div class="card"><h3 style="margin:0 0 6px">Who else is on your site</h3>' +
+          '<div class="note" style="margin-bottom:10px">People at companies that came back to lumesp.com after we emailed them, matched to exactly who we contacted there.</div>' + connectTable + "</div>";
+
+      // Wire the Send-request buttons: fire the real connection request, reflect status inline.
+      body.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-connect]"); if (!b) return;
+        var email = b.getAttribute("data-connect");
+        b.disabled = true; b.textContent = "Sending...";
+        send("/mpc-connect", "POST", { email: email }).then(function (r) {
+          var cell = b.closest(".rp-connect-cell");
+          if (r.ok && r.data && (r.data.status === "sent" || r.data.status === "queued")) {
+            if (cell) cell.innerHTML = '<span class="sv" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">REQUEST ' + esc(String(r.data.status).toUpperCase()) + "</span>";
+            toast("Connection request sent from the recruiter who emailed them.");
+          } else if (r.ok && r.data && r.data.status === "suppressed") {
+            if (cell) cell.innerHTML = '<span class="sv bad" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">SUPPRESSED</span>';
+            toast(r.data.reason || "Skipped, this person is on the do-not-contact list.");
+          } else {
+            b.disabled = false; b.textContent = "Send request";
+            toast("Could not send (" + ((r.data && (r.data.error || r.data.reason)) || r.status) + ").");
+          }
+        }).catch(function () { b.disabled = false; b.textContent = "Send request"; toast("Could not reach the server."); });
+      });
     }).catch(function () {
       var body = $("#rpBody"); if (body) body.innerHTML = needsSetup();
     });
