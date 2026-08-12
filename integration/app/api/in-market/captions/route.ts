@@ -67,7 +67,13 @@ export async function POST(req: Request) {
       ? "Connect ElevenLabs under Setup first, then try again."
       : err === "clip_not_found"
       ? "That recording is no longer on file."
-      : `Transcription failed: ${err}`;
+      : /missing the permission speech_to_text|missing_permissions/i.test(err)
+      // The key works but was issued without the transcription scope: an exact, fixable answer
+      // beats a raw 401 the operator has to decode.
+      ? "Your ElevenLabs key does not have the Speech to Text permission. Open ElevenLabs, edit that API key, tick Speech to Text, save, and try again."
+      : /elevenlabs_4\d\d/.test(err)
+      ? "ElevenLabs rejected the request. Check the API key under Setup."
+      : "Could not transcribe that recording. Try again in a moment.";
     return fail(err, 502, { detail });
   }
   return ok({

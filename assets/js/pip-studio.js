@@ -706,7 +706,8 @@
       mNote.style.display = mo ? "" : "none";
       mNote.innerHTML = mo
         ? nfmt(mo) + " load" + (mo === 1 ? " was" : "s were") + " an email security scanner or preview bot, not a person. " +
-          "Those are kept out of every number above, and never trigger a connection request."
+          "Those are kept out of every number above, and never trigger a connection request. " +
+          "Visits recorded before scanner checking went live are still counted as people, so an old row with visits but no plays is most likely a scanner too."
         : "";
     }
 
