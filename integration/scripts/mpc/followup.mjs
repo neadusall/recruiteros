@@ -19,6 +19,21 @@ import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from
 const OUT = process.env.MPC_OUT_DIR || "/out";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
 const LUME_WS = process.env.MPC_LUME_WS || "ws_mqf6o989003";
+
+// Domain rest fail-safe (same ledger batch.mjs enforces): a follow-up goes out on the SAME box
+// as touch 1, so while that box's domain is resting the follow-up simply waits. Deferring costs
+// nothing: the prospect stays due and sends on the next run after the domain revives. Fail-open:
+// no ledger means no domain is benched.
+const REST_FILE = process.env.MPC_REST_FILE || "/data/snap_mpc_domain_rest_v1.json";
+function restingDomains() {
+  try {
+    const r = JSON.parse(readFileSync(REST_FILE, "utf8"));
+    const now = Date.now();
+    return new Set(Object.entries(r.domains || {})
+      .filter(([, v]) => v && v.state === "resting" && (!v.until || Date.parse(v.until) > now))
+      .map(([d]) => d.toLowerCase()));
+  } catch { return new Set(); }
+}
 // Follow-ups must sign as WHOEVER sent touch 1, never a fixed name. Resolve the recruiter from the
 // send row's `recruiter` key (new sends carry it) or, for older rows, by mapping the sending mailbox
 // back to its owner in the senders snapshot.
@@ -153,6 +168,17 @@ async function main() {
   }
   due.sort((a, b) => a.lastAt - b.lastAt); // oldest waiting first
 
+  // Resting domains: their follow-ups defer, they do not send. Filtered AFTER the due list is
+  // built so the deferred prospects stay visible in the count and simply come back next run.
+  const resting = restingDomains();
+  let deferred = 0;
+  const sendable = due.filter((t) => {
+    const d = String((t.last.from || "").split("@")[1] || "").toLowerCase();
+    if (d && resting.has(d)) { deferred++; return false; }
+    return true;
+  });
+  if (deferred) console.log(`  domain rest: ${deferred} follow-up(s) deferred (resting: ${[...resting].join(", ")})`);
+
   // Fill only the REMAINING daily capacity: follow-ups + fresh sends share one 490 ceiling, so the
   // day is maxed but never over-sent. (Follow-up log rows match sent-*.jsonl, so they count too.)
   const today = new Date().toISOString().slice(0, 10);
@@ -162,7 +188,7 @@ async function main() {
   const effLimit = SEND ? Math.min(LIMIT, capRemaining) : LIMIT;
   console.log(`prospects emailed: ${byEmail.size} | replied/stopped (excluded): ${[...byEmail.keys()].filter((e) => stop.has(e)).length} | DUE: ${due.length} | sent today ${sentTodayAll}/${OVERALL_CAP}, capacity to fill ${capRemaining}`);
 
-  const batch = due.slice(0, effLimit);
+  const batch = sendable.slice(0, effLimit);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const logFile = `${OUT}/followups-${stamp}.jsonl`;
   let sent = 0;

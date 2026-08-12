@@ -3771,11 +3771,21 @@
           var miss = []; if (!a.spf) miss.push("SPF"); if (!a.dkim) miss.push("DKIM"); if (!a.dmarc || a.dmarcPolicy === "none") miss.push("DMARC"); if (!a.mx) miss.push("MX");
           return " &middot; <span style='color:#e6b450'>needs " + miss.join("+") + "</span>";
         }
+        // Domain rest fail-safe: a benched domain sends nothing until it revives. Stamped onto the
+        // audit snapshot by domain-rest.mjs; shown here so a resting domain reads as deliberate
+        // protection, never as a quiet outage.
+        function restTag(x) {
+          if (!x.resting) return "";
+          var until = x.resting.until ? String(x.resting.until).slice(0, 10) : "signals clear";
+          return " &middot; <span style='color:#e6b450;font-weight:600'>resting until " + esc(until) + "</span>";
+        }
+        var restingRows = (d.byDomain || []).filter(function (x) { return x.resting; });
         var drows = (d.byDomain || []).filter(function (x) { return x.sent > 0; }).map(function (x) {
-          var vc = x.verdict === "healthy" ? "good" : "amber";
-          return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(x.domain) + '</div><div class="lr-sub">' + x.sent + " sent &middot; " + (x.acceptanceRatePct == null ? "-" : x.acceptanceRatePct) + "% accepted &middot; " + x.hardFailRatePct + "% fail &middot; " + x.bounces + " bounces" + authTag(x.auth) + '</div></div><div style="flex:none;text-align:right"><div class="sv ' + vc + '" style="font-size:13px">' + (x.warmupReputationPct == null ? "-" : x.warmupReputationPct + "% inbox") + "</div></div></div>";
+          var vc = x.resting ? "amber" : (x.verdict === "healthy" ? "good" : "amber");
+          return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(x.domain) + '</div><div class="lr-sub">' + x.sent + " sent &middot; " + (x.acceptanceRatePct == null ? "-" : x.acceptanceRatePct) + "% accepted &middot; " + x.hardFailRatePct + "% fail &middot; " + x.bounces + " bounces" + authTag(x.auth) + restTag(x) + '</div></div><div style="flex:none;text-align:right"><div class="sv ' + vc + '" style="font-size:13px">' + (x.warmupReputationPct == null ? "-" : x.warmupReputationPct + "% inbox") + "</div></div></div>";
         }).join("") || '<div class="empty">No sends yet.</div>';
         var gapHtml = gaps.length ? '<div class="note" style="margin-bottom:8px;color:#e6b450">' + gaps.length + " sending domain" + (gaps.length > 1 ? "s" : "") + " need DMARC enforcement (SPF + DKIM are in place, DMARC is p=none): " + gaps.slice(0, 8).map(function (x) { return esc(x.domain); }).join(", ") + (gaps.length > 8 ? ", and " + (gaps.length - 8) + " more" : "") + ". Set DMARC to p=quarantine to fully authenticate them.</div>" : "";
+        var restHtml = restingRows.length ? '<div class="note" style="margin-bottom:8px;color:#e6b450">' + restingRows.length + " domain" + (restingRows.length > 1 ? "s are" : " is") + " resting (cold sends and follow-ups paused, warm-up still running): " + restingRows.slice(0, 8).map(function (x) { return esc(x.domain) + (x.resting.until ? " until " + esc(String(x.resting.until).slice(0, 10)) : ""); }).join(", ") + (restingRows.length > 8 ? ", and " + (restingRows.length - 8) + " more" : "") + ". Each revives on its own once its rest is served and its signals read clean.</div>" : "";
         dlHtml = '<h4 style="margin:18px 0 6px">Deliverability &middot; are they landing?</h4>' +
           '<div class="stat-grid" style="margin-bottom:8px">' +
             dk((ov.acceptanceRatePct == null ? "-" : ov.acceptanceRatePct) + "%", "Accepted by server", "good") +
@@ -3783,7 +3793,7 @@
             dk(ov.bounces, "Bounces", ov.bounces > 0 ? "amber" : "good") +
             dk((ov.warmupReputationPct == null ? "-" : ov.warmupReputationPct + "%"), "Inbox placement", placeCls) +
             dk(authedN + "/" + sendingN, "Domains authenticated", authCls) +
-          "</div>" + gapHtml +
+          "</div>" + restHtml + gapHtml +
           '<div class="note" style="margin-bottom:8px">' + ov.domainsWarmed + "/" + ov.domainsTotal + " domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; authentication = real SPF/DKIM/DMARC/MX DNS checks (the hard signal). Inbox placement = live Smartlead warm-up reputation, a measured proxy for the prospect inbox, not the inbox itself &middot; updated " + esc(fmtCentral(d.generatedAt)) + "</div>" +
           drows;
       }
