@@ -72,8 +72,16 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
     const min = Math.round(d / 60);
     return min <= 1 ? "about a minute" : `about ${min} minutes`;
   })();
-  vals.videogif = pv?.gifUrl || "";
-  vals.videoposter = pv?.posterUrl || "";
+  // The teaser image is fetched when the prospect opens the email, so it carries the same rcpt
+  // tag as the watch link: a human load then records a NAMED email open (gif_open) instead of an
+  // anonymous counter tick. Same first-party image either way — no tracking pixel is added.
+  const tagRcpt = (u: string) => {
+    if (!u) return u;
+    const id = p.id || p.email || "";
+    return id ? `${u}${u.includes("?") ? "&" : "?"}rcpt=${encodeURIComponent(id)}` : u;
+  };
+  vals.videogif = tagRcpt(pv?.gifUrl || "");
+  vals.videoposter = tagRcpt(pv?.posterUrl || "");
   // Loom-look embed, LEFT-ALIGNED with the copy (owner call 2026-08-12: the card sits in the
   // text flow like an attachment, not centered like a marketing blast), rounded, with a "Watch"
   // line beneath for image-blocking clients. Table markup because email clients ignore div CSS.
@@ -84,7 +92,7 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   // GIF teaser with INMARKET_EMBED_GIF=1 once placement is proven. Either way the other asset
   // remains the fallback, so older videos missing one artifact still render.
   const gifFirst = ["1", "true", "yes", "on"].includes((process.env.INMARKET_EMBED_GIF || "").toLowerCase());
-  const thumb = gifFirst ? (pv?.gifUrl || pv?.posterUrl || "") : (pv?.posterUrl || pv?.gifUrl || "");
+  const thumb = tagRcpt(gifFirst ? (pv?.gifUrl || pv?.posterUrl || "") : (pv?.posterUrl || pv?.gifUrl || ""));
   vals.videoembed = watch && thumb
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0"><tr><td align="left">` +
       `<a href="${watch}" target="_blank" style="text-decoration:none">` +

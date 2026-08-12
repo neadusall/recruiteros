@@ -161,6 +161,20 @@ if [ ! -f "$DIR/.caddy-restart-v2" ]; then
   fi
 fi
 
+# One-time (v3): restart Caddy to load the app.lumesp.com access-log directive
+# (first-party ground truth for watch-page viewers: client IP + user-agent per
+# hit, so a "viewer" can always be settled person-vs-scanner from evidence).
+# Same deterministic restart as v1/v2, new marker.
+if [ ! -f "$DIR/.caddy-restart-v3" ]; then
+  echo "$(date -u) one-time(v3): caddy restart to enable app.lumesp.com access log..." >> "$LOG"
+  if docker compose restart caddy >> "$LOG" 2>&1; then
+    touch "$DIR/.caddy-restart-v3"
+    echo "$(date -u) caddy restarted, app.lumesp.com access log live" >> "$LOG"
+  else
+    echo "$(date -u) caddy restart(v3) failed, will retry next cycle" >> "$LOG"
+  fi
+fi
+
 # One-time: wire the OS Text single sign-on token into the portal env.
 # deploy.sh section 4c does this, but this watcher never runs deploy.sh, so a
 # box deployed before the token wiring never got RECRUITEROS_OSTEXT_TOKEN and

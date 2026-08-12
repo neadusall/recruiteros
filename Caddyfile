@@ -144,6 +144,17 @@ www.lumesp.com {
 # app.lumesp.com already points at this box.
 app.lumesp.com {
 	encode zstd gzip
+	# Ground-truth access log for the prospect-facing surfaces (watch pages, video
+	# assets, track beacons): client IP + user-agent per hit, so "is this viewer a
+	# person or an email scanner?" can always be settled from first-party evidence.
+	# Same handling as the lumesp.com log: stays on this box, no third party.
+	log {
+		output file /data/logs/app-lumesp-access.log {
+			roll_size 25mb
+			roll_keep 4
+		}
+		format json
+	}
 	import ostext
 	handle {
 		reverse_proxy app:3000 {

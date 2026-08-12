@@ -41,12 +41,23 @@ export async function GET(req: Request) {
     // Judged the same way as a watch-page beacon: a security gateway prefetching the teaser is
     // not an email open, and counting it as one overstates the top of the funnel.
     (async () => {
-      const { classifyViewer, clientIp } = await import("../../../../lib/inmarket/viewerId");
+      const { classifyViewer, clientIp, identifyViewer } = await import("../../../../lib/inmarket/viewerId");
       const verdict = await classifyViewer(req.headers.get("user-agent") || "", clientIp(req.headers));
+      const machine = verdict.kind === "machine";
+      // The email embeds this image with &rcpt=<prospect id or email>, so a human open names
+      // its opener the same way a watch-page beacon does. A machine fetch is never identified:
+      // a Gmail proxy load must not put a person's name on an open they didn't make.
+      const rcpt = (url.searchParams.get("rcpt") || "").slice(0, 160) || undefined;
+      let who: import("../../../../lib/inmarket/viewerId").ViewerIdentity | null = null;
+      if (!machine) {
+        try { who = await identifyViewer(key, rcpt); } catch { /* an anonymous open still counts */ }
+      }
       const { recordVideoEvent } = await import("../../../../lib/inmarket/videoStats");
       await recordVideoEvent({
         videoKey: key, type: "gif_open",
-        machine: verdict.kind === "machine", machineReason: verdict.reason,
+        recipient: who?.prospectId || rcpt,
+        machine, machineReason: verdict.reason,
+        viewerName: who?.name, viewerEmail: who?.email, viewerCompany: who?.company,
       });
     })().catch(() => {});
   }
