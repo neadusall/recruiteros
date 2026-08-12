@@ -3063,6 +3063,119 @@
     api("/linkedin/engage").then(paint).catch(function () { mount.innerHTML = ""; });
   }
 
+  // Post engagement radar: people commenting on the owner's OWN posts, scored
+  // (decision-maker + company hiring) and tiered hot/warm/community. Replies
+  // and connects are approval-gated; the listener scans every 15 minutes.
+  function liCommentsPanel(mount) {
+    if (!mount) return;
+    mount.innerHTML = loading();
+    function tierChip(t) {
+      if (t.tier === "hot") return '<span class="lie-chip ok">Hot: decision-maker, hiring now</span>';
+      if (t.tier === "warm") return '<span class="lie-chip">Warm: decision-maker</span>';
+      if (t.peer) return '<span class="lie-chip mut">Peer</span>';
+      return '<span class="lie-chip mut">Community</span>';
+    }
+    function unlockHours(t) {
+      if (!t.connectAfter) return 0;
+      var ms = new Date(t.connectAfter).getTime() - Date.now();
+      return ms > 0 ? Math.ceil(ms / 3600000) : 0;
+    }
+    function replyBlock(t) {
+      if (t.replyStatus === "suggested") {
+        return '<textarea class="lie-text" data-lic-reply rows="2">' + esc(t.replyText || "") + "</textarea>" +
+          '<div class="lie-actions">' +
+            '<button class="btn btn-sm btn-primary" data-lic="approve">Approve reply</button> ' +
+            '<button class="btn btn-sm btn-ghost" data-lic="skip">Skip</button>' +
+          "</div>";
+      }
+      if (t.replyStatus === "approved") return '<div><span class="lie-chip ok">Reply approved, sending from your account</span></div>';
+      if (t.replyStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Blocked") + "</span></div>";
+      if (t.replyStatus === "skipped") return '<div><span class="lie-chip mut">Skipped</span></div>';
+      return '<div class="lie-actions"><button class="btn btn-sm" data-lic="draft">Draft a reply</button></div>';
+    }
+    function connectBlock(t) {
+      if (!t.connectStatus) return "";
+      if (t.connectStatus === "suggested") {
+        var hrs = unlockHours(t);
+        return '<div class="lie-post muted">Follow-up connect (spaced a day after your reply):</div>' +
+          '<textarea class="lie-text" data-lic-connect rows="2">' + esc(t.connectText || "") + "</textarea>" +
+          '<div class="lie-actions">' +
+            '<button class="btn btn-sm btn-primary" data-lic="connect_approve"' + (hrs ? ' disabled title="Unlocks in about ' + hrs + 'h"' : "") + ">" +
+              (hrs ? "Connect unlocks in " + hrs + "h" : "Send connect request") + "</button> " +
+            '<button class="btn btn-sm btn-ghost" data-lic="connect_skip">Skip connect</button>' +
+          "</div>";
+      }
+      if (t.connectStatus === "approved") return '<div><span class="lie-chip ok">Connect request approved and queued</span></div>';
+      if (t.connectStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Connect blocked") + "</span></div>";
+      return '<div><span class="lie-chip mut">Connect skipped</span></div>';
+    }
+    function row(t) {
+      var who = esc(t.authorName) +
+        (t.authorHeadline ? ' <span class="muted">' + esc(t.authorHeadline.slice(0, 120)) + "</span>" : "");
+      var hiring = t.hiring && t.hiring.openRoles
+        ? '<div class="lie-post">Hiring now: ' + t.hiring.openRoles + " open role" + (t.hiring.openRoles === 1 ? "" : "s") +
+          (t.hiring.sample && t.hiring.sample.length ? " (" + esc(t.hiring.sample.join(", ")) + ")" : "") + "</div>"
+        : "";
+      var open = t.replyStatus === "suggested" || t.connectStatus === "suggested";
+      return '<div class="lie-row' + (open ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
+        '<div class="lie-who">' + who + " " + tierChip(t) + "</div>" +
+        '<div class="lie-post muted">On your post: "' + esc((t.postExcerpt || "").slice(0, 140)) + '..."</div>' +
+        '<div class="lie-post">Their comment: ' + esc((t.commentText || "").slice(0, 280)) + "</div>" +
+        hiring + replyBlock(t) + connectBlock(t) +
+      "</div>";
+    }
+    function paint(d) {
+      if (!document.body.contains(mount)) return;
+      var st = (d && d.status) || {};
+      var items = (d && d.items) || [];
+      if (!st.active && !items.length) {
+        mount.innerHTML =
+          '<div class="card liops-card">' +
+            '<div class="liops-head"><div><b>Post engagement radar</b>' +
+              '<div class="muted liops-sub">Listens to comments on your LinkedIn posts, checks who is a decision-maker and whether their company is hiring, and drafts replies for your approval.</div></div>' +
+              '<span class="lie-chip mut">Standby</span></div>' +
+            ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join("") || "") +
+          "</div>";
+        return;
+      }
+      var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested"; }).length;
+      mount.innerHTML =
+        '<div class="card liops-card">' +
+          '<div class="liops-head"><div><b>Post engagement radar</b>' +
+            '<div class="muted liops-sub">People commenting on your posts, scored for buying signals. Replies thread under their comment and send only after your approval.</div></div>' +
+            '<span class="liops-progress' + (open ? "" : " ok") + '">' + (open ? open + " to review" : "All caught up") + "</span></div>" +
+          (items.length
+            ? items.map(row).join("")
+            : '<div class="lie-post muted">No commenters captured yet. The listener checks your recent posts every 15 minutes.</div>') +
+          '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button></div>' +
+        "</div>";
+      Array.prototype.forEach.call(mount.querySelectorAll("[data-lic]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var rowEl = btn.closest(".lie-row");
+          var id = rowEl.getAttribute("data-id");
+          var act = btn.getAttribute("data-lic");
+          var payload = { action: act, id: id };
+          var ta = act === "approve" ? rowEl.querySelector("[data-lic-reply]")
+            : act === "connect_approve" ? rowEl.querySelector("[data-lic-connect]") : null;
+          if (ta) payload.text = ta.value;
+          btn.disabled = true;
+          send("/linkedin/comments", "POST", payload).then(function (r) {
+            if (r.ok && r.data && r.data.view) paint(r.data.view);
+            if (r.data && r.data.accepted === false && r.data.reason) toast(r.data.reason);
+          });
+        });
+      });
+      var scanBtn = mount.querySelector("[data-lic-scan]");
+      if (scanBtn) scanBtn.addEventListener("click", function () {
+        scanBtn.disabled = true; scanBtn.textContent = "Scanning...";
+        send("/linkedin/comments", "POST", { action: "scan" }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      });
+    }
+    api("/linkedin/comments").then(paint).catch(function () { mount.innerHTML = ""; });
+  }
+
   // Aliases. #builder stays the BD-branded entry (it forces BD via its own
   // route); Hire Signals (#inmarket) is motion-agnostic and shows in both.
   var HASH_ALIAS = { "in-market": "inmarket", leads: "inmarket", bdbulk: "email", emailprep: "email" };
@@ -22655,9 +22768,12 @@
     // The daily-ops worksheet mounts as a sibling ABOVE the tool host: the
     // LinkedIn OS renderer owns its element's innerHTML entirely (and repaints
     // it on internal tab switches), so the panel must live outside that host.
-    el.innerHTML = '<div class="liops-mount"></div><div class="lie-mount"></div><div class="liops-host"></div>';
+    el.innerHTML = '<div class="liops-mount"></div><div class="lic-mount"></div><div class="lie-mount"></div><div class="liops-host"></div>';
     liOpsPanel($(".liops-mount", el), "outreach");
-    if (motion === "bd") liEngagePanel($(".lie-mount", el));
+    if (motion === "bd") {
+      liCommentsPanel($(".lic-mount", el));
+      liEngagePanel($(".lie-mount", el));
+    }
     var host = $(".liops-host", el);
     var tries = 0;
     (function mount() {

@@ -201,6 +201,16 @@ async function tickOutbound(): Promise<void> {
  * text the screening invite, and delete the processed mail. The email->call
  * gate of AI Vetting.
  */
+/**
+ * The comment listener: pull new comments on the owner's own LinkedIn posts,
+ * enrich + tier each commenter (decision-maker, company hiring) and draft
+ * approval-gated replies. Nothing posts without a human tap.
+ */
+async function tickCommentListener(): Promise<void> {
+  const { tickCommentWatch } = await import("../linkedin/commentWatch");
+  await tickCommentWatch();
+}
+
 async function tickResumeInbox(): Promise<void> {
   const { sweepAllResumeInboxes } = await import("../vetting/inbox");
   await sweepAllResumeInboxes();
@@ -259,6 +269,7 @@ const TICKS: TickSpec[] = [
   { key: "booking_sms", label: "Booking reminder texts", env: "RECRUITEROS_BOOKING_SMS_TICK_MS", defaultMs: 60_000, firstDelayMs: 55_000, fn: tickBookingSms },
   { key: "meet_recordings", label: "Meeting recordings -> summary + role brief", env: "RECRUITEROS_MEET_RECORDINGS_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 130_000, fn: tickMeetRecordings },
   { key: "linkedin_engage", label: "LinkedIn BD engagement queue (daily drafts)", env: "RECRUITEROS_LINKEDIN_ENGAGE_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 110_000, fn: tickLinkedinEngage },
+  { key: "linkedin_comments", label: "LinkedIn comment listener (own posts)", env: "RECRUITEROS_LINKEDIN_COMMENTS_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 150_000, fn: tickCommentListener },
   { key: "voice", label: "Voicemail drops", env: "RECRUITEROS_VOICE_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 45_000, fn: tickVoice },
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },
   { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },

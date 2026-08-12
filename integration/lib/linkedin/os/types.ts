@@ -118,6 +118,8 @@ export interface LiActionRecord {
     audioUrl?: string;
     attachmentUrl?: string;
     postUrl?: string;
+    /** comment_post only: reply threaded under this existing comment. */
+    commentId?: string;
     /** Resolved provider profile id, filled at execution when known. */
     providerProfileId?: string;
     linkedinUrl?: string;

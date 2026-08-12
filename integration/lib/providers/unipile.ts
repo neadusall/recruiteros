@@ -130,12 +130,37 @@ export class UnipileClient extends ProviderClient {
   }
 
   /** Leave a comment on a post (the nurture "comment on their post" touch).
-   *  NOTE: confirm the exact path/shape against the current Unipile API. */
-  commentOnPost(accountId: string, postId: string, text: string) {
+   *  With replyToCommentId set, the comment posts as a threaded reply to that
+   *  comment instead of a new top-level comment (Unipile body field comment_id). */
+  commentOnPost(accountId: string, postId: string, text: string, replyToCommentId?: string) {
     return this.request({
       method: "POST",
       path: `/api/v1/posts/${encodeURIComponent(postId)}/comments`,
-      body: { account_id: accountId, text },
+      body: replyToCommentId
+        ? { account_id: accountId, text, comment_id: replyToCommentId }
+        : { account_id: accountId, text },
+    });
+  }
+
+  /** All comments on a post (the comment-listener read). postId must be the
+   *  post's social_id. Returns { items, cursor } per Unipile's CommentList. */
+  listPostComments(accountId: string, postId: string, opts?: { cursor?: string; limit?: number }) {
+    return this.request({
+      path: `/api/v1/posts/${encodeURIComponent(postId)}/comments`,
+      query: {
+        account_id: accountId,
+        limit: opts?.limit ?? 100,
+        ...(opts?.cursor ? { cursor: opts.cursor } : {}),
+      },
+    });
+  }
+
+  /** The linked account's OWN profile (who am I posting as) — used by the
+   *  comment listener to find the owner's posts and skip their own comments. */
+  getOwnProfile(accountId: string) {
+    return this.request({
+      path: "/api/v1/users/me",
+      query: { account_id: accountId },
     });
   }
 
