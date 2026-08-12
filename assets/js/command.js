@@ -3577,17 +3577,30 @@
           "</div>";
         return;
       }
+      var auto = (d && d.autopilot) || {};
       var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested" || t.dmStatus === "suggested"; }).length;
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Post engagement radar</b>' +
-            '<div class="muted liops-sub">Commenters on your posts scored for buying signals, plus hiring decision-makers who are posting (those get a direct message, never a public comment). Nothing sends without your approval.</div></div>' +
-            '<span class="liops-progress' + (open ? "" : " ok") + '">' + (open ? open + " to review" : "All caught up") + "</span></div>" +
+            '<div class="muted liops-sub">Commenters on your posts scored for buying signals, plus hiring decision-makers who are posting (those get a direct message, never a public comment).' +
+              (auto.enabled
+                ? " Autopilot is on: decision-maker touches send automatically through your account limits; community items wait for you."
+                : " Nothing sends without your approval.") + "</div></div>" +
+            '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span></div>" +
           (items.length
             ? items.map(row).join("")
             : '<div class="lie-post muted">No commenters captured yet. The listener checks your recent posts every 15 minutes.</div>') +
-          '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button></div>' +
+          '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button> ' +
+            '<button class="btn btn-sm btn-ghost" data-lic-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' +
+              (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button></div>" +
         "</div>";
+      var autoBtn = mount.querySelector("[data-lic-auto]");
+      if (autoBtn) autoBtn.addEventListener("click", function () {
+        autoBtn.disabled = true;
+        send("/linkedin/comments", "POST", { action: autoBtn.getAttribute("data-lic-auto") }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      });
       Array.prototype.forEach.call(mount.querySelectorAll("[data-lic]"), function (btn) {
         btn.addEventListener("click", function () {
           var rowEl = btn.closest(".lie-row");

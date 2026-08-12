@@ -1049,6 +1049,7 @@
       if (!d.commentWatch) {
         d.commentWatch = {
           status: { active: true, engineReady: true, aiReady: true, paused: false, reasons: [] },
+          autopilot: { enabled: true, source: "bd_autopilot" },
           lastScan: new Date().toISOString(),
           items: [
             {
@@ -1105,6 +1106,10 @@
         var it = body.id ? cwItem(body.id) : null;
         if (body.action === "scan") { cw.lastScan = new Date().toISOString(); save(d); return ok({ scanned: 0, created: 0, view: cw }); }
         if (body.action === "pause" || body.action === "resume") { cw.status.paused = body.action === "pause"; save(d); return ok({ view: cw }); }
+        if (body.action === "auto_on" || body.action === "auto_off") {
+          cw.autopilot = { enabled: body.action === "auto_on", source: body.action === "auto_on" ? "manual" : "off" };
+          save(d); return ok({ view: cw });
+        }
         if (!it) return ok({ view: cw });
         if (body.action === "approve") {
           if (body.text) it.replyText = body.text;

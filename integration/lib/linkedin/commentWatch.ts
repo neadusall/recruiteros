@@ -46,6 +46,7 @@ const POSTER_SCAN_PER_TICK = 20; // prospects examined per tick
 const POSTER_NEW_PER_TICK = 8;   // DM drafts created per tick
 const POSTER_RECHECK_DAYS = 7;   // how often the same prospect is re-examined
 const POST_FRESH_DAYS = 21;      // only message about a reasonably fresh post
+const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
 
 export type CommentTier = "hot" | "warm" | "community";
 
@@ -119,11 +120,17 @@ interface WatchState {
   posterSeen: Record<string, Record<string, string>>;
   /** ws -> owner switched the listener off. */
   paused: Record<string, boolean>;
+  /**
+   * ws -> explicit autopilot override. When unset, autopilot follows the
+   * workspace's BD Autopilot opt-in (an active BD campaign with autoRun), the
+   * same hands-off signal the cadence/nurture ticks key off.
+   */
+  autoMode: Record<string, boolean>;
   lastScan: Record<string, string>;
 }
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, paused: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, paused: {}, autoMode: {}, lastScan: {} };
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 const save = debouncedSaver(KEY, () => state);
@@ -140,6 +147,7 @@ async function hydrate(): Promise<void> {
           ownProfile: snap.ownProfile ?? {},
           posterSeen: snap.posterSeen ?? {},
           paused: snap.paused ?? {},
+          autoMode: snap.autoMode ?? {},
           lastScan: snap.lastScan ?? {},
         };
       }
@@ -181,6 +189,63 @@ export async function setCommentWatchPaused(workspaceId: string, paused: boolean
   await hydrate();
   state.paused[workspaceId] = paused;
   save();
+}
+
+/** Explicit on/off wins; otherwise follow the workspace's BD Autopilot opt-in. */
+export async function commentWatchAutopilot(workspaceId: string): Promise<{ enabled: boolean; source: "manual" | "bd_autopilot" | "off" }> {
+  await hydrate();
+  const manual = state.autoMode[workspaceId];
+  if (typeof manual === "boolean") return { enabled: manual, source: manual ? "manual" : "off" };
+  try {
+    const { getCore } = await import("../core/repository");
+    const all = await getCore().listAllCampaigns();
+    const on = all.some((c) => c.workspaceId === workspaceId && c.motion === "bd" && c.status === "active" && c.autoRun);
+    return { enabled: on, source: on ? "bd_autopilot" : "off" };
+  } catch { return { enabled: false, source: "off" }; }
+}
+
+export async function setCommentWatchAuto(workspaceId: string, on: boolean): Promise<void> {
+  await hydrate();
+  state.autoMode[workspaceId] = on;
+  save();
+}
+
+/**
+ * Autopilot: execute the open drafts hands-free through the shared engine
+ * (caps, pacing, health, suppression all still apply there). Decision-makers
+ * only: poster DMs first, then hot connects + replies, then warm replies.
+ * Community items are never auto-sent.
+ */
+async function autoExecute(workspaceId: string): Promise<number> {
+  const { enabled } = await commentWatchAutopilot(workspaceId);
+  if (!enabled) return 0;
+  const APPROVER = "comment-radar-autopilot";
+  const rank = (i: CommentLeadItem): number =>
+    i.kind === "poster" ? 0 : i.tier === "hot" ? 1 : i.tier === "warm" ? 2 : 3;
+  const open = state.items
+    .filter((i) => i.workspaceId === workspaceId && i.tier !== "community"
+      && (i.dmStatus === "suggested" || i.replyStatus === "suggested" || i.connectStatus === "suggested"))
+    .sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt));
+  let sent = 0;
+  for (const item of open) {
+    if (sent >= AUTO_PER_TICK) break;
+    try {
+      if (item.kind === "poster" && item.dmStatus === "suggested") {
+        const r = await approveDm(workspaceId, "", APPROVER, item.id);
+        if (r.accepted) sent++;
+        continue;
+      }
+      if (item.connectStatus === "suggested" && sent < AUTO_PER_TICK) {
+        const r = await approveConnect(workspaceId, "", APPROVER, item.id);
+        if (r.accepted) sent++;
+      }
+      if (item.replyStatus === "suggested" && sent < AUTO_PER_TICK) {
+        const r = await approveReply(workspaceId, "", APPROVER, item.id);
+        if (r.accepted) sent++;
+      }
+    } catch { /* next item */ }
+  }
+  return sent;
 }
 
 /* ------------------------------------------------------------------ */
@@ -490,6 +555,9 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
   let dmCreated = 0;
   try { dmCreated = await scanPosters(workspaceId, account); } catch { /* lane 1 results stand */ }
 
+  // Autopilot: when armed, the fresh drafts go straight out through the engine.
+  try { await autoExecute(workspaceId); } catch { /* drafts stay open for manual review */ }
+
   state.lastScan[workspaceId] = nowIso();
   prune();
   save();
@@ -612,6 +680,7 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
 
 export interface CommentWatchView {
   status: CommentWatchStatus;
+  autopilot: { enabled: boolean; source: "manual" | "bd_autopilot" | "off" };
   lastScan?: string;
   items: CommentLeadItem[];
 }
@@ -621,10 +690,11 @@ const TIER_RANK: Record<CommentTier, number> = { hot: 0, warm: 1, community: 2 }
 export async function commentWatchView(workspaceId: string): Promise<CommentWatchView> {
   await hydrate();
   const status = await commentWatchStatus(workspaceId);
+  const autopilot = await commentWatchAutopilot(workspaceId);
   const items = state.items
     .filter((i) => i.workspaceId === workspaceId)
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
-  return { status, lastScan: state.lastScan[workspaceId], items };
+  return { status, autopilot, lastScan: state.lastScan[workspaceId], items };
 }
 
 function findItem(workspaceId: string, id: string): CommentLeadItem | undefined {

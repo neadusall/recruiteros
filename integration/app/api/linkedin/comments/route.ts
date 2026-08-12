@@ -15,12 +15,14 @@
  *   dm_skip         { id }
  *   dm_edit         { id, text }
  *   pause / resume  {}
+ *   auto_on / auto_off {}       -> autopilot: execute drafts hands-free
  * Session-gated with outreach:send, same capability as the LinkedIn tab.
  */
 import { ok, fail, body, requireCapability } from "../../../../lib/api";
 import {
   commentWatchView, scanWorkspace, approveReply, skipReply, editReply, draftReply,
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
+  setCommentWatchAuto,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -45,6 +47,10 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (b.action === "pause" || b.action === "resume") {
     await setCommentWatchPaused(ws, b.action === "pause");
+    return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "auto_on" || b.action === "auto_off") {
+    await setCommentWatchAuto(ws, b.action === "auto_on");
     return ok({ view: await commentWatchView(ws) });
   }
   if (!b.id) return fail("missing_id");
