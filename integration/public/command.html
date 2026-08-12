@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="assets/css/styles.css?v=cded6c8cf8" />
   <link rel="stylesheet" href="assets/css/app.css?v=8433338cde" />
-  <link rel="stylesheet" href="assets/css/command.css?v=a7b6aebf54" />
+  <link rel="stylesheet" href="assets/css/command.css?v=9029ee0c72" />
   <link rel="stylesheet" href="assets/css/campaign-studio.css?v=ee5486c59c" />
   <link rel="stylesheet" href="assets/css/vetting.css?v=208ee6fda1" />
   <link rel="stylesheet" href="assets/css/linkedin-os.css?v=5474960975" />
@@ -111,9 +111,9 @@
         <!-- My Outbound: every user's personal performance view + the 10-15 minute
              Daily Checklist worksheet. No capability gate: recruiters and admins
              each see only their OWN numbers here (the API is self-scoped). -->
-        <a class="nav-item" data-route="myoutbound"><span class="ni"><svg><use href="#i-clipboard"/></svg></span> My Outbound<span class="ni-badge" id="badgeOutbound"></span></a>
         <a class="nav-item" data-route="analytics"><span class="ni"><svg><use href="#i-chart"/></svg></span> Analytics</a>
         <a class="nav-item" data-route="response"><span class="ni"><svg><use href="#i-inbox"/></svg></span> Replies<span class="ni-badge" id="badgeResponse"></span></a>
+        <a class="nav-item" data-route="sent"><span class="ni"><svg><use href="#i-send"/></svg></span> Sent</a>
 
         <!-- Business Development: shown only in BD motion (the toggle is available to
              recruiters too), so a recruiter can run BD from their own portal. Hire Signals
@@ -128,6 +128,7 @@
         <a class="nav-item" data-route="clients" data-motion-only="bd"><span class="ni"><svg><use href="#i-briefcase"/></svg></span> Pipeline</a>
         <a class="nav-item" data-route="email" data-motion-only="bd" data-cap="outreach:send"><span class="ni"><svg><use href="#i-mail"/></svg></span> Email</a>
         <a class="nav-item" data-route="autopilot" data-motion-only="bd" data-cap="outreach:send"><span class="ni"><svg><use href="#i-zap"/></svg></span> Autopilot</a>
+        <a class="nav-item" data-route="reports" data-motion-only="bd" data-cap="team:manage"><span class="ni"><svg><use href="#i-chart"/></svg></span> BD Reports</a>
 
         <!-- Tools: the hands-on working instruments (the BD Phone lives here;
              future tools slot in alongside). BD-only until a tool ships for
@@ -270,10 +271,10 @@
 
   <div class="toast" id="toast"></div>
   <script src="assets/js/campaign-studio.js?v=3059af9747"></script>
-  <script src="assets/js/local-backend.js?v=38b077fc61"></script>
+  <script src="assets/js/local-backend.js?v=567a0ec6e1"></script>
   <script src="assets/js/session-bridge.js?v=2727497284"></script>
   <script src="assets/js/wl-theme.js?v=1c8caa379d"></script>
-  <script src="assets/js/command.js?v=58bfacc5bf"></script>
+  <script src="assets/js/command.js?v=52f1a8842d"></script>
   <script src="assets/js/command-ux.js?v=c352fca6c3"></script>
   <script src="assets/js/bd-phone.js?v=b54e28e288"></script>
   <script src="assets/js/linkedin-os.js?v=0717e033a4"></script>

@@ -683,10 +683,69 @@
     return Math.floor(d / 86400) + "d";
   }
 
+  // When the machine sends next / last sent, so a batch can be watched the moment it lands.
+  // Times come from the box's own systemd timers via the mpc_schedule snapshot; the strip
+  // simply hides when the telemetry isn't there (e.g. a workspace with no MPC lane).
+  function fmtClock(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d)) return "";
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  function fmtCountdown(iso) {
+    if (!iso) return "";
+    var ms = Date.parse(iso) - Date.now();
+    if (!isFinite(ms)) return "";
+    if (ms <= 0) return "sending now";
+    var m = Math.round(ms / 60000);
+    if (m < 60) return "in " + m + " min";
+    var h = Math.floor(m / 60);
+    return "in " + h + "h " + ("0" + (m % 60)).slice(-2) + "m";
+  }
+  function fmtDay(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d)) return "";
+    var today = new Date(); var tom = new Date(Date.now() + 86400000);
+    var day = d.toDateString() === today.toDateString() ? "today"
+      : d.toDateString() === tom.toDateString() ? "tomorrow"
+      : d.toLocaleDateString([], { weekday: "short" });
+    return day + " " + fmtClock(iso);
+  }
+  function renderSending(s) {
+    var el = $("sendStrip");
+    if (!el) return;
+    if (!s) { el.style.display = "none"; return; }
+    var cells = [];
+    if (s.nextDrainAt) {
+      var cd = fmtCountdown(s.nextDrainAt);
+      cells.push({ l: "Next send window", v: fmtClock(s.nextDrainAt) + (cd ? ' <span class="in">· ' + cd + "</span>" : ""),
+        s: "drains ready leads every " + (s.drainEveryMin || 20) + " min" });
+    }
+    if (s.lastBatchAt) {
+      cells.push({ l: "Last batch", v: fmtDay(s.lastBatchAt) + " · " + s.lastBatchCount + " email" + (s.lastBatchCount === 1 ? "" : "s"),
+        s: s.lastBatchVideos ? s.lastBatchVideos + " carried a video" : "first-touch intros" });
+    }
+    if (s.sentToday != null) {
+      cells.push({ l: "Sent today", v: s.sentToday + (s.sentTodayTruncated ? "+" : "") + (s.dailyCap ? " of " + s.dailyCap + " cap" : ""),
+        s: s.ledgerAt ? "ledger updated " + ago(s.ledgerAt) + " ago" : "" });
+    }
+    if (s.nextDailyAt) {
+      cells.push({ l: "Daily supply run", v: fmtDay(s.nextDailyAt), s: "sources and enrolls fresh leads" });
+    }
+    if (!cells.length) { el.style.display = "none"; return; }
+    el.innerHTML = cells.map(function (c) {
+      return '<div class="cell"><span class="cl">' + c.l + '</span><span class="cv">' + c.v + "</span>" +
+        (c.s ? '<span class="cs">' + esc(c.s) + "</span>" : "") + "</div>";
+    }).join("");
+    el.style.display = "flex";
+  }
+
   function renderPerf(o) {
     var t = (o && o.totals) || {};
     $("perfSub").textContent = (t.videos || 0) + " video" + (t.videos === 1 ? "" : "s") + " · engagement across every personalized role video.";
-    $("perfUpdated").textContent = "updated just now";
+    $("perfUpdated").textContent = "live · refreshes every 15s";
+    renderSending(o && o.sending);
     var kpis = [
       { v: nfmt(t.gifOpens), l: "Email opens", sub: "teaser GIF loads" },
       { v: nfmt(t.opens), l: "Page visits", sub: "by people, scanners excluded" },

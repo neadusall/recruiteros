@@ -58,6 +58,20 @@
   .player .dur{position:absolute;top:14px;right:16px;background:rgba(2,8,20,.62);border:1px solid rgba(255,255,255,.14);
     -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:#fff;font-size:11px;font-weight:600;
     letter-spacing:.02em;padding:4px 10px;border-radius:99px;z-index:1}
+  /* "Tap for sound": only shown when the browser refused audio, so it is an answer to a real
+     problem rather than decoration. Sits clear of the native controls at the bottom. */
+  .player .sound{position:absolute;top:14px;left:14px;z-index:3;display:flex;align-items:center;gap:7px;
+    background:rgba(2,8,20,.78);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+    border:1px solid rgba(255,255,255,.28);color:#fff;font:inherit;font-size:12.5px;font-weight:600;
+    padding:8px 13px;border-radius:99px;cursor:pointer;box-shadow:0 6px 20px rgba(2,8,20,.4);
+    animation:pulseSound 2.2s ease-in-out infinite}
+  .player .sound[hidden]{display:none}
+  .player .sound:hover{background:rgba(2,8,20,.92);border-color:rgba(255,255,255,.5)}
+  .player .sound svg{width:15px;height:15px;fill:#fff;flex:none}
+  @keyframes pulseSound{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
+  @media (prefers-reduced-motion:reduce){ .player .sound{animation:none} }
+  /* Captions sit at the bottom of the picture, readable over any frame. */
+  video::cue{background:rgba(2,8,20,.72);color:#fff;font-size:.92em;line-height:1.35}
   .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2}
   .play .ring{position:absolute;width:82px;height:82px;border-radius:50%;border:1.5px solid rgba(255,255,255,.55);
     animation:pulse 2.6s cubic-bezier(.25,.6,.35,1) infinite}
@@ -268,6 +282,17 @@
     gif = API + "/api/in-market/watch?key=" + encodeURIComponent(key) + "&fmt=gif&notrack=1" + auth + bust;
   }
 
+  // Captions: the spoken words, transcribed ONCE per recording and reused by every video built
+  // on that take. 204 when there is no transcript yet, in which case the track stays empty and
+  // the video simply plays without captions.
+  var vttUrl = "";
+  (function () {
+    var exp2 = qs.get("exp"), sig2 = qs.get("sig");
+    if (!trackKey || !exp2 || !sig2) return;
+    vttUrl = API + "/api/in-market/captions?key=" + encodeURIComponent(trackKey) +
+      "&exp=" + encodeURIComponent(exp2) + "&sig=" + encodeURIComponent(sig2);
+  })();
+
   /* engagement tracking (anonymous session) */
   var sid;
   try { sid = sessionStorage.getItem("ros_sid"); if (!sid) { sid = (Math.random().toString(36).slice(2) + Date.now().toString(36)); sessionStorage.setItem("ros_sid", sid); } } catch (e) { sid = "anon"; }
@@ -296,7 +321,10 @@
     '<div class="ctx"><span class="eyebrow">' + esc(eyebrow) + '</span><h1>' + title + '</h1></div>' +
     '<div class="player" id="player">' +
       '<span class="dur" id="dur" style="display:none"></span>' +
-      '<video id="vid" playsinline preload="metadata" poster="' + gif + '"></video>' +
+      '<video id="vid" playsinline preload="metadata" crossorigin="anonymous" poster="' + gif + '"></video>' +
+      '<button class="sound" id="soundBtn" type="button" hidden>' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4h4l5 4V6L7 10H3zm13.5 2a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1c3 .9 5 3.5 5 6.7s-2 5.8-5 6.7v2.1c4.1-.9 7-4.5 7-8.8s-2.9-7.9-7-8.8z"/></svg>' +
+        "<span>Tap for sound</span></button>" +
       '<div class="play" id="overlay"><span class="ring"></span><div class="btn"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div></div>' +
       (role ? '<span class="label">' + esc(role) + '</span>' : '') +
     '</div>' +
@@ -367,8 +395,52 @@
     var d = vid.duration; if (d && isFinite(d)) { var m = Math.floor(d/60), sec = Math.round(d%60); var el = $("dur"); if (el){ el.textContent = m + ":" + (sec<10?"0":"") + sec; el.style.display = "block"; } }
   });
   vid.addEventListener("error", function(){ $("player").innerHTML = '<div class="err">This video isn\'t available right now.</div>'; });
-  function start(){ if (vid.ended) vid.currentTime = 0; vid.play(); vid.controls = true; overlay.style.display = "none"; }
+  // Captions track: added only once we know a transcript exists, so a 204 never leaves an empty
+  // "English" entry sitting in the player's menu.
+  if (vttUrl) {
+    fetch(vttUrl).then(function (r) {
+      if (!r.ok || r.status === 204) return;
+      return r.text().then(function (body) {
+        if (!body || body.indexOf("WEBVTT") !== 0) return;
+        var tr = document.createElement("track");
+        tr.kind = "captions"; tr.label = "English"; tr.srclang = "en"; tr.default = true;
+        tr.src = URL.createObjectURL(new Blob([body], { type: "text/vtt" }));
+        vid.appendChild(tr);
+        try { if (vid.textTracks && vid.textTracks[0]) vid.textTracks[0].mode = "showing"; } catch (e) {}
+      });
+    }).catch(function () { /* captions are a bonus, never a blocker */ });
+  }
+
+  // Sound. Most people open this at their desk in an office, so we try with audio on (the click
+  // is a real user gesture, which browsers accept) and fall back to a muted play plus a clear
+  // prompt if the browser blocks it anyway. Nobody ends up watching a silent video by accident.
+  var soundBtn = $("soundBtn");
+  function showSoundPrompt(show) { if (soundBtn) soundBtn.hidden = !show; }
+  function start(){
+    if (vid.ended) vid.currentTime = 0;
+    vid.muted = false;
+    vid.controls = true;
+    overlay.style.display = "none";
+    var p = vid.play();
+    if (p && typeof p.catch === "function") {
+      p.then(function () { showSoundPrompt(false); }).catch(function () {
+        // Autoplay policy refused audio: play silently rather than not at all, and say so.
+        vid.muted = true;
+        showSoundPrompt(true);
+        var q = vid.play();
+        if (q && typeof q.catch === "function") q.catch(function () { overlay.style.display = "flex"; });
+      });
+    }
+  }
   overlay.addEventListener("click", start);
+  if (soundBtn) soundBtn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    vid.muted = false;
+    vid.volume = 1;
+    showSoundPrompt(false);
+    if (vid.paused) vid.play().catch(function () {});
+  });
+  vid.addEventListener("volumechange", function () { if (!vid.muted) showSoundPrompt(false); });
 
   track("open");
 

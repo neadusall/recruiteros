@@ -193,6 +193,16 @@
   var viewTimers = [];
   function clearViewTimers() { viewTimers.forEach(function (t) { clearInterval(t); }); viewTimers = []; }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  // Timestamps arrive as UTC ISO strings; recruiters read them in Central, 12-hour.
+  function fmtCentral(iso, timeOnly) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso).slice(0, 16).replace("T", " ") + " UTC";
+    var opts = timeOnly
+      ? { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" }
+      : { timeZone: "America/Chicago", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" };
+    try { return d.toLocaleString("en-US", opts); } catch (e) { return d.toISOString().slice(0, 16).replace("T", " ") + " UTC"; }
+  }
   function toast(t) { var el = $("#toast"); el.textContent = t; el.classList.add("show"); setTimeout(function () { el.classList.remove("show"); }, 2200); }
 
   /* Reusable modal: openModal(title, sub, bodyHtml, onMount) -> returns close fn.
@@ -886,9 +896,14 @@
   function refreshBadge() {
     api("/response/list").then(function (d) {
       var items = (d && d.items) || [];
+      // Hot AND still yours to answer: unhandled, not snoozed, identity-verified.
+      // (Counting every hot reply ever meant the badge never went down.)
       var hot = items.filter(function (p) {
         var c = p.classification && p.classification.class;
-        return c === "positive" || c === "referral";
+        if (c !== "positive" && c !== "referral") return false;
+        if (p.handledAt || p.deletedAt) return false;
+        if (p.snoozedUntil && Date.parse(p.snoozedUntil) > Date.now()) return false;
+        return !!(p.inbound && (p.inbound.prospectId || p.inbound.campaignId));
       }).length;
       var bd = $("#badgeResponse");
       if (!bd) return;
@@ -1574,6 +1589,7 @@
     // tabs; before this hub the last two had no nav entrance at all.
     clients: { title: "Pipeline", crumb: "Business Development", action: null, render: renderPipelineHub, motionOnly: "bd" },
     response: { title: "Response", crumb: "Operate", action: null, render: renderResponse },
+    sent: { title: "Sent", crumb: "Operate", action: null, render: renderSent },
     inmarket: { title: "Hire Signals", crumb: "Operate", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run", tool: "inmarket" },
     // Consolidation redirects: these screens moved into hubs (Send Queue into
     // Email, the sending fleet into Admin > Infrastructure). The routes stay
@@ -1585,6 +1601,7 @@
     // in one table); BD keeps the classic Prospects pipeline.
     prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: function (el) { return motion === "recruiting" ? renderCandidates(el) : renderProspects(el); } },
     autopilot: { title: "Autopilot", crumb: "Business Development", action: null, render: renderAutopilot, motionOnly: "bd", cap: "outreach:send" },
+    reports: { title: "BD Reports", crumb: "Business Development", action: null, render: renderBdReports, motionOnly: "bd", cap: "team:manage" },
     campaigns: { title: "Campaigns", crumb: "Build", action: "+ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting", cap: "sourcing:run", tool: "jdsourcing" },
@@ -1622,7 +1639,6 @@
     ostextkpi: { title: "OS Text Performance", crumb: "Admin", action: null, render: function () { location.hash = "#outbound/ostext"; }, cap: "team:manage" },
     // My Outbound: the personal performance view + the 10-15 minute Daily
     // Checklist worksheet. Self-scoped; available in both portals.
-    myoutbound: { title: "My Outbound", crumb: "Operate", action: null, render: renderMyOutbound },
     engine: { title: "Engine / Throughput", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure"; }, cap: "team:manage" },
     // Infrastructure: every piece of system plumbing in one admin hub. Engine /
     // Throughput, the Senders fleet and Mailbox Ops as tabs.
@@ -3660,8 +3676,174 @@
       : "Your recruiting sending engine, capacity, throughput and what's running right now.")
       + (showRecruiterBar ? " Pick a recruiter to scope it, or see every recruiter's stats below." : "");
     el.innerHTML = head("Dashboard", sub) +
+      '<div id="ovMpc"></div>' +
+      '<div id="ovVisitors"></div>' +
       (showRecruiterBar ? '<div class="ov-recruiters" id="ovRecruiters">' + loading() + "</div>" : "") +
       '<div id="ovBody">' + loading() + "</div>";
+
+    // Who is on your site: first-party visitor intelligence for the marketing site.
+    // A company we emailed shows with the exact people we emailed there (recruiter +
+    // LinkedIn), the LinkedIn-connect shortlist. Hides cleanly when nothing is there.
+    api("/site-visitors").then(function (v) {
+      var host = $("#ovVisitors"); if (!host || !v || !v.present) return;
+      var comps = v.companies || [], corp = v.corporate || [];
+      if (!comps.length && !corp.length) return;
+      var rows = comps.map(function (c) {
+        var when = (c.lastVisit || "").slice(0, 16).replace("T", " ");
+        var conf = c.confident ? "" : ' <span class="note">(network-owner match, less certain)</span>';
+        var people = (c.people || []).map(function (p) {
+          var li = p.linkedin ? ' &middot; <a href="' + esc(p.linkedin) + '" target="_blank" rel="noopener">LinkedIn</a>' : "";
+          var by = p.recruiter ? " &middot; emailed by " + esc(p.recruiter) : "";
+          return '<div class="lr-sub" style="margin-top:2px">' + esc(p.name || p.email) + (p.title ? ", " + esc(p.title) : "") + by + li + "</div>";
+        }).join("");
+        return '<div class="list-row" style="align-items:flex-start;justify-content:space-between;gap:10px"><div>' +
+          '<div class="lr-main">' + esc(c.company) + conf + "</div>" + people + "</div>" +
+          '<div class="note" style="flex:none;text-align:right">' + c.visits + " page view" + (c.visits === 1 ? "" : "s") + "<br>" + esc(when) + " UTC</div></div>";
+      }).join("") || '<div class="empty">No visits matched to emailed companies yet. As outreach lands, matches appear here.</div>';
+      var corpNote = corp.length
+        ? '<details style="margin-top:10px"><summary class="note" style="cursor:pointer">' + corp.length + " other business network" + (corp.length === 1 ? "" : "s") + " visited (no email match yet)</summary>" +
+          corp.slice(0, 15).map(function (u) {
+            return '<div class="lr-sub" style="margin-top:4px">' + esc(u.org || u.rdns || u.ip) + (u.country ? " &middot; " + esc(u.country) : "") + " &middot; " + u.visits + " views &middot; " + esc((u.lastVisit || "").slice(0, 10)) + "</div>";
+          }).join("") + "</details>"
+        : "";
+      host.innerHTML =
+        '<div class="card" style="margin-bottom:16px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Who is on your site</h3><span class="note">lumesp.com &middot; matched to your outreach &middot; updated ' + esc((v.generatedAt || "").slice(11, 16)) + " UTC</span></div>" +
+          '<div class="note" style="margin:6px 0 8px">A company here visited the site AFTER we emailed them. The people listed are exactly who we contacted there, ready for a LinkedIn connect from the recruiter who emailed them.</div>' +
+          rows + corpNote +
+        "</div>";
+    }).catch(function () { /* visitor card is best-effort; the Dashboard still loads */ });
+
+    // Finance BD Campaign cockpit: real activity from the MPC engine (sends via Sending.ac + free
+    // ATS sourcing + reply bridge) that the app's native /overview can't see. Hides if not present.
+    api("/mpc-stats").then(function (m) {
+      var host = $("#ovMpc"); if (!host || !m || !m.present) return;
+      function kpi(v, l, sub) { return '<div class="stat"><div class="sv">' + esc(String(v)) + '</div><div class="sl">' + esc(l) + (sub ? ' &middot; <span class="note">' + esc(sub) + "</span>" : "") + "</div></div>"; }
+      var sent = m.repliesBySentiment || {};
+      var pills = Object.keys(sent).map(function (k) { return '<span class="cls cls-' + k + '" style="margin-right:6px">' + esc(clsLabel(k)) + ": " + sent[k] + "</span>"; }).join("") || '<span class="note">No replies in yet</span>';
+      var maxR = Math.max.apply(null, (m.variants || []).map(function (v) { return v.rate; }).concat([0.1]));
+      var vrows = (m.variants || []).map(function (v) {
+        return '<div class="bar-row"><div>' + esc(v.variant) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(2, (v.rate / maxR) * 100) + '%"></div></div><div class="num">' + v.replied + "/" + v.sent + " (" + v.rate + "%)</div></div>";
+      }).join("") || '<div class="empty">No sends yet.</div>';
+      var adv = (m.advisor && m.advisor.recommendations) || [];
+      var advHtml = adv.length ? ('<h4 style="margin:16px 0 6px">Advisor &middot; how to move the needle</h4>' +
+        adv.map(function (r) {
+          var pc = r.priority === "high" ? "bad" : r.priority === "medium" ? "amber" : "good";
+          return '<div class="list-row" style="align-items:flex-start"><span class="sv ' + pc + '" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-right:10px;flex:none;align-self:center">' + esc(String(r.priority || "").toUpperCase()) + '</span><div><div class="lr-main">' + esc(r.title) + '</div><div class="lr-sub">' + esc(r.detail) + "</div></div></div>";
+        }).join("") +
+        '<div class="note" style="margin-top:6px">AI read, based on ' + ((m.advisor.basedOn && m.advisor.basedOn.sent) || 0) + " sent &middot; updated " + esc((m.advisor.generatedAt || "").slice(0, 10)) + "</div>") : "";
+      // Growth Engine: idle demand + campaign proposals that push more outbound.
+      var g = m.growth || null, grHtml = "";
+      if (g) {
+        var gap = g.growthGap || {};
+        var cc = (gap.constraint === "capacity" || gap.constraint === "supply") ? "amber" : "good";
+        var prop = (g.proposals || []).map(function (p) {
+          var badge = p.launchable ? '<span class="sv good" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-left:8px">LAUNCH</span>' : '<span class="note" style="margin-left:8px">queue</span>';
+          return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(p.industry) + " &middot; " + esc(p.family) + " &middot; " + esc(p.metro) + badge + '</div><div class="lr-sub">' + p.companies + " companies &middot; " + p.prospects + " decision-makers &middot; avg score " + p.avgScore + "</div></div>" +
+            '<div style="flex:none;display:flex;gap:6px;align-items:center"><button class="resp-btn" data-grow="approve" data-key="' + esc(p.key) + '">Launch</button><button class="resp-btn ghost" data-grow="snooze" data-key="' + esc(p.key) + '">Snooze</button><button class="resp-btn ghost" data-grow="suppress" data-key="' + esc(p.key) + '">Suppress</button></div></div>';
+        }).join("") || '<div class="empty">No idle cohorts right now.</div>';
+        grHtml = '<h4 style="margin:18px 0 6px">Growth &middot; push more outbound</h4>' +
+          '<div class="stat-grid" style="margin-bottom:8px">' +
+            '<div class="stat"><div class="sv ' + (gap.untouchedClean ? "amber" : "") + '">' + (gap.untouchedClean || 0) + '</div><div class="sl">Idle clean leads</div></div>' +
+            '<div class="stat"><div class="sv">' + (gap.safeRemaining || 0) + '</div><div class="sl">Safe sends left today</div></div>' +
+            '<div class="stat"><div class="sv ' + cc + '">' + esc(String(gap.constraint || "").toUpperCase()) + '</div><div class="sl">Constraint</div></div>' +
+          "</div>" +
+          '<div class="note" style="margin-bottom:8px">' + esc(gap.message || "") + "</div>" + prop;
+      }
+      // Deliverability: real, documented numbers on whether mail is actually landing. Acceptance,
+      // hard-fail, bounce, complaint are directly measured from send logs + our inboxes; inbox
+      // placement is live Smartlead warm-up reputation (mail landing in inbox vs spam across the
+      // warm-up seed network), a real signal, stated honestly, never a guess.
+      var d = m.deliverability || null, dlHtml = "";
+      if (d && d.overall) {
+        var ov = d.overall;
+        function dk(v, l, cls) { return '<div class="stat"><div class="sv ' + (cls || "") + '">' + esc(String(v)) + '</div><div class="sl">' + esc(l) + "</div></div>"; }
+        var failCls = (ov.hardFailRatePct > 2) ? "bad" : "good";
+        var placeCls = (ov.warmupReputationPct != null && ov.warmupReputationPct < 90) ? "amber" : "good";
+        // Authentication (real DNS facts, not a proxy): SPF + DKIM + DMARC + MX per sending domain.
+        var sendingN = ov.domainsSending || (d.byDomain || []).filter(function (x) { return x.sent > 0; }).length;
+        var authedN = (d.byDomain || []).filter(function (x) { return x.sent > 0 && x.auth && x.auth.fullyAuthed; }).length;
+        var gaps = (d.byDomain || []).filter(function (x) { return x.sent > 0 && x.auth && !x.auth.fullyAuthed; });
+        var authCls = (sendingN && authedN === sendingN) ? "good" : "amber";
+        function authTag(a) {
+          if (!a) return "";
+          if (a.fullyAuthed) return " &middot; <span style='color:#3ec98a'>authenticated</span>";
+          var miss = []; if (!a.spf) miss.push("SPF"); if (!a.dkim) miss.push("DKIM"); if (!a.dmarc || a.dmarcPolicy === "none") miss.push("DMARC"); if (!a.mx) miss.push("MX");
+          return " &middot; <span style='color:#e6b450'>needs " + miss.join("+") + "</span>";
+        }
+        // Domain rest fail-safe: a benched domain sends nothing until it revives. Stamped onto the
+        // audit snapshot by domain-rest.mjs; shown here so a resting domain reads as deliberate
+        // protection, never as a quiet outage.
+        function restTag(x) {
+          if (!x.resting) return "";
+          var until = x.resting.until ? String(x.resting.until).slice(0, 10) : "signals clear";
+          return " &middot; <span style='color:#e6b450;font-weight:600'>resting until " + esc(until) + "</span>";
+        }
+        var restingRows = (d.byDomain || []).filter(function (x) { return x.resting; });
+        var drows = (d.byDomain || []).filter(function (x) { return x.sent > 0; }).map(function (x) {
+          var vc = x.resting ? "amber" : (x.verdict === "healthy" ? "good" : "amber");
+          return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(x.domain) + '</div><div class="lr-sub">' + x.sent + " sent &middot; " + (x.acceptanceRatePct == null ? "-" : x.acceptanceRatePct) + "% accepted &middot; " + x.hardFailRatePct + "% fail &middot; " + x.bounces + " bounces" + authTag(x.auth) + restTag(x) + '</div></div><div style="flex:none;text-align:right"><div class="sv ' + vc + '" style="font-size:13px">' + (x.warmupReputationPct == null ? "-" : x.warmupReputationPct + "% inbox") + "</div></div></div>";
+        }).join("") || '<div class="empty">No sends yet.</div>';
+        var gapHtml = gaps.length ? '<div class="note" style="margin-bottom:8px;color:#e6b450">' + gaps.length + " sending domain" + (gaps.length > 1 ? "s" : "") + " need DMARC enforcement (SPF + DKIM are in place, DMARC is p=none): " + gaps.slice(0, 8).map(function (x) { return esc(x.domain); }).join(", ") + (gaps.length > 8 ? ", and " + (gaps.length - 8) + " more" : "") + ". Set DMARC to p=quarantine to fully authenticate them.</div>" : "";
+        var restHtml = restingRows.length ? '<div class="note" style="margin-bottom:8px;color:#e6b450">' + restingRows.length + " domain" + (restingRows.length > 1 ? "s are" : " is") + " resting (cold sends and follow-ups paused, warm-up still running): " + restingRows.slice(0, 8).map(function (x) { return esc(x.domain) + (x.resting.until ? " until " + esc(String(x.resting.until).slice(0, 10)) : ""); }).join(", ") + (restingRows.length > 8 ? ", and " + (restingRows.length - 8) + " more" : "") + ". Each revives on its own once its rest is served and its signals read clean.</div>" : "";
+        dlHtml = '<h4 style="margin:18px 0 6px">Deliverability &middot; are they landing?</h4>' +
+          '<div class="stat-grid" style="margin-bottom:8px">' +
+            dk((ov.acceptanceRatePct == null ? "-" : ov.acceptanceRatePct) + "%", "Accepted by server", "good") +
+            dk(ov.hardFailRatePct + "%", "Hard-fail rate", failCls) +
+            dk(ov.bounces, "Bounces", ov.bounces > 0 ? "amber" : "good") +
+            dk((ov.warmupReputationPct == null ? "-" : ov.warmupReputationPct + "%"), "Inbox placement", placeCls) +
+            dk(authedN + "/" + sendingN, "Domains authenticated", authCls) +
+          "</div>" + restHtml + gapHtml +
+          '<div class="note" style="margin-bottom:8px">' + ov.domainsWarmed + "/" + ov.domainsTotal + " domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; authentication = real SPF/DKIM/DMARC/MX DNS checks (the hard signal). Inbox placement = live Smartlead warm-up reputation, a measured proxy for the prospect inbox, not the inbox itself &middot; updated " + esc(fmtCentral(d.generatedAt)) + "</div>" +
+          drows;
+      }
+      // Who sent it: per-recruiter attribution. Every send goes out on a mailbox owned by one
+      // recruiter, so the engine's activity splits cleanly by person: sends today, total, and
+      // the replies their sends earned.
+      var recs = m.recruiters || [], recHtml = "";
+      if (recs.length) {
+        recHtml = '<h4 style="margin:16px 0 6px">Who sent it &middot; by recruiter' +
+          ' <a href="#response" style="font-weight:400;font-size:12px;margin-left:8px" title="Every reply lands in the Reply center, where you answer from the same recruiter mailbox that received it">Read + answer replies</a></h4>' +
+          '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+          "<th>Recruiter</th><th>Sent today</th><th>Sent total</th><th>Replies</th><th>Reply rate</th>" +
+          "</tr></thead><tbody>" +
+          recs.map(function (r) {
+            var repl = (r.replies || 0) > 0
+              ? '<a href="#response" title="Open in the Reply center to read and answer as ' + esc(r.name) + '">' + r.replies + "</a>"
+              : "0";
+            return "<tr><td><b>" + esc(r.name) + "</b></td><td>" + (r.sentToday || 0) + "</td><td>" + (r.sentTotal || 0) + "</td><td>" + repl + "</td><td>" + (r.replyRate || 0) + "%</td></tr>";
+          }).join("") + "</tbody></table></div>";
+      }
+      host.innerHTML =
+        '<div class="card" style="margin-bottom:16px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc(fmtCentral(m.generatedAt, true)) + "</span></div>" +
+          '<div class="stat-grid" style="margin-top:12px">' +
+            kpi(m.sentToday, "Sent today", "of " + (m.sentTotal || 0) + " total") +
+            kpi((m.replyRate || 0) + "%", "Reply rate", (m.repliesTotal || 0) + " real replies") +
+            kpi(m.supplyReady, "Supply ready", "clean, to send") +
+            kpi((m.freeBoards || 0).toLocaleString(), "Free boards", "$0 sourcing") +
+          "</div>" +
+          '<div style="margin-top:10px">' + pills + "</div>" +
+          recHtml +
+          '<h4 style="margin:16px 0 6px">What is working &middot; reply rate by angle</h4>' +
+          '<div class="bars">' + vrows + "</div>" + dlHtml + advHtml + grHtml +
+        "</div>";
+      // Real buttons: Launch (greenlight the cohort so the always-on sender ships it),
+      // Snooze (7d), Suppress (never send this cohort). The sender obeys these next cycle.
+      host.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-grow]"); if (!b) return;
+        var action = b.getAttribute("data-grow"), key = b.getAttribute("data-key");
+        var payload = { cohortKey: key, action: action };
+        if (action === "snooze") payload.snoozeDays = 7;
+        b.disabled = true;
+        send("/growth/decision", "POST", payload).then(function (r) {
+          if (r.ok) {
+            toast(action === "approve" ? "Launching, the autopilot ships this cohort" : action === "snooze" ? "Snoozed 7 days" : "Suppressed, the sender will skip it");
+            var row = b.closest(".list-row"); if (row && action !== "approve") row.style.opacity = "0.4";
+          } else { toast("Could not " + action + " (" + ((r.data && r.data.error) || r.status) + ")"); b.disabled = false; }
+        }).catch(function () { toast("Could not reach the server."); b.disabled = false; });
+      });
+    }).catch(function () { /* cockpit is best-effort; the rest of the Dashboard still loads */ });
 
     if (showRecruiterBar) {
       api("/team").then(function (d) {
@@ -5048,58 +5230,546 @@
     });
   }
 
+  function renderSent(el) {
+    el.innerHTML = head("Sent", "Every message the outbound engine sent in your name, newest first, with the full text, for reference and peace of mind.");
+    var wrap = document.createElement("div");
+    el.appendChild(wrap);
+    wrap.innerHTML = loading();
+    api("/mpc-sent").then(function (d) {
+      var msgs = (d && d.messages) || [];
+      if (!msgs.length) { wrap.innerHTML = '<div class="empty">No sent messages yet. As the engine sends, they appear here.</div>'; return; }
+      // Every message carries the recruiter whose mailbox sent it; the chips scope the
+      // list to one recruiter so an admin can see exactly who sent what.
+      var senders = [];
+      msgs.forEach(function (m) { if (m.from_owner && senders.indexOf(m.from_owner) < 0) senders.push(m.from_owner); });
+      senders.sort();
+      var activeSender = null;
+      function draw() {
+        var show = activeSender ? msgs.filter(function (m) { return m.from_owner === activeSender; }) : msgs;
+        var chips = senders.length ? '<div class="chan-filter" id="sentSenders">' +
+          '<span class="cf' + (activeSender ? "" : " active") + '" data-sender="">All recruiters</span>' +
+          senders.map(function (s) { return '<span class="cf' + (activeSender === s ? " active" : "") + '" data-sender="' + esc(s) + '">' + esc(s) + "</span>"; }).join("") +
+          "</div>" : "";
+        var hdr = '<div class="note" style="margin-bottom:12px">' + (d.total || msgs.length) + " messages sent &middot; showing " + (activeSender ? show.length + " by " + esc(activeSender) : "newest " + show.length) + "</div>";
+        wrap.innerHTML = chips + hdr + (show.map(function (m) {
+          var when = fmtCentral(m.at);
+          var touch = (m.touch && m.touch > 1) ? '<span class="cls" style="margin-left:6px">follow-up ' + m.touch + '</span>' : "";
+          var who = esc(m.to_name || m.to_email) + (m.company ? " &middot; " + esc(m.company) : "");
+          var by = m.from_owner ? '<div class="note" style="margin-top:2px">Sent by <b>' + esc(m.from_owner) + "</b></div>" : "";
+          return '<div class="card" style="margin-bottom:12px">' +
+            '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><div><div class="resp-name">' + who + '</div><div class="resp-chan">' + esc(m.to_email) + (m.role ? " &middot; " + esc(m.role) : "") + "</div>" + by + "</div>" +
+            '<div class="note" style="flex:none">' + esc(when) + (m.variant ? " &middot; " + esc(m.variant) : "") + touch + "</div></div>" +
+            '<div style="margin-top:8px;font-weight:600">' + esc(m.subject) + "</div>" +
+            '<div class="resp-text" style="white-space:pre-wrap;margin-top:6px">' + esc(m.body) + "</div>" +
+            "</div>";
+        }).join("") || '<div class="empty">No messages from this recruiter yet.</div>');
+        var bar = wrap.querySelector("#sentSenders");
+        if (bar) bar.addEventListener("click", function (e) {
+          var c = e.target.closest("[data-sender]"); if (!c) return;
+          activeSender = c.getAttribute("data-sender") || null;
+          draw();
+        });
+      }
+      draw();
+    }).catch(function () { wrap.innerHTML = '<div class="empty">Could not load sent messages.</div>'; });
+  }
+
   function renderResponse(el) {
     var active = "all";
-    el.innerHTML = head("Response, the unified inbox",
-      "Every reply across email, LinkedIn and SMS, auto-classified by AI and routed by deterministic rules. Hottest first.");
+    var realOnly = true;   // default: hide Smartlead warm-up, show only identity-verified replies
+    var showDone = false;  // include rows already cleared from the worklist
+    var openRid = null;    // the row whose thread panel is expanded
+    var threads = {};      // responseId -> loaded thread payload
+    var people = {};       // prospectId -> cross-channel touch summary (from /list)
+    var slaRules = {};     // class -> sla bucket (from /list rules)
+    var nudges = {};       // responseId -> hours silent (answered threads gone quiet)
+    var timingUntil = {};  // responseId -> iso date parsed from a "not now, try Q4" reply
+    var slaWindows = {};   // class -> response window hours (server-authoritative)
+    var stats = null;      // reply-center performance (last 24h / 7d)
+    var booking = "";      // the operator's booking link for one-click insert
+    var lastDraft = {};    // responseId -> last AI draft text (verbatim/edited telemetry)
+    var lastObj = {};      // responseId -> the drafting objective behind that text
+    var draftPerf = {};    // objective -> { sent, replied } (the outcome loop)
+    var sendAsMap = {};    // responseId -> { name, email }: whose identity the answer sends under
+    var kbIndex = -1;      // keyboard triage cursor
+
+    el.innerHTML = head("Response, your reply center",
+      "Every reply across email, LinkedIn and SMS in one place. Open a reply to see every touch on every channel, answer without leaving, and work the list to zero.");
+    var score = document.createElement("div");
+    score.className = "stat-grid";
+    score.style.cssText = "margin:0 0 14px;display:none";
+    el.appendChild(score);
+    var strip = document.createElement("div");
+    strip.className = "note";
+    strip.style.cssText = "margin:0 0 10px;display:none";
+    el.appendChild(strip);
     var filter = document.createElement("div");
     filter.className = "chan-filter";
     ["all", "email", "linkedin", "sms"].forEach(function (c) {
       filter.innerHTML += '<span class="cf ' + (c === "all" ? "active" : "") + '" data-c="' + c + '">' + (c === "all" ? "All channels" : c.toUpperCase()) + "</span>";
     });
+    filter.innerHTML += '<span class="cf realtog active" data-realtog="1" title="Hide Smartlead warm-up: show only identity-verified replies (matched prospects + verified MPC finance replies)">Real only</span>';
+    filter.innerHTML += '<span class="cf donetog" data-donetog="1" title="Show replies you already cleared with Done or answered">Show done</span>';
     el.appendChild(filter);
     var listWrap = document.createElement("div");
     el.appendChild(listWrap);
 
     var inbox = [];        // loaded from the API
     var loaded = false;
+
+    function slaHours(cls) {
+      if (slaWindows[cls]) return slaWindows[cls]; // server-authoritative windows
+      var s = slaRules[cls];
+      return s === "immediate" ? 1 : s === "four_hours" ? 4 : 24; // same_day and unknown: a day
+    }
+    function waitingHours(r) {
+      var t = r.receivedAt ? Date.parse(r.receivedAt) : NaN;
+      return isNaN(t) ? 0 : Math.max(0, (Date.now() - t) / 3600000);
+    }
+    function isOverdue(r) { return !r.handled && waitingHours(r) > slaHours(r.cls); }
+    // At risk: past 60% of the window but not blown yet (amber, so it never gets there).
+    function isAtRisk(r) { return !r.handled && !isOverdue(r) && waitingHours(r) > slaHours(r.cls) * 0.6; }
+    function isSnoozed(r) { return !!(r.snoozedUntil && Date.parse(r.snoozedUntil) > Date.now()); }
+    function snoozeReturned(r) { return !!(r.snoozedUntil && Date.parse(r.snoozedUntil) <= Date.now()); }
+    // Worklist priority: blown SLA > back-from-snooze > waiting-on-them nudge > normal.
+    function rowPriority(r) {
+      if (isOverdue(r)) return 4;
+      if (snoozeReturned(r) && !r.handled) return 3;
+      if (nudges[r.id]) return 2;
+      return 1;
+    }
+    function clsRank(c) {
+      var order = ["positive", "soft_yes", "referral", "timing_objection", "unclassified", "fit_objection", "not_interested", "auto_reply", "stop"];
+      var i = order.indexOf(c); return i < 0 ? 5 : i;
+    }
+
+    function visibleItems() {
+      var hidden = 0, snoozedCount = 0;
+      var items = inbox.filter(function (r) {
+        // A handled thread that went quiet after your answer comes BACK on the list.
+        if (!showDone && r.handled && !nudges[r.id]) return false;
+        if (isSnoozed(r)) { snoozedCount++; return showDone; } // hidden until due
+        if (active !== "all" && r.channel !== active) return false;
+        if (realOnly && !respVerified(r)) { hidden++; return false; }
+        return true;
+      });
+      // Never lose anyone: blown SLA, then snooze returns, then quiet threads, then hottest class.
+      items.sort(function (a, b) {
+        var pr = rowPriority(b) - rowPriority(a); if (pr) return pr;
+        var cr = clsRank(a.cls) - clsRank(b.cls); if (cr) return cr;
+        return (b.receivedAt || "").localeCompare(a.receivedAt || "");
+      });
+      return { items: items, hidden: hidden, snoozed: snoozedCount };
+    }
+
     function paint() {
       if (!loaded) { listWrap.innerHTML = loading(); return; }
-      var items = inbox.filter(function (r) { return active === "all" || r.channel === active; });
-      listWrap.innerHTML = items.map(respItem).join("") ||
-        '<div class="empty">No replies' + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every reply lands here, auto-classified.</div>";
+      var v = visibleItems();
+      var waiting = 0, overdue = 0, quiet = 0;
+      inbox.forEach(function (r) {
+        if (isSnoozed(r)) return;
+        if (nudges[r.id] && r.handled) { quiet++; return; }
+        if (!r.handled && (!realOnly || respVerified(r))) { waiting++; if (isOverdue(r)) overdue++; }
+      });
+      // The daily scoreboard: every number is server-computed by the tested
+      // metrics module, with honest labels about what each one measures.
+      var med = stats ? stats.medianFirstResponseMins : -1;
+      var medLabel = med < 0 ? "n/a" : med < 60 ? med + "m" : Math.round(med / 6) / 10 + "h";
+      var medColor = med < 0 ? null : med <= 60 ? "var(--success,#1d7a3e)" : med <= 240 ? "#b06a00" : "var(--danger,#c02929)";
+      score.style.display = "";
+      score.innerHTML =
+        obStat(waiting, "Waiting for you", overdue ? overdue + " past the window, top of the list" : "all inside their windows", overdue ? "var(--danger,#c02929)" : null) +
+        obStat(quiet, "Gone quiet", "answered, then silence 48h+; nudge them", quiet ? "#b06a00" : null) +
+        obStat(stats ? stats.sent24h : 0, "Replies sent · 24h", (stats ? stats.cleared24h : 0) + " cleared (answered or done)") +
+        obStat(medLabel, "Median first response · 7d", "answer positives inside 1 hour", medColor) +
+        obStat(stats ? stats.booked7d : 0, "Booked · 7d", "meetings from these replies", stats && stats.booked7d ? "var(--success,#1d7a3e)" : null);
+      strip.style.display = "";
+      strip.innerHTML = "Answered and Done replies drop off the list; quiet threads come back on top" +
+        (v.snoozed ? " · " + v.snoozed + " snoozed" : "") +
+        '<span class="muted" style="float:right;font-size:11px" title="Keyboard triage: fastest replies win the meeting. Answering an interested reply inside minutes can multiply your booking rate.">Keys: j / k move · Enter open · e done · s snooze</span>';
+      var dpKeys = Object.keys(draftPerf);
+      if (dpKeys.length) {
+        var objNames = { book_call: "Book a call", send_info: "Send info", nudge: "Nudge", forwardable: "Forwardable", close_polite: "Polite close" };
+        var dpBits = dpKeys.map(function (k) {
+          var p2 = draftPerf[k];
+          return (objNames[k] || k) + " " + p2.replied + "/" + p2.sent + " answered";
+        });
+        strip.innerHTML += '<div class="muted" style="font-size:11px;margin-top:3px" title="How your AI-assisted sends are performing: replies that came back after each draft objective. This is the loop that tunes the drafter on outcomes, not vibes.">AI drafts: ' + esc(dpBits.join(" · ")) + "</div>";
+      }
+      var note = (realOnly && v.hidden) ? '<div class="note" style="margin:0 0 10px">Hiding ' + v.hidden + ' warm-up / unverified message' + (v.hidden === 1 ? "" : "s") + '. <a href="#" data-showall="1">Show all</a></div>' : "";
+      listWrap.innerHTML = note + (v.items.map(respItem).join("") ||
+        '<div class="empty">' + (waiting === 0 && loaded ? "You are all caught up. New replies land here the moment they arrive." : "No " + (realOnly ? "verified " : "") + "replies" + (active === "all" ? "" : " on " + active) + " yet. As your campaigns run, every real reply lands here, auto-classified.") + "</div>");
+      if (openRid) {
+        var host = listWrap.querySelector('.resp-item[data-rid="' + openRid + '"]');
+        if (host) renderThread(host, openRid); else openRid = null;
+      }
     }
+
     filter.addEventListener("click", function (e) {
+      var rt = e.target.closest(".realtog");
+      if (rt) { realOnly = !realOnly; rt.classList.toggle("active", realOnly); paint(); return; }
+      var dt = e.target.closest(".donetog");
+      if (dt) { showDone = !showDone; dt.classList.toggle("active", showDone); paint(); return; }
       var cf = e.target.closest(".cf"); if (!cf) return;
       active = cf.dataset.c;
-      Array.prototype.forEach.call(filter.children, function (x) { x.classList.toggle("active", x === cf); });
+      Array.prototype.forEach.call(filter.querySelectorAll(".cf:not(.realtog):not(.donetog)"), function (x) { x.classList.toggle("active", x === cf); });
       paint();
     });
     paint();
 
-    function load() {
+    function load(quiet) {
       api("/response/list").then(function (d) {
         inbox = ((d && d.items) || []).map(mapProcessed);
-        loaded = true; paint(); wireActions();
-      }).catch(function () { loaded = true; paint(); });
+        people = (d && d.people) || {};
+        nudges = (d && d.nudges) || {};
+        timingUntil = (d && d.timingUntil) || {};
+        slaWindows = (d && d.windows) || {};
+        draftPerf = (d && d.draftPerf) || {};
+        sendAsMap = (d && d.sendAs) || {};
+        stats = (d && d.stats) || null;
+        booking = (d && d.booking) || "";
+        slaRules = {};
+        ((d && d.rules) || []).forEach(function (r) { slaRules[r.class] = r.sla; });
+        loaded = true; paint();
+      }).catch(function () { if (!quiet) { loaded = true; paint(); } });
     }
     load();
 
-    // Working inbox actions: Book / Suppress persist via the API and reload.
-    function wireActions() {
-      Array.prototype.forEach.call(listWrap.querySelectorAll("[data-act]"), function (btn) {
-        btn.addEventListener("click", function () {
-          var act = btn.getAttribute("data-act"), pid = btn.getAttribute("data-pid");
-          if (!pid) { toast("This reply isn't linked to a prospect yet."); return; }
-          btn.disabled = true;
-          send("/response/actions", "POST", { action: act, prospectId: pid })
-            .then(function (r) {
-              if (r.ok) { toast(act === "book" ? "Marked booked" : "Suppressed (do-not-contact)"); load(); refreshBadge(); }
-              else { toast("Could not " + act + " (" + (r.data.error || r.status) + ")"); btn.disabled = false; }
-            }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
-        });
-      });
+    // Live inbox: refresh every 45s unless a thread is open or a draft is typed,
+    // so new replies appear on their own and nothing you typed is ever lost.
+    var timer = setInterval(function () {
+      if (!document.body.contains(el)) { clearInterval(timer); return; }
+      if (openRid) return;
+      var ta = listWrap.querySelector("textarea");
+      if (ta && ta.value.trim()) return;
+      load(true);
+    }, 45000);
+
+    /* ---------- the thread panel: full history + answer on any channel ---------- */
+
+    function chanIcon(c) { return c === "email" ? "Email" : c === "linkedin" ? "LinkedIn" : c === "sms" ? "SMS" : c === "voice" ? "Call" : esc(c); }
+
+    // Same popup dialer OS Text uses: the call goes out on the recruiter's assigned
+    // line and lands in call history with recording + AI notes.
+    function openDialer(phone, name, company) {
+      var p = new URLSearchParams({ to: phone });
+      if (name) p.set("name", name);
+      if (company) p.set("company", company);
+      try {
+        var th = localStorage.getItem("ros_theme"), ac = localStorage.getItem("ros_accent");
+        if (th) p.set("theme", th);
+        if (ac) p.set("accent", ac);
+      } catch (err) { /* dialer falls back to its own theme */ }
+      window.open("/phone-widget?" + p.toString(), "ros-phone-widget", "width=380,height=620,popup=yes");
     }
+    function liProfileUrl(u) { return /^https?:/i.test(u) ? u : "https://" + String(u).replace(/^\/+/, ""); }
+    // Direct-contact handles for a row: the prospect record first, else what the
+    // reply itself carries (an SMS row's handle IS the phone, a LinkedIn row's the profile).
+    function contactFor(r) {
+      var s = r.prospectId ? people[r.prospectId] : null;
+      return {
+        phone: (s && s.phone) || (r.channel === "sms" ? r.email : "") || "",
+        linkedinUrl: (s && s.linkedinUrl) || (r.channel === "linkedin" && /linkedin\./i.test(r.email || "") ? r.email : "") || "",
+        company: (s && s.company) || ""
+      };
+    }
+    function contactBtns(phone, li, company, emailAddr) {
+      var out = "";
+      if (phone) out += '<button class="resp-btn ghost" data-act="call" data-phone="' + esc(phone) + '" data-company="' + esc(company || "") + '" title="Call ' + esc(phone) + ' from your assigned number (recorded, with AI notes)">Call</button>';
+      if (li) out += '<a class="resp-btn ghost" href="' + esc(liProfileUrl(li)) + '" target="_blank" rel="noopener" title="Open their LinkedIn profile in a new tab" style="text-decoration:none;display:inline-block">LinkedIn ↗</a>';
+      if (emailAddr) out += '<button class="resp-btn ghost" data-act="copyemail" data-v="' + esc(emailAddr) + '" title="Copy their email address">Copy email</button>';
+      return out;
+    }
+
+    function renderThread(host, ridv) {
+      var slot = host.querySelector(".resp-thread");
+      if (!slot) return;
+      var t = threads[ridv];
+      if (!t) {
+        slot.innerHTML = '<div class="muted" style="padding:10px 0">Loading the conversation…</div>';
+        api("/response/thread?id=" + encodeURIComponent(ridv)).then(function (d) {
+          if (d && d.entries) { threads[ridv] = d; if (openRid === ridv) renderThread(host, ridv); }
+          else slot.innerHTML = '<div class="muted" style="padding:10px 0">Could not load the conversation.</div>';
+        }).catch(function () { slot.innerHTML = '<div class="muted" style="padding:10px 0">Could not load the conversation.</div>'; });
+        return;
+      }
+      var bubbles = t.entries.map(function (en) {
+        var when = respAge(en.at) + " ago";
+        if (en.kind === "event") {
+          return '<div class="muted" style="font-size:11.5px;margin:6px 0;text-align:right">' + chanIcon(en.channel) + " · " + esc(en.text) + " · " + esc(when) + "</div>";
+        }
+        var out = en.dir === "out";
+        return '<div style="display:flex;justify-content:' + (out ? "flex-end" : "flex-start") + ';margin:7px 0">' +
+          '<div style="max-width:78%;padding:9px 12px;border-radius:12px;border:1px solid var(--border,#d8dbe0);' +
+            (out ? "background:var(--surface-2,#eef1f6);border-bottom-right-radius:4px" : "background:var(--surface,#fff);border-bottom-left-radius:4px") + '">' +
+            '<div style="font-size:11px;color:var(--text-dim,#7a8194);margin-bottom:3px">' + (out ? "You · " : "") + chanIcon(en.channel) + " · " + esc(when) + "</div>" +
+            '<div style="font-size:13px;white-space:pre-wrap">' + esc(en.text) + "</div>" +
+          "</div></div>";
+      }).join("");
+      var chanBar = "";
+      if (t.suppressed) {
+        chanBar = '<div class="note" style="margin:10px 0 0">This person asked not to be contacted, so sending is off. Remove them from the do-not-contact list first if this was a mistake.</div>';
+      } else {
+        var opts = [
+          { c: "email", on: t.channels.email, why: "No tracked mailbox for this person yet." },
+          { c: "linkedin", on: t.channels.linkedin, why: "No LinkedIn profile on file for this person." },
+          { c: "sms", on: t.channels.sms, why: "No mobile number on file (SMS is also off for BD prospects)." }
+        ];
+        var cur = host.getAttribute("data-chan") || (t.channels.email ? "email" : t.channels.linkedin ? "linkedin" : t.channels.sms ? "sms" : "");
+        if (cur && !opts.some(function (o) { return o.c === cur && o.on; })) cur = (opts.filter(function (o) { return o.on; })[0] || {}).c || "";
+        host.setAttribute("data-chan", cur);
+        var tabs = opts.map(function (o) {
+          return o.on
+            ? '<span class="cf' + (o.c === cur ? " active" : "") + '" data-chan="' + o.c + '">' + chanIcon(o.c) + "</span>"
+            : '<span class="cf" style="opacity:.45;cursor:not-allowed" title="' + esc(o.why) + '">' + chanIcon(o.c) + "</span>";
+        }).join("");
+        var hint = cur === "email"
+          ? (t.sendsAs && t.sendsAs.name
+              ? "Sends as <b>" + esc(t.sendsAs.name) + "</b> (" + esc(t.sendsAs.email) + "), threaded onto the conversation. The AI draft signs as them too."
+              : "Sends from the same mailbox that received their email, threaded onto the conversation.")
+          : cur === "linkedin" ? "Goes out through your connected LinkedIn account with normal pacing, so it looks human."
+          : cur === "sms" ? "Texts them from your recruiter line."
+          : "No channel is available for this person yet.";
+        // Objective-driven AI drafts: pick what the reply should accomplish and the
+        // drafter writes it from the whole conversation. Suggested per class.
+        var suggested = { positive: "book_call", soft_yes: "send_info", referral: "send_info", timing_objection: "close_polite", unclassified: "send_info" };
+        var anchorRow = null;
+        for (var ai = 0; ai < inbox.length; ai++) if (inbox[ai].id === ridv) { anchorRow = inbox[ai]; break; }
+        var sug = nudges[ridv] ? "nudge" : (anchorRow && suggested[anchorRow.cls]) || "send_info";
+        var objDefs = [["book_call", "Book a call"], ["send_info", "Answer & send info"], ["nudge", "Nudge"], ["forwardable", "Forwardable intro"], ["close_polite", "Polite close"]];
+        var objChips = objDefs.map(function (o) {
+          return '<button class="resp-btn ghost" data-act="draft" data-obj="' + o[0] + '"' + ' data-rid="' + esc(ridv) + '" title="AI drafts this reply from the whole conversation; you edit before sending">' +
+            (o[0] === sug ? "★ " : "") + o[1] + "</button>";
+        }).join(" ");
+        chanBar =
+          '<div class="chan-filter" style="margin:12px 0 8px">' + tabs + "</div>" +
+          (cur
+            ? '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 6px">' +
+                '<span class="muted" style="font-size:11.5px">Draft with AI:</span>' + objChips +
+              "</div>" +
+              '<textarea class="resp-reply-text" rows="3" placeholder="Type your reply, or let AI draft it above…" style="width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--border,#d8dbe0);border-radius:8px"></textarea>' +
+              '<div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">' +
+                '<button class="resp-btn" data-act="sendmsg" data-rid="' + esc(ridv) + '">Send on ' + chanIcon(cur) + "</button>" +
+                (booking ? '<button class="resp-btn ghost" data-act="insertlink" title="Insert your booking link">+ Booking link</button>' : "") +
+                (cur === "sms" ? '<span class="muted resp-sms-count" style="font-size:11.5px">0/300</span>' : "") +
+                '<span class="muted" style="font-size:11.5px">' + hint + "</span>" +
+              "</div>"
+            : "");
+      }
+      var who = t.person || {};
+      var facts = [who.title, who.company, who.status ? "status: " + String(who.status).replace(/_/g, " ") : null]
+        .filter(Boolean).map(esc).join(" · ");
+      var reach = contactBtns(who.phone, who.linkedinUrl, who.company, who.email);
+      slot.innerHTML =
+        (facts ? '<div class="muted" style="font-size:12px;margin:2px 0 6px">' + facts + "</div>" : "") +
+        (reach ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 6px">' + reach + "</div>" : "") +
+        '<div style="max-height:340px;overflow:auto;padding:2px 2px 0">' + (bubbles || '<div class="muted" style="font-size:12.5px">No history yet beyond this reply.</div>') + "</div>" +
+        chanBar;
+      var box = slot.querySelector("textarea");
+      // On-arrival AI pre-draft: waiting in the composer the moment the thread opens.
+      if (box && !box.value && anchorRow && anchorRow.suggested && anchorRow.suggested.text && !lastDraft[ridv]) {
+        box.value = anchorRow.suggested.text;
+        lastDraft[ridv] = anchorRow.suggested.text;
+        lastObj[ridv] = anchorRow.suggested.objective || "";
+        var noteEl = document.createElement("div");
+        noteEl.className = "muted";
+        noteEl.style.cssText = "font-size:11.5px;margin-top:4px";
+        noteEl.textContent = "AI drafted this from their reply the moment it arrived. Edit freely or clear it.";
+        box.parentNode.insertBefore(noteEl, box.nextSibling);
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      if (box) box.focus();
+    }
+
+    /* ---------- actions (one delegated listener survives every repaint) ---------- */
+
+    listWrap.addEventListener("click", function (e) {
+      var sa = e.target.closest("[data-showall]");
+      if (sa) {
+        e.preventDefault(); realOnly = false;
+        var rtog = filter.querySelector(".realtog"); if (rtog) rtog.classList.remove("active");
+        paint(); return;
+      }
+      var item = e.target.closest(".resp-item");
+      var chan = e.target.closest(".cf[data-chan]");
+      if (chan && item && chan.getAttribute("data-chan")) {
+        var keep = item.querySelector(".resp-thread textarea");
+        var draft = keep ? keep.value : "";
+        item.setAttribute("data-chan", chan.getAttribute("data-chan"));
+        renderThread(item, item.getAttribute("data-rid"));
+        var ta2 = item.querySelector(".resp-thread textarea");
+        if (ta2 && draft) ta2.value = draft;
+        return;
+      }
+      var btn = e.target.closest("[data-act]");
+      if (!btn || !item) return;
+      var act = btn.getAttribute("data-act");
+      var ridv = btn.getAttribute("data-rid") || item.getAttribute("data-rid");
+
+      if (act === "call") {
+        var num = btn.getAttribute("data-phone");
+        if (!num) { toast("No phone number on file."); return; }
+        var nmEl = item.querySelector(".resp-name");
+        openDialer(num, nmEl ? nmEl.textContent : "", btn.getAttribute("data-company") || "");
+        return;
+      }
+      if (act === "copyemail") {
+        var v = btn.getAttribute("data-v") || "";
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(v).then(function () { toast("Email address copied"); }, function () { toast(v); });
+        } else { toast(v); }
+        return;
+      }
+      if (act === "thread") {
+        if (openRid === ridv) { openRid = null; paint(); return; }
+        openRid = ridv;
+        Array.prototype.forEach.call(listWrap.querySelectorAll(".resp-thread"), function (s) { s.innerHTML = ""; });
+        renderThread(item, ridv);
+        return;
+      }
+      if (act === "draft") {
+        var dchan = item.getAttribute("data-chan") || "email";
+        var dta = item.querySelector(".resp-thread textarea");
+        btn.disabled = true;
+        var oldLabel = btn.textContent;
+        btn.textContent = "Drafting…";
+        send("/response/actions", "POST", { action: "draft", responseId: ridv, objective: btn.getAttribute("data-obj"), channel: dchan })
+          .then(function (r) {
+            btn.disabled = false; btn.textContent = oldLabel;
+            if (r.ok && r.data && r.data.text) {
+              if (dta) { dta.value = r.data.text; dta.dispatchEvent(new Event("input", { bubbles: true })); dta.focus(); }
+              lastDraft[ridv] = r.data.text;
+              lastObj[ridv] = btn.getAttribute("data-obj") || "";
+            } else { toast((r.data && (r.data.detail || r.data.error)) || "Could not draft"); }
+          }).catch(function () { btn.disabled = false; btn.textContent = oldLabel; toast("Could not reach the server."); });
+        return;
+      }
+      if (act === "insertlink") {
+        var lta = item.querySelector(".resp-thread textarea");
+        if (lta && booking) {
+          lta.value = (lta.value ? lta.value.replace(/\s+$/, "") + "\n\n" : "") + booking;
+          lta.dispatchEvent(new Event("input", { bubbles: true }));
+          lta.focus();
+        }
+        return;
+      }
+      if (act === "snoozemenu") {
+        var pop = btn.parentNode.querySelector(".resp-snooze-pop");
+        if (pop) pop.style.display = pop.style.display === "none" ? "" : "none";
+        return;
+      }
+      if (act === "snooze" || act === "snoozeuntil") {
+        var untilIso = act === "snoozeuntil"
+          ? btn.getAttribute("data-until")
+          : new Date(Date.now() + (parseInt(btn.getAttribute("data-h"), 10) || 24) * 3600000).toISOString();
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "snooze", responseId: ridv, until: untilIso })
+          .then(function (r) {
+            if (r.ok) {
+              toast(act === "snoozeuntil" ? "Scheduled. It comes back on top " + new Date(untilIso).toLocaleDateString(undefined, { month: "short", day: "numeric" }) + "." : "Snoozed. It comes back on top.");
+              if (openRid === ridv) openRid = null; load();
+            } else { toast("Could not snooze"); btn.disabled = false; }
+          })
+          .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      if (act === "refprospect") {
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "referral_prospect", responseId: ridv })
+          .then(function (r) {
+            if (r.ok) { toast((r.data && r.data.detail) || "Added to your pipeline"); btn.textContent = "Added ✓"; }
+            else { toast((r.data && (r.data.detail || r.data.error)) || "Could not add"); btn.disabled = false; }
+          })
+          .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      if (act === "sendmsg") {
+        var ta = item.querySelector(".resp-thread textarea");
+        var txt = ta ? (ta.value || "").trim() : "";
+        if (!txt) { toast("Type a reply first."); return; }
+        var chosen = item.getAttribute("data-chan") || "email";
+        // Draft telemetry: was the AI draft sent as-is, edited, or not used at all?
+        var drafted = lastDraft[ridv] ? (txt === lastDraft[ridv].trim() ? "verbatim" : "edited") : "none";
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "send", responseId: ridv, channel: chosen, text: txt, aiDraft: drafted, aiObjective: lastObj[ridv] || undefined })
+          .then(function (r) {
+            if (r.ok) { toast((r.data && r.data.note) || "Sent"); delete threads[ridv]; delete lastDraft[ridv]; openRid = null; load(); refreshBadge(); }
+            else { toast((r.data && (r.data.detail || r.data.error)) || "Could not send"); btn.disabled = false; }
+          }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      if (act === "done" || act === "undone") {
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "handle", responseId: ridv, handled: act === "done" })
+          .then(function (r) { if (r.ok) { toast(act === "done" ? "Cleared from your list" : "Back on your list"); load(); refreshBadge(); } else { toast("Could not update"); btn.disabled = false; } })
+          .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      if (act === "delete") {
+        if (!confirm("Delete this reply from your inbox? It will not come back on the next sync.")) return;
+        btn.disabled = true;
+        send("/response/actions", "POST", { action: "delete", responseId: ridv })
+          .then(function (r) { if (r.ok) { toast("Deleted"); if (openRid === ridv) openRid = null; load(); refreshBadge(); } else { toast("Could not delete"); btn.disabled = false; } })
+          .catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+        return;
+      }
+      // Prospect actions: book / suppress.
+      var pid = btn.getAttribute("data-pid");
+      if (!pid) { toast("This reply isn't linked to a prospect yet."); return; }
+      btn.disabled = true;
+      send("/response/actions", "POST", { action: act, prospectId: pid })
+        .then(function (r) {
+          if (r.ok) { toast(act === "book" ? "Marked booked" : "Suppressed (do-not-contact)"); load(); refreshBadge(); }
+          else { toast("Could not " + act + " (" + ((r.data && r.data.error) || r.status) + ")"); btn.disabled = false; }
+        }).catch(function () { toast("Could not reach the server."); btn.disabled = false; });
+    });
+
+    // SMS length counter, live while typing.
+    listWrap.addEventListener("input", function (e) {
+      var ta = e.target;
+      if (!ta || !ta.classList || !ta.classList.contains("resp-reply-text")) return;
+      var item = ta.closest(".resp-item");
+      var counter = item && item.querySelector(".resp-sms-count");
+      if (!counter) return;
+      var n = (ta.value || "").length;
+      counter.textContent = n + "/300";
+      counter.style.color = n > 300 ? "var(--danger,#c02929)" : "";
+    });
+
+    // Keyboard triage: work the list without touching the mouse.
+    function kbRows() { return listWrap.querySelectorAll(".resp-item"); }
+    function kbSelect(i) {
+      var rows = kbRows(); if (!rows.length) return;
+      kbIndex = Math.max(0, Math.min(rows.length - 1, i));
+      Array.prototype.forEach.call(rows, function (x, n) {
+        x.style.outline = n === kbIndex ? "2px solid var(--brand,#2e5bd7)" : "";
+        x.style.outlineOffset = n === kbIndex ? "2px" : "";
+      });
+      rows[kbIndex].scrollIntoView({ block: "nearest" });
+    }
+    function kbKey(e) {
+      if (!document.body.contains(el)) { document.removeEventListener("keydown", kbKey); return; }
+      var t = e.target;
+      if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName || "")) {
+        if (e.key === "Escape" && openRid) { openRid = null; paint(); }
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      var rows = kbRows();
+      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); kbSelect(kbIndex + 1); return; }
+      if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); kbSelect(kbIndex - 1); return; }
+      if (kbIndex < 0 || !rows[kbIndex]) { if (e.key === "Escape" && openRid) { openRid = null; paint(); } return; }
+      var sel = rows[kbIndex];
+      if (e.key === "Enter" || e.key === "o" || e.key === "r") {
+        e.preventDefault();
+        var tb = sel.querySelector('[data-act="thread"]'); if (tb) tb.click();
+      } else if (e.key === "e") {
+        var db = sel.querySelector('[data-act="done"]'); if (db) db.click();
+      } else if (e.key === "s") {
+        var sb = sel.querySelector('[data-act="snoozemenu"]'); if (sb) sb.click();
+      } else if (e.key === "Escape" && openRid) { openRid = null; paint(); }
+    }
+    document.addEventListener("keydown", kbKey);
 
     // rules matrix (product reference: how every reply is classified + routed)
     var rows = REF.rules.map(function (r) {
@@ -5113,19 +5783,89 @@
     matrix.style.marginTop = "18px";
     matrix.innerHTML = "<h3>Classification &amp; routing rules</h3><div style=\"overflow:auto\"><table class=\"matrix\"><thead><tr><th>Class</th><th>Triggers</th><th>System action</th><th>SLA</th></tr></thead><tbody>" + rows + "</tbody></table></div>";
     el.appendChild(matrix);
+
+    /* ---------- one reply row ---------- */
+
+    function touchLine(r) {
+      var s = r.prospectId ? people[r.prospectId] : null;
+      if (!s) return "";
+      var bits = [];
+      ["email", "linkedin", "sms", "voice"].forEach(function (c) {
+        var o = (s.out && s.out[c]) || 0, i = (s.in && s.in[c]) || 0;
+        if (o || i) bits.push(chanIcon(c) + " " + (o ? o + " out" : "") + (o && i ? " / " : "") + (i ? i + " in" : ""));
+      });
+      if (!bits.length) return "";
+      var last = s.lastOutAt ? " · last touch " + respAge(s.lastOutAt) + " ago" : "";
+      return '<div class="muted" style="font-size:11.5px;margin:4px 0 0">Every touch: ' + esc(bits.join(" · ") + last) + "</div>";
+    }
+
+    function respItem(r) {
+      var pid = r.prospectId ? ' data-pid="' + esc(r.prospectId) + '"' : "";
+      var ridAttr = ' data-rid="' + esc(r.id) + '"';
+      var age = r.receivedAt ? respAge(r.receivedAt) : "";
+      var agePill = "";
+      if (age) {
+        if (isOverdue(r)) agePill = '<span class="cls" style="background:var(--danger,#c02929);color:#fff" title="Past the response window for this reply type. Speed wins: interested replies answered inside minutes book at a multiple of ones that wait days.">' + esc(age) + " · overdue</span>";
+        else if (isAtRisk(r)) agePill = '<span class="cls" style="background:#f6a723;color:#3a2a00" title="Getting close to the response window. Answer now while it is warm.">' + esc(age) + " · due soon</span>";
+        else agePill = '<span class="cls" style="background:var(--surface-2,#eef1f6);color:var(--text-muted,#5a6172)">' + esc(age) + "</span>";
+      }
+      var draftPill = (r.suggested && !r.handled)
+        ? '<span class="cls" style="background:#e8f0fe;color:#2e5bd7" title="An AI reply is already drafted and waiting in the composer. Open, skim, send.">draft ready</span>'
+        : "";
+      var quietPill = nudges[r.id]
+        ? '<span class="cls" style="background:#f6a723;color:#3a2a00" title="You answered, then it went quiet. A light nudge inside two days keeps the thread alive; three silent days roughly halves the booking odds.">quiet ' + esc(String(nudges[r.id])) + "h · nudge?</span>"
+        : (snoozeReturned(r) && !r.handled ? '<span class="cls" style="background:#f6a723;color:#3a2a00" title="Snooze ended, back on your list">back from snooze</span>' : "");
+      var doneBtn = r.handled
+        ? '<button class="resp-btn ghost" data-act="undone"' + ridAttr + ' title="Put this reply back on your list">Reopen</button>'
+        : '<button class="resp-btn ghost" data-act="done"' + ridAttr + ' title="Clear from today\'s list">Done</button>';
+      return '<div class="resp-item"' + ridAttr + (r.handled ? ' style="opacity:.62"' : "") + '><div class="resp-top">' +
+        '<span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
+        '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + (r.email ? " · " + esc(r.email) : "") +
+          (sendAsMap[r.id] && sendAsMap[r.id].name ? ' · <span title="Answers go out from ' + esc(sendAsMap[r.id].email) + ', this recruiter\'s own mailbox, threaded onto the conversation.">replies as <b>' + esc(sendAsMap[r.id].name) + "</b></span>" : "") +
+          "</div></div>" +
+        agePill + quietPill + draftPill +
+        '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
+        '<div class="resp-text">"' + esc(r.text) + '"</div>' +
+        touchLine(r) +
+        '<div class="resp-thread"></div>' +
+        '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") +
+        '<button class="resp-btn" data-act="thread"' + ridAttr + ' title="Open the whole conversation and answer on any channel">Reply</button>' +
+        (timingUntil[r.id] && r.captured && r.captured.timing
+          ? '<button class="resp-btn ghost" data-act="snoozeuntil" data-until="' + esc(timingUntil[r.id]) + '"' + ridAttr + ' title="They said &quot;' + esc(r.captured.timing) + '&quot;. Snooze this until then; it comes back on top when the window opens.">Comeback ' + esc(new Date(timingUntil[r.id]).toLocaleDateString(undefined, { month: "short", day: "numeric" })) + "</button>"
+          : "") +
+        (r.captured && r.captured.referralTo
+          ? (function () {
+              var nm = String(r.captured.referralTo).replace(/^(my|our|the)\s+/i, "").replace(/^(colleague|coworker|co-worker|friend|boss|manager|partner)\s+/i, "").trim();
+              return '<button class="resp-btn ghost" data-act="refprospect"' + ridAttr + ' title="They referred you to ' + esc(r.captured.referralTo) + '. Add them to your pipeline with the referrer as context.">+ Add ' + esc(nm.split(/\s+/).slice(0, 2).join(" ") || "referral") + "</button>";
+            })()
+          : "") +
+        (function () { var c = contactFor(r); return contactBtns(c.phone, c.linkedinUrl, c.company, ""); })() +
+        '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
+        '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
+        doneBtn +
+        '<span style="position:relative;display:inline-block">' +
+          '<button class="resp-btn ghost" data-act="snoozemenu"' + ridAttr + ' title="Hide this until later; it comes back on top of the list">Snooze</button>' +
+          '<span class="resp-snooze-pop" style="display:none;position:absolute;bottom:110%;left:0;z-index:30;background:var(--surface,#fff);border:1px solid var(--border,#d8dbe0);border-radius:10px;box-shadow:0 8px 24px rgba(20,24,40,.14);padding:6px;white-space:nowrap">' +
+            '<button class="resp-btn ghost" data-act="snooze" data-h="4"' + ridAttr + '>4 hours</button> ' +
+            '<button class="resp-btn ghost" data-act="snooze" data-h="24"' + ridAttr + '>Tomorrow</button> ' +
+            '<button class="resp-btn ghost" data-act="snooze" data-h="72"' + ridAttr + '>3 days</button> ' +
+            '<button class="resp-btn ghost" data-act="snooze" data-h="168"' + ridAttr + '>Next week</button>' +
+          "</span>" +
+        "</span>" +
+        '<button class="resp-btn ghost" data-act="delete"' + ridAttr + ' title="Delete from the inbox for good">Delete</button>' +
+        "</div></div>";
+    }
   }
 
-  function respItem(r) {
-    var pid = r.prospectId ? ' data-pid="' + esc(r.prospectId) + '"' : "";
-    return '<div class="resp-item"><div class="resp-top">' +
-      '<span class="avatar" style="background:' + colorFor(r.name) + '">' + esc(initials(r.name)) + "</span>" +
-      '<div><div class="resp-name">' + esc(r.name) + '</div><div class="resp-chan">' + esc(r.channel) + " · " + esc(r.source) + "</div></div>" +
-      '<span class="cls cls-' + r.cls + '">' + esc(clsLabel(r.cls)) + "</span></div>" +
-      '<div class="resp-text">"' + esc(r.text) + '"</div>' +
-      '<div class="resp-actions">' + r.actions.map(function (a) { return '<span class="resp-act">' + esc(a) + "</span>"; }).join("") +
-      '<button class="resp-btn" data-act="book"' + pid + '>Book</button>' +
-      '<button class="resp-btn ghost" data-act="suppress"' + pid + '>Suppress</button>' +
-      "</div></div>";
+  /** Short human age: 12m, 3h, 2d. */
+  function respAge(iso) {
+    var ms = Date.now() - Date.parse(iso);
+    if (isNaN(ms) || ms < 0) ms = 0;
+    var m = Math.round(ms / 60000);
+    if (m < 60) return m + "m";
+    var h = Math.round(m / 60);
+    if (h < 24) return h + "h";
+    return Math.round(h / 24) + "d";
   }
 
   /* ---------------- In-Market Leads (BD: who is hiring right now) ------------ */
@@ -7662,8 +8402,17 @@
     return '<span class="wu-repbar"><span class="wu-reptrack"><span class="wu-repfill" style="width:' + Math.max(2, Math.min(100, p)) + '%;background:' + c + '"></span></span><b style="color:' + c + '">' + p + '%</b></span>';
   }
 
-  function wuBadge(r) {
+  // Takes the whole domain row so a warming domain can say WHERE it is on its
+  // clock ("Warming · day 16 of 30") instead of a bare "Warming". The target
+  // comes from the server (readyAfterDays: 14 for Sending.ac/Gmail fleets, 30
+  // for the internal SMTP server); older payloads without it fall back to the
+  // plain label.
+  function wuBadge(d) {
+    var r = d.readiness;
     var label = r === "ready" ? "Ready to send" : r === "attention" ? "Needs attention" : "Warming";
+    if (r === "warming" && d.days != null && d.readyAfterDays) {
+      label = "Warming · day " + Math.min(Math.floor(d.days) + 1, d.readyAfterDays) + " of " + d.readyAfterDays;
+    }
     return '<span class="wu-badge ' + r + '">' + label + '</span>';
   }
 
@@ -7680,16 +8429,23 @@
   // Plain-English reason for a domain's reputation given how long it has been
   // warming, so a low number on a brand-new domain reads as "expected", not
   // "problem". A low number on a MATURE domain is the real signal to act on.
-  function wuRepReason(days, rep) {
+  function wuRepReason(days, rep, target) {
     if (rep == null) return "";
     var d = days == null ? 0 : days;
+    var goal = target || 14;
     var msg, tone = "muted";
     if (d < 3) {
       msg = "Normal for a new domain. It climbs as warm-up sends land, get pulled from spam, opened and replied to. Expect 90%+ within 1 to 2 weeks.";
     } else if (d < 7) {
       msg = rep >= 80 ? "Ramping well, on track to reach 90%+ soon." : "Still early days, reputation is expected to keep rising this week.";
     } else if (d < 14) {
-      msg = rep >= 85 ? "Almost there, nearly warmed." : (rep >= 70 ? "Climbing, give it the rest of the two weeks." : (tone = "warn", "Lower than expected at this age. Watch it. If it does not rise, ease the daily volume."));
+      msg = rep >= 85 ? "Almost there, reputation is nearly warmed." : (rep >= 70 ? "Climbing, give it the rest of the two weeks." : (tone = "warn", "Lower than expected at this age. Watch it. If it does not rise, ease the daily volume."));
+    } else if (d < goal) {
+      // Reputation can max out well before the clock does: on the internal SMTP
+      // server the domain still holds the full warm period before cold sends.
+      if (rep >= 95) { tone = "ok"; msg = "Reputation is fully warmed. Holding for the full " + goal + "-day warm before cold sends, mailbox providers trust age as much as score."; }
+      else if (rep >= 85) { tone = "ok"; msg = "Warming well, on track for the " + goal + "-day mark."; }
+      else { tone = "warn"; msg = "Lower than expected at this age. Watch it. If it does not rise, ease the daily volume."; }
     } else {
       if (rep >= 95) { tone = "ok"; msg = "Fully warmed and steady. Ready to send."; }
       else if (rep >= 85) { tone = "ok"; msg = "Warmed and healthy."; }
@@ -7753,7 +8509,7 @@
         '<span style="flex:1"></span>' +
         '<button class="btn btn-ghost btn-sm" id="wuRefresh"' + (wuLoading ? " disabled" : "") + '>' + (wuLoading ? "Refreshing…" : "↻ Refresh now") + '</button>' +
       '</div>' +
-      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam; a domain is <b>Ready to send</b> after 14+ days warming at 95%+ average reputation. Click a domain for its mailboxes.</div>' +
+      '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam. A domain is <b>Ready to send</b> at 95%+ average reputation after its full warm period: <b>14+ days</b> on provider-run mailboxes (Sending.ac, Gmail), <b>30+ days</b> on the Internal SMTP server, which earns its reputation from scratch. Each warming domain shows its day count toward that mark. Click a domain for its mailboxes.</div>' +
       (wuData.portalNote ? '<div class="wu-sub"><b>Portal split:</b> ' + esc(wuData.portalNote) + '</div>' : '');
     // Infrastructure split cards: only providers that actually have mailboxes.
     var infraCards = "";
@@ -7779,11 +8535,11 @@
         '<td><span class="wu-caret' + (open ? " open" : "") + '">▸</span> <b>' + esc(d.domain) + '</b>' + wuInfraChip(d.infra) + wuKindChip(d.mailboxKind) + (d.emailIds && d.emailIds.total ? '<div class="muted" style="font-size:11px">' + d.emailIds.total + ' Email ID' + (d.emailIds.total === 1 ? "" : "s") + ' on this portal' + (d.emailIds.error ? ', <span style="color:#b3261e">' + d.emailIds.error + ' in error</span>' : '') + '</div>' : '') + '</td>' +
         '<td>' + d.warming + '/' + d.mailboxes + (d.paused ? ' <span class="muted">(' + d.paused + ' paused)</span>' : '') + '</td>' +
         '<td>' + days + '</td>' +
-        '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation) + '</td>' +
+        '<td>' + wuRepCell(d.avgReputation) + wuRepReason(d.days, d.avgReputation, d.readyAfterDays) + '</td>' +
         '<td>' + wuHealthChip(d.health) + '</td>' +
         '<td>' + wuDnsPills(d.dns) + '</td>' +
         '<td>' + (d.warmupPerDay != null ? '<b>' + d.warmupPerDay + '</b><span class="muted" style="font-size:11px">/day</span>' + (d.replyRatePct != null ? '<div class="muted" style="font-size:11px">' + d.replyRatePct + '% replies</div>' : '') : '<span class="muted">n/a</span>') + '</td>' +
-        '<td>' + wuBadge(d.readiness) + '</td>' +
+        '<td>' + wuBadge(d) + '</td>' +
       '</tr>';
       if (!open) return main;
       var acts = (d.actions && d.actions.length)
@@ -11242,6 +11998,149 @@
     if (d < 86400) return Math.floor(d / 3600) + "h ago"; return Math.floor(d / 86400) + "d ago";
   }
   var AP_CH = { email: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', linkedin: '<svg class="isvg" aria-hidden="true"><use href="#i-briefcase"/></svg>', voice: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' };
+
+  /* ===========================================================================
+   * BD REPORTS  ·  the whole outbound funnel in one place (admin, BD motion).
+   * Ties three live feeds together so an owner can SEE who is doing what:
+   *   /mpc-stats            -> sends + replies, per recruiter
+   *   /site-visitors        -> companies that came back to the site + the exact
+   *                            people we emailed there (the "who is it" step)
+   *   /linkedin/os?view=watch_connect -> video-watch -> LinkedIn connect funnel
+   *                            (requested -> sent -> accepted -> meeting), per recruiter
+   * Read-only; no new writes. It is the visual answer to "email sent -> we found
+   * out who -> we connected with them on LinkedIn."
+   * ======================================================================== */
+  function renderBdReports(el) {
+    el.innerHTML = head("BD Reports",
+      "Your whole outbound funnel in one place: what every recruiter sent, who came back to the site, who we identified, and who we connected with on LinkedIn after the email went out.") +
+      '<div id="rpBody">' + loading() + "</div>";
+
+    Promise.all([
+      api("/mpc-stats").catch(function () { return null; }),
+      api("/site-visitors").catch(function () { return null; }),
+      api("/linkedin/os?view=watch_connect").catch(function () { return null; }),
+      api("/mpc-watchers").catch(function () { return null; })
+    ]).then(function (res) {
+      var m = res[0] || {}, v = res[1] || {}, w = res[2] || {};
+      var wt = (res[3] && res[3].present) ? res[3] : { summary: {}, watchers: [] };
+      var wsum = wt.summary || {};
+      var body = $("#rpBody"); if (!body) return;
+
+      var comps = (v && v.present && v.companies) || [];
+      var identifiedPeople = comps.reduce(function (n, c) { return n + ((c.people || []).length); }, 0);
+      // Watchers feed both the funnel's tail and their own action table. Prefer the real MPC watcher
+      // count; fall back to the in-app watch_connect funnel when present.
+      var watched = wsum.watched || 0;
+      var connectSent = (wsum.connectSent || 0) || (w.sent || 0);
+      var accepted = (wsum.accepted || 0) || (w.accepted || 0);
+
+      // ---- The funnel, left to right. Each stage is a real measured number. ----
+      var stages = [
+        { k: "Emails sent", val: (m.sentTotal || 0), sub: (m.sentToday || 0) + " today", acc: "b" },
+        { k: "Replies", val: (m.repliesTotal || 0), sub: (m.replyRate || 0) + "% reply rate", acc: "g" },
+        { k: "Videos watched", val: watched, sub: (wsum.completed || 0) + " watched to end", acc: "c" },
+        { k: "People identified", val: (identifiedPeople + watched), sub: "site + video watchers", acc: "c" },
+        { k: "LinkedIn requests", val: connectSent, sub: "sent to watchers", acc: "v" },
+        { k: "Connections accepted", val: accepted, sub: (w.meetings || 0) + " to meetings", acc: "p" }
+      ];
+      var funnel = '<div class="rp-funnel">' + stages.map(function (s, i) {
+        var arrow = i < stages.length - 1 ? '<div class="rp-arrow">&rsaquo;</div>' : "";
+        return '<div class="rp-stage rp-' + s.acc + '"><div class="rp-val">' + esc(String(s.val)) + '</div><div class="rp-k">' + esc(s.k) + '</div><div class="rp-sub">' + esc(s.sub) + "</div></div>" + arrow;
+      }).join("") + "</div>";
+
+      // ---- Team scoreboard: who is doing what. ----
+      var recs = m.recruiters || [];
+      var scoreboard = recs.length
+        ? '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+            "<th>Recruiter</th><th>Sent today</th><th>Sent total</th><th>Replies</th><th>Reply rate</th>" +
+          "</tr></thead><tbody>" +
+          recs.map(function (r) {
+            return "<tr><td><b>" + esc(r.name) + "</b></td><td>" + (r.sentToday || 0) + "</td><td>" + (r.sentTotal || 0) + "</td><td>" + (r.replies || 0) + "</td><td>" + (r.replyRate || 0) + "%</td></tr>";
+          }).join("") + "</tbody></table></div>"
+        : emptyCard("No sends yet. As the engine sends, per-recruiter totals appear here.");
+
+      // ---- Who we're connecting with: identified visitors + the connect funnel. ----
+      var connectRows = comps.map(function (c) {
+        return (c.people || []).map(function (p) {
+          var li = p.linkedin ? '<a href="' + esc(p.linkedin) + '" target="_blank" rel="noopener">LinkedIn</a>' : '<span class="note">no profile yet</span>';
+          var when = (c.lastVisit || "").slice(0, 10);
+          return "<tr><td><b>" + esc(p.name || p.email) + "</b>" + (p.title ? '<div class="lr-sub">' + esc(p.title) + "</div>" : "") + "</td>" +
+            "<td>" + esc(c.company) + "</td><td>" + esc(p.recruiter || "-") + "</td><td>" + esc(when) + "</td><td>" + li + "</td></tr>";
+        }).join("");
+      }).join("");
+      var connectTable = connectRows
+        ? '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+            "<th>Person</th><th>Company</th><th>Emailed by</th><th>Visited</th><th>Connect</th>" +
+          "</tr></thead><tbody>" + connectRows + "</tbody></table></div>"
+        : '<div class="empty">No site visitors identified yet. When a company we emailed returns to the site, the exact people we contacted there appear here, ready to connect on LinkedIn.</div>';
+
+      // ---- Watched the video -> send the LinkedIn connection request. The action table. ----
+      // Each row is someone who OPENED/PLAYED/COMPLETED their personalized video. The button files a
+      // real connection request through LinkedIn OS from the recruiter who emailed them.
+      var evLabel = { complete: "Watched to end", play: "Played", open: "Opened" };
+      var evCls = { complete: "good", play: "good", open: "amber" };
+      function connectBtn(r) {
+        var st = String(r.connectStatus || "");
+        if (st === "accepted") return '<span class="sv good" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">ACCEPTED</span>';
+        if (st === "sent" || st === "queued") return '<span class="sv" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">REQUEST ' + esc(st.toUpperCase()) + "</span>";
+        if (st === "suppressed") return '<span class="sv bad" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">SUPPRESSED</span>';
+        if (!r.linkedin) return '<span class="note">no profile yet</span>';
+        return '<button class="resp-btn" data-connect="' + esc(r.email) + '">Send request</button>';
+      }
+      var watchers = wt.watchers || [];
+      var watcherRows = watchers.map(function (r) {
+        var li = r.linkedin ? ' &middot; <a href="' + esc(r.linkedin) + '" target="_blank" rel="noopener">profile</a>' : "";
+        return '<tr data-row="' + esc(r.email) + '"><td><b>' + esc(r.name || r.email) + "</b>" + (r.title ? '<div class="lr-sub">' + esc(r.title) + "</div>" : "") + "</td>" +
+          "<td>" + esc(r.company || "-") + '<div class="lr-sub">' + esc(r.role || "") + "</div></td>" +
+          '<td><span class="sv ' + (evCls[r.event] || "amber") + '" style="font-size:11px">' + esc(evLabel[r.event] || r.event) + "</span></td>" +
+          "<td>" + esc(r.recruiter || "-") + li + "</td>" +
+          "<td>" + esc((r.watchedAt || "").slice(0, 10)) + "</td>" +
+          '<td class="rp-connect-cell">' + connectBtn(r) + "</td></tr>";
+      }).join("");
+      var watcherTable = watchers.length
+        ? '<div class="stat-grid" style="margin-bottom:12px">' +
+            '<div class="stat"><div class="sv">' + watched + '</div><div class="sl">Watched their video</div></div>' +
+            '<div class="stat"><div class="sv">' + (wsum.completed || 0) + '</div><div class="sl">Watched to the end</div></div>' +
+            '<div class="stat"><div class="sv">' + connectSent + '</div><div class="sl">Requests sent</div></div>' +
+            '<div class="stat"><div class="sv good">' + accepted + '</div><div class="sl">Accepted</div></div>' +
+          "</div>" +
+          '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+            "<th>Person</th><th>Company &amp; role</th><th>Engagement</th><th>Emailed by</th><th>Watched</th><th>Connect</th>" +
+          "</tr></thead><tbody>" + watcherRows + "</tbody></table></div>"
+        : '<div class="empty">No one has watched their video yet. As recipients open the video email, whoever watches shows here with a one-click connection request from the recruiter who emailed them.</div>';
+
+      body.innerHTML =
+        '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 12px">The funnel &middot; email to connection</h3>' + funnel +
+          '<div class="note" style="margin-top:10px">Left to right: every number is measured, not estimated. A watch is attributed to the exact person we emailed (the video link carries their id), and the connection request goes out from the recruiter who sent them the email.</div></div>' +
+        '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 12px">Team scoreboard &middot; who is doing what</h3>' + scoreboard + "</div>" +
+        '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 6px">Watched the video &middot; send the LinkedIn request</h3>' +
+          '<div class="note" style="margin-bottom:10px">Everyone who opened or played their personalized video. Send a connection request from the recruiter who emailed them, in one click.</div>' + watcherTable + "</div>" +
+        '<div class="card"><h3 style="margin:0 0 6px">Who else is on your site</h3>' +
+          '<div class="note" style="margin-bottom:10px">People at companies that came back to lumesp.com after we emailed them, matched to exactly who we contacted there.</div>' + connectTable + "</div>";
+
+      // Wire the Send-request buttons: fire the real connection request, reflect status inline.
+      body.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-connect]"); if (!b) return;
+        var email = b.getAttribute("data-connect");
+        b.disabled = true; b.textContent = "Sending...";
+        send("/mpc-connect", "POST", { email: email }).then(function (r) {
+          var cell = b.closest(".rp-connect-cell");
+          if (r.ok && r.data && (r.data.status === "sent" || r.data.status === "queued")) {
+            if (cell) cell.innerHTML = '<span class="sv" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">REQUEST ' + esc(String(r.data.status).toUpperCase()) + "</span>";
+            toast("Connection request sent from the recruiter who emailed them.");
+          } else if (r.ok && r.data && r.data.status === "suppressed") {
+            if (cell) cell.innerHTML = '<span class="sv bad" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">SUPPRESSED</span>';
+            toast(r.data.reason || "Skipped, this person is on the do-not-contact list.");
+          } else {
+            b.disabled = false; b.textContent = "Send request";
+            toast("Could not send (" + ((r.data && (r.data.error || r.data.reason)) || r.status) + ").");
+          }
+        }).catch(function () { b.disabled = false; b.textContent = "Send request"; toast("Could not reach the server."); });
+      });
+    }).catch(function () {
+      var body = $("#rpBody"); if (body) body.innerHTML = needsSetup();
+    });
+  }
 
   function renderAutopilot(el) {
     el.innerHTML = head("Autopilot",
@@ -20493,7 +21392,7 @@
         var body = $("#anBody"); if (!body) return;
         var ov = res[0] || {};
         var prospects = (res[1] && res[1].prospects) || [];
-        var replies = (res[2] && res[2].items) || [];
+        var replies = anReplies((res[2] && res[2].items) || [], prospects);
         var curated = ((res[3] || {})[bd ? "bd" : "recruiting"]) || {};
 
         if (!ov.activeProspects && !prospects.length && !replies.length) {
@@ -20873,6 +21772,37 @@
     "won": { title: "Closed this period", sub: "Deals closed this period and the campaign that earned them." }
   };
 
+  // /response/list serves nested { inbound, classification } rows from the real
+  // backend but flat rows from the demo shim. Analytics must read one shape, so
+  // flatten the real rows (mapProcessed), then join each reply to its prospect
+  // record to fill in the person's name, campaign and recruiter. Rows analytics
+  // should never count are dropped here too: auto-replies (OOO bots) and real
+  // rows with no matched prospect (inbox warm-up traffic, not conversations).
+  function anReplies(items, prospects) {
+    var byId = {};
+    (prospects || []).forEach(function (p) { if (p && p.id) byId[p.id] = p; });
+    var out = [];
+    (items || []).forEach(function (raw) {
+      if (!raw) return;
+      var real = !!raw.inbound;
+      var r = real ? mapProcessed(raw) : raw;
+      if (rClass(r) === "auto_reply") return;
+      if (real && !respVerified(r)) return;
+      var p = r.prospectId ? byId[r.prospectId] : null;
+      if (p) {
+        if (!r.name || r.name === "Unknown") r.name = p.fullName || r.name;
+        r.campaign = p.campaign || r.campaign;
+        r.owner = r.owner || p.owner;
+        r.company = r.company || p.company;
+      }
+      // Demo rows carry the campaign name in `source`; real rows carry a
+      // provider slug there, which must never reach the screen.
+      if (!r.campaign && !real) r.campaign = r.source;
+      out.push(r);
+    });
+    return out;
+  }
+
   function renderAnalyticsDetail(el, detail) {
     var meta = AN_DETAILS[detail];
     if (!meta) { location.hash = "analytics"; return; }
@@ -20902,7 +21832,7 @@
       var host = $("#anDetailBody"); if (!host) return;
       var ov = res[0] || {};
       var prospects = (res[1] && res[1].prospects) || [];
-      var replies = (res[2] && res[2].items) || [];
+      var replies = anReplies((res[2] && res[2].items) || [], prospects);
       host.innerHTML = anDetailHtml(detail, ov, prospects, replies, bd);
     }).catch(function () {
       var host = $("#anDetailBody"); if (host) host.innerHTML = needsSetup();
@@ -20971,7 +21901,7 @@
       var warm = replies.filter(function (r) { return WARM.indexOf(rClass(r)) >= 0; });
       var rows = warm.map(function (r) {
         var cls = rClass(r), ch = rChannel(r);
-        var line = [ch === "sms" ? "SMS" : (ch.charAt(0).toUpperCase() + ch.slice(1)), r.source, r.owner].filter(Boolean).join(" · ");
+        var line = [ch === "sms" ? "SMS" : (ch.charAt(0).toUpperCase() + ch.slice(1)), r.company, r.owner].filter(Boolean).join(" · ");
         var thread = (r.thread || []).map(function (m) {
           return '<div class="an-msg ' + (m.from === "in" ? "in" : "out") + '"><span class="an-msg-at">' + esc(m.at || "") + "</span>" + esc(m.text || "") + "</div>";
         }).join("") || '<div class="an-msg in">' + esc(r.text || "") + "</div>";
@@ -20981,7 +21911,7 @@
             '<div style="flex:1"><div class="lr-main">' + esc(r.name || "Unknown") +
               ' <span class="cls-pill ' + esc(cls) + '">' + esc(clsLabel(cls)) + "</span></div>" +
               '<div class="lr-sub">' + esc(line) + "</div></div>" +
-            (r.source ? '<a class="an-camp clickable" data-go="campaigns" title="Open campaign">' + esc(r.source) + "</a>" : "") +
+            (r.campaign ? '<a class="an-camp clickable" data-go="campaigns" title="Open campaign">' + esc(r.campaign) + "</a>" : "") +
             '<a class="btn btn-ghost btn-sm clickable" data-go="response" style="margin-left:8px">Open thread →</a>' +
           "</div>" +
           '<div class="an-conv-body">' + thread + "</div></div>";
@@ -23062,8 +23992,12 @@
     return l ? (l[motion] || l.status) : s;
   }
   function mapProcessed(p) {
-    return { name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.prospectId || (p.prospect && p.prospect.id) || null };
+    return { id: p.inbound.id, name: (p.inbound.fromName || "Unknown"), channel: p.inbound.channel, source: p.inbound.source, text: p.inbound.text, cls: p.classification.class, actions: p.actionsTaken, prospectId: p.inbound.prospectId || p.prospectId || (p.prospect && p.prospect.id) || null, campaignId: p.inbound.campaignId || null, email: p.inbound.fromHandle || null, canReply: (p.inbound.channel === "email" && !!p.inbound.toMailbox), handled: !!p.handledAt, receivedAt: p.inbound.receivedAt || null, snoozedUntil: p.snoozedUntil || null, captured: (p.classification && p.classification.captured) || null, suggested: p.suggestedReply || null };
   }
+  // A reply is REAL (not Smartlead warm-up) if it's identity-verified: either matched to a known
+  // prospect, or tagged by the MPC bridge (which only ingests inbound from people we actually
+  // emailed). Warm-up traffic has neither, so this cleanly hides it without fragile word-matching.
+  function respVerified(r) { return !!r.campaignId || !!r.prospectId; }
   // shared UI states
   /* ============================ Email (Top of Funnel) ============================
      The prep + QA gate before send. A queue of prospects (pushed from Hire Signals

@@ -204,6 +204,14 @@
   .perfhead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
   .perfhead h1{margin:0;font-size:21px;font-weight:650;letter-spacing:-.025em}
   .perfhead p{margin:4px 0 0}
+  .sendstrip{display:flex;flex-wrap:wrap;gap:6px 26px;align-items:center;background:var(--panel);
+    border:1px solid var(--line);border-radius:13px;padding:11px 16px}
+  .sendstrip .cell{display:flex;flex-direction:column;gap:1px;min-width:140px}
+  .sendstrip .cl{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+  .sendstrip .cv{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+  .sendstrip .cv .in{color:var(--accent)}
+  .sendstrip .cs{font-size:11px;color:var(--mut)}
+  @media(max-width:700px){.sendstrip .cell{min-width:46%}}
   .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
   .kpi{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;}
   .kpi .v{font-size:25px;font-weight:700;letter-spacing:-.035em;line-height:1.05;font-variant-numeric:tabular-nums}
@@ -488,6 +496,7 @@
       <button id="perfRefresh" class="ghost small">↻ Refresh</button>
     </div>
   </div>
+  <div class="sendstrip" id="sendStrip" style="display:none"></div>
   <div class="kpis" id="kpis"></div>
   <div class="note-machine" id="perfMachine" style="display:none"></div>
   <div class="perfgrid">
@@ -513,6 +522,6 @@
 <div class="copied" id="toast"></div>
 <div class="modal" id="modal"><div class="modal-card" id="modalBody"></div></div>
 <script src="assets/js/config.js?v=ad110cbee0"></script>
-<script src="assets/js/pip-studio.js?v=c6b1e48a3b"></script>
+<script src="assets/js/pip-studio.js?v=1cb512212c"></script>
 </body>
 </html>

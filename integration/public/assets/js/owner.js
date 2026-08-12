@@ -87,8 +87,8 @@
 
   /* ---------------- router ---------------- */
   // Projection calculator moved to the in-app command center (Measure → Spending).
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, breaks: viewBreaks, security: viewSecurity };
-  var TITLES = { overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", breaks: "Breaks", security: "Security" };
+  var ROUTES = { overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, tools: viewTools, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, breaks: viewBreaks, security: viewSecurity };
+  var TITLES = { overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", tools: "Tools & Credits", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", breaks: "Breaks", security: "Security" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -131,6 +131,78 @@
     return '<div class="bars">' + entries.map(function (e) {
       return '<div class="bar-row"><div>' + esc(e[0]) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(2, (e[1] / max) * 100) + '%"></div></div><div class="num">' + usd(e[1]) + '</div></div>';
     }).join("") + '</div>';
+  }
+
+  /* ================= TOOLS & CREDITS ================= */
+  // Live per-tool API credit usage + burn-rate projection, so we know which package to upgrade
+  // (and when) to keep the send pipeline from throttling as volume scales.
+  function viewTools() {
+    api("/owner/tool-usage?days=14").then(function (d) {
+      var tools = d.tools || [], alerts = d.alerts || [];
+      var html = '<div class="v-head"><h2>Tools &amp; Credits</h2><p>Live API credit usage across the sourcing + validation stack, captured from each provider. Burn rate projects days-to-empty so we upgrade the right package before it throttles sending. Captured ' + esc((d.generatedAt || "").slice(0, 16).replace("T", " ")) + ' UTC.</p></div>';
+
+      if (alerts.length) {
+        html += '<div class="card" style="border-color:#c0392b;background:rgba(192,57,43,.06)"><h3 style="color:#c0392b">Action needed</h3><ul style="margin:6px 0 0;padding-left:18px">' +
+          alerts.map(function (a) { return '<li style="margin:4px 0">' + esc(a.message) + '</li>'; }).join("") + '</ul></div>';
+      }
+
+      // Headline: how many metered tools are healthy vs need attention.
+      var metered = tools.filter(function (t) { return t.metered; });
+      var crit = tools.filter(function (t) { return t.status === "critical"; }).length;
+      var watch = tools.filter(function (t) { return t.status === "watch"; }).length;
+      html += '<div class="stat-grid" style="margin-bottom:14px">' +
+        stat(tools.length, "Tools tracked") +
+        stat(metered.length, "Metered subscriptions") +
+        stat(watch, "Watch (>80% used)", watch ? "amber" : "") +
+        stat(crit, "Critical (runs dry first)", crit ? "bad" : "good") +
+        '</div>';
+
+      html += tools.map(toolCard).join("");
+      $("#view").innerHTML = html;
+    }).catch(fail);
+  }
+
+  function toolStatusPill(s) {
+    var map = { ok: ["good", "Healthy"], watch: ["amber", "Watch"], critical: ["bad", "Critical"] };
+    var m = map[s] || map.ok;
+    return '<span class="sv ' + m[0] + '" style="font-size:12px;padding:2px 10px;border-radius:999px;border:1px solid currentColor">' + m[1] + '</span>';
+  }
+
+  // A 14-day burn sparkline from daily deltas (requests spent per day).
+  function toolSpark(hist) {
+    if (!hist || !hist.length) return '<p class="note" style="margin:8px 0 0">No usage history captured yet.</p>';
+    var max = Math.max.apply(null, hist.map(function (h) { return h.used; })) || 1;
+    var bars = hist.map(function (h) {
+      var ht = Math.max(3, Math.round((h.used / max) * 46));
+      return '<div title="' + esc(h.date) + ': ' + h.used + '" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center"><div style="width:70%;height:' + ht + 'px;background:var(--accent,#2e5bd7);border-radius:2px 2px 0 0"></div></div>';
+    }).join("");
+    return '<div style="margin-top:10px"><div style="display:flex;align-items:flex-end;gap:3px;height:50px">' + bars + '</div><div class="note" style="margin-top:4px">Daily burn, last ' + hist.length + ' days</div></div>';
+  }
+
+  function toolCard(t) {
+    var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">' +
+      '<div><h3 style="margin:0">' + esc(t.label) + '</h3><div class="note" style="margin-top:2px">' + esc(t.powers || "") + '</div></div>' +
+      toolStatusPill(t.status) + '</div>';
+
+    var bodyHtml;
+    if (t.metered && t.limit) {
+      var reset = t.resetAt ? new Date(t.resetAt).toISOString().slice(0, 10) : "n/a";
+      var dte = t.daysToEmpty == null ? "no burn yet" : (t.daysToEmpty + " days");
+      var dteCls = t.status === "critical" ? "bad" : t.status === "watch" ? "amber" : "good";
+      bodyHtml =
+        '<div class="bar-track" style="margin:12px 0 4px"><div class="bar-fill" style="width:' + Math.min(100, t.pctUsed) + '%;background:' + (t.status === "critical" ? "#c0392b" : t.status === "watch" ? "#e08a1e" : "var(--accent,#2e5bd7)") + '"></div></div>' +
+        '<div class="note">' + t.used.toLocaleString() + ' used of ' + t.limit.toLocaleString() + ' (' + t.pctUsed + '%) · ' + t.remaining.toLocaleString() + ' left · resets ' + esc(reset) + '</div>' +
+        '<div class="stat-grid" style="margin-top:12px">' +
+          stat(t.avgDaily.toLocaleString() + "/day", "Avg daily burn (14d)") +
+          stat(dte, "Days to empty", dteCls) +
+          stat(t.daysToReset == null ? "n/a" : (t.daysToReset + "d"), "Days to reset") +
+          stat(t.remaining.toLocaleString(), "Remaining") +
+        '</div>' +
+        toolSpark(t.history);
+    } else {
+      bodyHtml = '<p class="note" style="margin:10px 0 0">' + esc(t.note || "No per-call meter.") + '</p>';
+    }
+    return '<div class="card" style="margin-top:14px">' + head + bodyHtml + '</div>';
   }
 
   // Human label for a raw cost key (e.g. "boost_phones" -> "Boost phones").

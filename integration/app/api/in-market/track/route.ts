@@ -113,7 +113,49 @@ export async function GET(req: Request) {
 
   const { statsOverview } = await import("../../../../lib/inmarket/videoStats");
   const days = Number(url.searchParams.get("days")) || 14;
-  return ok(await statsOverview({ days }));
+
+  // Outbound send telemetry for the board header: when the machine sends next, when the last
+  // batch went out and how big it was, and today's total against the cap — so the operator can
+  // watch a batch land without shelling into the box. Best-effort reads of the MPC snapshots
+  // (schedule published by tools/publish-send-schedule.sh each monitor tick; ledger by the
+  // monitor itself): the board renders fine without either.
+  let sending: Record<string, unknown> | null = null;
+  try {
+    const { loadSnapshot } = await import("../../../../lib/db");
+    const sched = await loadSnapshot<Record<string, unknown>>("mpc_schedule_v1").catch(() => null);
+    const sent = await loadSnapshot<{ generatedAt?: string; messages?: { at?: string; touch?: number }[] }>(
+      "mpc_sent_v1",
+    ).catch(() => null);
+    const msgs = Array.isArray(sent?.messages) ? sent!.messages! : [];
+    const stamped = msgs
+      .map((m) => ({ t: Date.parse(m?.at || ""), touch: Number(m?.touch) || 1 }))
+      .filter((m) => Number.isFinite(m.t))
+      .sort((a, b) => b.t - a.t);
+    const utcMidnight = new Date().setUTCHours(0, 0, 0, 0);
+    const todays = stamped.filter((m) => m.t >= utcMidnight);
+    // "Last batch" = the newest send plus everything within a rolling 30-minute gap of it —
+    // one drain tick's worth of sends, not the whole day.
+    const batch: typeof stamped = [];
+    for (const m of stamped) {
+      if (!batch.length || batch[batch.length - 1].t - m.t < 30 * 60 * 1000) batch.push(m);
+      else break;
+    }
+    if (sched || stamped.length) {
+      sending = {
+        ...(sched || {}),
+        sentToday: todays.length,
+        // The ledger is a rolling window; when it's full and entirely from today, the true
+        // count is higher than what we can see.
+        sentTodayTruncated: msgs.length > 0 && todays.length === msgs.length,
+        lastBatchAt: batch.length ? new Date(batch[0].t).toISOString() : undefined,
+        lastBatchCount: batch.length,
+        lastBatchVideos: batch.filter((m) => m.touch >= 2).length,
+        ledgerAt: sent?.generatedAt,
+      };
+    }
+  } catch { /* telemetry is a bonus, never a blocker for the stats board */ }
+
+  return ok({ ...(await statsOverview({ days })), sending });
 }
 
 export async function DELETE(req: Request) {
