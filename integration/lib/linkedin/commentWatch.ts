@@ -16,11 +16,16 @@
  * LinkedIn tab and goes out through requestLinkedInAction, so account caps,
  * health and the ledger all apply.
  *
- * CONNECT-FIRST for HOT commenters (owner decision 2026-08-12): a commenter
- * who is a hiring decision-maker AND whose company has open roles gets a
- * connection-note draft as the FIRST touch, referencing their comment. The
- * public reply stays drafted but locked until the connect is sent (or
- * deliberately skipped). Warm and community commenters stay reply-first.
+ * HOT commenters (hiring decision-maker AND open roles) get BOTH a
+ * connection-note draft and a reply draft, each independently one-tap
+ * approvable; no forced ordering (owner decision 2026-08-12).
+ *
+ * SECOND LANE, "poster leads" (owner decision 2026-08-12): decision-makers in
+ * the BD pool who are POSTING on LinkedIn while their company has open roles.
+ * No public comment on their post; instead a direct custom message
+ * referencing the post: open profiles get it as a free direct InMail, and
+ * non-open profiles (who cannot receive a stranger's DM) get the same
+ * personalized text shaped as a connection note.
  */
 
 import { loadSnapshot, debouncedSaver } from "../db";
@@ -35,19 +40,37 @@ const COMMENTS_PER_POST = 100;   // first page is plenty at this volume
 const NEW_PER_TICK = 15;         // commenters fully processed per tick (rest next tick)
 const SEEN_CAP = 8000;           // per-workspace dedupe memory
 const ITEM_TTL_DAYS = 21;
+// Poster lane pacing: each examined prospect costs a profile read + a posts
+// read against the provider, so the sweep trickles through the BD pool.
+const POSTER_SCAN_PER_TICK = 20; // prospects examined per tick
+const POSTER_NEW_PER_TICK = 8;   // DM drafts created per tick
+const POSTER_RECHECK_DAYS = 7;   // how often the same prospect is re-examined
+const POST_FRESH_DAYS = 21;      // only message about a reasonably fresh post
 
 export type CommentTier = "hot" | "warm" | "community";
 
 export interface CommentLeadItem {
   id: string;
   workspaceId: string;
-  /** The owner's post the comment landed on. */
+  /**
+   * "commenter" = someone commented on the owner's post (default for
+   * pre-lane items). "poster" = a BD decision-maker posted on LinkedIn while
+   * their company has open roles; we DM them instead of commenting publicly.
+   */
+  kind?: "commenter" | "poster";
+  /** commenter: the owner's post. poster: THEIR post. */
   postId: string;
   postExcerpt: string;
-  /** The comment itself. */
+  postAt?: string;
+  /** commenter lane only: the comment itself. */
   commentId: string;
   commentText: string;
   commentAt?: string;
+  /** poster lane: BD prospect linkage + the direct-message draft. */
+  prospectId?: string;
+  openProfile?: boolean;
+  dmText?: string;
+  dmStatus?: "suggested" | "approved" | "skipped" | "blocked";
   /** The commenter. */
   authorProviderId?: string;
   authorName: string;
@@ -92,13 +115,15 @@ interface WatchState {
   seen: Record<string, string[]>;
   /** ws -> resolved own profile for the connected account. */
   ownProfile: Record<string, OwnProfile>;
+  /** ws -> prospectId -> last time the poster lane examined them (recheck weekly). */
+  posterSeen: Record<string, Record<string, string>>;
   /** ws -> owner switched the listener off. */
   paused: Record<string, boolean>;
   lastScan: Record<string, string>;
 }
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, paused: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, paused: {}, lastScan: {} };
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 const save = debouncedSaver(KEY, () => state);
@@ -113,6 +138,7 @@ async function hydrate(): Promise<void> {
           items: snap.items,
           seen: snap.seen ?? {},
           ownProfile: snap.ownProfile ?? {},
+          posterSeen: snap.posterSeen ?? {},
           paused: snap.paused ?? {},
           lastScan: snap.lastScan ?? {},
         };
@@ -192,6 +218,23 @@ Rules:
 - Max 270 characters. Two sentences at most.
 - Reference their comment naturally (their take under the post), not their profile or their company.
 - No pitch, no links, no "synergies", no emoji, no long dashes, no mention of hiring, roles, or services. Connecting to keep talking is the whole message.
+- Never mention AI.
+Return ONLY the note text, nothing else.`;
+
+const DM_RULES = `You write direct LinkedIn messages for a recruiting agency owner. The recipient is a hiring decision-maker whose company has open roles, and they just published a LinkedIn post; this message goes straight to their inbox. The reader must never suspect a machine wrote it.
+Rules:
+- Open by engaging ONE specific point from their post: extend it with a concrete observation from recruiting/staffing or a sharp question. Never summarize their post back, never flatter.
+- You may include ONE natural sentence acknowledging they are growing (the open roles), and at most one low-key line that this is the space you work in. No hard pitch, no links, no calendar ask, no "quick call".
+- 40 to 80 words. Short paragraphs. No exclamation marks, no emoji, no hashtags, no long dashes.
+- Banned openers: "Great post", "Love this", "Hope you're well", "I came across". Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies".
+- End with one genuine question they would want to answer. Never mention AI.
+Return ONLY the message text, nothing else.`;
+
+const POSTER_CONNECT_RULES = `You write short LinkedIn connection notes for a recruiting agency owner. The recipient is a hiring decision-maker who just published a LinkedIn post; their profile does not accept direct messages from strangers, so this note is the door-opener. The reader must never suspect a machine wrote it.
+Rules:
+- Max 270 characters. Two sentences at most.
+- Reference ONE specific point from their post naturally. No flattery, no "I came across your profile".
+- No pitch, no links, no emoji, no long dashes, no mention of hiring, roles, or services. Connecting to keep talking is the whole message.
 - Never mention AI.
 Return ONLY the note text, nothing else.`;
 
@@ -321,16 +364,27 @@ function parseComment(c: Dict): RawComment | null {
   };
 }
 
-/** Fallback enrichment when the comment payload has no headline. */
-async function fetchHeadline(account: LiAccountState, providerId: string): Promise<{ headline?: string; publicUrl?: string }> {
+/** One profile read: provider id, headline, open-profile flag, distance.
+ *  Accepts a provider id OR a public slug (linkedin.com/in/<slug>). */
+async function fetchProfileLite(account: LiAccountState, identifier: string): Promise<{
+  providerId?: string; headline?: string; publicUrl?: string; openProfile?: boolean; networkDistance?: string;
+}> {
   try {
     const { unipileRequest } = await import("./provider");
-    const p = await unipileRequest<Dict>(`/users/${encodeURIComponent(providerId)}?account_id=${account.providerAccountId}`);
+    const p = await unipileRequest<Dict>(`/users/${encodeURIComponent(identifier)}?account_id=${account.providerAccountId}`);
     return {
+      providerId: str(p.provider_id) ?? str(p.id),
       headline: str(p.headline),
       publicUrl: str(p.public_identifier) ? `https://www.linkedin.com/in/${str(p.public_identifier)}` : undefined,
+      openProfile: typeof p.is_open_profile === "boolean" ? p.is_open_profile : undefined,
+      networkDistance: str(p.network_distance),
     };
   } catch { return {}; }
+}
+
+function slugOf(url?: string): string | undefined {
+  const m = /linkedin\.com\/in\/([^/?#]+)/i.exec(url ?? "");
+  return m ? decodeURIComponent(m[1]) : undefined;
 }
 
 /* ------------------------------------------------------------------ */
@@ -385,7 +439,7 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
       let headline = c.authorHeadline;
       let publicUrl = c.authorPublicUrl;
       if (!headline && c.authorProviderId) {
-        const extra = await fetchHeadline(account, c.authorProviderId);
+        const extra = await fetchProfileLite(account, c.authorProviderId);
         headline = extra.headline;
         publicUrl = publicUrl ?? extra.publicUrl;
       }
@@ -416,9 +470,8 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
           `MY POST:\n${postExcerpt || "(no text)"}\n\nTHEIR COMMENT (by ${persona}):\n${c.text}\n\nWrite the reply.`);
         if (text) { item.replyText = text; item.replyStatus = "suggested"; }
       }
-      // Connect-first: a decision-maker at a company hiring right now gets the
-      // connection note staged as the FIRST touch; the reply stays locked
-      // until the connect is sent or skipped (enforced in approveReply).
+      // A decision-maker at a company hiring right now also gets a connection
+      // note referencing their comment; reply and connect approve independently.
       if (tier === "hot") {
         const note = await draft(CONNECT_RULES,
           `The person: ${persona}.\nMy post they commented under:\n${postExcerpt || "(no text)"}\n\nTheir comment:\n${c.text}\n\nWrite the connection note.`);
@@ -432,10 +485,125 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
   }
 
   if (seenArr.length > SEEN_CAP) state.seen[workspaceId] = seenArr.slice(-SEEN_CAP);
+
+  // Lane 2: posting decision-makers with open roles -> direct-message drafts.
+  let dmCreated = 0;
+  try { dmCreated = await scanPosters(workspaceId, account); } catch { /* lane 1 results stand */ }
+
   state.lastScan[workspaceId] = nowIso();
   prune();
   save();
-  return { scanned, created, skipped: null };
+  return { scanned, created: created + dmCreated, skipped: null };
+}
+
+/* ------------------------------------------------------------------ */
+/* The poster lane: decision-makers in the BD pool who are posting      */
+/* while their company has open roles. No public comment; a direct      */
+/* custom message instead (free InMail to open profiles, plain message  */
+/* to existing connections, connection note otherwise).                 */
+/* ------------------------------------------------------------------ */
+
+async function scanPosters(workspaceId: string, account: LiAccountState): Promise<number> {
+  const seen = state.posterSeen[workspaceId] ?? (state.posterSeen[workspaceId] = {});
+  const recheckCutoff = Date.now() - POSTER_RECHECK_DAYS * 86_400_000;
+  const inQueue = new Set(
+    state.items
+      .filter((i) => i.workspaceId === workspaceId && i.kind === "poster" && i.prospectId)
+      .map((i) => i.prospectId as string),
+  );
+
+  let prospects: Array<{
+    id: string; email?: string; linkedinUrl?: string; fullName?: string; firstName?: string;
+    company?: string; title?: string; motion?: string;
+  }> = [];
+  try {
+    const { getCore } = await import("../core/repository");
+    prospects = (await getCore().listProspects(workspaceId))
+      .filter((p) => p.motion === "bd" && p.linkedinUrl && p.title);
+  } catch { return 0; }
+
+  const { unipile } = await import("../providers");
+  let examined = 0;
+  let created = 0;
+
+  for (const p of prospects) {
+    if (examined >= POSTER_SCAN_PER_TICK || created >= POSTER_NEW_PER_TICK) break;
+    if (inQueue.has(p.id)) continue;
+    const last = seen[p.id];
+    if (last && new Date(last).getTime() >= recheckCutoff) continue;
+    const intel = classifyTitle(p.title ?? "");
+    if (!intel.isDecisionMaker || looksLikePeer(p.title, p.company)) { seen[p.id] = nowIso(); continue; }
+
+    examined++;
+    seen[p.id] = nowIso();
+    save();
+
+    // Benchmark 1: their company has open roles right now (their own board).
+    const hiring = p.company ? await checkHiring(p.company) : undefined;
+    if (!hiring?.openRoles) continue;
+
+    // Never message anyone on the do-not-contact list or inside the
+    // cross-channel recency cooldown.
+    const fullName = (p.fullName || p.firstName || "").trim();
+    try {
+      const { checkContactable } = await import("../outreach/contactGuard");
+      const dnc = await checkContactable(workspaceId,
+        { email: p.email, linkedinUrl: p.linkedinUrl, fullName: fullName || undefined, company: p.company },
+        { checkRecency: true });
+      if (!dnc.ok) continue;
+    } catch { continue; }
+
+    const slug = slugOf(p.linkedinUrl);
+    if (!slug) continue;
+    const prof = await fetchProfileLite(account, slug);
+    if (!prof.providerId) continue;
+
+    // Benchmark 2: they are posting. Take their freshest real post.
+    let posts: Dict[] = [];
+    try { posts = listOf(await unipile.listPosts(account.providerAccountId!, prof.providerId, 3)); } catch { continue; }
+    const post = posts.map((entry) => ({
+      id: str(entry.social_id) ?? str(entry.share_url) ?? str(entry.url) ?? str(entry.id) ?? str(entry.post_id),
+      text: (str(entry.text) ?? str(entry.commentary) ?? "").trim(),
+      at: str(entry.date) ?? str(entry.parsed_datetime) ?? str(entry.created_at),
+    })).find((x) => x.id && x.text.length >= 40);
+    if (!post) continue;
+    if (post.at) {
+      const t = new Date(post.at).getTime();
+      if (Number.isFinite(t) && t < Date.now() - POST_FRESH_DAYS * 86_400_000) continue;
+    }
+
+    // Open profile or already connected -> a direct message lands; otherwise
+    // LinkedIn will not deliver a stranger's DM, so the same personalized
+    // text is shaped as a connection note.
+    const direct = prof.openProfile === true || prof.networkDistance === "DISTANCE_1";
+    const persona = `${fullName || "them"}${p.title ? `, ${p.title}` : ""}${p.company ? ` at ${p.company}` : ""}`;
+    const text = await draft(direct ? DM_RULES : POSTER_CONNECT_RULES,
+      `THE PERSON: ${persona}. Their company has ${hiring.openRoles} open role(s)${hiring.sample.length ? ` including ${hiring.sample.join(", ")}` : ""}.\n\nTHEIR POST:\n${post.text.slice(0, 700)}\n\nWrite the ${direct ? "message" : "connection note"}.`);
+    if (!text) continue;
+
+    state.items.push({
+      id: rid("licw"), workspaceId, kind: "poster",
+      postId: post.id!, postExcerpt: post.text.slice(0, 700), postAt: post.at,
+      commentId: "", commentText: "",
+      prospectId: p.id, openProfile: prof.openProfile,
+      authorProviderId: prof.providerId,
+      authorName: fullName || "LinkedIn member",
+      authorHeadline: prof.headline ?? [p.title, p.company].filter(Boolean).join(" at "),
+      authorPublicUrl: prof.publicUrl ?? (p.linkedinUrl?.startsWith("http") ? p.linkedinUrl : `https://www.${p.linkedinUrl}`),
+      networkDistance: prof.networkDistance,
+      title: p.title, company: p.company,
+      seniority: intel.seniority, jobFunction: intel.function,
+      decisionMaker: true, peer: false, hiring, tier: "hot",
+      replyStatus: "none",
+      dmText: direct ? text : text.slice(0, 280), dmStatus: "suggested",
+      createdAt: nowIso(), updatedAt: nowIso(),
+    });
+    created++;
+    save();
+  }
+
+  save();
+  return created;
 }
 
 /* ------------------------------------------------------------------ */
@@ -509,9 +677,6 @@ export async function approveReply(
   if (!item || item.replyStatus !== "suggested" || !item.replyText) {
     return { item: item ?? null, accepted: false, reason: "not_open" };
   }
-  if (item.tier === "hot" && item.connectStatus === "suggested") {
-    return { item, accepted: false, reason: "Connect first: send (or skip) the connection request above, then this reply unlocks." };
-  }
   if (editedText && scrub(editedText).length >= 2) item.replyText = scrub(editedText).slice(0, 1200);
 
   const accounts = await connectedAccounts(workspaceId);
@@ -548,6 +713,85 @@ export async function approveReply(
     return { item, accepted: result.accepted, reason: result.reason };
   } catch (e) {
     item.replyStatus = "blocked"; item.reason = e instanceof Error ? e.message : "engine_error";
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+}
+
+export async function editDm(workspaceId: string, id: string, text: string): Promise<CommentLeadItem | null> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.dmStatus !== "suggested") return null;
+  const direct = item.openProfile === true || item.networkDistance === "DISTANCE_1";
+  item.dmText = scrub(text).slice(0, direct ? 1200 : 280);
+  item.updatedAt = nowIso();
+  save();
+  return item;
+}
+
+export async function skipDm(workspaceId: string, id: string): Promise<CommentLeadItem | null> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.dmStatus !== "suggested") return null;
+  item.dmStatus = "skipped";
+  item.updatedAt = nowIso();
+  save();
+  return item;
+}
+
+/** Approve the poster-lane message. Open profiles get a free direct InMail,
+ *  1st-degree connections a plain message, everyone else a connection note. */
+export async function approveDm(
+  workspaceId: string, userId: string, userEmail: string, id: string, editedText?: string,
+): Promise<{ item: CommentLeadItem | null; accepted: boolean; reason?: string }> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.kind !== "poster" || item.dmStatus !== "suggested" || !item.dmText) {
+    return { item: item ?? null, accepted: false, reason: "not_open" };
+  }
+  const direct = item.openProfile === true || item.networkDistance === "DISTANCE_1";
+  if (editedText && scrub(editedText).length >= 2) item.dmText = scrub(editedText).slice(0, direct ? 1200 : 280);
+
+  const accounts = await connectedAccounts(workspaceId);
+  const account = accounts.find((a) => a.ownerUserId === userId) ?? accounts.find((a) => !a.ownerUserId) ?? accounts[0];
+  if (!account) {
+    item.dmStatus = "blocked"; item.reason = "No connected LinkedIn account."; item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+
+  const actionType = !direct ? "connect_note"
+    : item.networkDistance === "DISTANCE_1" ? "message" : "inmail";
+  try {
+    const result = await requestLinkedInAction({
+      workspaceId,
+      accountId: account.accountId,
+      person: {
+        fullName: item.authorName, linkedinUrl: item.authorPublicUrl,
+        company: item.company, title: item.title,
+        providerProfileId: item.authorProviderId, prospectId: item.prospectId,
+      },
+      actionType,
+      payload: actionType === "connect_note"
+        ? { note: item.dmText, providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl }
+        : {
+            text: item.dmText,
+            ...(actionType === "inmail" ? { subject: `Your post: "${item.postExcerpt.split(/\s+/).slice(0, 6).join(" ")}..."` } : {}),
+            providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl,
+          },
+      businessUnit: "bd",
+      sourceType: "manual",
+      approvedBy: userEmail,
+      idempotencyKey: `licw_dm_${item.id}`,
+    });
+    if (result.accepted) {
+      item.dmStatus = "approved"; item.reason = undefined;
+    } else {
+      item.dmStatus = "blocked"; item.reason = result.reason || "The engine declined this action.";
+    }
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: result.accepted, reason: result.reason };
+  } catch (e) {
+    item.dmStatus = "blocked"; item.reason = e instanceof Error ? e.message : "engine_error";
     item.updatedAt = nowIso(); save();
     return { item, accepted: false, reason: item.reason };
   }

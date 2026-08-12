@@ -933,6 +933,17 @@
           lastScan: new Date().toISOString(),
           items: [
             {
+              id: "licw_demo0", kind: "poster", tier: "hot", decisionMaker: true, peer: false,
+              authorName: "Priya Raghavan", authorHeadline: "Chief Operating Officer at Alderwood Care Group",
+              title: "Chief Operating Officer", company: "Alderwood Care Group",
+              openProfile: true,
+              postExcerpt: "We opened two new clinics this quarter and the hardest part was not the buildout. It was finding clinicians who stay past month six. Retention starts in the interview, not in onboarding.",
+              hiring: { checked: true, openRoles: 9, sample: ["Clinic Director", "Nurse Practitioner", "Care Coordinator"] },
+              dmStatus: "suggested",
+              dmText: "Retention starting in the interview is the part almost everyone gets backwards; the month-six dropoff is usually a screening miss, not an onboarding miss. We place clinicians all day and see the same pattern. What signal do you now screen for that you ignored two clinics ago?",
+              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            },
+            {
               id: "licw_demo1", tier: "hot", decisionMaker: true, peer: false,
               authorName: "Dana Whitfield", authorHeadline: "VP People at Northgate Health",
               title: "VP People", company: "Northgate Health",
@@ -977,15 +988,13 @@
         if (body.action === "pause" || body.action === "resume") { cw.status.paused = body.action === "pause"; save(d); return ok({ view: cw }); }
         if (!it) return ok({ view: cw });
         if (body.action === "approve") {
-          // Connect-first mirror of the real backend: hot replies stay locked
-          // until the connection request is sent or skipped.
-          if (it.tier === "hot" && it.connectStatus === "suggested") {
-            return ok({ accepted: false, reason: "Connect first: send (or skip) the connection request above, then this reply unlocks.", view: cw });
-          }
           if (body.text) it.replyText = body.text;
           it.replyStatus = "approved";
           save(d); return ok({ accepted: true, view: cw });
         }
+        if (body.action === "dm_approve") { if (body.text) it.dmText = body.text; it.dmStatus = "approved"; save(d); return ok({ accepted: true, view: cw }); }
+        if (body.action === "dm_skip") { it.dmStatus = "skipped"; save(d); return ok({ view: cw }); }
+        if (body.action === "dm_edit") { if (body.text) it.dmText = body.text; save(d); return ok({ view: cw }); }
         if (body.action === "skip") { it.replyStatus = "skipped"; save(d); return ok({ view: cw }); }
         if (body.action === "edit") { if (body.text) it.replyText = body.text; save(d); return ok({ view: cw }); }
         if (body.action === "draft") {
