@@ -88,9 +88,27 @@ await Promise.all(Array.from({ length: 3 }, worker));
 console.log(`swept ${swept}/${boxList.length} boxes (${errors} errors), ${ndrs.length} NDR notices`);
 
 // Campaign NDRs only (recipient matches a logged send, or an all-lowercase campaign subject).
+// FRESHNESS RULE for resting domains: a bench must be judged on bounces received AFTER it began.
+// A resting domain sends nothing, so its pre-bench bounce count can only age, never improve; if
+// those stale notices kept counting, revive-time "signals clean" could never pass and every
+// 2-day bench would auto-extend to 7 then 14 days. Pre-bench notices still feed the suppression
+// list (a dead address is dead forever); they just stop counting against the resting domain.
+const REST_FILE = process.env.MPC_REST_FILE
+  || "/var/lib/docker/volumes/recruiteros_app_data/_data/snap_mpc_domain_rest_v1.json";
+const restSince = new Map(); // domain -> bench start (ms) while resting
+try {
+  const ledger = JSON.parse(readFileSync(REST_FILE, "utf8"));
+  const nowMs = Date.now();
+  for (const [d, v] of Object.entries(ledger.domains || {})) {
+    if (v && v.state === "resting" && (!v.until || Date.parse(v.until) > nowMs) && v.since) {
+      restSince.set(d.toLowerCase(), Date.parse(v.since));
+    }
+  }
+} catch { /* no ledger: count everything */ }
+
 const bounced = new Set();
 const perDomain = {};
-let warmupNdrs = 0;
+let warmupNdrs = 0, staleSkipped = 0;
 for (const n of ndrs) {
   const rcpt = String(n.rcpt || "").toLowerCase();
   const subjLower = n.subj.replace(/^undeliverable:\s*/i, "");
@@ -99,9 +117,12 @@ for (const n of ndrs) {
   if (!isCampaign) { warmupNdrs++; continue; }
   if (rcpt && sentTo.has(rcpt)) bounced.add(rcpt);
   const d = n.box.split("@")[1];
+  const benchStart = restSince.get(d);
+  if (benchStart && Date.parse(n.at || 0) < benchStart) { staleSkipped++; continue; }
   perDomain[d] = perDomain[d] || { bounces: 0, sent: sentByDomain.get(d) || 0 };
   perDomain[d].bounces++;
 }
+if (staleSkipped) console.log(`freshness rule: ${staleSkipped} pre-bench notices excluded from resting domains' counts`);
 
 // Merge: bounced[] never shrinks (a narrower sweep must not forget old bounces).
 if (existsSync(SIDECAR)) {
