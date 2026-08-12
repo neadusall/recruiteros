@@ -17,13 +17,15 @@
  *   dm_edit         { id, text }
  *   pause / resume  {}
  *   auto_on / auto_off {}       -> autopilot: execute drafts hands-free
+ *   keywords_set    { text }    -> comma-separated market-scan keyword bank
+ *                                  (empty text restores the backend defaults)
  * Session-gated with outreach:send, same capability as the LinkedIn tab.
  */
 import { ok, fail, body, requireCapability } from "../../../../lib/api";
 import {
   commentWatchView, scanWorkspace, approveReply, skipReply, editReply, draftReply,
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
-  setCommentWatchAuto,
+  setCommentWatchAuto, setMarketKeywords,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -52,6 +54,10 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (b.action === "auto_on" || b.action === "auto_off") {
     await setCommentWatchAuto(ws, b.action === "auto_on");
+    return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "keywords_set") {
+    await setMarketKeywords(ws, String(b.text ?? "").split(",").map((k) => k.trim()).filter(Boolean));
     return ok({ view: await commentWatchView(ws) });
   }
   if (!b.id) return fail("missing_id");

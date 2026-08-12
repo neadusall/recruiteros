@@ -3550,8 +3550,8 @@
       if (t.kind === "poster") {
         var openP = t.dmStatus === "suggested";
         return '<div class="lie-row' + (openP ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
-          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Posting now: decision-maker, hiring</span></div>' +
-          '<div class="lie-post">Their post: ' + esc((t.postExcerpt || "").slice(0, 280)) + (t.postExcerpt && t.postExcerpt.length > 280 ? "..." : "") + "</div>" +
+          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span></div>' +
+          '<div class="lie-post">Their hiring post: ' + esc((t.postExcerpt || "").slice(0, 280)) + (t.postExcerpt && t.postExcerpt.length > 280 ? "..." : "") + "</div>" +
           hiring + dmBlock(t) +
         "</div>";
       }
@@ -3582,18 +3582,29 @@
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Post engagement radar</b>' +
-            '<div class="muted liops-sub">Commenters on your posts scored for buying signals, plus hiring decision-makers who are posting (those get a direct message, never a public comment).' +
+            '<div class="muted liops-sub">Two lanes: commenters on your posts scored for buying signals, and a market scan that searches LinkedIn posts by hiring keywords to find hiring managers looking for talent (open profiles get a hyper-targeted direct message, never an InMail, never a public comment).' +
               (auto.enabled
                 ? " Autopilot is on: decision-maker touches send automatically through your account limits; community items wait for you."
                 : " Nothing sends without your approval.") + "</div></div>" +
             '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span></div>" +
           (items.length
             ? items.map(row).join("")
-            : '<div class="lie-post muted">No commenters captured yet. The listener checks your recent posts every 15 minutes.</div>') +
+            : '<div class="lie-post muted">Nothing captured yet. The listener checks your posts and runs a market keyword search every 15 minutes.</div>') +
+          '<div class="lie-post muted">Market keywords (comma-separated; clear to restore defaults):</div>' +
+          '<textarea class="lie-text" data-lic-keywords rows="1">' + esc((d.keywords || []).join(", ")) + "</textarea>" +
           '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button> ' +
+            '<button class="btn btn-sm btn-ghost" data-lic-kwsave>Save keywords</button> ' +
             '<button class="btn btn-sm btn-ghost" data-lic-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' +
               (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button></div>" +
         "</div>";
+      var kwBtn = mount.querySelector("[data-lic-kwsave]");
+      if (kwBtn) kwBtn.addEventListener("click", function () {
+        kwBtn.disabled = true;
+        var kta = mount.querySelector("[data-lic-keywords]");
+        send("/linkedin/comments", "POST", { action: "keywords_set", text: kta ? kta.value : "" }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      });
       var autoBtn = mount.querySelector("[data-lic-auto]");
       if (autoBtn) autoBtn.addEventListener("click", function () {
         autoBtn.disabled = true;

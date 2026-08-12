@@ -20,12 +20,14 @@
  * connection-note draft and a reply draft, each independently one-tap
  * approvable; no forced ordering (owner decision 2026-08-12).
  *
- * SECOND LANE, "poster leads" (owner decision 2026-08-12): decision-makers in
- * the BD pool who are POSTING on LinkedIn while their company has open roles.
- * No public comment on their post; instead a direct custom message
- * referencing the post: open profiles get it as a plain direct message, and
- * non-open profiles (who cannot receive a stranger's DM) get the same
- * personalized text shaped as a connection note.
+ * SECOND LANE, "market scan" (owner decision 2026-08-12): keyword searches
+ * across ALL of LinkedIn's posts (backend keyword bank, editable per
+ * workspace) find hiring managers posting about talent they need. Each match
+ * is gated (decision-maker title, hiring intent in the post, not a peer
+ * firm, DNC) and then gets a hyper-targeted direct message built off their
+ * post. Open profiles get it as a plain direct message (NEVER InMail); the
+ * same personalized text goes as a connection note when their profile
+ * cannot receive a stranger's DM.
  */
 
 import { loadSnapshot, debouncedSaver } from "../db";
@@ -40,13 +42,24 @@ const COMMENTS_PER_POST = 100;   // first page is plenty at this volume
 const NEW_PER_TICK = 15;         // commenters fully processed per tick (rest next tick)
 const SEEN_CAP = 8000;           // per-workspace dedupe memory
 const ITEM_TTL_DAYS = 21;
-// Poster lane pacing: each examined prospect costs a profile read + a posts
-// read against the provider, so the sweep trickles through the BD pool.
-const POSTER_SCAN_PER_TICK = 20; // prospects examined per tick
+// Market-scan pacing: one keyword search per tick (rotating through the
+// bank), each hit costing a profile read, so the lane trickles steadily.
+const MARKET_RESULTS_PER_SEARCH = 20;
 const POSTER_NEW_PER_TICK = 8;   // DM drafts created per tick
-const POSTER_RECHECK_DAYS = 7;   // how often the same prospect is re-examined
-const POST_FRESH_DAYS = 21;      // only message about a reasonably fresh post
+const POSTER_RECHECK_DAYS = 7;   // never re-message the same author within a week
 const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
+
+/** The backend keyword bank: what a hiring manager types when they are
+ *  looking for talent. Workspaces can override via the card/API. */
+const DEFAULT_MARKET_KEYWORDS = [
+  "we are hiring", "we're hiring", "now hiring", "hiring for",
+  "looking to hire", "open role", "open position",
+  "growing our team", "join our team", "looking for a recruiter",
+];
+
+/** Belt + suspenders on top of the keyword search: the post text itself must
+ *  read like hiring intent, not just mention the keyword in passing. */
+const HIRING_INTENT_RE = /\b(hiring|hire|open (role|position|req)|recruit(ing|er)?|looking for (a|an|someone)|join (our|the) team|growing (our|the) team|position (open|available)|role (open|available)|expanding (our|the) team|add(ing)? to (our|the) team)\b/i;
 
 export type CommentTier = "hot" | "warm" | "community";
 
@@ -116,8 +129,12 @@ interface WatchState {
   seen: Record<string, string[]>;
   /** ws -> resolved own profile for the connected account. */
   ownProfile: Record<string, OwnProfile>;
-  /** ws -> prospectId -> last time the poster lane examined them (recheck weekly). */
+  /** ws -> author providerId -> last time the market lane touched them (weekly gate). */
   posterSeen: Record<string, Record<string, string>>;
+  /** ws -> keyword bank override (backend defaults when unset). */
+  marketKeywords: Record<string, string[]>;
+  /** ws -> rotation cursor into the keyword bank (one search per tick). */
+  keywordCursor: Record<string, number>;
   /** ws -> owner switched the listener off. */
   paused: Record<string, boolean>;
   /**
@@ -130,7 +147,7 @@ interface WatchState {
 }
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, paused: {}, autoMode: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, marketKeywords: {}, keywordCursor: {}, paused: {}, autoMode: {}, lastScan: {} };
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 const save = debouncedSaver(KEY, () => state);
@@ -146,6 +163,8 @@ async function hydrate(): Promise<void> {
           seen: snap.seen ?? {},
           ownProfile: snap.ownProfile ?? {},
           posterSeen: snap.posterSeen ?? {},
+          marketKeywords: snap.marketKeywords ?? {},
+          keywordCursor: snap.keywordCursor ?? {},
           paused: snap.paused ?? {},
           autoMode: snap.autoMode ?? {},
           lastScan: snap.lastScan ?? {},
@@ -286,13 +305,13 @@ Rules:
 - Never mention AI.
 Return ONLY the note text, nothing else.`;
 
-const DM_RULES = `You write direct LinkedIn messages for a recruiting agency owner. The recipient is a hiring decision-maker whose company has open roles, and they just published a LinkedIn post; this message goes straight to their inbox. The reader must never suspect a machine wrote it.
+const DM_RULES = `You write direct LinkedIn messages for a recruiting agency owner. The recipient is a hiring decision-maker who just published a LinkedIn post about a role they need to fill or talent they are looking for; this message goes straight to their inbox while the post is fresh. The reader must never suspect a machine wrote it.
 Rules:
-- Open by engaging ONE specific point from their post: extend it with a concrete observation from recruiting/staffing or a sharp question. Never summarize their post back, never flatter.
-- You may include ONE natural sentence acknowledging they are growing (the open roles), and at most one low-key line that this is the space you work in. No hard pitch, no links, no calendar ask, no "quick call".
+- Anchor the message in the SPECIFIC need from their post: the exact role, team, or hiring challenge they described, in their own framing. Never summarize their post back, never flatter.
+- One low-key line that this exact kind of search is what the owner does all day; offering to send over a couple of strong profiles is allowed. No hard pitch, no links, no calendar ask, no "quick call".
 - 40 to 80 words. Short paragraphs. No exclamation marks, no emoji, no hashtags, no long dashes.
-- Banned openers: "Great post", "Love this", "Hope you're well", "I came across". Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies".
-- End with one genuine question they would want to answer. Never mention AI.
+- Banned openers: "Great post", "Love this", "Hope you're well", "I came across", "I saw your post". Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies".
+- End with one genuine question about the search (the bar, the sticking point, the timeline). Never mention AI.
 Return ONLY the message text, nothing else.`;
 
 const POSTER_CONNECT_RULES = `You write short LinkedIn connection notes for a recruiting agency owner. The recipient is a hiring decision-maker who just published a LinkedIn post; their profile does not accept direct messages from strangers, so this note is the door-opener. The reader must never suspect a machine wrote it.
@@ -565,111 +584,127 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
 }
 
 /* ------------------------------------------------------------------ */
-/* The poster lane: decision-makers in the BD pool who are posting      */
-/* while their company has open roles. No public comment; a direct      */
-/* custom message instead (plain direct message to open profiles and   */
-/* to existing connections, connection note otherwise).                 */
+/* The market scan: keyword search across ALL LinkedIn posts finds      */
+/* hiring managers posting about talent they need. No public comment;   */
+/* a hyper-targeted direct message instead (plain DM to open profiles   */
+/* and existing connections, connection note otherwise, never InMail).  */
 /* ------------------------------------------------------------------ */
 
-async function scanPosters(workspaceId: string, account: LiAccountState): Promise<number> {
-  const seen = state.posterSeen[workspaceId] ?? (state.posterSeen[workspaceId] = {});
-  const recheckCutoff = Date.now() - POSTER_RECHECK_DAYS * 86_400_000;
-  const inQueue = new Set(
-    state.items
-      .filter((i) => i.workspaceId === workspaceId && i.kind === "poster" && i.prospectId)
-      .map((i) => i.prospectId as string),
-  );
+export function marketKeywordsFor(workspaceId: string): string[] {
+  const custom = state.marketKeywords[workspaceId];
+  return custom?.length ? custom : DEFAULT_MARKET_KEYWORDS;
+}
 
-  let prospects: Array<{
-    id: string; email?: string; linkedinUrl?: string; fullName?: string; firstName?: string;
-    company?: string; title?: string; motion?: string;
-  }> = [];
-  try {
-    const { getCore } = await import("../core/repository");
-    prospects = (await getCore().listProspects(workspaceId))
-      .filter((p) => p.motion === "bd" && p.linkedinUrl && p.title);
-  } catch { return 0; }
+export async function setMarketKeywords(workspaceId: string, keywords: string[]): Promise<string[]> {
+  await hydrate();
+  const clean = [...new Set(keywords.map((k) => k.trim().toLowerCase()).filter((k) => k.length >= 3))].slice(0, 25);
+  state.marketKeywords[workspaceId] = clean;
+  save();
+  return marketKeywordsFor(workspaceId);
+}
+
+async function scanPosters(workspaceId: string, account: LiAccountState): Promise<number> {
+  const seenAuthors = state.posterSeen[workspaceId] ?? (state.posterSeen[workspaceId] = {});
+  const seenArr = state.seen[workspaceId] ?? (state.seen[workspaceId] = []);
+  const seenPosts = new Set(seenArr);
+  const recheckCutoff = Date.now() - POSTER_RECHECK_DAYS * 86_400_000;
+  const own = state.ownProfile[workspaceId];
+
+  // One keyword per tick, rotating through the bank: 96 ticks/day covers a
+  // 10-keyword bank ~9x over with fresh-post sorting doing the dedupe work.
+  const bank = marketKeywordsFor(workspaceId);
+  const idx = (state.keywordCursor[workspaceId] ?? 0) % bank.length;
+  state.keywordCursor[workspaceId] = idx + 1;
+  const keyword = bank[idx];
+  save();
 
   const { unipile } = await import("../providers");
-  let examined = 0;
+  let results: Dict[] = [];
+  try {
+    results = listOf(await unipile.searchPosts(account.providerAccountId!, keyword, MARKET_RESULTS_PER_SEARCH));
+  } catch { return 0; }
+
   let created = 0;
+  for (const raw of results) {
+    if (created >= POSTER_NEW_PER_TICK) break;
+    const postId = str(raw.social_id) ?? str(raw.share_url) ?? str(raw.url) ?? str(raw.id) ?? str(raw.post_id);
+    const text = (str(raw.text) ?? str(raw.commentary) ?? str(raw.content) ?? "").trim();
+    if (!postId || text.length < 40) continue;
+    if (seenPosts.has(postId)) continue;
+    seenPosts.add(postId); seenArr.push(postId);
 
-  for (const p of prospects) {
-    if (examined >= POSTER_SCAN_PER_TICK || created >= POSTER_NEW_PER_TICK) break;
-    if (inQueue.has(p.id)) continue;
-    const last = seen[p.id];
-    if (last && new Date(last).getTime() >= recheckCutoff) continue;
-    const intel = classifyTitle(p.title ?? "");
-    if (!intel.isDecisionMaker || looksLikePeer(p.title, p.company)) { seen[p.id] = nowIso(); continue; }
+    // The post itself must read like hiring intent, not a passing mention.
+    if (!HIRING_INTENT_RE.test(text)) continue;
 
-    examined++;
-    seen[p.id] = nowIso();
+    // Author: a person (not a company page), not the owner, decision-maker
+    // title, not a peer staffing firm, not touched by this lane this week.
+    const author = (typeof raw.author === "object" && raw.author ? raw.author : (typeof raw.author_details === "object" && raw.author_details ? raw.author_details : {})) as Dict;
+    if (author.is_company === true || str(author.type) === "COMPANY" || str(author.type) === "organization") continue;
+    const authorId = str(author.id) ?? str(author.provider_id) ?? str(author.public_identifier);
+    const authorName = str(author.name) ?? [str(author.first_name), str(author.last_name)].filter(Boolean).join(" ").trim();
+    if (!authorId || !authorName) continue;
+    if (own && authorId === own.providerId) continue;
+    const lastTouch = seenAuthors[authorId];
+    if (lastTouch && new Date(lastTouch).getTime() >= recheckCutoff) continue;
+
+    const headline = str(author.headline);
+    const { title, company } = parseHeadline(headline);
+    const intel = classifyTitle(title ?? headline ?? "");
+    if (!intel.isDecisionMaker || looksLikePeer(title, company)) { seenAuthors[authorId] = nowIso(); continue; }
+
+    seenAuthors[authorId] = nowIso();
     save();
-
-    // Benchmark 1: their company has open roles right now (their own board).
-    const hiring = p.company ? await checkHiring(p.company) : undefined;
-    if (!hiring?.openRoles) continue;
 
     // Never message anyone on the do-not-contact list or inside the
     // cross-channel recency cooldown.
-    const fullName = (p.fullName || p.firstName || "").trim();
     try {
       const { checkContactable } = await import("../outreach/contactGuard");
       const dnc = await checkContactable(workspaceId,
-        { email: p.email, linkedinUrl: p.linkedinUrl, fullName: fullName || undefined, company: p.company },
+        { fullName: authorName, company, linkedinUrl: str(author.public_identifier) ? `linkedin.com/in/${str(author.public_identifier)}` : undefined },
         { checkRecency: true });
       if (!dnc.ok) continue;
     } catch { continue; }
 
-    const slug = slugOf(p.linkedinUrl);
-    if (!slug) continue;
-    const prof = await fetchProfileLite(account, slug);
+    // Open-profile check FIRST: it decides the channel. Open profile or an
+    // existing connection takes a plain direct message (never InMail);
+    // closed profiles get the same personalized text as a connection note.
+    const prof = await fetchProfileLite(account, authorId);
     if (!prof.providerId) continue;
-
-    // Benchmark 2: they are posting. Take their freshest real post.
-    let posts: Dict[] = [];
-    try { posts = listOf(await unipile.listPosts(account.providerAccountId!, prof.providerId, 3)); } catch { continue; }
-    const post = posts.map((entry) => ({
-      id: str(entry.social_id) ?? str(entry.share_url) ?? str(entry.url) ?? str(entry.id) ?? str(entry.post_id),
-      text: (str(entry.text) ?? str(entry.commentary) ?? "").trim(),
-      at: str(entry.date) ?? str(entry.parsed_datetime) ?? str(entry.created_at),
-    })).find((x) => x.id && x.text.length >= 40);
-    if (!post) continue;
-    if (post.at) {
-      const t = new Date(post.at).getTime();
-      if (Number.isFinite(t) && t < Date.now() - POST_FRESH_DAYS * 86_400_000) continue;
-    }
-
-    // Open profile or already connected -> a direct message lands; otherwise
-    // LinkedIn will not deliver a stranger's DM, so the same personalized
-    // text is shaped as a connection note.
     const direct = prof.openProfile === true || prof.networkDistance === "DISTANCE_1";
-    const persona = `${fullName || "them"}${p.title ? `, ${p.title}` : ""}${p.company ? ` at ${p.company}` : ""}`;
-    const text = await draft(direct ? DM_RULES : POSTER_CONNECT_RULES,
-      `THE PERSON: ${persona}. Their company has ${hiring.openRoles} open role(s)${hiring.sample.length ? ` including ${hiring.sample.join(", ")}` : ""}.\n\nTHEIR POST:\n${post.text.slice(0, 700)}\n\nWrite the ${direct ? "message" : "connection note"}.`);
-    if (!text) continue;
+
+    // Supporting evidence, never a gate: their own board's open roles.
+    const hiring = company ? await checkHiring(company) : undefined;
+
+    const persona = `${authorName}${title ? `, ${title}` : ""}${company ? ` at ${company}` : ""}`;
+    const evidence = hiring?.openRoles
+      ? ` Their company also shows ${hiring.openRoles} open role(s)${hiring.sample.length ? ` including ${hiring.sample.join(", ")}` : ""}.`
+      : "";
+    const dmText = await draft(direct ? DM_RULES : POSTER_CONNECT_RULES,
+      `THE PERSON: ${persona}.${evidence}\n\nTHEIR HIRING POST:\n${text.slice(0, 700)}\n\nWrite the ${direct ? "message" : "connection note"}.`);
+    if (!dmText) continue;
 
     state.items.push({
       id: rid("licw"), workspaceId, kind: "poster",
-      postId: post.id!, postExcerpt: post.text.slice(0, 700), postAt: post.at,
+      postId, postExcerpt: text.slice(0, 700), postAt: str(raw.date) ?? str(raw.parsed_datetime),
       commentId: "", commentText: "",
-      prospectId: p.id, openProfile: prof.openProfile,
+      openProfile: prof.openProfile,
       authorProviderId: prof.providerId,
-      authorName: fullName || "LinkedIn member",
-      authorHeadline: prof.headline ?? [p.title, p.company].filter(Boolean).join(" at "),
-      authorPublicUrl: prof.publicUrl ?? (p.linkedinUrl?.startsWith("http") ? p.linkedinUrl : `https://www.${p.linkedinUrl}`),
+      authorName,
+      authorHeadline: headline ?? prof.headline,
+      authorPublicUrl: prof.publicUrl,
       networkDistance: prof.networkDistance,
-      title: p.title, company: p.company,
+      title: title ?? headline, company,
       seniority: intel.seniority, jobFunction: intel.function,
       decisionMaker: true, peer: false, hiring, tier: "hot",
       replyStatus: "none",
-      dmText: direct ? text : text.slice(0, 280), dmStatus: "suggested",
+      dmText: direct ? dmText : dmText.slice(0, 280), dmStatus: "suggested",
       createdAt: nowIso(), updatedAt: nowIso(),
     });
     created++;
     save();
   }
 
+  if (seenArr.length > SEEN_CAP) state.seen[workspaceId] = seenArr.slice(-SEEN_CAP);
   save();
   return created;
 }
@@ -681,6 +716,8 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
 export interface CommentWatchView {
   status: CommentWatchStatus;
   autopilot: { enabled: boolean; source: "manual" | "bd_autopilot" | "off" };
+  /** The market-scan keyword bank in effect (backend defaults or override). */
+  keywords: string[];
   lastScan?: string;
   items: CommentLeadItem[];
 }
@@ -694,7 +731,7 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
   const items = state.items
     .filter((i) => i.workspaceId === workspaceId)
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
-  return { status, autopilot, lastScan: state.lastScan[workspaceId], items };
+  return { status, autopilot, keywords: marketKeywordsFor(workspaceId), lastScan: state.lastScan[workspaceId], items };
 }
 
 function findItem(workspaceId: string, id: string): CommentLeadItem | undefined {

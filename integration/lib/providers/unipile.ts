@@ -157,6 +157,18 @@ export class UnipileClient extends ProviderClient {
     });
   }
 
+  /** Keyword search across LinkedIn POSTS (classic search) — the market scan
+   *  behind the comment listener's poster lane: find hiring managers posting
+   *  about talent they need. Fresh posts first. */
+  searchPosts(accountId: string, keywords: string, limit = 20) {
+    return this.request({
+      method: "POST",
+      path: "/api/v1/linkedin/search",
+      query: { account_id: accountId, limit },
+      body: { api: "classic", category: "posts", keywords, sort_by: "date", date_posted: "past_week" },
+    });
+  }
+
   /** React to a post (the LinkedIn OS "like post" touch).
    *  NOTE: confirm the exact path/shape against the current Unipile API. */
   likePost(accountId: string, postId: string, reaction = "like") {

@@ -1050,6 +1050,7 @@
         d.commentWatch = {
           status: { active: true, engineReady: true, aiReady: true, paused: false, reasons: [] },
           autopilot: { enabled: true, source: "bd_autopilot" },
+          keywords: ["we are hiring", "we're hiring", "now hiring", "looking to hire", "open role", "growing our team"],
           lastScan: new Date().toISOString(),
           items: [
             {
@@ -1057,10 +1058,10 @@
               authorName: "Priya Raghavan", authorHeadline: "Chief Operating Officer at Alderwood Care Group",
               title: "Chief Operating Officer", company: "Alderwood Care Group",
               openProfile: true,
-              postExcerpt: "We opened two new clinics this quarter and the hardest part was not the buildout. It was finding clinicians who stay past month six. Retention starts in the interview, not in onboarding.",
+              postExcerpt: "We are hiring a Clinic Director and two Nurse Practitioners for our new Bentonville location. Finding clinicians who stay past month six has been our hardest problem. If you know someone great, send them my way.",
               hiring: { checked: true, openRoles: 9, sample: ["Clinic Director", "Nurse Practitioner", "Care Coordinator"] },
               dmStatus: "suggested",
-              dmText: "Retention starting in the interview is the part almost everyone gets backwards; the month-six dropoff is usually a screening miss, not an onboarding miss. We place clinicians all day and see the same pattern. What signal do you now screen for that you ignored two clinics ago?",
+              dmText: "A Clinic Director plus two NPs for a brand-new location is the exact search where month-six retention gets decided. Placing clinicians who stay is what we do all day, happy to send over a couple of profiles worth comparing against your bar. What has been the sticking point on the director search so far?",
               createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
             },
             {
@@ -1108,6 +1109,11 @@
         if (body.action === "pause" || body.action === "resume") { cw.status.paused = body.action === "pause"; save(d); return ok({ view: cw }); }
         if (body.action === "auto_on" || body.action === "auto_off") {
           cw.autopilot = { enabled: body.action === "auto_on", source: body.action === "auto_on" ? "manual" : "off" };
+          save(d); return ok({ view: cw });
+        }
+        if (body.action === "keywords_set") {
+          var kws = String(body.text || "").split(",").map(function (k) { return k.trim().toLowerCase(); }).filter(Boolean);
+          cw.keywords = kws.length ? kws : ["we are hiring", "we're hiring", "now hiring", "looking to hire", "open role", "growing our team"];
           save(d); return ok({ view: cw });
         }
         if (!it) return ok({ view: cw });
