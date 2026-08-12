@@ -98,8 +98,11 @@ async function triggerVoiceOnEmailSent(workspaceId: string, t: SendTouch): Promi
  * clients still get a clickable URL).
  */
 export function emailPayload(body: string): { html: string; text: string } {
+  // max-width matches the 480px video card (owner call 2026-08-12): copy wraps into a few short
+  // lines instead of running the full width of a desktop client, which also mirrors how it reads
+  // on a phone. Left-aligned block — personal notes aren't centered layouts.
   const html =
-    `<div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#222222">` +
+    `<div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#222222;max-width:480px">` +
     body.replace(/\r?\n/g, "<br>") +
     `</div>`;
   const link = (body.match(/<a href="(https?:[^"]+)"/) || [])[1] || "";

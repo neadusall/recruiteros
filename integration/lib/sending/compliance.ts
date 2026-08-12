@@ -71,7 +71,7 @@ export function complianceFooter(workspaceId: string, recipientEmail: string, br
   const address = postalAddressFor(workspaceId, brand);
   const identity = address ? `${brand.name} · ${address}` : brand.name;
   const html =
-    `<div style="margin-top:28px;padding-top:12px;border-top:1px solid #e6e6e6;` +
+    `<div style="margin-top:28px;padding-top:12px;border-top:1px solid #e6e6e6;max-width:480px;` +
     `font-family:Helvetica,Arial,sans-serif;font-size:11px;line-height:1.6;color:#8a8a8a">` +
     escapeHtml(identity) +
     `<br><a href="${url}" style="color:#8a8a8a;text-decoration:underline">Unsubscribe</a>` +

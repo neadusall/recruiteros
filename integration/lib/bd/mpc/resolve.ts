@@ -110,6 +110,22 @@ export function fixArticles(text: string): string {
   });
 }
 
+/**
+ * UNIVERSAL post-fill fix (owner call 2026-08-12): sentences start with a capital letter and the
+ * standalone pronoun "i" is always "I". Several template pools were written all-lowercase for a
+ * casual look; the owner wants proper casing on everything a prospect reads. Anchored on
+ * whitespace so URLs (no space after their dots) and HTML tags (start with "<") are never touched;
+ * idempotent on copy that is already cased correctly.
+ */
+export function fixSentenceCase(text: string): string {
+  return text
+    // First letter of the string, and of every sentence/line: "hi tracie. quick one" -> "Hi ... Quick"
+    .replace(/(^\s*|[.?!]\s+|\n\s*)([a-z])/g, (_m, lead: string, ch: string) => lead + ch.toUpperCase())
+    // The pronoun "i" anywhere: "and i move fast" -> "and I move fast" (word-bounded, so "in"/"it"
+    // and letters inside URLs, tags, or words are untouched)
+    .replace(/(^|[\s([{"'])i(?=[\s)\]}"'.,!?;:]|$)/g, (_m, lead: string) => lead + "I");
+}
+
 /** Choose "a" or "an" for a role phrase, phonetically — handles acronyms (read letter-by-letter) and
  *  the common vowel-letter/consonant-sound exceptions ("a user", "an hour"). */
 function indefiniteArticle(phrase: string): "a" | "an" {

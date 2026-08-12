@@ -18,7 +18,7 @@
 import type { Campaign, CampaignModel, CampaignModelTouch, Prospect } from "../core/types";
 import { GUIDELINES_PROMPT } from "../copy/guidelines";
 import { expandSpintax } from "../copy/spintax";
-import { buildMpcTokens, fixArticles } from "../bd/mpc/resolve";
+import { buildMpcTokens, fixArticles, fixSentenceCase } from "../bd/mpc/resolve";
 
 const MERGE_HELP = "{{firstName}}, {{company}}, {{title}}, {{role}}, {{signal}}, {{watchlink}}, {{videoembed}}";
 
@@ -74,9 +74,9 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   })();
   vals.videogif = pv?.gifUrl || "";
   vals.videoposter = pv?.posterUrl || "";
-  // Loom-look embed, centered like a share card, rounded, with a "Watch" line beneath for
-  // image-blocking clients. Table markup + explicit width because email clients ignore
-  // margin:auto on divs.
+  // Loom-look embed, LEFT-ALIGNED with the copy (owner call 2026-08-12: the card sits in the
+  // text flow like an attachment, not centered like a marketing blast), rounded, with a "Watch"
+  // line beneath for image-blocking clients. Table markup because email clients ignore div CSS.
   //
   // POSTER-FIRST by default: the static JPEG (play button baked in, ~10x lighter than the
   // animated teaser) paints instantly, survives Outlook's animation freeze, and keeps a cold
@@ -86,7 +86,7 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   const gifFirst = ["1", "true", "yes", "on"].includes((process.env.INMARKET_EMBED_GIF || "").toLowerCase());
   const thumb = gifFirst ? (pv?.gifUrl || pv?.posterUrl || "") : (pv?.posterUrl || pv?.gifUrl || "");
   vals.videoembed = watch && thumb
-    ? `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:14px auto"><tr><td align="center">` +
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0"><tr><td align="left">` +
       `<a href="${watch}" target="_blank" style="text-decoration:none">` +
       `<img src="${thumb}" alt="Play the quick video I recorded about ${vals.company}" width="480" ` +
       `style="width:480px;max-width:100%;height:auto;border-radius:12px;border:1px solid #e5e7eb;display:block" /></a>` +
@@ -122,12 +122,12 @@ export function renderTouch(touch: CampaignModelTouch, p: Partial<Prospect>, opt
   const seed = `${p.id || ""}:${touch.key || ""}`;
   const tokens: Record<string, string> = {};
   const fill = (s?: string) =>
-    fixArticles(expandSpintax(s || "", seed).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, k) => {
+    fixSentenceCase(fixArticles(expandSpintax(s || "", seed).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, k) => {
       const key = String(k).toLowerCase();
       const v = vals[key] ?? "";
       tokens[key] = v;
       return v;
-    }));
+    })));
   return { subject: touch.subject ? fill(touch.subject) : undefined, body: fill(touch.body), tokens };
 }
 
