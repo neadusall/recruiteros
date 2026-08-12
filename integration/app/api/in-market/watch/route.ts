@@ -38,9 +38,17 @@ export async function GET(req: Request) {
   // Email-teaser open: count a GIF/poster load as an approximate email open, EXCEPT the
   // watch-page poster (which passes notrack=1) so we don't double-count the watch view.
   if ((fmt === "gif" || fmt === "jpg") && !url.searchParams.get("notrack")) {
-    import("../../../../lib/inmarket/videoStats")
-      .then((m) => m.recordVideoEvent({ videoKey: key, type: "gif_open" }))
-      .catch(() => {});
+    // Judged the same way as a watch-page beacon: a security gateway prefetching the teaser is
+    // not an email open, and counting it as one overstates the top of the funnel.
+    (async () => {
+      const { classifyViewer, clientIp } = await import("../../../../lib/inmarket/viewerId");
+      const verdict = await classifyViewer(req.headers.get("user-agent") || "", clientIp(req.headers));
+      const { recordVideoEvent } = await import("../../../../lib/inmarket/videoStats");
+      await recordVideoEvent({
+        videoKey: key, type: "gif_open",
+        machine: verdict.kind === "machine", machineReason: verdict.reason,
+      });
+    })().catch(() => {});
   }
 
   const total = buf.length;

@@ -249,9 +249,28 @@
         var el = document.createElement("div");
         el.className = "clip" + (c.id === state.clipId ? " on" : "");
         var kb = Math.round(c.bytes / 1024);
-        el.innerHTML = '<span class="d"></span><span class="meta">' + esc(c.label || ("Clip " + new Date(c.at).toLocaleDateString())) + ' · ' + kb + ' KB</span><button class="danger small" data-del="' + c.id + '">✕</button>';
-        el.onclick = function (ev) { if (ev.target.getAttribute("data-del")) return; state.clipId = c.id; lsSet(LS.clip, c.id); loadClips(); refreshBanner(); };
+        el.innerHTML = '<span class="d"></span><span class="meta">' + esc(c.label || ("Clip " + new Date(c.at).toLocaleDateString())) + ' · ' + kb + ' KB</span>' +
+          '<button class="ghost small vcap" data-cap="' + c.id + '" title="Transcribe this recording once. Every video built from it shows the same captions, so this is charged one time per take, not per video.">CC</button>' +
+          '<button class="danger small" data-del="' + c.id + '">✕</button>';
+        el.onclick = function (ev) { if (ev.target.getAttribute("data-del") || ev.target.getAttribute("data-cap")) return; state.clipId = c.id; lsSet(LS.clip, c.id); loadClips(); refreshBanner(); };
         box.appendChild(el);
+      });
+      // Captions: one transcription per RECORDING, cached forever after.
+      box.querySelectorAll("[data-cap]").forEach(function (b) {
+        b.onclick = function (ev) {
+          ev.stopPropagation();
+          var id = b.getAttribute("data-cap");
+          b.disabled = true; b.textContent = "…";
+          api("/api/in-market/captions", { method: "POST", body: JSON.stringify({ clipId: id }) })
+            .then(function (j) {
+              b.textContent = "CC";
+              b.disabled = false;
+              toast(j && j.cached
+                ? "Captions already on file for this recording, nothing charged."
+                : "Recording transcribed. Every video made from it now shows captions.");
+            })
+            .catch(function (e) { b.textContent = "CC"; b.disabled = false; toast((e && e.message) || "Could not transcribe that recording"); });
+        };
       });
       box.querySelectorAll("[data-del]").forEach(function (b) {
         b.onclick = function (ev) {
@@ -670,15 +689,26 @@
     $("perfUpdated").textContent = "updated just now";
     var kpis = [
       { v: nfmt(t.gifOpens), l: "Email opens", sub: "teaser GIF loads" },
-      { v: nfmt(t.opens), l: "Page visits", sub: "watch-page loads" },
+      { v: nfmt(t.opens), l: "Page visits", sub: "by people, scanners excluded" },
       { v: nfmt(t.plays), l: "Plays", sub: pct(t.opens ? t.plays / t.opens : 0) + " of visits" },
-      { v: nfmt(t.uniqueViewers), l: "Unique viewers", sub: "" },
-      { v: dur(t.avgWatchSeconds), l: "Avg watch", sub: "" },
+      { v: nfmt(t.identified), l: "People named", sub: "known by name, not just a count" },
+      { v: dur(t.watchSeconds), l: "Total watch time", sub: dur(t.avgWatchSeconds) + " avg per play" },
       { v: pct(t.completionRate), l: "Completion", sub: nfmt(t.completes) + " finished" },
     ];
     $("kpis").innerHTML = kpis.map(function (k) {
       return '<div class="kpi"><div class="v">' + k.v + '</div><div class="l">' + k.l + "</div>" + (k.sub ? '<div class="sub">' + esc(k.sub) + "</div>" : "") + "</div>";
     }).join("");
+    // Scanner traffic, stated plainly. Security gateways fetch every link in a cold email within
+    // seconds of delivery; counting those as viewers would overstate the whole funnel.
+    var mo = t.machineOpens || 0;
+    var mNote = $("perfMachine");
+    if (mNote) {
+      mNote.style.display = mo ? "" : "none";
+      mNote.innerHTML = mo
+        ? nfmt(mo) + " load" + (mo === 1 ? " was" : "s were") + " an email security scanner or preview bot, not a person. " +
+          "Those are kept out of every number above, and never trigger a connection request."
+        : "";
+    }
 
     $("chart").innerHTML = chartSvg((o && o.trend) || []);
     renderFeed((o && o.recent) || []);
@@ -736,12 +766,28 @@
     if (!videos.length) { $("leaderboard").innerHTML = '<div class="empty">Generate and send a video to start seeing performance here.</div>'; return; }
     var maxPlays = Math.max.apply(null, videos.map(function (v) { return v.plays || 0; }).concat([1]));
     var rows = videos.slice(0, 50).map(function (v) {
+      // Who watched, by name. A row with people on it is the actionable thing on this page;
+      // the counters only matter when nobody is named yet.
+      var people = v.people || [];
+      var whoHtml = people.length
+        ? people.slice(0, 6).map(function (p) {
+            var label = p.name || p.email || "Someone";
+            var time = p.watchSeconds ? dur(p.watchSeconds) : (p.plays ? "played" : "visited");
+            return '<span class="who" title="' + esc((p.email || "") + (p.company ? " · " + p.company : "")) + '">' +
+              "<b>" + esc(label) + '</b><span class="wt">' + esc(time) + "</span>" +
+              (p.completed ? '<span class="done">finished</span>' : "") + "</span>";
+          }).join("") + (people.length > 6 ? '<span class="wt">+' + (people.length - 6) + " more</span>" : "")
+        : '<span class="wt">' + (v.plays ? "not identified" : "nobody yet") + "</span>";
+      var machine = v.machineOpens
+        ? '<div class="ro" title="Email security scanners and preview bots that fetched this link. Excluded from every number in this row.">' + nfmt(v.machineOpens) + " scanner load" + (v.machineOpens === 1 ? "" : "s") + "</div>"
+        : "";
       return "<tr>" +
-        '<td class="l"><div class="co">' + esc(v.company || "·") + '</div><div class="ro">' + esc(v.roleTitle || "") + "</div></td>" +
+        '<td class="l"><div class="co">' + esc(v.company || "·") + '</div><div class="ro">' + esc(v.roleTitle || "") + "</div>" + machine + "</td>" +
+        '<td class="people">' + whoHtml + "</td>" +
         "<td>" + nfmt(v.gifOpens) + "</td>" +
         "<td>" + nfmt(v.opens) + "</td>" +
         "<td>" + nfmt(v.plays) + "</td>" +
-        "<td>" + nfmt(v.uniqueViewers) + "</td>" +
+        "<td>" + dur(v.watchSeconds) + "</td>" +
         "<td>" + dur(v.avgWatchSeconds) + "</td>" +
         '<td><span class="pill-rate">' + pct(v.completionRate) + "</span></td>" +
         '<td class="l"><div class="bar"><i style="width:' + Math.round((v.plays / maxPlays) * 100) + '%"></i></div></td>' +
@@ -751,9 +797,9 @@
         "</tr>";
     }).join("");
     $("leaderboard").innerHTML =
-      '<table class="lbt"><thead><tr><th class="l">Company · Role</th><th>Email</th><th>Visits</th><th>Plays</th><th>Viewers</th><th>Avg watch</th><th>Compl.</th><th class="l">Plays</th><th>Last</th><th></th></tr></thead><tbody>' +
+      '<table class="lbt"><thead><tr><th class="l">Company · Role</th><th class="l">Who watched</th><th>Email</th><th>Visits</th><th>Plays</th><th>Watch time</th><th>Avg watch</th><th>Compl.</th><th class="l">Plays</th><th>Last</th><th></th></tr></thead><tbody>' +
       rows + "</tbody></table>" +
-      '<div class="empty" style="text-align:left;padding:8px 2px 0">Your own views count like a prospect\'s. Remove a row after you check a video so the rates stay honest.</div>';
+      '<div class="empty" style="text-align:left;padding:8px 2px 0">A play by a named person queues that recruiter\'s LinkedIn request automatically. Your own views count like a prospect\'s, so remove a row after you check a video.</div>';
   }
 
   // Remove one video's stats: internal views would otherwise inflate every rate.

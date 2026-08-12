@@ -221,6 +221,14 @@
   .fe .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fe .ago{color:var(--faint);font-size:11px;flex:none}
   .lb{overflow-x:auto}
+  .note-machine{margin:-6px 0 16px;padding:10px 13px;border:1px solid var(--line);border-left:3px solid var(--mut);
+    border-radius:9px;background:var(--field);color:var(--mut);font-size:12.5px;line-height:1.5}
+  /* Named people under a video row: the point of the table is who watched, not how many. */
+  table.lbt td.people{text-align:left;white-space:normal}
+  .who{display:inline-flex;align-items:center;gap:6px;margin:2px 8px 2px 0;font-size:12px}
+  .who b{font-weight:600}
+  .who .wt{color:var(--mut);font-variant-numeric:tabular-nums}
+  .who .done{color:var(--ok,#1d7a3e);font-weight:600}
   table.lbt{width:100%;border-collapse:collapse;font-size:13px}
   table.lbt th{text-align:right;font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;padding:9px 10px;border-bottom:1px solid var(--line);font-weight:600}
   table.lbt th.l,table.lbt td.l{text-align:left}
@@ -481,6 +489,7 @@
     </div>
   </div>
   <div class="kpis" id="kpis"></div>
+  <div class="note-machine" id="perfMachine" style="display:none"></div>
   <div class="perfgrid">
     <div class="card">
       <h2>Plays · last 14 days</h2>

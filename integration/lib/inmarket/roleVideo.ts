@@ -82,6 +82,9 @@ export interface VideoResult {
   status: VideoStatus;
   /** Stable key the composite assets are stored/served under. */
   key?: string;
+  /** The recording this composite was built from. Captions are cached per clip, so this is
+   *  what lets a finished video find its transcript without re-transcribing anything. */
+  clipId?: string;
   /** Which composite assets exist, by format. Served via the video route by (key, fmt). */
   files?: { gif?: boolean; mp4?: boolean; jpg?: boolean };
   /** The page we used as the background (the company's own careers URL). */
@@ -126,6 +129,10 @@ function clipsDir(): string {
 }
 function clipPath(id: string, ext: string): string {
   return join(clipsDir(), `${id}.${ext}`);
+}
+/** On-disk path of a recorded clip, for callers that read the take itself (captions). */
+export function clipFilePath(clip: ClipMeta): string {
+  return clipPath(clip.id, clip.ext);
 }
 /** The three served composite artifacts: watch MP4, animated email teaser, static email poster. */
 export type CompositeFmt = "gif" | "mp4" | "jpg";
@@ -410,7 +417,7 @@ export async function mirrorComposite(fromKey: string, toKey: string): Promise<b
 }
 
 /** Ensure the source clip is on local disk so ffmpeg (which can't read S3) can consume it. */
-async function materializeClip(clip: ClipMeta): Promise<void> {
+export async function materializeClip(clip: ClipMeta): Promise<void> {
   const local = clipPath(clip.id, clip.ext);
   if (await fileExists(local)) return;
   if (!s3Enabled()) return;
@@ -1006,7 +1013,7 @@ export async function composeRoleVideo(
   const now = () => new Date().toISOString();
 
   if (!opts?.force && (await compositeExists(key, "gif"))) {
-    return { ok: true, status: "ready", key, files: { gif: true, mp4: await compositeExists(key, "mp4"), jpg: await compositeExists(key, "jpg") }, at: now() };
+    return { ok: true, status: "ready", key, clipId, files: { gif: true, mp4: await compositeExists(key, "mp4"), jpg: await compositeExists(key, "jpg") }, at: now() };
   }
 
   let result: VideoResult;
@@ -1076,10 +1083,19 @@ export async function composeRoleVideo(
 
   try {
     const cache = await ensureVideos();
-    cache.set(key, { ...result, at: result.at || now() } as VideoRow);
+    // clipId is recorded so a finished video can find its (already paid for) transcript.
+    cache.set(key, { ...result, clipId, at: result.at || now() } as VideoRow);
     saveVideos();
   } catch { /* best-effort */ }
   return result;
+}
+
+/** The cached compose record for a key, so callers can recover which clip produced it. */
+export async function getVideoRecord(key: string): Promise<VideoResult | null> {
+  if (!key) return null;
+  const cache = await ensureVideos();
+  const row = cache.get(key);
+  return row ? stripRow(row) : null;
 }
 
 function stripRow(row: VideoRow): VideoResult {

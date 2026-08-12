@@ -27,19 +27,44 @@ export interface VideoEventIn {
   recipient?: string;   // optional per-recipient label (prospect id / name from a merge tag)
   seconds?: number;     // for heartbeat: seconds watched since the last beat
   sessionId?: string;   // anonymous per-viewer-session id (from the watch page)
+  /** Machine traffic (email security scanner, preview bot) is counted SEPARATELY: it must never
+   *  inflate an engagement rate or look like a person who watched. */
+  machine?: boolean;
+  machineReason?: string;
+  /** Who it was, when we could tell (see lib/inmarket/viewerId). */
+  viewerName?: string;
+  viewerEmail?: string;
+  viewerCompany?: string;
+}
+
+/** One identified human who engaged, kept per video so the operator sees names, not counters. */
+export interface VideoViewer {
+  name?: string;
+  email?: string;
+  company?: string;
+  plays: number;
+  watchSeconds: number;
+  completed: boolean;
+  firstAt: string;
+  lastAt: string;
 }
 
 export interface VideoAgg {
   videoKey: string;
   company?: string;
   roleTitle?: string;
-  opens: number;        // watch-page loads
+  opens: number;        // watch-page loads BY PEOPLE
   plays: number;        // play presses
   completes: number;    // finished the video
   gifOpens: number;     // email teaser GIF loads (approx email opens)
   watchSeconds: number; // total seconds watched
   viewers: string[];    // distinct session ids (capped) -> unique viewers
   viewerOverflow: number;
+  /** Scanner / preview-bot loads, tracked but excluded from every rate. */
+  machineOpens?: number;
+  machineGifOpens?: number;
+  /** Named people who actually engaged, keyed by email (or name when there is no email). */
+  people?: Record<string, VideoViewer>;
   firstAt?: string;
   lastAt?: string;
   days: Record<string, number>; // YYYY-MM-DD -> plays that day (trend)
@@ -51,6 +76,10 @@ export interface RecentEvent {
   roleTitle?: string;
   type: VideoEventType;
   recipient?: string;
+  viewerName?: string;
+  viewerCompany?: string;
+  machine?: boolean;
+  machineReason?: string;
   at: string;
 }
 
@@ -93,6 +122,21 @@ export async function recordVideoEvent(e: VideoEventIn): Promise<void> {
   a.firstAt ||= now;
   a.lastAt = now;
 
+  // Machine traffic is recorded but quarantined: it never touches a counter any rate is built
+  // from. A security gateway loading the page is not a prospect who watched.
+  if (e.machine) {
+    if (e.type === "gif_open") a.machineGifOpens = (a.machineGifOpens || 0) + 1;
+    else if (e.type === "open") a.machineOpens = (a.machineOpens || 0) + 1;
+    st.feed.unshift({
+      videoKey: e.videoKey, company: a.company, roleTitle: a.roleTitle,
+      type: e.type, machine: true, machineReason: e.machineReason, at: now,
+    });
+    if (st.feed.length > FEED_CAP) st.feed.length = FEED_CAP;
+    scheduleSave();
+    return;
+  }
+
+  const secs = Math.max(0, Math.min(60, Math.round(e.seconds || 0)));
   switch (e.type) {
     case "open": a.opens++; break;
     case "play":
@@ -101,7 +145,7 @@ export async function recordVideoEvent(e: VideoEventIn): Promise<void> {
       break;
     case "complete": a.completes++; break;
     case "gif_open": a.gifOpens++; break;
-    case "heartbeat": a.watchSeconds += Math.max(0, Math.min(60, Math.round(e.seconds || 0))); break;
+    case "heartbeat": a.watchSeconds += secs; break;
   }
 
   // Unique viewers (by session id), capped.
@@ -112,11 +156,29 @@ export async function recordVideoEvent(e: VideoEventIn): Promise<void> {
     }
   }
 
+  // Named engagement: who watched, how long, did they finish. This is what turns a counter
+  // into a person the recruiter can act on.
+  const who = (e.viewerEmail || e.viewerName || "").trim().toLowerCase();
+  if (who) {
+    const people = (a.people ||= {});
+    const v = (people[who] ||= {
+      name: e.viewerName, email: e.viewerEmail, company: e.viewerCompany,
+      plays: 0, watchSeconds: 0, completed: false, firstAt: now, lastAt: now,
+    });
+    if (e.viewerName && !v.name) v.name = e.viewerName;
+    if (e.viewerCompany && !v.company) v.company = e.viewerCompany;
+    if (e.type === "play") v.plays++;
+    if (e.type === "heartbeat") v.watchSeconds += secs;
+    if (e.type === "complete") v.completed = true;
+    v.lastAt = now;
+  }
+
   // Activity feed (skip heartbeats — too noisy).
   if (e.type !== "heartbeat") {
     st.feed.unshift({
       videoKey: e.videoKey, company: a.company, roleTitle: a.roleTitle,
-      type: e.type, recipient: e.recipient, at: now,
+      type: e.type, recipient: e.recipient,
+      viewerName: e.viewerName, viewerCompany: e.viewerCompany, at: now,
     });
     if (st.feed.length > FEED_CAP) st.feed.length = FEED_CAP;
   }
@@ -169,11 +231,18 @@ export interface VideoStatRow {
   avgWatchSeconds: number;
   completionRate: number; // completes / plays
   playRate: number;       // plays / opens
+  /** Scanner / preview-bot loads, reported separately so opens are never misread as people. */
+  machineOpens: number;
+  /** Named people who engaged, best first (longest watch). */
+  people: VideoViewer[];
   lastAt?: string;
 }
 
 function toRow(a: VideoAgg): VideoStatRow {
   const uniqueViewers = a.viewers.length + a.viewerOverflow;
+  const people = Object.values(a.people || {}).sort(
+    (x, y) => y.watchSeconds - x.watchSeconds || y.plays - x.plays,
+  );
   return {
     videoKey: a.videoKey, company: a.company, roleTitle: a.roleTitle,
     opens: a.opens, plays: a.plays, completes: a.completes, gifOpens: a.gifOpens,
@@ -181,8 +250,37 @@ function toRow(a: VideoAgg): VideoStatRow {
     avgWatchSeconds: a.plays ? Math.round(a.watchSeconds / a.plays) : 0,
     completionRate: a.plays ? a.completes / a.plays : 0,
     playRate: a.opens ? a.plays / a.opens : 0,
+    machineOpens: (a.machineOpens || 0) + (a.machineGifOpens || 0),
+    people,
     lastAt: a.lastAt,
   };
+}
+
+/** Label a video with the company/role we know server-side, for rows whose link never carried
+ *  them. Only fills blanks, so a label the page reported is never overwritten. */
+export async function labelVideo(videoKey: string, company?: string, roleTitle?: string): Promise<boolean> {
+  if (!videoKey || (!company && !roleTitle)) return false;
+  const st = await ensure();
+  const a = st.byKey[videoKey];
+  if (!a) return false;
+  let changed = false;
+  if (company && !a.company) { a.company = company.slice(0, 120); changed = true; }
+  if (roleTitle && !a.roleTitle) { a.roleTitle = roleTitle.slice(0, 160); changed = true; }
+  if (changed) {
+    for (const f of st.feed) {
+      if (f.videoKey !== videoKey) continue;
+      f.company ||= a.company;
+      f.roleTitle ||= a.roleTitle;
+    }
+    scheduleSave();
+  }
+  return changed;
+}
+
+/** Every videoKey we hold stats for that still has no company label. */
+export async function unlabeledVideoKeys(): Promise<string[]> {
+  const st = await ensure();
+  return Object.values(st.byKey).filter((a) => !a.company).map((a) => a.videoKey);
 }
 
 export interface StatsOverview {
@@ -196,6 +294,10 @@ export interface StatsOverview {
     watchSeconds: number;
     avgWatchSeconds: number;
     completionRate: number;
+    /** Scanner / preview-bot loads across all videos, excluded from every rate above. */
+    machineOpens: number;
+    /** People we could name, across all videos. */
+    identified: number;
   };
   trend: { date: string; plays: number; opens: number }[]; // last `days` days
   videos: VideoStatRow[];   // per-video, plays desc
@@ -208,14 +310,18 @@ export async function statsOverview(opts?: { days?: number; recent?: number }): 
   const aggs = Object.values(st.byKey);
   const rows = aggs.map(toRow).sort((x, y) => y.plays - x.plays || y.opens - x.opens);
 
+  const seenPeople = new Set<string>();
   const totals = rows.reduce(
     (t, r) => {
       t.gifOpens += r.gifOpens; t.opens += r.opens; t.plays += r.plays;
       t.completes += r.completes; t.uniqueViewers += r.uniqueViewers; t.watchSeconds += r.watchSeconds;
+      t.machineOpens += r.machineOpens;
+      for (const p of r.people) seenPeople.add((p.email || p.name || "").toLowerCase());
       return t;
     },
-    { videos: rows.length, gifOpens: 0, opens: 0, plays: 0, completes: 0, uniqueViewers: 0, watchSeconds: 0, avgWatchSeconds: 0, completionRate: 0 },
+    { videos: rows.length, gifOpens: 0, opens: 0, plays: 0, completes: 0, uniqueViewers: 0, watchSeconds: 0, avgWatchSeconds: 0, completionRate: 0, machineOpens: 0, identified: 0 },
   );
+  totals.identified = seenPeople.size;
   totals.avgWatchSeconds = totals.plays ? Math.round(totals.watchSeconds / totals.plays) : 0;
   totals.completionRate = totals.plays ? totals.completes / totals.plays : 0;
 
