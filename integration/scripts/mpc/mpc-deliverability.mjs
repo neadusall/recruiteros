@@ -68,6 +68,16 @@ function inboxSignals() {
       if (/spam|abuse|complaint|feedback loop|unsubscribe me|stop emailing/.test(text)) complaints++;
     }
   } catch { /* no inbox yet */ }
+  // Fleet NDR sweep sidecar (2026-08-12): real bounce counts read from ALL sending mailboxes
+  // via the Mailbox API. The inbox snapshot above only sees recruiter reply boxes, which is how
+  // a 15% bounce rate showed as "1 bounce". Sidecar counts are per SENDING domain already.
+  try {
+    const n = JSON.parse(readFileSync(process.env.MPC_NDR_FILE || "/data/snap_mpc_ndr_v1.json", "utf8"));
+    for (const [d, v] of Object.entries(n.perDomain || {})) {
+      perDomain.set(d, Math.max(perDomain.get(d) || 0, (v && v.bounces) || 0));
+    }
+    bounces = Math.max(bounces, (n.bounced || []).length);
+  } catch { /* no sweep yet */ }
   return { bounces, complaints, perDomain };
 }
 

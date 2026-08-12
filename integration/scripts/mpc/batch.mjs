@@ -254,14 +254,22 @@ async function main() {
   const runSeen = new Set();
   const fresh = [];
   let skippedBlocked = 0;
+  let skippedUnvalidated = 0;
+  // VALIDATION BELT (2026-08-12 deliverability audit). The app-side enroll gate requires a
+  // Reoon-validated address, but curated rows reach this lane directly, so the same rule holds
+  // here: a known-invalid address never sends, and an unvalidated one waits for the nightly
+  // validation batch instead of bouncing off a real company and burning the sending domain.
+  // MPC_REQUIRE_VALIDATED=0 restores the old accept-unvalidated behavior.
+  const REQUIRE_VALIDATED = process.env.MPC_REQUIRE_VALIDATED !== "0";
   for (const p of preferred) {
     const e = String(p.likelyEmail || "").toLowerCase().trim();
     if (!e || seen.has(e) || runSeen.has(e)) continue;
     if (blocked.size && blocked.has(cohortKeyOf(p))) { skippedBlocked++; continue; } // recruiter said "no" to this cohort
+    if (p.emailInvalid || (REQUIRE_VALIDATED && p.emailValidated !== true)) { skippedUnvalidated++; continue; }
     runSeen.add(e);
     fresh.push(p);
   }
-  console.log(`already emailed: ${seen.size} | blocked-cohort skipped: ${skippedBlocked} | fresh & ready: ${fresh.length}`);
+  console.log(`already emailed: ${seen.size} | blocked-cohort skipped: ${skippedBlocked} | unvalidated/invalid held: ${skippedUnvalidated} | fresh & ready: ${fresh.length}`);
 
   // PROVIDER-AWARE ORDERING + SEG PHASE (the enterprise-deliverability layer, mxclass.mjs).
   // All MPC volume leaves Azure/Outlook infrastructure, so Outlook-hosted recipients are our
@@ -281,7 +289,22 @@ async function main() {
     if (c.family === "none") { buckets.nomx.push(p); continue; }
     (buckets[c.family] || buckets.unknown).push(p);
   }
-  const ordered = [...buckets.microsoft, ...buckets.custom, ...buckets.unknown, ...buckets.google];
+  // GMAIL PLACEMENT GATE (owner mandate 2026-08-12): if the latest seed test shows Gmail filing
+  // us to spam, google-hosted prospects are DEFERRED like SEG targets: never logged as sent, so
+  // they re-enter the pipeline automatically once a passing test lands. Microsoft-hosted targets
+  // (where all engagement is coming from) carry the volume meanwhile.
+  let googleHeld = false;
+  try {
+    const pl = JSON.parse(readFileSync(process.env.MPC_PLACEMENT_FILE || "/data/snap_mpc_placement_v1.json", "utf8"));
+    const g = (pl && pl.gmail) || {};
+    const total = (g.inbox || 0) + (g.spam || 0);
+    const fresh = pl && Date.now() - Date.parse(pl.checkedAt || 0) <= 7 * 86_400_000;
+    if (fresh && total > 0 && (g.spam || 0) / total > 0.3) googleHeld = true;
+  } catch { /* no seed test yet: google still sends, but the ramp governor holds base volume */ }
+  const ordered = googleHeld
+    ? [...buckets.microsoft, ...buckets.custom, ...buckets.unknown]
+    : [...buckets.microsoft, ...buckets.custom, ...buckets.unknown, ...buckets.google];
+  if (googleHeld) console.log(`placement gate: Gmail seed test failing, ${buckets.google.length} google-hosted prospects deferred`);
   console.log(`provider mix -> outlook-hosted ${buckets.microsoft.length} | custom ${buckets.custom.length} | unknown ${buckets.unknown.length} | google ${buckets.google.length} | SEG deferred ${buckets.seg.length}${SEG_SEND ? " (SEG sends ON)" : ""} | no-MX skipped ${buckets.nomx.length}`);
 
   // Cheap supply check: gates + MX mix, no AI spend. Use it to watch the finance pool fill.
@@ -295,7 +318,35 @@ async function main() {
   // capacity) instead of once a day, without ever over-sending.
   // Fleet ceiling: 900 boxes x 2 cold/day (Sending.ac's safe flat rate) = 1800. The per-box
   // cap below is the real enforcer; this daily total is the belt on top of those suspenders.
-  const DAILY_CAP = Number(process.env.MPC_DAILY_CAP || 1800);
+  const DAILY_CAP_ENV = Number(process.env.MPC_DAILY_CAP || 1800);
+  // VOLUME RAMP GOVERNOR (owner mandate 2026-08-12, after the bounce audit): the young fleet
+  // rebuilds reputation on ~450/day from 2026-08-13. Growth (+20%/week toward the 1500 ceiling)
+  // unlocks ONLY while a fresh (<=7 day old) seed placement test shows Gmail inboxing
+  // (snap_mpc_placement_v1.json, written by run-seed-test). No test or a failing test holds the
+  // base rate: reputation rebuilds are judged by measured placement, not the calendar alone.
+  // The domain-rest breaker separately benches any domain that starts bouncing again.
+  // Overrides: MPC_RAMP_START (ISO date), MPC_RAMP_BASE (0 disables the governor).
+  const RAMP_START = Date.parse(process.env.MPC_RAMP_START || "2026-08-13");
+  const RAMP_BASE = Number(process.env.MPC_RAMP_BASE ?? 450);
+  const PLACEMENT_FILE = process.env.MPC_PLACEMENT_FILE || "/data/snap_mpc_placement_v1.json";
+  function gmailPlacementPasses() {
+    try {
+      const pl = JSON.parse(readFileSync(PLACEMENT_FILE, "utf8"));
+      if (!pl || Date.now() - Date.parse(pl.checkedAt || 0) > 7 * 86_400_000) return null; // stale/absent
+      const g = pl.gmail || {};
+      const total = (g.inbox || 0) + (g.spam || 0);
+      if (!total) return null;
+      return (g.spam || 0) / total <= 0.3;
+    } catch { return null; } // no seed test yet
+  }
+  let rampCap = Infinity;
+  if (RAMP_BASE > 0 && Number.isFinite(RAMP_START)) {
+    const weeks = Math.max(0, (Date.now() - RAMP_START) / (7 * 86_400_000));
+    const growth = gmailPlacementPasses() === true ? Math.pow(1.2, weeks) : 1;
+    rampCap = Math.min(1500, Math.round(RAMP_BASE * growth));
+  }
+  const DAILY_CAP = Math.min(DAILY_CAP_ENV, rampCap);
+  if (rampCap < DAILY_CAP_ENV) console.log(`volume ramp: cap ${DAILY_CAP} today (base ${RAMP_BASE}; growth unlocked only by a fresh passing seed test)`);
   let sentToday = 0;
   if (SEND && existsSync(OUT)) {
     const today = new Date().toISOString().slice(0, 10);

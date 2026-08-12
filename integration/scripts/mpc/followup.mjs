@@ -94,6 +94,13 @@ function repliedOrStopped() {
       if (email) stop.add(email);
     }
   } catch { /* no inbox */ }
+  // NDR guard (2026-08-12 deliverability audit): never follow up an address whose touch 1
+  // bounced. The fleet NDR sweep maintains /data/snap_mpc_ndr_v1.json from the bounce notices
+  // sitting in ALL sending mailboxes (the unified inbox only covers recruiter reply boxes).
+  try {
+    const n = JSON.parse(readFileSync(process.env.MPC_NDR_FILE || "/data/snap_mpc_ndr_v1.json", "utf8"));
+    for (const e of n.bounced || []) stop.add(String(e).toLowerCase());
+  } catch { /* no sweep yet */ }
   return stop;
 }
 
