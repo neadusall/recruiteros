@@ -1601,6 +1601,7 @@
     // in one table); BD keeps the classic Prospects pipeline.
     prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: function (el) { return motion === "recruiting" ? renderCandidates(el) : renderProspects(el); } },
     autopilot: { title: "Autopilot", crumb: "Business Development", action: null, render: renderAutopilot, motionOnly: "bd", cap: "outreach:send" },
+    reports: { title: "BD Reports", crumb: "Business Development", action: null, render: renderBdReports, motionOnly: "bd", cap: "team:manage" },
     campaigns: { title: "Campaigns", crumb: "Build", action: "+ New sequence", render: renderCampaignsHub },
     studio: { title: "Campaign Studio", crumb: "Build", action: null, render: renderStudio },
     jdsourcing: { title: "JD Sourcing", crumb: "Build", action: null, render: renderJdSourcing, motionOnly: "recruiting", cap: "sourcing:run", tool: "jdsourcing" },
@@ -11960,6 +11961,97 @@
     if (d < 86400) return Math.floor(d / 3600) + "h ago"; return Math.floor(d / 86400) + "d ago";
   }
   var AP_CH = { email: '<svg class="isvg" aria-hidden="true"><use href="#i-mail"/></svg>', linkedin: '<svg class="isvg" aria-hidden="true"><use href="#i-briefcase"/></svg>', voice: '<svg class="isvg" aria-hidden="true"><use href="#i-phone"/></svg>' };
+
+  /* ===========================================================================
+   * BD REPORTS  ·  the whole outbound funnel in one place (admin, BD motion).
+   * Ties three live feeds together so an owner can SEE who is doing what:
+   *   /mpc-stats            -> sends + replies, per recruiter
+   *   /site-visitors        -> companies that came back to the site + the exact
+   *                            people we emailed there (the "who is it" step)
+   *   /linkedin/os?view=watch_connect -> video-watch -> LinkedIn connect funnel
+   *                            (requested -> sent -> accepted -> meeting), per recruiter
+   * Read-only; no new writes. It is the visual answer to "email sent -> we found
+   * out who -> we connected with them on LinkedIn."
+   * ======================================================================== */
+  function renderBdReports(el) {
+    el.innerHTML = head("BD Reports",
+      "Your whole outbound funnel in one place: what every recruiter sent, who came back to the site, who we identified, and who we connected with on LinkedIn after the email went out.") +
+      '<div id="rpBody">' + loading() + "</div>";
+
+    Promise.all([
+      api("/mpc-stats").catch(function () { return null; }),
+      api("/site-visitors").catch(function () { return null; }),
+      api("/linkedin/os?view=watch_connect").catch(function () { return null; })
+    ]).then(function (res) {
+      var m = res[0] || {}, v = res[1] || {}, w = res[2] || {};
+      var body = $("#rpBody"); if (!body) return;
+
+      var comps = (v && v.present && v.companies) || [];
+      var identifiedPeople = comps.reduce(function (n, c) { return n + ((c.people || []).length); }, 0);
+
+      // ---- The funnel, left to right. Each stage is a real measured number. ----
+      var stages = [
+        { k: "Emails sent", val: (m.sentTotal || 0), sub: (m.sentToday || 0) + " today", acc: "b" },
+        { k: "Replies", val: (m.repliesTotal || 0), sub: (m.replyRate || 0) + "% reply rate", acc: "g" },
+        { k: "Companies back on site", val: comps.length, sub: "matched to your outreach", acc: "c" },
+        { k: "People identified", val: identifiedPeople, sub: "exact contacts we emailed", acc: "c" },
+        { k: "LinkedIn requests", val: (w.requested || 0), sub: (w.sent || 0) + " sent", acc: "v" },
+        { k: "Connections accepted", val: (w.accepted || 0), sub: (w.meetings || 0) + " to meetings", acc: "p" }
+      ];
+      var funnel = '<div class="rp-funnel">' + stages.map(function (s, i) {
+        var arrow = i < stages.length - 1 ? '<div class="rp-arrow">&rsaquo;</div>' : "";
+        return '<div class="rp-stage rp-' + s.acc + '"><div class="rp-val">' + esc(String(s.val)) + '</div><div class="rp-k">' + esc(s.k) + '</div><div class="rp-sub">' + esc(s.sub) + "</div></div>" + arrow;
+      }).join("") + "</div>";
+
+      // ---- Team scoreboard: who is doing what. ----
+      var recs = m.recruiters || [];
+      var scoreboard = recs.length
+        ? '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+            "<th>Recruiter</th><th>Sent today</th><th>Sent total</th><th>Replies</th><th>Reply rate</th>" +
+          "</tr></thead><tbody>" +
+          recs.map(function (r) {
+            return "<tr><td><b>" + esc(r.name) + "</b></td><td>" + (r.sentToday || 0) + "</td><td>" + (r.sentTotal || 0) + "</td><td>" + (r.replies || 0) + "</td><td>" + (r.replyRate || 0) + "%</td></tr>";
+          }).join("") + "</tbody></table></div>"
+        : emptyCard("No sends yet. As the engine sends, per-recruiter totals appear here.");
+
+      // ---- Who we're connecting with: identified visitors + the connect funnel. ----
+      var connectRows = comps.map(function (c) {
+        return (c.people || []).map(function (p) {
+          var li = p.linkedin ? '<a href="' + esc(p.linkedin) + '" target="_blank" rel="noopener">LinkedIn</a>' : '<span class="note">no profile yet</span>';
+          var when = (c.lastVisit || "").slice(0, 10);
+          return "<tr><td><b>" + esc(p.name || p.email) + "</b>" + (p.title ? '<div class="lr-sub">' + esc(p.title) + "</div>" : "") + "</td>" +
+            "<td>" + esc(c.company) + "</td><td>" + esc(p.recruiter || "-") + "</td><td>" + esc(when) + "</td><td>" + li + "</td></tr>";
+        }).join("");
+      }).join("");
+      var connectTable = connectRows
+        ? '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
+            "<th>Person</th><th>Company</th><th>Emailed by</th><th>Visited</th><th>Connect</th>" +
+          "</tr></thead><tbody>" + connectRows + "</tbody></table></div>"
+        : '<div class="empty">No site visitors identified yet. When a company we emailed returns to the site, the exact people we contacted there appear here, ready to connect on LinkedIn.</div>';
+
+      // The watch-to-connect recent list (fires when a prospect watches the video email).
+      var recent = (w.recent || []);
+      var recentHtml = recent.length
+        ? recent.map(function (r) {
+            var st = String(r.status || "");
+            var cls = /accepted/.test(st) ? "good" : /sent/.test(st) ? "" : /skip/.test(st) ? "bad" : "amber";
+            return '<div class="list-row" style="justify-content:space-between;gap:10px"><div><div class="lr-main">' + esc(r.prospectName || "Prospect") + "</div><div class=\"lr-sub\">" + (r.recruiterName ? "via " + esc(r.recruiterName) + " &middot; " : "") + "watched " + esc((r.watchedAt || "").slice(0, 10)) + "</div></div>" +
+              '<span class="sv ' + cls + '" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;flex:none;align-self:center">' + esc(st.toUpperCase()) + "</span></div>";
+          }).join("")
+        : '<div class="empty">No video-watch connections yet. Once the video email is live, a watch fires a connection request from the recruiter who sent it, and each one lands here.</div>';
+
+      body.innerHTML =
+        '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 12px">The funnel &middot; email to connection</h3>' + funnel +
+          '<div class="note" style="margin-top:10px">Left to right: every number is measured, not estimated. Site identification is company-level from first-party traffic; person-level naming comes from matching your send ledger and, for the video email, the watch page.</div></div>' +
+        '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 12px">Team scoreboard &middot; who is doing what</h3>' + scoreboard + "</div>" +
+        '<div class="card" style="margin-bottom:16px"><h3 style="margin:0 0 6px">Who we are connecting with</h3>' +
+          '<div class="note" style="margin-bottom:10px">People at companies that came back to lumesp.com after we emailed them. Each row is exactly who we contacted there, and who to connect with on LinkedIn.</div>' + connectTable + "</div>" +
+        '<div class="card"><h3 style="margin:0 0 6px">Video-watch connections</h3>' +
+          '<div class="note" style="margin-bottom:10px">When a prospect watches their personalized video, a LinkedIn connection request goes out from the recruiter who emailed them. Newest first.</div>' + recentHtml + "</div>";
+    }).catch(function () {
+      var body = $("#rpBody"); if (body) body.innerHTML = needsSetup();
+    });
+  }
 
   function renderAutopilot(el) {
     el.innerHTML = head("Autopilot",

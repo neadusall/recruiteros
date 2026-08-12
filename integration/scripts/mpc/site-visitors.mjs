@@ -133,7 +133,7 @@ function loadLedger() {
       try {
         const r = JSON.parse(s);
         const email = String(r.email || r.to_email || "").toLowerCase();
-        const url = r.linkedinUrl || r.url || "";
+        const url = r.linkedin_url || r.linkedinUrl || r.url || "";
         if (!email || !url || r.status === "no_match") continue;
         const dom = email.split("@")[1];
         const e = byDomain.get(dom);
