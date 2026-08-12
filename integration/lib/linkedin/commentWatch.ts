@@ -487,12 +487,18 @@ function slugOf(url?: string): string | undefined {
 export async function scanWorkspace(workspaceId: string): Promise<{ scanned: number; created: number; skipped: string | null }> {
   await hydrate();
   const status = await commentWatchStatus(workspaceId);
-  if (!status.active) return { scanned: 0, created: 0, skipped: "standby" };
+  if (!status.active) {
+    console.log(`[comment-radar] ${workspaceId}: standby (${status.reasons.join(" | ") || "unknown"})`);
+    return { scanned: 0, created: 0, skipped: "standby" };
+  }
 
   const accounts = await connectedAccounts(workspaceId);
   const account = accounts[0];
   const own = await ownProfileFor(workspaceId, account);
-  if (!own) return { scanned: 0, created: 0, skipped: "own_profile_unresolved" };
+  if (!own) {
+    console.log(`[comment-radar] ${workspaceId}: own profile unresolved (account=${providerIdOf(account)})`);
+    return { scanned: 0, created: 0, skipped: "own_profile_unresolved" };
+  }
 
   const { unipile } = await import("../providers");
   const seenArr = state.seen[workspaceId] ?? (state.seen[workspaceId] = []);
@@ -503,7 +509,10 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
   let posts: Dict[] = [];
   try {
     posts = listOf(await unipile.listPosts(providerIdOf(account)!, own.providerId, POSTS_TO_WATCH));
-  } catch { return { scanned: 0, created: 0, skipped: "posts_unavailable" }; }
+  } catch (e) {
+    console.log(`[comment-radar] ${workspaceId}: own posts unavailable (${e instanceof Error ? e.message : e})`);
+    return { scanned: 0, created: 0, skipped: "posts_unavailable" };
+  }
 
   for (const post of posts.slice(0, POSTS_TO_WATCH)) {
     if (created >= NEW_PER_TICK) break;
@@ -584,11 +593,13 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
   try { dmCreated = await scanPosters(workspaceId, account); } catch { /* lane 1 results stand */ }
 
   // Autopilot: when armed, the fresh drafts go straight out through the engine.
-  try { await autoExecute(workspaceId); } catch { /* drafts stay open for manual review */ }
+  let sent = 0;
+  try { sent = await autoExecute(workspaceId); } catch { /* drafts stay open for manual review */ }
 
   state.lastScan[workspaceId] = nowIso();
   prune();
   save();
+  console.log(`[comment-radar] ${workspaceId}: scanned=${scanned} created=${created + dmCreated} autopilot_sent=${sent}`);
   return { scanned, created: created + dmCreated, skipped: null };
 }
 
@@ -631,7 +642,10 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
   let results: Dict[] = [];
   try {
     results = listOf(await unipile.searchPosts(providerIdOf(account)!, keyword, MARKET_RESULTS_PER_SEARCH));
-  } catch { return 0; }
+  } catch (e) {
+    console.log(`[comment-radar] market search failed for "${keyword}" (${e instanceof Error ? e.message : e})`);
+    return 0;
+  }
 
   let created = 0;
   for (const raw of results) {
@@ -981,7 +995,10 @@ export async function tickCommentWatch(): Promise<void> {
   const { accounts } = await import("./os/store");
   const all = await accounts.all();
   const workspaces = [...new Set(all.filter((a) => providerIdOf(a) && a.connected !== false).map((a) => a.workspaceId))];
+  if (!workspaces.length) console.log(`[comment-radar] tick: no connected workspaces (${all.length} account records)`);
   for (const ws of workspaces) {
-    try { await scanWorkspace(ws); } catch { /* next workspace */ }
+    try { await scanWorkspace(ws); } catch (e) {
+      console.log(`[comment-radar] ${ws}: scan error (${e instanceof Error ? e.message : e})`);
+    }
   }
 }
