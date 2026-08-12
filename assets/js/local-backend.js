@@ -1065,36 +1065,14 @@
               createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
             },
             {
-              id: "licw_demo1", tier: "hot", decisionMaker: true, peer: false,
-              authorName: "Dana Whitfield", authorHeadline: "VP People at Northgate Health",
-              title: "VP People", company: "Northgate Health",
-              postExcerpt: "Most agencies send resumes. The good ones send proof: here is the exact bar we screen against before you ever see a candidate.",
-              commentText: "This is the part most firms skip. How do you keep the bar consistent when a role drags on for months?",
-              hiring: { checked: true, openRoles: 12, sample: ["Director of Nursing", "Clinical Recruiter", "RN Case Manager"] },
-              replyStatus: "suggested",
-              replyText: "Long searches drift when the scorecard lives in someone's head. We re-run the same rubric on week one and week twelve, so the bar cannot quietly move. What made it drag on your side?",
-              connectStatus: "suggested",
-              connectText: "Your question under my screening post is the one most people never ask. Connecting so the conversation does not get lost in the comments.",
-              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-            },
-            {
-              id: "licw_demo2", tier: "warm", decisionMaker: true, peer: false,
+              id: "licw_demo1", kind: "poster", tier: "hot", decisionMaker: true, peer: false,
               authorName: "Marcus Bell", authorHeadline: "Director of Engineering at Corvid Systems",
               title: "Director of Engineering", company: "Corvid Systems",
-              postExcerpt: "Most agencies send resumes. The good ones send proof: here is the exact bar we screen against before you ever see a candidate.",
-              commentText: "We stopped using agencies because every shortlist needed re-screening anyway.",
-              hiring: { checked: true, openRoles: 0, sample: [] },
-              replyStatus: "suggested",
-              replyText: "Re-screening a shortlist means the agency screened for keywords, not for your bar. What did your own second screen catch that theirs missed?",
-              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-            },
-            {
-              id: "licw_demo3", tier: "community", decisionMaker: false, peer: false,
-              authorName: "Sofia Reyes", authorHeadline: "Software Engineer at Meridian Labs",
-              title: "Software Engineer", company: "Meridian Labs",
-              postExcerpt: "Most agencies send resumes. The good ones send proof: here is the exact bar we screen against before you ever see a candidate.",
-              commentText: "Wish more recruiters worked like this honestly.",
-              replyStatus: "none",
+              openProfile: false,
+              postExcerpt: "Open role on my team: senior platform engineer, Kafka and Kubernetes heavy. Third time posting it because the pipeline keeps filling with people who have read about both. Referrals welcome.",
+              hiring: { checked: true, openRoles: 4, sample: ["Senior Platform Engineer", "SRE", "Data Engineer"] },
+              dmStatus: "suggested",
+              dmText: "Third repost usually means the screen is passing readers and the interview is catching them. Kafka-and-K8s-in-production people exist but they are never applying. Happy to send a couple who clear that bar. What is the interview catching that the resumes hide?",
               createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
             }
           ]

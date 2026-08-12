@@ -3570,8 +3570,8 @@
       if (!st.active && !items.length) {
         mount.innerHTML =
           '<div class="card liops-card">' +
-            '<div class="liops-head"><div><b>Post engagement radar</b>' +
-              '<div class="muted liops-sub">Listens to comments on your LinkedIn posts, checks who is a decision-maker and whether their company is hiring, and drafts replies for your approval.</div></div>' +
+            '<div class="liops-head"><div><b>Market radar</b>' +
+              '<div class="muted liops-sub">Searches LinkedIn posts by hiring keywords to find hiring managers looking for talent, then direct-messages them off their own post.</div></div>' +
               '<span class="lie-chip mut">Standby</span></div>' +
             ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join("") || "") +
           "</div>";
@@ -3581,15 +3581,15 @@
       var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested" || t.dmStatus === "suggested"; }).length;
       mount.innerHTML =
         '<div class="card liops-card">' +
-          '<div class="liops-head"><div><b>Post engagement radar</b>' +
-            '<div class="muted liops-sub">Two lanes: commenters on your posts scored for buying signals, and a market scan that searches LinkedIn posts by hiring keywords to find hiring managers looking for talent (open profiles get a hyper-targeted direct message, never an InMail, never a public comment).' +
+          '<div class="liops-head"><div><b>Market radar</b>' +
+            '<div class="muted liops-sub">Searches LinkedIn posts by your hiring keywords to find hiring managers looking for talent, then sends each one a hyper-targeted direct message built off their post (open profiles get a plain DM, never an InMail, never a public comment; closed profiles get the same text as a connect note).' +
               (auto.enabled
                 ? " Autopilot is on: decision-maker touches send automatically through your account limits; community items wait for you."
                 : " Nothing sends without your approval.") + "</div></div>" +
             '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span></div>" +
           (items.length
             ? items.map(row).join("")
-            : '<div class="lie-post muted">Nothing captured yet. The listener checks your posts and runs a market keyword search every 15 minutes.</div>') +
+            : '<div class="lie-post muted">Nothing captured yet. The radar runs a market keyword search every 15 minutes.</div>') +
           '<div class="lie-post muted">Market keywords (comma-separated; clear to restore defaults):</div>' +
           '<textarea class="lie-text" data-lic-keywords rows="1">' + esc((d.keywords || []).join(", ")) + "</textarea>" +
           '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button> ' +

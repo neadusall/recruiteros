@@ -1,16 +1,19 @@
 /**
- * RecruitersOS · LinkedIn Comment Listener ("who is engaging with my posts?")
+ * RecruitersOS · LinkedIn Market Radar ("who is posting that they're hiring?")
  *
- * The owner's posts are getting comments; each commenter is a possible buyer.
- * Every tick (15 min by default) this listener:
+ * OTHER PEOPLE'S posts are the market (owner decision 2026-08-12: the radar
+ * never scans the owner's own posts). Every tick (15 min by default):
  *
- *   1. lists the connected account's OWN recent posts,
- *   2. pulls new comments on them (deduped against everything already seen),
- *   3. enriches each commenter (headline -> title + company, network distance),
- *   4. scores them: decision-maker (classifyTitle) + "is their company hiring
- *      right now" (their own ATS board via resolveCompanyRoles),
- *   5. tiers them hot / warm / community, and
- *   6. for hot + warm, drafts a substance-first reply to their comment.
+ *   1. one keyword search across ALL of LinkedIn's posts (rotating bank:
+ *      "we are hiring", "looking to hire", ... - editable per workspace),
+ *   2. every hit is gated: hiring intent in the text, a person (not a
+ *      company page), decision-maker title, not a peer firm, DNC/cooldown,
+ *   3. open-profile check picks the channel, and
+ *   4. a hyper-targeted direct message is drafted off THEIR post.
+ *
+ * The commenter machinery below (replies/connects on items with kind
+ * "commenter") remains for items already captured, but the scan no longer
+ * creates them.
  *
  * NOTHING posts on its own: everything waits for one-tap approval in the
  * LinkedIn tab and goes out through requestLinkedInAction, so account caps,
@@ -494,103 +497,18 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
 
   const accounts = await connectedAccounts(workspaceId);
   const account = accounts[0];
-  const own = await ownProfileFor(workspaceId, account);
-  if (!own) {
-    console.log(`[comment-radar] ${workspaceId}: own profile unresolved (account=${providerIdOf(account)})`);
-    return { scanned: 0, created: 0, skipped: "own_profile_unresolved" };
-  }
 
-  const { unipile } = await import("../providers");
-  const seenArr = state.seen[workspaceId] ?? (state.seen[workspaceId] = []);
-  const seen = new Set(seenArr);
-  let scanned = 0;
-  let created = 0;
+  // Best-effort own identity, ONLY so the market scan can skip the owner's
+  // own posts in search results. Never a gate (owner decision 2026-08-12:
+  // the radar hunts OTHER people's posts, not the owner's).
+  try { await ownProfileFor(workspaceId, account); } catch { /* optional */ }
 
-  let posts: Dict[] = [];
-  try {
-    posts = listOf(await unipile.listPosts(providerIdOf(account)!, own.providerId, POSTS_TO_WATCH));
-  } catch (e) {
-    console.log(`[comment-radar] ${workspaceId}: own posts unavailable (${e instanceof Error ? e.message : e})`);
-    return { scanned: 0, created: 0, skipped: "posts_unavailable" };
-  }
-
-  for (const post of posts.slice(0, POSTS_TO_WATCH)) {
-    if (created >= NEW_PER_TICK) break;
-    const postId = str(post.social_id) ?? str(post.id) ?? str(post.post_id);
-    if (!postId) continue;
-    const postExcerpt = (str(post.text) ?? str(post.commentary) ?? "").slice(0, 700);
-
-    let comments: Dict[] = [];
-    try {
-      comments = listOf(await unipile.listPostComments(providerIdOf(account)!, postId, { limit: COMMENTS_PER_POST }));
-    } catch { continue; }
-
-    for (const rawC of comments) {
-      if (created >= NEW_PER_TICK) break;
-      const c = parseComment(rawC);
-      if (!c) continue;
-      if (seen.has(c.commentId)) continue;
-      // The owner replying in their own threads must never re-enter the queue.
-      if (c.authorProviderId && c.authorProviderId === own.providerId) {
-        seen.add(c.commentId); seenArr.push(c.commentId);
-        continue;
-      }
-      seen.add(c.commentId); seenArr.push(c.commentId);
-      scanned++;
-
-      let headline = c.authorHeadline;
-      let publicUrl = c.authorPublicUrl;
-      if (!headline && c.authorProviderId) {
-        const extra = await fetchProfileLite(account, c.authorProviderId);
-        headline = extra.headline;
-        publicUrl = publicUrl ?? extra.publicUrl;
-      }
-      const { title, company } = parseHeadline(headline);
-      const intel = classifyTitle(title ?? headline ?? "");
-      const peer = looksLikePeer(title, company);
-      const hiring = company && !peer ? await checkHiring(company) : undefined;
-      const tier = tierOf(intel.isDecisionMaker, peer, hiring?.openRoles ?? 0);
-
-      const item: CommentLeadItem = {
-        id: rid("licw"), workspaceId,
-        postId, postExcerpt,
-        commentId: c.commentId, commentText: c.text.slice(0, 1000), commentAt: c.date,
-        authorProviderId: c.authorProviderId, authorName: c.authorName,
-        authorHeadline: headline, authorPublicUrl: publicUrl, networkDistance: c.networkDistance,
-        title, company,
-        seniority: intel.seniority, jobFunction: intel.function,
-        decisionMaker: intel.isDecisionMaker, peer, hiring, tier,
-        replyStatus: "none",
-        createdAt: nowIso(), updatedAt: nowIso(),
-      };
-
-      // Hot and warm commenters get a drafted reply immediately; community
-      // stays listed with on-demand drafting so goodwill replies are one tap away.
-      const persona = [c.authorName, title, company ? `at ${company}` : undefined].filter(Boolean).join(", ");
-      if (tier === "hot" || tier === "warm") {
-        const text = await draft(REPLY_RULES,
-          `MY POST:\n${postExcerpt || "(no text)"}\n\nTHEIR COMMENT (by ${persona}):\n${c.text}\n\nWrite the reply.`);
-        if (text) { item.replyText = text; item.replyStatus = "suggested"; }
-      }
-      // A decision-maker at a company hiring right now also gets a connection
-      // note referencing their comment; reply and connect approve independently.
-      if (tier === "hot") {
-        const note = await draft(CONNECT_RULES,
-          `The person: ${persona}.\nMy post they commented under:\n${postExcerpt || "(no text)"}\n\nTheir comment:\n${c.text}\n\nWrite the connection note.`);
-        if (note) { item.connectText = note; item.connectStatus = "suggested"; }
-      }
-
-      state.items.push(item);
-      created++;
-      save();
-    }
-  }
-
-  if (seenArr.length > SEEN_CAP) state.seen[workspaceId] = seenArr.slice(-SEEN_CAP);
-
-  // Lane 2: posting decision-makers with open roles -> direct-message drafts.
+  const scanned = 0;
+  const created = 0;
   let dmCreated = 0;
-  try { dmCreated = await scanPosters(workspaceId, account); } catch { /* lane 1 results stand */ }
+  try { dmCreated = await scanPosters(workspaceId, account); } catch (e) {
+    console.log(`[comment-radar] ${workspaceId}: market scan error (${e instanceof Error ? e.message : e})`);
+  }
 
   // Autopilot: when armed, the fresh drafts go straight out through the engine.
   let sent = 0;
