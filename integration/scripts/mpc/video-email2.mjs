@@ -30,6 +30,20 @@ const SENDERS = process.env.MPC_SENDERS_FILE || `${DATA}/snap_senders_v1.json`;
 const INBOX_FILE = process.env.MPC_INBOX_FILE || `${DATA}/snap_inbox.json`;
 const VIDEO_MAP = process.env.MPC_VIDEO_MAP || `${DATA}/snap_inmarket_autovideo_map_v1.json`;
 const LUME_WS = process.env.MPC_LUME_WS || "ws_mqf6o989003";
+
+// Domain rest fail-safe (same ledger batch.mjs and followup.mjs enforce): touch 2 goes out on
+// the SAME box as touch 1, so while that box's domain is resting the video email simply waits
+// and sends on a later run. Fail-open: no ledger means no domain is benched.
+const REST_FILE = process.env.MPC_REST_FILE || `${DATA}/snap_mpc_domain_rest_v1.json`;
+function restingDomains() {
+  try {
+    const r = JSON.parse(readFileSync(REST_FILE, "utf8"));
+    const now = Date.now();
+    return new Set(Object.entries(r.domains || {})
+      .filter(([, v]) => v && v.state === "resting" && (!v.until || Date.parse(v.until) > now))
+      .map(([d]) => d.toLowerCase()));
+  } catch { return new Set(); }
+}
 const MODEL = process.env.MPC_WRITER_MODEL || "claude-haiku-4-5";
 const MAILBOX_BASE = (process.env.SENDINGAC_MAILBOX_API_BASE || "https://api.customers.ac/api/mailbox/v1alpha1").replace(/\/+$/, "") + "/azure/v1.0";
 const APP_HOST = process.env.MPC_APP_HOST || "https://app.lumesp.com"; // Lume portal host (branded watch page)
@@ -223,11 +237,13 @@ async function main() {
   }
   let sent = 0, failed = 0, done = 0;
   const outFile = `${OUT}/sent-video2-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`;
-  let capped = 0;
+  const resting = restingDomains();
+  let capped = 0, deferredRest = 0;
   for (const item of cohort) {
     if (sent + failed >= LIMIT && SEND) break;
     if (done >= LIMIT && !SEND) break;
     const r = item.r, from = r.from, fromLc = String(from).toLowerCase();
+    if (resting.has(fromLc.split("@")[1] || "")) { deferredRest++; continue; } // domain resting: touch 2 waits
     if ((boxCount.get(fromLc) || 0) >= PER_BOX_DAILY) { capped++; continue; } // box at its daily floor
     const link = watchLink(item.video.videoKey);
     let note;
@@ -258,6 +274,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 250)); // gentle pacing
   }
 
+  if (deferredRest) console.log(`  domain rest: ${deferredRest} touch-2 email(s) deferred (resting: ${[...resting].join(", ")})`);
   if (SEND) console.log(`\nvideo-email2 -> sent ${sent}, failed ${failed}, held-by-box-cap ${capped} (ledger ${outFile})`);
   else console.log(`\n(dry run) ${done} would send now; ${capped} held by the 2/box/day cap (go tomorrow). Re-run with --send to send.`);
 }
