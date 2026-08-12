@@ -6,6 +6,14 @@
 import type { ProcessedResponse, OutboundNote } from "./types";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
+/** Identity-verified: matched to a prospect we know, or attributed to a campaign
+ *  send (the MPC bridge only queues sender-verified replies). Email rows with
+ *  neither are warm-up network chatter arriving hundreds a day; they must never
+ *  crowd out or evict a real reply. */
+export function isRealReply(p: ProcessedResponse): boolean {
+  return !!(p.inbound.prospectId || p.inbound.campaignId);
+}
+
 class InboxStore {
   items: ProcessedResponse[] = [];
   seen = new Set<string>();
@@ -50,9 +58,14 @@ class InboxStore {
 
   async list(workspaceId: string, limit = 100): Promise<ProcessedResponse[]> {
     await this.ready();
-    return this.items
-      .filter((p) => p.inbound.workspaceId === workspaceId && !p.deletedAt)
-      .slice(0, limit);
+    const mine = this.items.filter((p) => p.inbound.workspaceId === workspaceId && !p.deletedAt);
+    // Real replies are first-class citizens of this list: a plain newest-N slice
+    // lets warm-up chatter push a day-old real reply out of the window entirely.
+    // Every real reply makes the list; unverified rows only fill what is left.
+    const real = mine.filter(isRealReply).slice(0, limit);
+    const rest = mine.filter((p) => !isRealReply(p)).slice(0, Math.max(0, limit - real.length));
+    return [...real, ...rest].sort((a, b) =>
+      (b.inbound.receivedAt || "").localeCompare(a.inbound.receivedAt || ""));
   }
 
   /** One response by inbound id, scoped to the workspace (for reply-in-place). */
@@ -118,7 +131,22 @@ class InboxStore {
   async prune(maxItems = 3000, maxOutbound = 3000, maxSeen = 20000): Promise<number> {
     await this.ready();
     let dropped = 0;
-    if (this.items.length > maxItems) { dropped += this.items.length - maxItems; this.items.length = maxItems; }
+    if (this.items.length > maxItems) {
+      // Evict warm-up chatter before any real reply: drop unverified rows from
+      // the old end first, and only truncate real rows if the store is somehow
+      // all-real (then oldest-first, as before).
+      let toDrop = this.items.length - maxItems;
+      const kept: ProcessedResponse[] = [];
+      for (let i = this.items.length - 1; i >= 0; i--) {
+        const p = this.items[i];
+        if (toDrop > 0 && !isRealReply(p)) { toDrop--; continue; }
+        kept.push(p);
+      }
+      kept.reverse();
+      if (kept.length > maxItems) kept.length = maxItems;
+      dropped += this.items.length - kept.length;
+      this.items = kept;
+    }
     if (this.outbound.length > maxOutbound) { dropped += this.outbound.length - maxOutbound; this.outbound.length = maxOutbound; }
     if (this.seen.size > maxSeen) {
       const keep = [...this.seen];

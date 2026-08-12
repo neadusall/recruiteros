@@ -3792,12 +3792,16 @@
       // the replies their sends earned.
       var recs = m.recruiters || [], recHtml = "";
       if (recs.length) {
-        recHtml = '<h4 style="margin:16px 0 6px">Who sent it &middot; by recruiter</h4>' +
+        recHtml = '<h4 style="margin:16px 0 6px">Who sent it &middot; by recruiter' +
+          ' <a href="#response" style="font-weight:400;font-size:12px;margin-left:8px" title="Every reply lands in the Reply center, where you answer from the same recruiter mailbox that received it">Read + answer replies</a></h4>' +
           '<div style="overflow:auto"><table class="matrix"><thead><tr>' +
           "<th>Recruiter</th><th>Sent today</th><th>Sent total</th><th>Replies</th><th>Reply rate</th>" +
           "</tr></thead><tbody>" +
           recs.map(function (r) {
-            return "<tr><td><b>" + esc(r.name) + "</b></td><td>" + (r.sentToday || 0) + "</td><td>" + (r.sentTotal || 0) + "</td><td>" + (r.replies || 0) + "</td><td>" + (r.replyRate || 0) + "%</td></tr>";
+            var repl = (r.replies || 0) > 0
+              ? '<a href="#response" title="Open in the Reply center to read and answer as ' + esc(r.name) + '">' + r.replies + "</a>"
+              : "0";
+            return "<tr><td><b>" + esc(r.name) + "</b></td><td>" + (r.sentToday || 0) + "</td><td>" + (r.sentTotal || 0) + "</td><td>" + repl + "</td><td>" + (r.replyRate || 0) + "%</td></tr>";
           }).join("") + "</tbody></table></div>";
       }
       host.innerHTML =
@@ -23908,7 +23912,7 @@
   // A reply is REAL (not Smartlead warm-up) if it's identity-verified: either matched to a known
   // prospect, or tagged by the MPC bridge (which only ingests inbound from people we actually
   // emailed). Warm-up traffic has neither, so this cleanly hides it without fragile word-matching.
-  function respVerified(r) { return r.campaignId === "mpc-finance" || !!r.prospectId; }
+  function respVerified(r) { return !!r.campaignId || !!r.prospectId; }
   // shared UI states
   /* ============================ Email (Top of Funnel) ============================
      The prep + QA gate before send. A queue of prospects (pushed from Hire Signals

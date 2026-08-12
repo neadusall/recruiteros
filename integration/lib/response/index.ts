@@ -35,7 +35,11 @@ export async function processInbound(
   if (!inbox.claim(inbound.providerMessageId)) return null; // already processed
 
   inbound = await matchProspect(inbound);
-  const classification = await classify(inbound.text, hints);
+  // Email from a sender we cannot tie to a prospect or campaign is warm-up
+  // network chatter (it arrives hundreds a day on the fleet boxes): keep the
+  // free heuristics but never spend a model call or a hot label on it.
+  const unverifiedEmail = inbound.channel === "email" && !inbound.prospectId && !inbound.campaignId;
+  const classification = await classify(inbound.text, unverifiedEmail ? { ...hints, unverifiedSender: true } : hints);
   const processed = await route(inbound, classification, pauseSequences);
 
   inbox.add(processed);

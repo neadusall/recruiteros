@@ -150,6 +150,23 @@ async function main() {
   ok(dropped > 0, "prune drops something when over cap");
   ok((await inbox.list("ws_prune", 100)).some((p) => p.inbound.id === newestId), "prune keeps the newest rows");
 
+  // 8. Real replies are first-class: warm-up chatter can neither push them out
+  //    of the list window nor evict them from the store.
+  {
+    const wsR = "ws_realfirst";
+    const mpc = row({ cls: "auto_reply", prospectId: null, campaignId: "mpc-finance", ws: wsR, receivedAt: hoursAgo(20) });
+    inbox.add(mpc);
+    for (let i = 0; i < 30; i++) inbox.add(row({ cls: "unclassified", prospectId: null, ws: wsR }));
+    const listed = await inbox.list(wsR, 10);
+    ok(listed.some((p) => p.inbound.id === mpc.inbound.id),
+      "a day-old campaign reply stays in the window over newer warm-up chatter");
+    strictEqual(listed.length, 10, "unverified rows still fill the remaining space");
+    await inbox.prune(5, 20, 20);
+    const afterPrune = await inbox.forPerson(wsR, { prospectId: null, handles: [mpc.inbound.fromHandle] });
+    ok(afterPrune.some((p) => p.inbound.id === mpc.inbound.id),
+      "prune evicts warm-up chatter before any real reply");
+  }
+
   console.log("response behavior suite: ALL PASS");
 }
 

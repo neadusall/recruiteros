@@ -53,6 +53,11 @@ export interface ClassifyHints {
   /** True when the raw message carried machine headers (Auto-Submitted,
    *  X-Autoreply, Precedence: auto_reply), a definitive auto_reply signal. */
   autoSubmitted?: boolean;
+  /** True when the sender could not be identity-verified (no matched prospect,
+   *  no campaign attribution): almost certainly warm-up network chatter. The
+   *  free heuristics still run; the paid model call is skipped so chatter costs
+   *  nothing and can never earn a hot label like "positive". */
+  unverifiedSender?: boolean;
 }
 
 export async function classify(text: string, hints?: ClassifyHints): Promise<Classification> {
@@ -61,6 +66,9 @@ export async function classify(text: string, hints?: ClassifyHints): Promise<Cla
   }
   const fast = fastPath(text);
   if (fast) return fast;
+  if (hints?.unverifiedSender) {
+    return { class: "unclassified", confidence: 0, reasoning: "unverified sender, model call skipped" };
+  }
 
   try {
     const res = await client.messages.create({
