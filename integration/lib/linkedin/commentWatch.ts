@@ -185,10 +185,17 @@ function prune(): void {
 /* Readiness                                                            */
 /* ------------------------------------------------------------------ */
 
+/** The Unipile account id to call the provider with: the executor's exact
+ *  fallback chain. Live seats predate providerAccountId (seen null on ros
+ *  2026-08-12, which held the radar in standby), so accountId is the id. */
+function providerIdOf(a: LiAccountState): string | undefined {
+  return a.providerAccountId || process.env.UNIPILE_ACCOUNT_ID || a.accountId || undefined;
+}
+
 async function connectedAccounts(workspaceId: string): Promise<LiAccountState[]> {
   try {
     const all = await listAccounts(workspaceId);
-    return all.filter((a) => a.providerAccountId && a.connected !== false && !a.killSwitch);
+    return all.filter((a) => providerIdOf(a) && a.connected !== false && !a.killSwitch);
   } catch { return []; }
 }
 
@@ -395,15 +402,17 @@ function listOf(raw: unknown): Dict[] {
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
 async function ownProfileFor(workspaceId: string, account: LiAccountState): Promise<OwnProfile | null> {
+  const provAccount = providerIdOf(account);
+  if (!provAccount) return null;
   const cached = state.ownProfile[workspaceId];
-  if (cached && cached.accountId === account.providerAccountId) return cached;
+  if (cached && cached.accountId === provAccount) return cached;
   try {
     const { unipile } = await import("../providers");
-    const me = await unipile.getOwnProfile(account.providerAccountId!) as Dict;
+    const me = await unipile.getOwnProfile(provAccount) as Dict;
     const providerId = str(me.provider_id) ?? str(me.id);
     if (!providerId) return null;
     const own: OwnProfile = {
-      accountId: account.providerAccountId!,
+      accountId: provAccount,
       providerId,
       publicIdentifier: str(me.public_identifier),
       name: str(me.name) ?? (str(me.first_name) || str(me.last_name)
@@ -455,7 +464,7 @@ async function fetchProfileLite(account: LiAccountState, identifier: string): Pr
 }> {
   try {
     const { unipileRequest } = await import("./provider");
-    const p = await unipileRequest<Dict>(`/users/${encodeURIComponent(identifier)}?account_id=${account.providerAccountId}`);
+    const p = await unipileRequest<Dict>(`/users/${encodeURIComponent(identifier)}?account_id=${providerIdOf(account)}`);
     return {
       providerId: str(p.provider_id) ?? str(p.id),
       headline: str(p.headline),
@@ -493,7 +502,7 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
 
   let posts: Dict[] = [];
   try {
-    posts = listOf(await unipile.listPosts(account.providerAccountId!, own.providerId, POSTS_TO_WATCH));
+    posts = listOf(await unipile.listPosts(providerIdOf(account)!, own.providerId, POSTS_TO_WATCH));
   } catch { return { scanned: 0, created: 0, skipped: "posts_unavailable" }; }
 
   for (const post of posts.slice(0, POSTS_TO_WATCH)) {
@@ -504,7 +513,7 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
 
     let comments: Dict[] = [];
     try {
-      comments = listOf(await unipile.listPostComments(account.providerAccountId!, postId, { limit: COMMENTS_PER_POST }));
+      comments = listOf(await unipile.listPostComments(providerIdOf(account)!, postId, { limit: COMMENTS_PER_POST }));
     } catch { continue; }
 
     for (const rawC of comments) {
@@ -621,7 +630,7 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
   const { unipile } = await import("../providers");
   let results: Dict[] = [];
   try {
-    results = listOf(await unipile.searchPosts(account.providerAccountId!, keyword, MARKET_RESULTS_PER_SEARCH));
+    results = listOf(await unipile.searchPosts(providerIdOf(account)!, keyword, MARKET_RESULTS_PER_SEARCH));
   } catch { return 0; }
 
   let created = 0;
@@ -971,7 +980,7 @@ export async function tickCommentWatch(): Promise<void> {
   await hydrate();
   const { accounts } = await import("./os/store");
   const all = await accounts.all();
-  const workspaces = [...new Set(all.filter((a) => a.providerAccountId && a.connected !== false).map((a) => a.workspaceId))];
+  const workspaces = [...new Set(all.filter((a) => providerIdOf(a) && a.connected !== false).map((a) => a.workspaceId))];
   for (const ws of workspaces) {
     try { await scanWorkspace(ws); } catch { /* next workspace */ }
   }
