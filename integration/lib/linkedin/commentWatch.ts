@@ -538,6 +538,77 @@ export async function setMarketKeywords(workspaceId: string, keywords: string[])
   return marketKeywordsFor(workspaceId);
 }
 
+/** One hiring-post candidate, whichever engine found it. authorRef is a
+ *  provider id or public slug - both resolvable by fetchProfileLite. */
+interface MarketCandidate {
+  postId: string;
+  postUrl?: string;
+  text: string;
+  postAt?: string;
+  authorRef: string;
+  authorName?: string;
+  headline?: string;
+}
+
+function candidatesFromUnipile(results: Dict[]): MarketCandidate[] {
+  const out: MarketCandidate[] = [];
+  for (const raw of results) {
+    const postId = str(raw.social_id) ?? str(raw.share_url) ?? str(raw.url) ?? str(raw.id) ?? str(raw.post_id);
+    const text = (str(raw.text) ?? str(raw.commentary) ?? str(raw.content) ?? "").trim();
+    if (!postId) continue;
+    const author = (typeof raw.author === "object" && raw.author ? raw.author : (typeof raw.author_details === "object" && raw.author_details ? raw.author_details : {})) as Dict;
+    if (author.is_company === true || str(author.type) === "COMPANY" || str(author.type) === "organization") continue;
+    const authorRef = str(author.id) ?? str(author.provider_id) ?? str(author.public_identifier);
+    if (!authorRef) continue;
+    out.push({
+      postId, text,
+      postAt: str(raw.date) ?? str(raw.parsed_datetime),
+      authorRef,
+      authorName: str(author.name) ?? str([str(author.first_name), str(author.last_name)].filter(Boolean).join(" ")),
+      headline: str(author.headline),
+    });
+  }
+  return out;
+}
+
+/** Fallback engine: Google's index of linkedin.com/posts via Serper (the
+ *  live Unipile seat's LinkedIn content search returns zero items in every
+ *  form - verified 2026-08-12 - while its people search works). Post URLs
+ *  carry the author slug and the activity id; profile enrichment and the
+ *  send still go through Unipile. */
+async function candidatesFromSerper(keyword: string): Promise<MarketCandidate[]> {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return [];
+  try {
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ q: `site:linkedin.com/posts "${keyword}"`, num: MARKET_RESULTS_PER_SEARCH, tbs: "qdr:w" }),
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as { organic?: Array<{ link?: string; title?: string; snippet?: string; date?: string }> };
+    const out: MarketCandidate[] = [];
+    for (const r of data.organic ?? []) {
+      const link = r.link ?? "";
+      const slugM = /linkedin\.com\/posts\/([^_/?#]+)_/i.exec(link);
+      const idM = /activity-(\d{10,})/.exec(link);
+      if (!slugM || !idM) continue;
+      // Result titles read "Jane Doe on LinkedIn: <post start>".
+      const title = r.title ?? "";
+      const name = title.split(/\s+on LinkedIn/i)[0].trim();
+      const afterColon = title.includes(":") ? title.slice(title.indexOf(":") + 1).trim() : "";
+      const text = [afterColon, r.snippet ?? ""].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+      out.push({
+        postId: idM[1], postUrl: link, text,
+        postAt: r.date,
+        authorRef: slugM[1],
+        authorName: name || undefined,
+      });
+    }
+    return out;
+  } catch { return []; }
+}
+
 async function scanPosters(workspaceId: string, account: LiAccountState): Promise<number> {
   const seenAuthors = state.posterSeen[workspaceId] ?? (state.posterSeen[workspaceId] = {});
   const seenArr = state.seen[workspaceId] ?? (state.seen[workspaceId] = []);
@@ -554,62 +625,65 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
   save();
 
   const { unipile } = await import("../providers");
-  let results: Dict[] = [];
+  let source = "unipile";
+  let candidates: MarketCandidate[] = [];
   try {
-    results = listOf(await unipile.searchPosts(providerIdOf(account)!, keyword, MARKET_RESULTS_PER_SEARCH));
+    candidates = candidatesFromUnipile(listOf(await unipile.searchPosts(providerIdOf(account)!, keyword, MARKET_RESULTS_PER_SEARCH)));
   } catch (e) {
-    console.log(`[comment-radar] market search failed for "${keyword}" (${e instanceof Error ? e.message : e})`);
-    return 0;
+    console.log(`[comment-radar] unipile post search failed for "${keyword}" (${e instanceof Error ? e.message : e})`);
+  }
+  if (!candidates.length) {
+    source = "serper";
+    candidates = await candidatesFromSerper(keyword);
   }
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, notperson: 0, weekly: 0, title: 0, dnc: 0, profile: 0, draft: 0 };
-  for (const raw of results) {
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, draft: 0 };
+  for (const c of candidates) {
     if (created >= POSTER_NEW_PER_TICK) break;
-    const postId = str(raw.social_id) ?? str(raw.share_url) ?? str(raw.url) ?? str(raw.id) ?? str(raw.post_id);
-    const text = (str(raw.text) ?? str(raw.commentary) ?? str(raw.content) ?? "").trim();
-    if (!postId || text.length < 40) { g.nopost++; continue; }
-    if (seenPosts.has(postId)) { g.seen++; continue; }
-    seenPosts.add(postId); seenArr.push(postId);
+    if (c.text.length < 40) { g.nopost++; continue; }
+    if (seenPosts.has(c.postId)) { g.seen++; continue; }
+    seenPosts.add(c.postId); seenArr.push(c.postId);
 
     // The post itself must read like hiring intent, not a passing mention.
-    if (!HIRING_INTENT_RE.test(text)) { g.intent++; continue; }
+    if (!HIRING_INTENT_RE.test(c.text)) { g.intent++; continue; }
 
-    // Author: a person (not a company page), not the owner, decision-maker
-    // title, not a peer staffing firm, not touched by this lane this week.
-    const author = (typeof raw.author === "object" && raw.author ? raw.author : (typeof raw.author_details === "object" && raw.author_details ? raw.author_details : {})) as Dict;
-    if (author.is_company === true || str(author.type) === "COMPANY" || str(author.type) === "organization") { g.notperson++; continue; }
-    const authorId = str(author.id) ?? str(author.provider_id) ?? str(author.public_identifier);
-    const authorName = str(author.name) ?? [str(author.first_name), str(author.last_name)].filter(Boolean).join(" ").trim();
-    if (!authorId || !authorName) { g.notperson++; continue; }
-    if (own && authorId === own.providerId) { g.notperson++; continue; }
-    const lastTouch = seenAuthors[authorId];
+    // One touch per author per week, whichever key we knew them by.
+    const lastTouch = seenAuthors[c.authorRef];
     if (lastTouch && new Date(lastTouch).getTime() >= recheckCutoff) { g.weekly++; continue; }
+    seenAuthors[c.authorRef] = nowIso();
+    save();
 
-    const headline = str(author.headline);
+    // Profile read: provider id, headline, and the open-profile flag that
+    // decides the channel. Company pages fail here, which is the point.
+    const prof = await fetchProfileLite(account, c.authorRef);
+    if (!prof.providerId) { g.profile++; continue; }
+    if (own && prof.providerId === own.providerId) { g.profile++; continue; }
+    const lastById = seenAuthors[prof.providerId];
+    if (lastById && new Date(lastById).getTime() >= recheckCutoff) { g.weekly++; continue; }
+    seenAuthors[prof.providerId] = nowIso();
+
+    // Decision-maker title, not a peer staffing firm.
+    const headline = c.headline ?? prof.headline;
     const { title, company } = parseHeadline(headline);
     const intel = classifyTitle(title ?? headline ?? "");
-    if (!intel.isDecisionMaker || looksLikePeer(title, company)) { g.title++; seenAuthors[authorId] = nowIso(); continue; }
+    if (!intel.isDecisionMaker || looksLikePeer(title, company)) { g.title++; continue; }
 
-    seenAuthors[authorId] = nowIso();
-    save();
+    const authorName = c.authorName ?? "LinkedIn member";
 
     // Never message anyone on the do-not-contact list or inside the
     // cross-channel recency cooldown.
     try {
       const { checkContactable } = await import("../outreach/contactGuard");
       const dnc = await checkContactable(workspaceId,
-        { fullName: authorName, company, linkedinUrl: str(author.public_identifier) ? `linkedin.com/in/${str(author.public_identifier)}` : undefined },
+        { fullName: authorName, company, linkedinUrl: prof.publicUrl },
         { checkRecency: true });
       if (!dnc.ok) { g.dnc++; continue; }
     } catch { g.dnc++; continue; }
 
-    // Open-profile check FIRST: it decides the channel. Open profile or an
-    // existing connection takes a plain direct message (never InMail);
-    // closed profiles get the same personalized text as a connection note.
-    const prof = await fetchProfileLite(account, authorId);
-    if (!prof.providerId) { g.profile++; continue; }
+    // Open profile or an existing connection takes a plain direct message
+    // (never InMail); closed profiles get the same text as a connect note.
     const direct = prof.openProfile === true || prof.networkDistance === "DISTANCE_1";
 
     // Supporting evidence, never a gate: their own board's open roles.
@@ -620,18 +694,18 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
       ? ` Their company also shows ${hiring.openRoles} open role(s)${hiring.sample.length ? ` including ${hiring.sample.join(", ")}` : ""}.`
       : "";
     const dmText = await draft(direct ? DM_RULES : POSTER_CONNECT_RULES,
-      `THE PERSON: ${persona}.${evidence}\n\nTHEIR HIRING POST:\n${text.slice(0, 700)}\n\nWrite the ${direct ? "message" : "connection note"}.`);
+      `THE PERSON: ${persona}.${evidence}\n\nTHEIR HIRING POST:\n${c.text.slice(0, 700)}\n\nWrite the ${direct ? "message" : "connection note"}.`);
     if (!dmText) { g.draft++; continue; }
 
     state.items.push({
       id: rid("licw"), workspaceId, kind: "poster",
-      postId, postExcerpt: text.slice(0, 700), postAt: str(raw.date) ?? str(raw.parsed_datetime),
+      postId: c.postId, postExcerpt: c.text.slice(0, 700), postAt: c.postAt,
       commentId: "", commentText: "",
       openProfile: prof.openProfile,
       authorProviderId: prof.providerId,
       authorName,
-      authorHeadline: headline ?? prof.headline,
-      authorPublicUrl: prof.publicUrl,
+      authorHeadline: headline,
+      authorPublicUrl: prof.publicUrl ?? c.postUrl,
       networkDistance: prof.networkDistance,
       title: title ?? headline, company,
       seniority: intel.seniority, jobFunction: intel.function,
@@ -646,7 +720,7 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
 
   if (seenArr.length > SEEN_CAP) state.seen[workspaceId] = seenArr.slice(-SEEN_CAP);
   save();
-  console.log(`[comment-radar] market "${keyword}": results=${results.length} created=${created} gates=${JSON.stringify(g)}`);
+  console.log(`[comment-radar] market "${keyword}" via ${source}: results=${candidates.length} created=${created} gates=${JSON.stringify(g)}`);
   return created;
 }
 
