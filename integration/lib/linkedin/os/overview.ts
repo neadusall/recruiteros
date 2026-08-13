@@ -82,7 +82,12 @@ export interface QueueRow {
   businessUnit: BusinessUnit;
   priority: string;
   accountId: string;
+  /** Sent rows only: when the LinkedIn read-back verified the message in the chat. */
+  confirmedAt?: string;
 }
+
+const QUEUE_PENDING = ["scheduled", "queued", "processing", "capacity_pending", "retry_pending", "paused"];
+const SENT_VISIBLE_HOURS = 48;
 
 export async function liveQueue(workspaceId: string, limit = 100): Promise<QueueRow[]> {
   const [rows, campaigns, idents] = await Promise.all([
@@ -90,13 +95,17 @@ export async function liveQueue(workspaceId: string, limit = 100): Promise<Queue
   ]);
   const cName = new Map(campaigns.map((c) => [c.id, c.name]));
   const iName = new Map(idents.map((i) => [i.id, i.fullName ?? "Unknown"]));
+  // Recently sent rows stay visible so the owner can watch each send flip to
+  // "confirmed on LinkedIn" (read-back), instead of items vanishing on send.
+  const sentCutoff = Date.now() - SENT_VISIBLE_HOURS * 3_600_000;
   return rows
-    .filter((r) => ["scheduled", "queued", "processing", "capacity_pending", "retry_pending", "paused"].includes(r.status))
+    .filter((r) => QUEUE_PENDING.includes(r.status)
+      || (r.status === "success" && r.completedAt && new Date(r.completedAt).getTime() >= sentCutoff))
     .sort((a, b) => (a.scheduledAt ?? a.requestedAt) < (b.scheduledAt ?? b.requestedAt) ? -1 : 1)
     .slice(0, limit)
     .map((r) => ({
       id: r.id,
-      at: r.scheduledAt ?? undefined,
+      at: r.scheduledAt ?? r.completedAt ?? undefined,
       actionType: r.actionType,
       status: r.status,
       statusReason: r.statusReason,
@@ -105,6 +114,7 @@ export async function liveQueue(workspaceId: string, limit = 100): Promise<Queue
       businessUnit: r.businessUnit,
       priority: r.priority,
       accountId: r.accountId,
+      confirmedAt: r.confirmedAt,
     }));
 }
 

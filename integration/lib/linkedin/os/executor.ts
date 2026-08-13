@@ -30,7 +30,7 @@ import { noteOutbound } from "./engine";
 import { ensureConversation, addMessage } from "./inbox";
 import { renderVoiceForAction, voiceAudioUrl } from "./voice";
 import { capCategoryOf } from "./types";
-import type { LiActionRecord, LiCapCategory } from "./types";
+import type { LiActionRecord, LiActionType, LiCapCategory } from "./types";
 
 const MAX_RETRIES = 3;
 const PER_ACCOUNT_PER_TICK = 4;
@@ -419,8 +419,58 @@ async function mirrorToTimeline(r: LiActionRecord): Promise<void> {
  * due actions, then advance campaign enrollments and the activation queue.
  * Called by the automation scheduler (and the manual cron endpoint).
  */
+/* ---------------- LinkedIn read-back confirmation ----------------
+   Owner ask 2026-08-13: "is there a way you can tell in LinkedIn and mark
+   them once confirmed". After a chat send reports success, re-read the
+   conversation with that person on LinkedIn and stamp the action confirmed
+   when the message is actually sitting in the thread. Best effort: a miss
+   simply retries on later ticks inside the window. */
+
+const CONFIRM_TYPES = new Set<LiActionType>(["message", "inmail", "attachment", "voice_note"]);
+const CONFIRM_PER_TICK = 5;          // provider reads per tick, spread over time
+const CONFIRM_WINDOW_HOURS = 72;     // stop re-checking after 3 days
+
+export async function confirmDelivered(limit = CONFIRM_PER_TICK): Promise<number> {
+  const all = await ledger.all();
+  const cutoff = Date.now() - CONFIRM_WINDOW_HOURS * 3_600_000;
+  const due = all.filter((r) =>
+    r.status === "success" && !r.confirmedAt && CONFIRM_TYPES.has(r.actionType)
+    && r.completedAt && new Date(r.completedAt).getTime() >= cutoff);
+  let confirmed = 0;
+  for (const r of due.slice(0, limit)) {
+    try {
+      if (await withWorkspaceCreds(r.workspaceId, () => confirmOneInner(r))) confirmed++;
+    } catch { /* provider hiccup: the next tick tries again */ }
+  }
+  if (confirmed) await withEngineLock(async () => { saveLedger(); });
+  return confirmed;
+}
+
+async function confirmOneInner(r: LiActionRecord): Promise<boolean> {
+  const policy = await getPolicy(r.workspaceId, r.accountId);
+  const accountState = await getAccount(r.workspaceId, r.accountId);
+  const providerAccountId =
+    accountState?.providerAccountId || process.env.UNIPILE_ACCOUNT_ID || r.accountId;
+  const account = engineAccount(r.accountId, providerAccountId, policy, accountState?.displayName ?? r.accountId);
+  const provider = getProvider();
+  const identity = await getIdentity(r.workspaceId, r.personIdentityId);
+  const providerProfileId = r.payload.providerProfileId
+    ?? identity?.providerIds.classic
+    ?? identity?.providerIds.salesNavigator
+    ?? identity?.providerIds.recruiter;
+  if (!providerProfileId) return false;
+  const msgs = await provider.listMessages(account, providerProfileId);
+  const sentText = (r.payload.text ?? "").trim().slice(0, 80).toLowerCase();
+  const hit = msgs.find((m) =>
+    (r.providerReference && m.providerMessageId === r.providerReference)
+    || (m.fromSelf && sentText.length >= 10 && m.text.trim().toLowerCase().startsWith(sentText)));
+  if (!hit) return false;
+  r.confirmedAt = nowIso();
+  return true;
+}
+
 export async function tickLinkedInOs(batch = 25): Promise<{
-  promoted: number; executed: number; enrollments: number; activated: number;
+  promoted: number; executed: number; enrollments: number; activated: number; confirmed: number;
 }> {
   const promoted = await promoteWaiting();
   const claimed = await claimDue(batch);
@@ -437,7 +487,11 @@ export async function tickLinkedInOs(batch = 25): Promise<{
     const { tickActivation } = await import("./activation");
     activated = await tickActivation();
   } catch { /* activation has its own guards */ }
-  return { promoted, executed: claimed.length, enrollments: enrollmentsProcessed, activated };
+  let confirmed = 0;
+  try {
+    confirmed = await confirmDelivered();
+  } catch { /* read-back is best-effort; sends are already recorded */ }
+  return { promoted, executed: claimed.length, enrollments: enrollmentsProcessed, activated, confirmed };
 }
 
 /** Health sweep used by the accounts UI (best-effort provider probe). */

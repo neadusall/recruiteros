@@ -134,6 +134,9 @@ export interface LiActionRecord {
   completedAt?: string;
   cancelledAt?: string;
   providerReference?: string;
+  /** LinkedIn read-back: the sent message was found in the actual chat.
+   *  Set by the confirm pass; the UI renders it as "confirmed on LinkedIn". */
+  confirmedAt?: string;
   failureReason?: string;
   retryCount: number;
   /** The policy day (YYYY-MM-DD in the account timezone) capacity was booked on. */

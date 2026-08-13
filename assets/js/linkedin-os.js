@@ -1232,14 +1232,22 @@
           "<td>" + title(s.priority) + "</td><td>" + s.weight + "</td><td>" + s.demand + "</td><td>" + s.allocated + "</td><td>" + s.usedToday + "</td></tr>";
       }).join("");
       var queue = d.queue.map(function (q) {
+        // Sent rows stay 48h so each send visibly flips to "confirmed on
+        // LinkedIn" once the read-back finds the message in the actual chat.
+        var sent = q.status === "success";
+        var statusCell = sent
+          ? (q.confirmedAt
+            ? pill("Sent · confirmed on LinkedIn", "green")
+            : pill("Sent · confirming on LinkedIn...", "amber"))
+          : statusPill(q.status) + (q.statusReason ? "<div class='lio-dim lio-clip'>" + esc(q.statusReason) + "</div>" : "");
         return "<tr data-id='" + esc(q.id) + "'><td>" + (q.at ? when(q.at) : "") + "</td>" +
           "<td>" + esc(ACTION_LABEL[q.actionType] || title(q.actionType)) + "</td>" +
           "<td>" + esc(q.personName) + "</td><td>" + esc(q.campaignName || title(q.businessUnit)) + "</td>" +
-          "<td>" + statusPill(q.status) + (q.statusReason ? "<div class='lio-dim lio-clip'>" + esc(q.statusReason) + "</div>" : "") + "</td>" +
+          "<td>" + statusCell + "</td>" +
           "<td class='lio-actions'>" +
           (q.status === "capacity_pending" ? "<button class='btn btn-sm btn-ghost' data-op='allow'>Allow temporary capacity</button>" : "") +
           "<button class='btn btn-sm btn-ghost' data-op='explain'>Why</button>" +
-          "<button class='btn btn-sm btn-ghost' data-op='cancel'>Cancel</button></td></tr>";
+          (sent ? "" : "<button class='btn btn-sm btn-ghost' data-op='cancel'>Cancel</button>") + "</td></tr>";
       }).join("");
       var weekly = Object.keys(o.weekly).map(function (k) {
         var wv = o.weekly[k];
