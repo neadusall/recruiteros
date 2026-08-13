@@ -3522,18 +3522,22 @@
     function dmBlock(t) {
       var direct = t.openProfile === true || t.networkDistance === "DISTANCE_1";
       if (t.dmStatus === "suggested") {
-        return '<div class="lie-post muted">' + (direct
-            ? (t.networkDistance === "DISTANCE_1"
-                ? "Already connected: this sends as a normal message."
-                : "Open profile: this lands as a direct message, no connection needed.")
-            : "Their profile does not take messages from strangers, so this sends as a connection note instead.") + "</div>" +
+        // Open profiles only: closed profiles never get a message from this
+        // lane (the scan skips them; this branch only guards legacy items).
+        if (!direct) {
+          return '<div class="lie-post muted">Closed profile: skipped by policy (open profiles only).</div>' +
+            '<div class="lie-actions"><button class="btn btn-sm btn-ghost" data-lic="dm_skip">Dismiss</button></div>';
+        }
+        return '<div class="lie-post muted">' + (t.networkDistance === "DISTANCE_1"
+            ? "Already connected: this sends as a normal message."
+            : "Open profile: this lands as a direct message, no connection needed.") + "</div>" +
           '<textarea class="lie-text" data-lic-dm rows="3">' + esc(t.dmText || "") + "</textarea>" +
           '<div class="lie-actions">' +
-            '<button class="btn btn-sm btn-primary" data-lic="dm_approve">' + (direct ? "Send direct message" : "Send connect request") + "</button> " +
+            '<button class="btn btn-sm btn-primary" data-lic="dm_approve">Send direct message</button> ' +
             '<button class="btn btn-sm btn-ghost" data-lic="dm_skip">Skip</button>' +
           "</div>";
       }
-      if (t.dmStatus === "approved") return '<div><span class="lie-chip ok">' + (direct ? "Message approved, sending from your account" : "Connect request approved and queued") + "</span></div>";
+      if (t.dmStatus === "approved") return '<div><span class="lie-chip ok">Message approved, sending from your account</span></div>';
       if (t.dmStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Blocked") + "</span></div>";
       if (t.dmStatus === "skipped") return '<div><span class="lie-chip mut">Skipped</span></div>';
       return "";

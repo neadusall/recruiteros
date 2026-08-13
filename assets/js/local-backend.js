@@ -1049,7 +1049,7 @@
       if (!d.commentWatch) {
         d.commentWatch = {
           status: { active: true, engineReady: true, aiReady: true, paused: false, reasons: [] },
-          autopilot: { enabled: true, source: "default_on" },
+          autopilot: { enabled: false, source: "off" },
           keywords: ["BCBA", "RBT", "Clinical Director", "Speech Language Pathologist", "Occupational Therapist", "Nurse Practitioner"],
           lastScan: new Date().toISOString(),
           items: [

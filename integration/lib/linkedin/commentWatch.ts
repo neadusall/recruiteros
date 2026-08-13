@@ -254,14 +254,14 @@ export async function setCommentWatchPaused(workspaceId: string, paused: boolean
   save();
 }
 
-/** Explicit on/off wins; otherwise the radar defaults ON (owner decision
- *  2026-08-12: "this needs to be automated"). Only workspaces with a
- *  connected seat ever reach a scan, and the card carries the off switch. */
+/** Explicit on/off wins; otherwise the radar defaults to APPROVAL-FIRST
+ *  (owner decision 2026-08-13: "I need to approve these first for now").
+ *  The card's toggle turns hands-free sending on per workspace. */
 export async function commentWatchAutopilot(workspaceId: string): Promise<{ enabled: boolean; source: "manual" | "default_on" | "off" }> {
   await hydrate();
   const manual = state.autoMode[workspaceId];
   if (typeof manual === "boolean") return { enabled: manual, source: manual ? "manual" : "off" };
-  return { enabled: true, source: "default_on" };
+  return { enabled: false, source: "off" };
 }
 
 export async function setCommentWatchAuto(workspaceId: string, on: boolean): Promise<void> {
@@ -354,14 +354,6 @@ Rules:
 - Banned openers: "Great post", "Love this", "Hope you're well", "I came across", "I saw your post". Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies".
 - End with one genuine question about the search (the bar, the sticking point, the timeline). Never mention AI.
 Return ONLY the message text, nothing else.`;
-
-const POSTER_CONNECT_RULES = `You write short LinkedIn connection notes for a recruiting agency owner. The recipient is a hiring decision-maker who just published a LinkedIn post; their profile does not accept direct messages from strangers, so this note is the door-opener. The reader must never suspect a machine wrote it.
-Rules:
-- Max 270 characters. Two sentences at most.
-- Reference ONE specific point from their post naturally. No flattery, no "I came across your profile".
-- No pitch, no links, no emoji, no long dashes, no mention of hiring, roles, or services. Connecting to keep talking is the whole message.
-- Never mention AI.
-Return ONLY the note text, nothing else.`;
 
 async function draft(system: string, user: string): Promise<string | null> {
   try {
@@ -910,9 +902,9 @@ export async function skipDm(workspaceId: string, id: string): Promise<CommentLe
   return item;
 }
 
-/** Approve the poster-lane message. Open profiles and 1st-degree connections
- *  get a plain direct message (never an InMail); everyone else a connection
- *  note, since LinkedIn will not deliver a stranger's DM to a closed profile. */
+/** Approve the market-radar message. OPEN PROFILES ONLY (plus existing
+ *  1st-degree connections): a plain direct message, never an InMail. Closed
+ *  profiles are never messaged and never connect-noted from this lane. */
 export async function approveDm(
   workspaceId: string, userId: string, userEmail: string, id: string, editedText?: string,
 ): Promise<{ item: CommentLeadItem | null; accepted: boolean; reason?: string }> {
@@ -922,7 +914,12 @@ export async function approveDm(
     return { item: item ?? null, accepted: false, reason: "not_open" };
   }
   const direct = item.openProfile === true || item.networkDistance === "DISTANCE_1";
-  if (editedText && scrub(editedText).length >= 2) item.dmText = scrub(editedText).slice(0, direct ? 1200 : 280);
+  if (!direct) {
+    item.dmStatus = "skipped"; item.reason = "Open profiles only: closed profiles are never messaged from this lane.";
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+  if (editedText && scrub(editedText).length >= 2) item.dmText = scrub(editedText).slice(0, 1200);
 
   const accounts = await connectedAccounts(workspaceId);
   // The seat that scouted this lead sends the DM (multi-account rota).
@@ -935,9 +932,8 @@ export async function approveDm(
     return { item, accepted: false, reason: item.reason };
   }
 
-  // NEVER "inmail" (owner decision 2026-08-12): open profiles take a plain
-  // message with no connection needed, so the paid InMail channel stays unused.
-  const actionType = direct ? "message" : "connect_note";
+  // Always a plain "message": open profiles take a DM with no connection
+  // needed. Never "inmail", never "connect_note" from this lane.
   try {
     const result = await requestLinkedInAction({
       workspaceId,
@@ -947,10 +943,8 @@ export async function approveDm(
         company: item.company, title: item.title,
         providerProfileId: item.authorProviderId, prospectId: item.prospectId,
       },
-      actionType,
-      payload: actionType === "connect_note"
-        ? { note: item.dmText, providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl }
-        : { text: item.dmText, providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl },
+      actionType: "message",
+      payload: { text: item.dmText, providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl },
       businessUnit: "bd",
       sourceType: "manual",
       approvedBy: userEmail,

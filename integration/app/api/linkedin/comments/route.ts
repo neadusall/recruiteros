@@ -9,10 +9,10 @@
  *   draft           { id }        -> draft a reply on demand (community tier)
  *   connect_approve { id, text? } -> send the connection note
  *   connect_skip    { id }
- *   dm_approve      { id, text? } -> poster lane: send the direct message
- *                                    (plain message to open profiles and
- *                                    connections, never InMail; connect
- *                                    note otherwise)
+ *   dm_approve      { id, text? } -> market radar: send the direct message.
+ *                                    OPEN PROFILES ONLY (plus existing
+ *                                    connections); never InMail, and closed
+ *                                    profiles are never messaged at all
  *   dm_skip         { id }
  *   dm_edit         { id, text }
  *   pause / resume  {}
