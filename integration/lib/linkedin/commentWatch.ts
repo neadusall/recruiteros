@@ -287,7 +287,11 @@ async function hydrate(): Promise<void> {
 
 function prune(): void {
   const cutoff = Date.now() - ITEM_TTL_DAYS * 86_400_000;
-  state.items = state.items.filter((i) => new Date(i.createdAt).getTime() >= cutoff);
+  // Community tier is retired (owner decision 2026-08-13): job seekers and
+  // peers commenting on the owner's posts are noise, not leads. The radar
+  // only surfaces people posting roles they need to fill; legacy community
+  // items from older builds are dropped here.
+  state.items = state.items.filter((i) => new Date(i.createdAt).getTime() >= cutoff && i.tier !== "community");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1009,7 +1013,7 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
   const status = await commentWatchStatus(workspaceId);
   const autopilot = await commentWatchAutopilot(workspaceId);
   const items = state.items
-    .filter((i) => i.workspaceId === workspaceId)
+    .filter((i) => i.workspaceId === workspaceId && i.tier !== "community")
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
   return {
     status, autopilot,
