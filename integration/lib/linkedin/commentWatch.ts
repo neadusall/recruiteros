@@ -558,13 +558,16 @@ function parseComment(c: Dict): RawComment | null {
 /** One profile read: provider id, headline, open-profile flag, distance.
  *  Accepts a provider id OR a public slug (linkedin.com/in/<slug>). */
 async function fetchProfileLite(account: LiAccountState, identifier: string): Promise<{
-  providerId?: string; headline?: string; publicUrl?: string; openProfile?: boolean; networkDistance?: string;
+  providerId?: string; name?: string; headline?: string; publicUrl?: string; openProfile?: boolean; networkDistance?: string;
 }> {
   try {
     const { unipileRequest } = await import("./provider");
     const p = await unipileRequest<Dict>(`/users/${encodeURIComponent(identifier)}?account_id=${providerIdOf(account)}`);
     return {
       providerId: str(p.provider_id) ?? str(p.id),
+      name: str(p.name) ?? ((str(p.first_name) || str(p.last_name))
+        ? [str(p.first_name), str(p.last_name)].filter(Boolean).join(" ")
+        : undefined),
       headline: str(p.headline),
       publicUrl: str(p.public_identifier) ? `https://www.linkedin.com/in/${str(p.public_identifier)}` : undefined,
       openProfile: typeof p.is_open_profile === "boolean" ? p.is_open_profile : undefined,
@@ -786,6 +789,52 @@ async function candidatesFromSerper(query: string): Promise<{ items: MarketCandi
   } catch (e) { return { items: [], error: `Serper unreachable (${e instanceof Error ? e.message : e})` }; }
 }
 
+/** "meghan-edwards-01a63073" -> "Meghan Edwards" (post-URL author slugs). */
+function nameFromSlug(slug: string): string | undefined {
+  const parts = slug.split("-").filter((p) => p && !/\d/.test(p));
+  if (parts.length < 2) return undefined;
+  return parts.slice(0, 3).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
+}
+
+/** Second failover: DataForSEO. Verified live 2026-08-13 on the radar's exact
+ *  site:linkedin.com/posts query: 20 organic hiring posts, $0.02/search,
+ *  $50.90 balance on the account while Serper sat out of credits. */
+async function candidatesFromDataForSeo(query: string): Promise<{ items: MarketCandidate[]; error?: string }> {
+  const login = process.env.DATAFORSEO_LOGIN;
+  const pass = process.env.DATAFORSEO_PASSWORD;
+  if (!login || !pass) return { items: [], error: "DataForSEO not configured." };
+  try {
+    const auth = Buffer.from(`${login}:${pass}`).toString("base64");
+    const res = await fetch("https://api.dataforseo.com/v3/serp/google/organic/live/advanced", {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+      body: JSON.stringify([{ keyword: query, location_code: 2840, language_code: "en", depth: MARKET_RESULTS_PER_SEARCH }]),
+    });
+    if (!res.ok) return { items: [], error: `Search engine: DataForSEO ${res.status}` };
+    const data = await res.json() as {
+      tasks?: Array<{ result?: Array<{ items?: Array<{ type?: string; url?: string; title?: string; description?: string; timestamp?: string }> }> }>;
+    };
+    const rows = (data.tasks?.[0]?.result?.[0]?.items ?? []).filter((i) => i.type === "organic");
+    const out: MarketCandidate[] = [];
+    for (const r of rows) {
+      const link = r.url ?? "";
+      const slugM = /linkedin\.com\/posts\/([^_/?#]+)_/i.exec(link);
+      const idM = /activity-(\d{10,})/.exec(link);
+      if (!slugM || !idM) continue;
+      const title = r.title ?? "";
+      const afterColon = title.includes(":") ? title.slice(title.indexOf(":") + 1).trim() : title;
+      const text = [afterColon, r.description ?? ""].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+      out.push({
+        postId: idM[1], postUrl: link, text,
+        postAt: r.timestamp,
+        authorRef: slugM[1],
+        authorName: nameFromSlug(slugM[1]),
+      });
+    }
+    return { items: out };
+  } catch (e) { return { items: [], error: `DataForSEO unreachable (${e instanceof Error ? e.message : e})` }; }
+}
+
 async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Promise<number> {
   // Multi-account rota: the search runs on the first seat, but each captured
   // lead is assigned round-robin across ALL connected seats, so profile reads
@@ -820,11 +869,21 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Pro
     source = "serper";
     const r = await candidatesFromSerper(combo.serperQ);
     candidates = r.items;
+    let engineError = r.error;
+    // Second failover: DataForSEO absorbs the volume when Serper is dry
+    // (out of credits, seen live 2026-08-13).
+    if (!candidates.length) {
+      source = "dataforseo";
+      const d2 = await candidatesFromDataForSeo(combo.serperQ);
+      candidates = d2.items;
+      if (candidates.length) engineError = undefined;
+      else engineError = [engineError, d2.error].filter(Boolean).join(" | ") || undefined;
+    }
     // Break layer: engine failures surface on the card, not just in logs.
-    if (r.error) {
-      state.lastError[workspaceId] = r.error;
+    if (engineError && !candidates.length) {
+      state.lastError[workspaceId] = engineError;
       save();
-      console.log(`[comment-radar] market "${keyword}": ${r.error}`);
+      console.log(`[comment-radar] market "${keyword}": ${engineError}`);
     } else if (state.lastError[workspaceId]) {
       delete state.lastError[workspaceId];
       save();
@@ -866,7 +925,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Pro
     const intel = classifyTitle(title ?? headline ?? "");
     if (!intel.isDecisionMaker || looksLikePeer(title, company)) { g.title++; continue; }
 
-    const authorName = c.authorName ?? "LinkedIn member";
+    const authorName = c.authorName ?? prof.name ?? "LinkedIn member";
 
     // Never message anyone on the do-not-contact list or inside the
     // cross-channel recency cooldown.
