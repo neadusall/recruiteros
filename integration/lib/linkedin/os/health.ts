@@ -181,6 +181,23 @@ export function capacityFactor(a: LiAccountState | null): number {
   return HEALTH_CAPACITY_FACTOR[a.health];
 }
 
+/**
+ * Cooldown expiry recovery. reevaluate() lifts an expired cooldown, but it
+ * only runs inside recordResult - which never fires while execution is
+ * blocked. An expired cooldown therefore parked the queue forever (seen live
+ * 2026-08-13: 16 messages stuck in capacity_pending after the 422 spike).
+ * The engine calls this before every block check. Sync in-memory mutation;
+ * accounts.save() is debounced like every other store write.
+ */
+export function liftExpiredCooldown(a: LiAccountState | null): void {
+  if (!a || a.health !== "cooldown" || !a.cooldownUntil || a.cooldownUntil > nowIso()) return;
+  a.health = "elevated";
+  a.healthReason = "Cooling down finished; velocity reduced while recovering";
+  a.cooldownUntil = undefined;
+  a.updatedAt = nowIso();
+  accounts.save();
+}
+
 /** Human answer to "can this account execute right now, and if not why". */
 export function executionBlock(a: LiAccountState | null): string | null {
   if (!a) return null;

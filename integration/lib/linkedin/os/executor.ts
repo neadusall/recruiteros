@@ -23,7 +23,7 @@ import type { LinkedInAccount as EngineAccount, Prospect as EngineProspect } fro
 import { ledger, withEngineLock } from "./store";
 import { categoryCounts, policyDay, releaseReservation, saveLedger, setStatus } from "./ledger";
 import { getPolicy } from "./policy";
-import { getAccount, capacityFactor, executionBlock, recordResult, listAccounts } from "./health";
+import { getAccount, capacityFactor, executionBlock, liftExpiredCooldown, recordResult, listAccounts } from "./health";
 import { allocate, type AllocationInput } from "./allocation";
 import { getIdentity, resolveIdentity } from "./identity";
 import { noteOutbound } from "./engine";
@@ -65,6 +65,7 @@ export async function promoteWaiting(): Promise<number> {
     for (const [key, rows] of groups) {
       const [workspaceId, accountId, category] = key.split("|") as [string, string, LiCapCategory];
       const account = await getAccount(workspaceId, accountId);
+      liftExpiredCooldown(account);
       if (executionBlock(account)) continue;
       const policy = await getPolicy(workspaceId, accountId);
       const factor = capacityFactor(account);
@@ -217,6 +218,7 @@ async function executeOne(r: LiActionRecord): Promise<void> {
 async function executeOneInner(r: LiActionRecord): Promise<void> {
   const policy = await getPolicy(r.workspaceId, r.accountId);
   const accountState = await getAccount(r.workspaceId, r.accountId);
+  liftExpiredCooldown(accountState);
   const block = executionBlock(accountState);
   if (block) {
     // The account degraded between claim and execution: put it back to waiting.
