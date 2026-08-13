@@ -135,13 +135,16 @@ async function unipile<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new UnipileError("UNIPILE_DSN / UNIPILE_API_KEY are not configured", 500);
   }
   let res: Response;
+  // A FormData body must NOT get a Content-Type header: fetch sets the
+  // multipart boundary itself, and Unipile's form endpoints 422 otherwise.
+  const isForm = typeof FormData !== "undefined" && init.body instanceof FormData;
   for (let attempt = 1; ; attempt++) {
     try {
       res = await fetch(`https://${dsn}/api/v1${path}`, {
         ...init,
         headers: {
           "X-API-KEY": apiKey,
-          "Content-Type": "application/json",
+          ...(isForm ? {} : { "Content-Type": "application/json" }),
           Accept: "application/json",
           ...(init.headers ?? {}),
         },
@@ -284,46 +287,41 @@ export const unipileProvider: LinkedInProvider = {
     });
   },
 
+  // POST /chats (start a new conversation) is validated by Unipile as
+  // multipart/form-data, exactly like /posts: a JSON body reaches its
+  // validator as zero fields and 422s. Seen live 2026-08-13: every scheduled
+  // BD first-touch message failed with "Unipile POST /chats failed: 422".
   sendMessage({ account, prospect, text }) {
     return attempt("message", async () => {
-      const out = await unipile<{ message_id?: string }>("/chats", {
-        method: "POST",
-        body: JSON.stringify({
-          account_id: account.providerAccountId,
-          attendees_ids: [prospect.providerProfileId],
-          text,
-        }),
-      });
+      const form = new FormData();
+      form.append("account_id", account.providerAccountId);
+      form.append("attendees_ids", prospect.providerProfileId);
+      form.append("text", text);
+      const out = await unipile<{ message_id?: string }>("/chats", { method: "POST", body: form });
       return { providerMessageId: out.message_id };
     });
   },
 
   sendInMail({ account, prospect, text, subject }) {
     return attempt("inmail", async () => {
-      const out = await unipile<{ message_id?: string }>("/chats", {
-        method: "POST",
-        body: JSON.stringify({
-          account_id: account.providerAccountId,
-          attendees_ids: [prospect.providerProfileId],
-          inmail: true,
-          subject,
-          text,
-        }),
-      });
+      const form = new FormData();
+      form.append("account_id", account.providerAccountId);
+      form.append("attendees_ids", prospect.providerProfileId);
+      form.append("inmail", "true");
+      if (subject) form.append("subject", subject);
+      form.append("text", text);
+      const out = await unipile<{ message_id?: string }>("/chats", { method: "POST", body: form });
       return { providerMessageId: out.message_id };
     });
   },
 
   sendVoiceNote({ account, prospect, audio }) {
     return attempt("voice_note", async () => {
-      const out = await unipile<{ message_id?: string }>("/chats", {
-        method: "POST",
-        body: JSON.stringify({
-          account_id: account.providerAccountId,
-          attendees_ids: [prospect.providerProfileId],
-          voice_message: audio,
-        }),
-      });
+      const form = new FormData();
+      form.append("account_id", account.providerAccountId);
+      form.append("attendees_ids", prospect.providerProfileId);
+      form.append("voice_message", audio);
+      const out = await unipile<{ message_id?: string }>("/chats", { method: "POST", body: form });
       return { providerMessageId: out.message_id };
     });
   },
