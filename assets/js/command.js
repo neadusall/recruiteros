@@ -3582,7 +3582,7 @@
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Market radar</b>' +
-            '<div class="muted liops-sub">Searches LinkedIn posts by your hiring keywords to find hiring managers looking for talent, then sends each one a hyper-targeted direct message built off their post (open profiles get a plain DM, never an InMail, never a public comment; closed profiles get the same text as a connect note).' +
+            '<div class="muted liops-sub">Type the roles you place below. The radar searches LinkedIn posts for people hiring those roles and messages ONLY open profiles (plus existing connections) with a short MPC script referencing their opening: "just wrapped a search for that title, a few candidates still warm." No InMails, no public comments, closed profiles are skipped.' +
               (auto.enabled
                 ? " Autopilot is on: decision-maker touches send automatically through your account limits; community items wait for you."
                 : " Nothing sends without your approval.") + "</div></div>" +
@@ -3590,7 +3590,7 @@
           (items.length
             ? items.map(row).join("")
             : '<div class="lie-post muted">Nothing captured yet. The radar runs a market keyword search every 15 minutes.</div>') +
-          '<div class="lie-post muted">Market keywords (comma-separated; clear to restore defaults):</div>' +
+          '<div class="lie-post muted">Roles you place (comma-separated; each becomes {job_title} in the MPC message):</div>' +
           '<textarea class="lie-text" data-lic-keywords rows="1">' + esc((d.keywords || []).join(", ")) + "</textarea>" +
           '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button> ' +
             '<button class="btn btn-sm btn-ghost" data-lic-kwsave>Save keywords</button> ' +

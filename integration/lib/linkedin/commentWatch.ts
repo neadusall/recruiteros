@@ -52,13 +52,43 @@ const POSTER_NEW_PER_TICK = 8;   // DM drafts created per tick
 const POSTER_RECHECK_DAYS = 7;   // never re-message the same author within a week
 const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
 
-/** The backend keyword bank: what a hiring manager types when they are
- *  looking for talent. Workspaces can override via the card/API. */
+/** The keyword bank is the ROLES the desk places (owner decision 2026-08-13):
+ *  each entry is a job title or phrase, searched against LinkedIn posts to
+ *  find hiring managers posting that opening. The matched keyword becomes
+ *  {job_title} in the MPC message. Editable on the card / keywords_set. */
 const DEFAULT_MARKET_KEYWORDS = [
-  "we are hiring", "we're hiring", "now hiring", "hiring for",
-  "looking to hire", "open role", "open position",
-  "growing our team", "join our team", "looking for a recruiter",
+  "BCBA", "RBT", "Clinical Director", "Speech Language Pathologist",
+  "Occupational Therapist", "Nurse Practitioner", "Registered Nurse",
 ];
+
+/**
+ * The MPC DM bank: short, role-anchored, "my search just ended and the
+ * runners-up are still warm" scripts. Deterministic fill ({job_title},
+ * {first_name}), no AI in the hot path, each safely under the personal-DM
+ * character threshold. House style: no em-dashes, no links, no exclamations.
+ */
+const MPC_DM_TEMPLATES = [
+  "Saw your post for a {job_title}. I just wrapped a {job_title} search and two finalists who did not get the offer are still open. Want me to send them over?",
+  "Your {job_title} post came up in my feed. We just closed a {job_title} search and a couple of strong runners-up are still on the market. Happy to share profiles if useful.",
+  "Noticed you are hiring a {job_title}. I have a few vetted {job_title} candidates left from a search that just closed, still warm. Worth a look?",
+  "Quick one on your {job_title} opening: a search I ran for the same title just ended and the shortlist is still available. Want the top two?",
+  "{first_name}, saw the {job_title} post. Just came off a {job_title} search with vetted candidates still warm. I can send a couple today if helpful.",
+];
+const MAX_DM_CHARS = 300;
+
+/** Deterministic template pick + fill; trims to the DM threshold. */
+function mpcDmFor(seed: string, jobTitle: string, firstName?: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  let t = MPC_DM_TEMPLATES[h % MPC_DM_TEMPLATES.length];
+  if (t.includes("{first_name}") && !firstName) t = MPC_DM_TEMPLATES[0];
+  const out = t
+    .replace(/\{job_title\}/g, jobTitle)
+    .replace(/\{first_name\}/g, firstName ?? "")
+    .replace(/^,\s*/, "")
+    .trim();
+  return scrub(out).slice(0, MAX_DM_CHARS);
+}
 
 /** Belt + suspenders on top of the keyword search: the post text itself must
  *  read like hiring intent, not just mention the keyword in passing. */
@@ -86,6 +116,10 @@ export interface CommentLeadItem {
   /** poster lane: BD prospect linkage + the direct-message draft. */
   prospectId?: string;
   openProfile?: boolean;
+  /** The role keyword that matched their post; becomes {job_title} in the DM. */
+  matchedRole?: string;
+  /** Which connected seat found them and sends the DM (multi-account rota). */
+  accountId?: string;
   dmText?: string;
   dmStatus?: "suggested" | "approved" | "skipped" | "blocked";
   /** The commenter. */
@@ -503,7 +537,7 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
   const scanned = 0;
   const created = 0;
   let dmCreated = 0;
-  try { dmCreated = await scanPosters(workspaceId, account); } catch (e) {
+  try { dmCreated = await scanPosters(workspaceId, accounts); } catch (e) {
     console.log(`[comment-radar] ${workspaceId}: market scan error (${e instanceof Error ? e.message : e})`);
   }
 
@@ -583,7 +617,12 @@ async function candidatesFromSerper(keyword: string): Promise<MarketCandidate[]>
     const res = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: { "X-API-KEY": key, "Content-Type": "application/json" },
-      body: JSON.stringify({ q: `site:linkedin.com/posts "${keyword}"`, num: MARKET_RESULTS_PER_SEARCH, tbs: "qdr:w" }),
+      body: JSON.stringify({
+        // The keyword is a ROLE; the OR-group narrows to posts about hiring it.
+        q: `site:linkedin.com/posts "${keyword}" (hiring OR "open role" OR "open position" OR "looking for" OR "join our team")`,
+        num: MARKET_RESULTS_PER_SEARCH,
+        tbs: "qdr:w",
+      }),
     });
     if (!res.ok) return [];
     const data = await res.json() as { organic?: Array<{ link?: string; title?: string; snippet?: string; date?: string }> };
@@ -609,7 +648,12 @@ async function candidatesFromSerper(keyword: string): Promise<MarketCandidate[]>
   } catch { return []; }
 }
 
-async function scanPosters(workspaceId: string, account: LiAccountState): Promise<number> {
+async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Promise<number> {
+  // Multi-account rota: the search runs on the first seat, but each captured
+  // lead is assigned round-robin across ALL connected seats, so profile reads
+  // and DM sends spread over every recruiter's account limits.
+  const account = accounts[0];
+  let rota = state.keywordCursor[`${workspaceId}:rota`] ?? 0;
   const seenAuthors = state.posterSeen[workspaceId] ?? (state.posterSeen[workspaceId] = {});
   const seenArr = state.seen[workspaceId] ?? (state.seen[workspaceId] = []);
   const seenPosts = new Set(seenArr);
@@ -628,7 +672,7 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
   let source = "unipile";
   let candidates: MarketCandidate[] = [];
   try {
-    candidates = candidatesFromUnipile(listOf(await unipile.searchPosts(providerIdOf(account)!, keyword, MARKET_RESULTS_PER_SEARCH)));
+    candidates = candidatesFromUnipile(listOf(await unipile.searchPosts(providerIdOf(account)!, `hiring ${keyword}`, MARKET_RESULTS_PER_SEARCH)));
   } catch (e) {
     console.log(`[comment-radar] unipile post search failed for "${keyword}" (${e instanceof Error ? e.message : e})`);
   }
@@ -639,7 +683,7 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, draft: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0 };
   for (const c of candidates) {
     if (created >= POSTER_NEW_PER_TICK) break;
     if (c.text.length < 40) { g.nopost++; continue; }
@@ -655,9 +699,10 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
     seenAuthors[c.authorRef] = nowIso();
     save();
 
-    // Profile read: provider id, headline, and the open-profile flag that
-    // decides the channel. Company pages fail here, which is the point.
-    const prof = await fetchProfileLite(account, c.authorRef);
+    // Profile read on the seat that will send. Company pages fail here,
+    // which is the point.
+    const sendAccount = accounts[rota % accounts.length];
+    const prof = await fetchProfileLite(sendAccount, c.authorRef);
     if (!prof.providerId) { g.profile++; continue; }
     if (own && prof.providerId === own.providerId) { g.profile++; continue; }
     const lastById = seenAuthors[prof.providerId];
@@ -682,26 +727,28 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
       if (!dnc.ok) { g.dnc++; continue; }
     } catch { g.dnc++; continue; }
 
-    // Open profile or an existing connection takes a plain direct message
-    // (never InMail); closed profiles get the same text as a connect note.
+    // OPEN PROFILES ONLY (owner decision 2026-08-13): the DM lands without a
+    // connection. Existing 1st-degree connections also take a plain message.
+    // Everyone else is skipped, never connect-noted from this lane.
     const direct = prof.openProfile === true || prof.networkDistance === "DISTANCE_1";
+    if (!direct) { g.closed++; continue; }
 
     // Supporting evidence, never a gate: their own board's open roles.
     const hiring = company ? await checkHiring(company) : undefined;
 
-    const persona = `${authorName}${title ? `, ${title}` : ""}${company ? ` at ${company}` : ""}`;
-    const evidence = hiring?.openRoles
-      ? ` Their company also shows ${hiring.openRoles} open role(s)${hiring.sample.length ? ` including ${hiring.sample.join(", ")}` : ""}.`
-      : "";
-    const dmText = await draft(direct ? DM_RULES : POSTER_CONNECT_RULES,
-      `THE PERSON: ${persona}.${evidence}\n\nTHEIR HIRING POST:\n${c.text.slice(0, 700)}\n\nWrite the ${direct ? "message" : "connection note"}.`);
-    if (!dmText) { g.draft++; continue; }
+    // The MPC script: deterministic template fill, {job_title} = the role
+    // keyword that matched their post. No AI in the hot path.
+    const id = rid("licw");
+    const firstName = authorName.split(/\s+/)[0];
+    const dmText = mpcDmFor(id, keyword, firstName && firstName !== "LinkedIn" ? firstName : undefined);
 
     state.items.push({
-      id: rid("licw"), workspaceId, kind: "poster",
+      id, workspaceId, kind: "poster",
       postId: c.postId, postExcerpt: c.text.slice(0, 700), postAt: c.postAt,
       commentId: "", commentText: "",
       openProfile: prof.openProfile,
+      matchedRole: keyword,
+      accountId: sendAccount.accountId,
       authorProviderId: prof.providerId,
       authorName,
       authorHeadline: headline,
@@ -711,13 +758,15 @@ async function scanPosters(workspaceId: string, account: LiAccountState): Promis
       seniority: intel.seniority, jobFunction: intel.function,
       decisionMaker: true, peer: false, hiring, tier: "hot",
       replyStatus: "none",
-      dmText: direct ? dmText : dmText.slice(0, 280), dmStatus: "suggested",
+      dmText, dmStatus: "suggested",
       createdAt: nowIso(), updatedAt: nowIso(),
     });
+    rota++;
     created++;
     save();
   }
 
+  state.keywordCursor[`${workspaceId}:rota`] = rota % 1_000_000;
   if (seenArr.length > SEEN_CAP) state.seen[workspaceId] = seenArr.slice(-SEEN_CAP);
   save();
   console.log(`[comment-radar] market "${keyword}" via ${source}: results=${candidates.length} created=${created} gates=${JSON.stringify(g)}`);
@@ -876,7 +925,11 @@ export async function approveDm(
   if (editedText && scrub(editedText).length >= 2) item.dmText = scrub(editedText).slice(0, direct ? 1200 : 280);
 
   const accounts = await connectedAccounts(workspaceId);
-  const account = accounts.find((a) => a.ownerUserId === userId) ?? accounts.find((a) => !a.ownerUserId) ?? accounts[0];
+  // The seat that scouted this lead sends the DM (multi-account rota).
+  const account = accounts.find((a) => a.accountId === item.accountId)
+    ?? accounts.find((a) => a.ownerUserId === userId)
+    ?? accounts.find((a) => !a.ownerUserId)
+    ?? accounts[0];
   if (!account) {
     item.dmStatus = "blocked"; item.reason = "No connected LinkedIn account."; item.updatedAt = nowIso(); save();
     return { item, accepted: false, reason: item.reason };

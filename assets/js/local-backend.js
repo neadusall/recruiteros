@@ -1050,7 +1050,7 @@
         d.commentWatch = {
           status: { active: true, engineReady: true, aiReady: true, paused: false, reasons: [] },
           autopilot: { enabled: true, source: "default_on" },
-          keywords: ["we are hiring", "we're hiring", "now hiring", "looking to hire", "open role", "growing our team"],
+          keywords: ["BCBA", "RBT", "Clinical Director", "Speech Language Pathologist", "Occupational Therapist", "Nurse Practitioner"],
           lastScan: new Date().toISOString(),
           items: [
             {
@@ -1068,11 +1068,11 @@
               id: "licw_demo1", kind: "poster", tier: "hot", decisionMaker: true, peer: false,
               authorName: "Marcus Bell", authorHeadline: "Director of Engineering at Corvid Systems",
               title: "Director of Engineering", company: "Corvid Systems",
-              openProfile: false,
-              postExcerpt: "Open role on my team: senior platform engineer, Kafka and Kubernetes heavy. Third time posting it because the pipeline keeps filling with people who have read about both. Referrals welcome.",
-              hiring: { checked: true, openRoles: 4, sample: ["Senior Platform Engineer", "SRE", "Data Engineer"] },
+              openProfile: true, matchedRole: "Clinical Director",
+              postExcerpt: "We are growing again: hiring a Clinical Director for our Rogers clinic. If you know a strong BCBA leader ready for the next step, my inbox is open.",
+              hiring: { checked: true, openRoles: 4, sample: ["Clinical Director", "BCBA", "RBT"] },
               dmStatus: "suggested",
-              dmText: "Third repost usually means the screen is passing readers and the interview is catching them. Kafka-and-K8s-in-production people exist but they are never applying. Happy to send a couple who clear that bar. What is the interview catching that the resumes hide?",
+              dmText: "Saw your post for a Clinical Director. I just wrapped a Clinical Director search and two finalists who did not get the offer are still open. Want me to send them over?",
               createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
             }
           ]
