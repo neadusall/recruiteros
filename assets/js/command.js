@@ -3483,6 +3483,153 @@
   // Post engagement radar: people commenting on the owner's OWN posts, scored
   // (decision-maker + company hiring) and tiered hot/warm/community. Replies
   // and connects are approval-gated; the listener scans every 15 minutes.
+  /* ---------------- Role Hunter ----------------
+     The hunting console, deliberately separate from the approval feed
+     (owner ask 2026-08-13): what the radar hunts (scenarios + custom
+     phrases), which roles it watches (with AI family expansion: feed it
+     "CPA" and it suggests Controller, CFO, Assistant Controller, ...),
+     and the scan/autopilot controls. Every save re-reads the server state
+     first so a stale tab can never clobber hunts added elsewhere. */
+  function liHunterPanel(mount) {
+    if (!mount) return;
+    mount.innerHTML = loading();
+    var unsavedRoles = null; // sticky textarea value until saved
+    var last = null;
+    function freshSave(mutate, clearOk) {
+      api("/linkedin/comments").then(function (fresh) {
+        var cur = (fresh && fresh.scenarios) || { presets: [], custom: [] };
+        var next = mutate({ presets: (cur.presets || []).slice(), custom: (cur.custom || []).slice() });
+        send("/linkedin/comments", "POST", { action: "scenarios_set", presets: next.presets, custom: next.custom, clear: !!clearOk })
+          .then(function (r) { if (r.ok && r.data && r.data.view) paint(r.data.view); });
+      });
+    }
+    function paint(d) {
+      if (!document.body.contains(mount)) return;
+      last = d;
+      var st = (d && d.status) || {};
+      var auto = (d && d.autopilot) || {};
+      var presets = d.scenarioPresets || [];
+      var active = d.scenarios || { presets: [], custom: [] };
+      var activeSet = {};
+      (active.presets || []).forEach(function (p) { activeSet[p] = 1; });
+      var roles = d.keywords || [];
+      var chips = (active.presets || []).map(function (id) {
+        var p = null; presets.forEach(function (x) { if (x.id === id) p = x; });
+        return '<span class="lie-chip">' + esc(p ? p.label : id) +
+          ' <a href="#" data-lih-del="' + esc(id) + '" title="Remove">&times;</a></span>';
+      }).concat((active.custom || []).map(function (c, i) {
+        return '<span class="lie-chip">' + esc(c.label || c.phrase) +
+          ' <a href="#" data-lih-delc="' + i + '" title="Remove">&times;</a></span>';
+      }));
+      var picker = presets.filter(function (p) { return !activeSet[p.id]; });
+      var rolesVal = unsavedRoles !== null ? unsavedRoles : roles.join(", ");
+      var huntCount = (active.presets || []).length + (active.custom || []).length;
+      mount.innerHTML =
+        '<div class="card liops-card">' +
+          '<div class="liops-head"><div><b>Role Hunter</b>' +
+            '<div class="muted liops-sub">Hunts LinkedIn for people posting roles they need to fill. Suggested scenarios search around the roles you place; custom phrases hunt anything ("Rippling is hiring", "opening a med spa"). One hunt runs every 15 minutes; found decision makers land in Messages to approve below.</div></div>' +
+            '<span>' +
+              '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span> " +
+              (st.active ? "" : '<span class="lie-chip mut">Standby</span>') +
+            "</span></div>" +
+          (st.active ? "" : ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join(""))) +
+          (d.lastError ? '<div class="lie-post"><span class="lie-chip bad">' + esc(d.lastError) + "</span></div>" : "") +
+          '<div class="lie-post muted">Active hunts (' + huntCount + "):</div>" +
+          '<div class="lie-post">' + (chips.length ? chips.join(" ") : '<span class="muted">No hunts active: the radar has nothing to look for.</span>') + "</div>" +
+          '<div class="lie-actions">' +
+            '<select class="lie-text" data-lih-pick style="max-width:340px">' +
+              '<option value="">Add a suggested scenario...</option>' +
+              picker.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.label) + " (" + esc(p.hint) + ")</option>"; }).join("") +
+            "</select> " +
+            '<input class="lie-text" data-lih-custom placeholder="Or a custom phrase to hunt, e.g. Rippling is hiring" style="max-width:340px"> ' +
+            '<button class="btn btn-sm btn-ghost" data-lih-addc>Add custom hunt</button>' +
+          "</div>" +
+          '<div class="lie-post muted">Roles you hunt (comma-separated; any industry, any title; the matched role becomes {job_title} in the message):</div>' +
+          '<textarea class="lie-text" data-lih-roles rows="2">' + esc(rolesVal) + "</textarea>" +
+          '<div class="lie-actions">' +
+            '<button class="btn btn-sm" data-lih-expand title="AI suggests the adjacent titles for whatever is in the box: feed it CPA and get Controller, CFO, Assistant Controller...">Expand with AI</button> ' +
+            '<button class="btn btn-sm ' + (unsavedRoles !== null ? "btn-primary" : "btn-ghost") + '" data-lih-kwsave>' + (unsavedRoles !== null ? "Save roles (unsaved)" : "Save roles") + "</button> " +
+            '<button class="btn btn-sm btn-ghost" data-lih-scan>Scan now</button> ' +
+            '<button class="btn btn-sm btn-ghost" data-lih-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' + (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button>" +
+            (d.lastScan ? ' <span class="muted" style="align-self:center">Last hunt: ' + esc(new Date(d.lastScan).toLocaleTimeString()) + "</span>" : "") +
+          "</div>" +
+        "</div>";
+      var pick = mount.querySelector("[data-lih-pick]");
+      if (pick) pick.addEventListener("change", function () {
+        if (!pick.value) return;
+        var v = pick.value;
+        freshSave(function (cur) { if (cur.presets.indexOf(v) < 0) cur.presets.push(v); return cur; });
+      });
+      var addC = mount.querySelector("[data-lih-addc]");
+      if (addC) addC.addEventListener("click", function () {
+        var inp = mount.querySelector("[data-lih-custom]");
+        var v = inp && inp.value ? inp.value.trim() : "";
+        if (v.length < 3) return;
+        freshSave(function (cur) { cur.custom.push({ label: v, phrase: v }); return cur; });
+      });
+      Array.prototype.forEach.call(mount.querySelectorAll("[data-lih-del]"), function (a) {
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          var id = a.getAttribute("data-lih-del");
+          freshSave(function (cur) {
+            cur.presets = cur.presets.filter(function (p) { return p !== id; });
+            return cur;
+          }, true);
+        });
+      });
+      Array.prototype.forEach.call(mount.querySelectorAll("[data-lih-delc]"), function (a) {
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          var lbl = (active.custom[parseInt(a.getAttribute("data-lih-delc"), 10)] || {}).phrase;
+          freshSave(function (cur) {
+            cur.custom = cur.custom.filter(function (c) { return c.phrase !== lbl; });
+            return cur;
+          }, true);
+        });
+      });
+      var ta = mount.querySelector("[data-lih-roles]");
+      if (ta) ta.addEventListener("input", function () { unsavedRoles = ta.value; });
+      var exBtn = mount.querySelector("[data-lih-expand]");
+      if (exBtn) exBtn.addEventListener("click", function () {
+        exBtn.disabled = true; exBtn.textContent = "Expanding...";
+        send("/linkedin/comments", "POST", { action: "expand_roles", text: ta ? ta.value : "" }).then(function (r) {
+          if (r.ok && r.data && r.data.roles && r.data.roles.length) {
+            unsavedRoles = r.data.roles.join(", ");
+            if (r.data.error) toast(r.data.error);
+            else if (!r.data.expanded) toast("No new titles suggested.");
+            paint(last);
+          } else {
+            toast((r.data && r.data.error) || "Expansion failed.");
+            exBtn.disabled = false; exBtn.textContent = "Expand with AI";
+          }
+        });
+      });
+      var kwBtn = mount.querySelector("[data-lih-kwsave]");
+      if (kwBtn) kwBtn.addEventListener("click", function () {
+        kwBtn.disabled = true;
+        send("/linkedin/comments", "POST", { action: "keywords_set", text: ta ? ta.value : "" }).then(function (r) {
+          unsavedRoles = null;
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      });
+      var autoBtn = mount.querySelector("[data-lih-auto]");
+      if (autoBtn) autoBtn.addEventListener("click", function () {
+        autoBtn.disabled = true;
+        send("/linkedin/comments", "POST", { action: autoBtn.getAttribute("data-lih-auto") }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      });
+      var scanBtn = mount.querySelector("[data-lih-scan]");
+      if (scanBtn) scanBtn.addEventListener("click", function () {
+        scanBtn.disabled = true; scanBtn.textContent = "Hunting...";
+        send("/linkedin/comments", "POST", { action: "scan" }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      });
+    }
+    api("/linkedin/comments").then(paint).catch(function () { mount.innerHTML = ""; });
+  }
+
   function liCommentsPanel(mount) {
     if (!mount) return;
     mount.innerHTML = loading();
@@ -3569,125 +3716,18 @@
     }
     function paint(d) {
       if (!document.body.contains(mount)) return;
-      var st = (d && d.status) || {};
       var items = (d && d.items) || [];
-      if (!st.active && !items.length) {
-        mount.innerHTML =
-          '<div class="card liops-card">' +
-            '<div class="liops-head"><div><b>Market radar</b>' +
-              '<div class="muted liops-sub">Searches LinkedIn posts by hiring keywords to find hiring managers looking for talent, then direct-messages them off their own post.</div></div>' +
-              '<span class="lie-chip mut">Standby</span></div>' +
-            ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join("") || "") +
-          "</div>";
-        return;
-      }
-      var auto = (d && d.autopilot) || {};
       var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested" || t.dmStatus === "suggested"; }).length;
-      var collapsed = false;
-      try { collapsed = localStorage.getItem("lic_radar_collapsed") === "1"; } catch (e) {}
-      var presets = d.scenarioPresets || [];
-      var active = d.scenarios || { presets: [], custom: [] };
-      var activeSet = {};
-      (active.presets || []).forEach(function (p) { activeSet[p] = 1; });
-      function scenChips() {
-        var chips = (active.presets || []).map(function (id) {
-          var p = null; presets.forEach(function (x) { if (x.id === id) p = x; });
-          return '<span class="lie-chip">' + esc(p ? p.label : id) +
-            ' <a href="#" data-lic-scen-del="' + esc(id) + '" title="Remove">&times;</a></span>';
-        }).concat((active.custom || []).map(function (c, i) {
-          return '<span class="lie-chip">' + esc(c.label || c.phrase) +
-            ' <a href="#" data-lic-scen-delc="' + i + '" title="Remove">&times;</a></span>';
-        }));
-        return chips.length ? chips.join(" ") : '<span class="muted">No scenarios active: the radar has nothing to hunt.</span>';
-      }
-      var picker = presets.filter(function (p) { return !activeSet[p.id]; });
       mount.innerHTML =
         '<div class="card liops-card">' +
-          '<div class="liops-head"><div><b>Market radar</b>' +
-            (collapsed ? "" :
-            '<div class="muted liops-sub">Pick hunting scenarios below and type the roles you place. The radar searches LinkedIn posts on each scenario and messages ONLY open profiles (plus existing connections) with a short MPC script. No InMails, no public comments, closed profiles are skipped.' +
-              (auto.enabled
-                ? " Autopilot is on: sends happen automatically through your account limits."
-                : " Nothing sends without your approval.") + "</div>") + "</div>" +
-            '<span>' +
-              '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span> " +
-              (open ? '<span class="liops-progress">' + open + " to review</span> " : "") +
-              '<button class="btn btn-sm btn-ghost" data-lic-collapse title="' + (collapsed ? "Expand" : "Collapse") + '">' + (collapsed ? "Expand" : "Collapse") + "</button>" +
-            "</span></div>" +
-          (collapsed ? "" :
-            ((d.lastError ? '<div class="lie-post"><span class="lie-chip bad">' + esc(d.lastError) + "</span></div>" : "") +
-            (items.length
-              ? items.map(row).join("")
-              : '<div class="lie-post muted">Nothing captured yet. The radar runs one scenario search every 15 minutes.</div>') +
-            '<div class="lie-post muted">Active scenarios:</div>' +
-            '<div class="lie-post" data-lic-chips>' + scenChips() + "</div>" +
-            '<div class="lie-actions">' +
-              '<select class="lie-text" data-lic-scen-pick style="max-width:340px">' +
-                '<option value="">Add a suggested scenario...</option>' +
-                picker.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.label) + " (" + esc(p.hint) + ")</option>"; }).join("") +
-              "</select> " +
-              '<input class="lie-text" data-lic-scen-custom placeholder="Or add your own phrase to hunt, e.g. opening a med spa" style="max-width:340px"> ' +
-              '<button class="btn btn-sm btn-ghost" data-lic-scen-addc>Add custom</button>' +
-            "</div>" +
-            '<div class="lie-post muted">Roles you place (comma-separated; each becomes {job_title} in the MPC message):</div>' +
-            '<textarea class="lie-text" data-lic-keywords rows="1">' + esc((d.keywords || []).join(", ")) + "</textarea>" +
-            '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button> ' +
-              '<button class="btn btn-sm btn-ghost" data-lic-kwsave>Save keywords</button> ' +
-              '<button class="btn btn-sm btn-ghost" data-lic-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' +
-                (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button></div>")) +
+          '<div class="liops-head"><div><b>Messages to approve</b>' +
+            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a drafted message. Approve, edit, or skip; approved and skipped items leave this list. Only open profiles and existing connections are ever messaged.</div></div>' +
+            (open ? '<span class="liops-progress">' + open + " to review</span>" : "") +
+          "</div>" +
+          (items.length
+            ? items.map(row).join("")
+            : '<div class="lie-post muted">Nothing to review right now. The Role Hunter above fills this list as it finds people posting roles they need filled.</div>') +
         "</div>";
-      var colBtn = mount.querySelector("[data-lic-collapse]");
-      if (colBtn) colBtn.addEventListener("click", function () {
-        try { localStorage.setItem("lic_radar_collapsed", collapsed ? "0" : "1"); } catch (e) {}
-        paint(d);
-      });
-      if (collapsed) return;
-      function saveScenarios(np, nc) {
-        send("/linkedin/comments", "POST", { action: "scenarios_set", presets: np, custom: nc }).then(function (r) {
-          if (r.ok && r.data && r.data.view) paint(r.data.view);
-        });
-      }
-      var pick = mount.querySelector("[data-lic-scen-pick]");
-      if (pick) pick.addEventListener("change", function () {
-        if (!pick.value) return;
-        saveScenarios((active.presets || []).concat([pick.value]), active.custom || []);
-      });
-      var addC = mount.querySelector("[data-lic-scen-addc]");
-      if (addC) addC.addEventListener("click", function () {
-        var inp = mount.querySelector("[data-lic-scen-custom]");
-        var v = inp && inp.value ? inp.value.trim() : "";
-        if (v.length < 3) return;
-        saveScenarios(active.presets || [], (active.custom || []).concat([{ label: v, phrase: v }]));
-      });
-      Array.prototype.forEach.call(mount.querySelectorAll("[data-lic-scen-del]"), function (a) {
-        a.addEventListener("click", function (ev) {
-          ev.preventDefault();
-          var id = a.getAttribute("data-lic-scen-del");
-          saveScenarios((active.presets || []).filter(function (p) { return p !== id; }), active.custom || []);
-        });
-      });
-      Array.prototype.forEach.call(mount.querySelectorAll("[data-lic-scen-delc]"), function (a) {
-        a.addEventListener("click", function (ev) {
-          ev.preventDefault();
-          var i = parseInt(a.getAttribute("data-lic-scen-delc"), 10);
-          saveScenarios(active.presets || [], (active.custom || []).filter(function (_, j) { return j !== i; }));
-        });
-      });
-      var kwBtn = mount.querySelector("[data-lic-kwsave]");
-      if (kwBtn) kwBtn.addEventListener("click", function () {
-        kwBtn.disabled = true;
-        var kta = mount.querySelector("[data-lic-keywords]");
-        send("/linkedin/comments", "POST", { action: "keywords_set", text: kta ? kta.value : "" }).then(function (r) {
-          if (r.ok && r.data && r.data.view) paint(r.data.view);
-        });
-      });
-      var autoBtn = mount.querySelector("[data-lic-auto]");
-      if (autoBtn) autoBtn.addEventListener("click", function () {
-        autoBtn.disabled = true;
-        send("/linkedin/comments", "POST", { action: autoBtn.getAttribute("data-lic-auto") }).then(function (r) {
-          if (r.ok && r.data && r.data.view) paint(r.data.view);
-        });
-      });
       Array.prototype.forEach.call(mount.querySelectorAll("[data-lic]"), function (btn) {
         btn.addEventListener("click", function () {
           var rowEl = btn.closest(".lie-row");
@@ -3703,13 +3743,6 @@
             if (r.ok && r.data && r.data.view) paint(r.data.view);
             if (r.data && r.data.accepted === false && r.data.reason) toast(r.data.reason);
           });
-        });
-      });
-      var scanBtn = mount.querySelector("[data-lic-scan]");
-      if (scanBtn) scanBtn.addEventListener("click", function () {
-        scanBtn.disabled = true; scanBtn.textContent = "Scanning...";
-        send("/linkedin/comments", "POST", { action: "scan" }).then(function (r) {
-          if (r.ok && r.data && r.data.view) paint(r.data.view);
         });
       });
     }
@@ -25243,9 +25276,10 @@
     // The daily-ops worksheet mounts as a sibling ABOVE the tool host: the
     // LinkedIn OS renderer owns its element's innerHTML entirely (and repaints
     // it on internal tab switches), so the panel must live outside that host.
-    el.innerHTML = '<div class="liops-mount"></div><div class="lic-mount"></div><div class="lie-mount"></div><div class="liops-host"></div>';
+    el.innerHTML = '<div class="liops-mount"></div><div class="lih-mount"></div><div class="lic-mount"></div><div class="lie-mount"></div><div class="liops-host"></div>';
     liOpsPanel($(".liops-mount", el), "outreach");
     if (motion === "bd") {
+      liHunterPanel($(".lih-mount", el));
       liCommentsPanel($(".lic-mount", el));
       liEngagePanel($(".lie-mount", el));
     }

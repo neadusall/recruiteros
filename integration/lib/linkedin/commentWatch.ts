@@ -653,10 +653,67 @@ export function marketKeywordsFor(workspaceId: string): string[] {
 
 export async function setMarketKeywords(workspaceId: string, keywords: string[]): Promise<string[]> {
   await hydrate();
-  const clean = [...new Set(keywords.map((k) => k.trim().toLowerCase()).filter((k) => k.length >= 3))].slice(0, 25);
+  // Keep the casing the recruiter typed: the matched keyword becomes
+  // {job_title} in the DM ("Controller", not "controller"). Dedupe is
+  // case-insensitive; 2-char floor admits titles like QA and PM.
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const k of keywords) {
+    const t = k.trim();
+    if (t.length < 2) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push(t.slice(0, 60));
+    if (clean.length >= 40) break;
+  }
   state.marketKeywords[workspaceId] = clean;
   save();
   return marketKeywordsFor(workspaceId);
+}
+
+/**
+ * AI role-family expansion (owner ask 2026-08-13): feed any seed title in any
+ * industry ("CPA") and get the adjacent titles a recruiter hunting that desk
+ * would also watch ("Controller", "CFO", "Assistant Controller", ...). Pure
+ * suggestion engine: returns the merged list for review, saves NOTHING.
+ * Deterministic fallback: on any AI failure the seeds come back unchanged.
+ */
+export async function expandRoleFamily(seeds: string[]): Promise<{ roles: string[]; expanded: boolean; error?: string }> {
+  const base = [...new Set(seeds.map((s) => s.trim()).filter((s) => s.length >= 2))].slice(0, 10);
+  if (!base.length) return { roles: [], expanded: false, error: "No seed titles given." };
+  if (!process.env.ANTHROPIC_API_KEY) return { roles: base, expanded: false, error: "AI key not configured on the server." };
+  try {
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0 });
+    const resp = await client.messages.create(
+      {
+        model: process.env.ROLE_EXPAND_MODEL ?? "claude-haiku-4-5",
+        max_tokens: 500,
+        temperature: 0.3,
+        system: "You expand recruiter search keywords. Given seed job titles, return the adjacent job titles a recruiter working that desk would also hunt: synonyms, common abbreviations, adjacent seniority levels from individual contributor to executive, and closely related functions in the same family. Any industry. Return ONLY a JSON array of title strings, no commentary. 10 to 18 titles, each 60 characters or fewer, no duplicates of the seeds.",
+        messages: [{ role: "user", content: `Seed titles: ${base.join(", ")}` }],
+      },
+      { timeout: 15_000 },
+    );
+    const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+    const m = /\[[\s\S]*\]/.exec(text);
+    const parsed: unknown = m ? JSON.parse(m[0]) : [];
+    const extras = (Array.isArray(parsed) ? parsed : [])
+      .map((x) => String(x).trim().slice(0, 60))
+      .filter((x) => x.length >= 2);
+    const seen = new Set(base.map((b) => b.toLowerCase()));
+    const merged = [...base];
+    for (const e of extras) {
+      if (seen.has(e.toLowerCase())) continue;
+      seen.add(e.toLowerCase());
+      merged.push(e);
+      if (merged.length >= 40) break;
+    }
+    return { roles: merged, expanded: merged.length > base.length };
+  } catch (e) {
+    return { roles: base, expanded: false, error: e instanceof Error ? e.message : "AI expansion failed." };
+  }
 }
 
 export function scenariosFor(workspaceId: string): { presets: string[]; custom: Array<{ label: string; phrase: string }> } {
@@ -668,16 +725,24 @@ export async function setScenarios(
   workspaceId: string,
   presets: string[],
   custom: Array<{ label?: string; phrase?: string }>,
+  opts?: { allowClear?: boolean },
 ): Promise<void> {
   await hydrate();
   const validIds = new Set(SCENARIO_PRESETS.map((p) => p.id));
-  state.scenarios[workspaceId] = {
+  const next = {
     presets: [...new Set(presets.filter((p) => validIds.has(p)))],
     custom: custom
       .map((c) => ({ label: String(c.label ?? c.phrase ?? "").trim().slice(0, 60), phrase: String(c.phrase ?? "").trim().slice(0, 120) }))
       .filter((c) => c.phrase.length >= 3)
-      .slice(0, 15),
+      .slice(0, 40),
   };
+  // Wipe guard (incident 2026-08-13): a stale tab posting an empty selection
+  // erased 20 seeded hunts. Emptying everything now requires an explicit
+  // clear from the UI; an empty save from old markup is treated as a no-op.
+  const prev = state.scenarios[workspaceId];
+  const prevCount = prev ? prev.presets.length + prev.custom.length : 0;
+  if (!next.presets.length && !next.custom.length && prevCount > 0 && !opts?.allowClear) return;
+  state.scenarios[workspaceId] = next;
   save();
 }
 

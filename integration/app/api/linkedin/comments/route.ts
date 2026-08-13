@@ -27,7 +27,7 @@ import { ok, fail, body, requireCapability } from "../../../../lib/api";
 import {
   commentWatchView, scanWorkspace, approveReply, skipReply, editReply, draftReply,
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
-  setCommentWatchAuto, setMarketKeywords, setScenarios,
+  setCommentWatchAuto, setMarketKeywords, setScenarios, expandRoleFamily,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -63,11 +63,16 @@ export async function POST(req: Request): Promise<Response> {
     return ok({ view: await commentWatchView(ws) });
   }
   if (b.action === "scenarios_set") {
-    const bb = b as { presets?: unknown; custom?: unknown };
+    const bb = b as { presets?: unknown; custom?: unknown; clear?: unknown };
     await setScenarios(ws,
       Array.isArray(bb.presets) ? bb.presets.map(String) : [],
-      Array.isArray(bb.custom) ? bb.custom as Array<{ label?: string; phrase?: string }> : []);
+      Array.isArray(bb.custom) ? bb.custom as Array<{ label?: string; phrase?: string }> : [],
+      { allowClear: bb.clear === true });
     return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "expand_roles") {
+    const r = await expandRoleFamily(String(b.text ?? "").split(",").map((k) => k.trim()).filter(Boolean));
+    return ok(r);
   }
   if (!b.id) return fail("missing_id");
 
