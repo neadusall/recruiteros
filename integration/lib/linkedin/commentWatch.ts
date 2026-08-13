@@ -285,13 +285,29 @@ async function hydrate(): Promise<void> {
   return hydrating;
 }
 
+/** An item the recruiter still needs to see: something is awaiting approval,
+ *  or something went wrong (blocked never disappears silently). Approved and
+ *  skipped items are done - they leave the card (owner ask 2026-08-13). */
+function actionable(i: CommentLeadItem): boolean {
+  return i.replyStatus === "suggested" || i.replyStatus === "blocked"
+    || i.dmStatus === "suggested" || i.dmStatus === "blocked"
+    || i.connectStatus === "suggested" || i.connectStatus === "blocked";
+}
+
+const RESOLVED_TTL_HOURS = 24;
+
 function prune(): void {
   const cutoff = Date.now() - ITEM_TTL_DAYS * 86_400_000;
+  // Resolved items (approved/skipped, nothing pending) are kept a day for
+  // safety, then dropped; re-contact prevention lives in posterSeen/seen,
+  // not here, so pruning them cannot cause a double touch.
+  const resolvedCutoff = Date.now() - RESOLVED_TTL_HOURS * 3_600_000;
   // Community tier is retired (owner decision 2026-08-13): job seekers and
   // peers commenting on the owner's posts are noise, not leads. The radar
   // only surfaces people posting roles they need to fill; legacy community
   // items from older builds are dropped here.
-  state.items = state.items.filter((i) => new Date(i.createdAt).getTime() >= cutoff && i.tier !== "community");
+  state.items = state.items.filter((i) => new Date(i.createdAt).getTime() >= cutoff && i.tier !== "community"
+    && (actionable(i) || new Date(i.updatedAt).getTime() >= resolvedCutoff));
 }
 
 /* ------------------------------------------------------------------ */
@@ -1013,7 +1029,7 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
   const status = await commentWatchStatus(workspaceId);
   const autopilot = await commentWatchAutopilot(workspaceId);
   const items = state.items
-    .filter((i) => i.workspaceId === workspaceId && i.tier !== "community")
+    .filter((i) => i.workspaceId === workspaceId && i.tier !== "community" && actionable(i))
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
   return {
     status, autopilot,
