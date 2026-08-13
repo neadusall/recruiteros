@@ -27,7 +27,7 @@ import { ok, fail, body, requireCapability } from "../../../../lib/api";
 import {
   commentWatchView, scanWorkspace, approveReply, skipReply, editReply, draftReply,
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
-  setCommentWatchAuto, setMarketKeywords, setScenarios, expandRoleFamily,
+  setCommentWatchAuto, setMarketKeywords, setScenarios, expandRoleFamily, aiHunt,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -73,6 +73,10 @@ export async function POST(req: Request): Promise<Response> {
   if (b.action === "expand_roles") {
     const r = await expandRoleFamily(String(b.text ?? "").split(",").map((k) => k.trim()).filter(Boolean));
     return ok(r);
+  }
+  if (b.action === "hunt_now") {
+    const r = await aiHunt(ws, String(b.text ?? ""));
+    return ok({ ...r, view: await commentWatchView(ws) });
   }
   if (!b.id) return fail("missing_id");
 

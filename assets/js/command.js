@@ -3534,6 +3534,12 @@
             "</span></div>" +
           (st.active ? "" : ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join(""))) +
           (d.lastError ? '<div class="lie-post"><span class="lie-chip bad">' + esc(d.lastError) + "</span></div>" : "") +
+          '<div class="lie-post muted">AI Search: describe who you want to find and it hunts right now (standing hunts below keep running on their own):</div>' +
+          '<div class="lie-actions">' +
+            '<input class="lie-text" data-lih-ask placeholder="e.g. CFOs at Series B fintechs hiring senior accountants" style="flex:1;min-width:260px"> ' +
+            '<button class="btn btn-sm btn-primary" data-lih-hunt>Hunt with AI</button>' +
+          "</div>" +
+          '<div class="lie-post" data-lih-hunt-status style="display:none"></div>' +
           '<div class="lie-post muted">Active hunts (' + huntCount + "):</div>" +
           '<div class="lie-post">' + (chips.length ? chips.join(" ") : '<span class="muted">No hunts active: the radar has nothing to look for.</span>') + "</div>" +
           '<div class="lie-actions">' +
@@ -3554,6 +3560,29 @@
             (d.lastScan ? ' <span class="muted" style="align-self:center">Last hunt: ' + esc(new Date(d.lastScan).toLocaleTimeString()) + "</span>" : "") +
           "</div>" +
         "</div>";
+      var huntBtn = mount.querySelector("[data-lih-hunt]");
+      if (huntBtn) huntBtn.addEventListener("click", function () {
+        var askEl = mount.querySelector("[data-lih-ask]");
+        var ask = askEl && askEl.value ? askEl.value.trim() : "";
+        if (ask.length < 3) return;
+        var stat = mount.querySelector("[data-lih-hunt-status]");
+        huntBtn.disabled = true; huntBtn.textContent = "Hunting...";
+        if (stat) { stat.style.display = ""; stat.innerHTML = '<span class="muted">Building the search and hunting LinkedIn. This can take a minute...</span>'; }
+        send("/linkedin/comments", "POST", { action: "hunt_now", text: ask }).then(function (r) {
+          huntBtn.disabled = false; huntBtn.textContent = "Hunt with AI";
+          var d2 = r.data || {};
+          if (!r.ok) { if (stat) stat.innerHTML = '<span class="lie-chip bad">The hunt failed. Try again.</span>'; return; }
+          var msg = "Searched: " + (d2.phrases || []).map(function (p) { return '"' + esc(p) + '"'; }).join(", ") +
+            (d2.role ? " (role: " + esc(d2.role) + ")" : "") + ". " +
+            (d2.created
+              ? '<b>' + d2.created + " new lead" + (d2.created === 1 ? "" : "s") + "</b> added to Messages to approve."
+              : "No new decision makers this pass; posts already seen or none matched.") +
+            (d2.error ? ' <span class="lie-chip bad">' + esc(d2.error) + "</span>" : "");
+          if (d2.view) { paint(d2.view); var s2 = mount.querySelector("[data-lih-hunt-status]"); if (s2) { s2.style.display = ""; s2.innerHTML = msg; } }
+          else if (stat) stat.innerHTML = msg;
+          if (d2.created && window.__licRefresh) window.__licRefresh();
+        });
+      });
       var pick = mount.querySelector("[data-lih-pick]");
       if (pick) pick.addEventListener("change", function () {
         if (!pick.value) return;
@@ -3746,6 +3775,9 @@
         });
       });
     }
+    // The Role Hunter pings this after a successful AI hunt so fresh drafts
+    // appear here without a page reload.
+    window.__licRefresh = function () { api("/linkedin/comments").then(paint).catch(function () {}); };
     api("/linkedin/comments").then(paint).catch(function () { mount.innerHTML = ""; });
   }
 

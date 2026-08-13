@@ -605,7 +605,7 @@ function slugOf(url?: string): string | undefined {
 /* The scan                                                             */
 /* ------------------------------------------------------------------ */
 
-export async function scanWorkspace(workspaceId: string): Promise<{ scanned: number; created: number; skipped: string | null }> {
+export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Promise<{ scanned: number; created: number; skipped: string | null }> {
   await hydrate();
   const status = await commentWatchStatus(workspaceId);
   if (!status.active) {
@@ -624,7 +624,7 @@ export async function scanWorkspace(workspaceId: string): Promise<{ scanned: num
   const scanned = 0;
   const created = 0;
   let dmCreated = 0;
-  try { dmCreated = await scanPosters(workspaceId, accounts); } catch (e) {
+  try { dmCreated = await scanPosters(workspaceId, accounts, adhoc); } catch (e) {
     console.log(`[comment-radar] ${workspaceId}: market scan error (${e instanceof Error ? e.message : e})`);
   }
 
@@ -744,6 +744,67 @@ export async function setScenarios(
   if (!next.presets.length && !next.custom.length && prevCount > 0 && !opts?.allowClear) return;
   state.scenarios[workspaceId] = next;
   save();
+}
+
+/**
+ * AI Search (owner ask 2026-08-13): the recruiter describes who they want to
+ * find in plain language ("CFOs at Series B fintechs hiring accountants") and
+ * this turns it into LinkedIn post hunts and runs them NOW, outside the
+ * 15-minute rotation. Findings land in the same approval feed as every other
+ * hunt. Fallback without AI: the raw ask runs as a single phrase hunt.
+ */
+export async function aiHunt(workspaceId: string, ask: string): Promise<{
+  phrases: string[]; role?: string; created: number; error?: string;
+}> {
+  const q = ask.trim().slice(0, 300);
+  if (q.length < 3) return { phrases: [], created: 0, error: "Describe who you want to find." };
+  let phrases: string[] = [];
+  let role: string | undefined;
+  let error: string | undefined;
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0 });
+      const resp = await client.messages.create(
+        {
+          model: process.env.ROLE_EXPAND_MODEL ?? "claude-haiku-4-5",
+          max_tokens: 300,
+          temperature: 0.3,
+          system: 'You turn a recruiter\'s description of who they want to find into LinkedIn post search phrases. The targets are always on the HIRING side: people posting about roles they need to fill. Reply with strict JSON only: {"role": "<job title being hired, singular, for message templating>", "phrases": ["...", "..."]}. Each phrase is 2 to 6 words that would appear verbatim inside such a post ("hiring a Senior Accountant", "looking for a Controller", "growing our finance team"). Exactly 2 phrases, no hashtags, no quotation marks inside phrases.',
+          messages: [{ role: "user", content: q }],
+        },
+        { timeout: 15_000 },
+      );
+      const text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("");
+      const m = /\{[\s\S]*\}/.exec(text);
+      const parsed = m ? JSON.parse(m[0]) as { role?: unknown; phrases?: unknown } : {};
+      role = typeof parsed.role === "string" && parsed.role.trim() ? parsed.role.trim().slice(0, 60) : undefined;
+      phrases = (Array.isArray(parsed.phrases) ? parsed.phrases : [])
+        .map((p) => String(p).trim().replace(/["“”]/g, "")).filter((p) => p.length >= 3).slice(0, 2);
+    } catch (e) {
+      error = e instanceof Error ? e.message : "AI query builder failed.";
+    }
+  }
+  if (!phrases.length) phrases = [q.slice(0, 120)];
+  let created = 0;
+  for (const p of phrases) {
+    const combo: ScanCombo = {
+      key: `AI hunt: ${p}`,
+      role,
+      serperQ: `site:linkedin.com/posts "${p}"`,
+      unipileQ: p,
+      hiringIntent: false,
+      dmBank: "mpc",
+    };
+    try {
+      const r = await scanWorkspace(workspaceId, combo);
+      created += r.created;
+      if (r.skipped === "standby") error = "The radar is on standby (no connected LinkedIn account).";
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Hunt failed.";
+    }
+  }
+  return { phrases, role, created, error };
 }
 
 /** One search per tick: the flattened (scenario x role) rotation. */
@@ -920,7 +981,7 @@ async function candidatesFromDataForSeo(query: string): Promise<{ items: MarketC
   } catch (e) { return { items: [], error: `DataForSEO unreachable (${e instanceof Error ? e.message : e})` }; }
 }
 
-async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Promise<number> {
+async function scanPosters(workspaceId: string, accounts: LiAccountState[], adhoc?: ScanCombo): Promise<number> {
   // Multi-account rota: the search runs on the first seat, but each captured
   // lead is assigned round-robin across ALL connected seats, so profile reads
   // and DM sends spread over every recruiter's account limits.
@@ -933,11 +994,17 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Pro
   const own = state.ownProfile[workspaceId];
 
   // One search per tick, rotating through the flattened (scenario x role)
-  // combos; 96 ticks/day covers the whole rotation several times over.
-  const combos = scanCombos(workspaceId);
-  const idx = (state.keywordCursor[workspaceId] ?? 0) % combos.length;
-  state.keywordCursor[workspaceId] = idx + 1;
-  const combo = combos[idx];
+  // combos; 96 ticks/day covers the whole rotation several times over. An
+  // ad-hoc combo (AI Search) runs immediately and leaves the rotation alone.
+  let combo: ScanCombo;
+  if (adhoc) {
+    combo = adhoc;
+  } else {
+    const combos = scanCombos(workspaceId);
+    const idx = (state.keywordCursor[workspaceId] ?? 0) % combos.length;
+    state.keywordCursor[workspaceId] = idx + 1;
+    combo = combos[idx];
+  }
   const keyword = combo.key;
   const roles = marketKeywordsFor(workspaceId);
   save();
