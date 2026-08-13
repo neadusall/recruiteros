@@ -19,13 +19,15 @@
  *   auto_on / auto_off {}       -> autopilot: execute drafts hands-free
  *   keywords_set    { text }    -> comma-separated market-scan keyword bank
  *                                  (empty text restores the backend defaults)
+ *   scenarios_set   { presets: string[], custom: [{label, phrase}] }
+ *                               -> which hunting scenarios are active
  * Session-gated with outreach:send, same capability as the LinkedIn tab.
  */
 import { ok, fail, body, requireCapability } from "../../../../lib/api";
 import {
   commentWatchView, scanWorkspace, approveReply, skipReply, editReply, draftReply,
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
-  setCommentWatchAuto, setMarketKeywords,
+  setCommentWatchAuto, setMarketKeywords, setScenarios,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -58,6 +60,13 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (b.action === "keywords_set") {
     await setMarketKeywords(ws, String(b.text ?? "").split(",").map((k) => k.trim()).filter(Boolean));
+    return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "scenarios_set") {
+    const bb = b as { presets?: unknown; custom?: unknown };
+    await setScenarios(ws,
+      Array.isArray(bb.presets) ? bb.presets.map(String) : [],
+      Array.isArray(bb.custom) ? bb.custom as Array<{ label?: string; phrase?: string }> : []);
     return ok({ view: await commentWatchView(ws) });
   }
   if (!b.id) return fail("missing_id");

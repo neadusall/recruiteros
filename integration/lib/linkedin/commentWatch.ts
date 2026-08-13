@@ -76,12 +76,78 @@ const MPC_DM_TEMPLATES = [
 ];
 const MAX_DM_CHARS = 300;
 
+/**
+ * Search scenarios (owner ask 2026-08-13): suggested, pickable hunting
+ * recipes shown as a dropdown on the card, plus custom phrases the owner
+ * adds. Role-based scenarios run once per role keyword; the rest run as-is.
+ */
+export interface ScenarioPreset {
+  id: string;
+  label: string;
+  hint: string;
+  roleBased: boolean;
+  /** The Google OR-group appended to the role / used standalone. */
+  orGroup: string;
+  /** Gate hits through HIRING_INTENT_RE (true) or accept any real post. */
+  hiringIntent: boolean;
+  dmBank: "mpc" | "growth";
+}
+
+export const SCENARIO_PRESETS: ScenarioPreset[] = [
+  {
+    id: "hiring_role", label: "Posting an opening for a role I place",
+    hint: "They announced they are hiring one of your roles",
+    roleBased: true, orGroup: `hiring OR "open role" OR "open position" OR "looking for" OR "join our team"`,
+    hiringIntent: true, dmBank: "mpc",
+  },
+  {
+    id: "urgent_backfill", label: "Urgent or backfill hires",
+    hint: "Urgent, immediate, or backfill language on your roles",
+    roleBased: true, orGroup: `urgent OR immediately OR backfill OR asap OR "start right away"`,
+    hiringIntent: true, dmBank: "mpc",
+  },
+  {
+    id: "struggling_to_fill", label: "Struggling to fill a role",
+    hint: "Complaining a search is hard: your MPC lands best here",
+    roleBased: true, orGroup: `"struggling to hire" OR "hard to fill" OR "hard to find" OR "cannot find" OR "third time posting"`,
+    hiringIntent: false, dmBank: "mpc",
+  },
+  {
+    id: "team_growth", label: "Announcing team growth",
+    hint: "Growing, expanding, or doubling the team",
+    roleBased: false, orGroup: `"growing our team" OR "expanding our team" OR "doubling our team" OR "scaling our team"`,
+    hiringIntent: false, dmBank: "growth",
+  },
+  {
+    id: "new_location", label: "Opening a new location",
+    hint: "New office, clinic, or market: staffing follows",
+    roleBased: false, orGroup: `("new office" OR "new clinic" OR "new location" OR "second location") (hiring OR "join our team" OR opening)`,
+    hiringIntent: false, dmBank: "growth",
+  },
+  {
+    id: "funding_growth", label: "Funding or rapid growth news",
+    hint: "Raises and growth announcements: hiring comes next",
+    roleBased: false, orGroup: `("we raised" OR "series a" OR "series b" OR "excited to announce" funding) (team OR hiring OR growing)`,
+    hiringIntent: false, dmBank: "growth",
+  },
+];
+const DEFAULT_SCENARIOS = ["hiring_role", "urgent_backfill", "struggling_to_fill"];
+
+/** Softer bank for growth/expansion scenarios where no specific opening was
+ *  posted: still MPC-flavored, anchored on the desk's primary roles. */
+const GROWTH_DM_TEMPLATES = [
+  "Congrats on the growth. We place {job_title}s all day and a search that just closed left a couple of vetted candidates still warm. Useful as you build out?",
+  "Sounds like the team is scaling. A {job_title} search I just wrapped left strong runners-up still on the market. Want me to send a couple over?",
+  "Growth like that usually means hiring is next. I keep a warm bench of vetted {job_title}s from recent searches. Happy to share a few profiles.",
+];
+
 /** Deterministic template pick + fill; trims to the DM threshold. */
-function mpcDmFor(seed: string, jobTitle: string, firstName?: string): string {
+function mpcDmFor(seed: string, jobTitle: string, firstName?: string, bank: "mpc" | "growth" = "mpc"): string {
+  const pool = bank === "growth" ? GROWTH_DM_TEMPLATES : MPC_DM_TEMPLATES;
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  let t = MPC_DM_TEMPLATES[h % MPC_DM_TEMPLATES.length];
-  if (t.includes("{first_name}") && !firstName) t = MPC_DM_TEMPLATES[0];
+  let t = pool[h % pool.length];
+  if (t.includes("{first_name}") && !firstName) t = pool[0];
   const out = t
     .replace(/\{job_title\}/g, jobTitle)
     .replace(/\{first_name\}/g, firstName ?? "")
@@ -172,6 +238,10 @@ interface WatchState {
   marketKeywords: Record<string, string[]>;
   /** ws -> rotation cursor into the keyword bank (one search per tick). */
   keywordCursor: Record<string, number>;
+  /** ws -> active scenario selection (preset ids + custom phrases). */
+  scenarios: Record<string, { presets: string[]; custom: Array<{ label: string; phrase: string }> }>;
+  /** ws -> last discovery-engine failure, surfaced on the card (break layer). */
+  lastError: Record<string, string>;
   /** ws -> owner switched the listener off. */
   paused: Record<string, boolean>;
   /**
@@ -184,7 +254,7 @@ interface WatchState {
 }
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, marketKeywords: {}, keywordCursor: {}, paused: {}, autoMode: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 const save = debouncedSaver(KEY, () => state);
@@ -202,6 +272,8 @@ async function hydrate(): Promise<void> {
           posterSeen: snap.posterSeen ?? {},
           marketKeywords: snap.marketKeywords ?? {},
           keywordCursor: snap.keywordCursor ?? {},
+          scenarios: snap.scenarios ?? {},
+          lastError: snap.lastError ?? {},
           paused: snap.paused ?? {},
           autoMode: snap.autoMode ?? {},
           lastScan: snap.lastScan ?? {},
@@ -564,6 +636,79 @@ export async function setMarketKeywords(workspaceId: string, keywords: string[])
   return marketKeywordsFor(workspaceId);
 }
 
+export function scenariosFor(workspaceId: string): { presets: string[]; custom: Array<{ label: string; phrase: string }> } {
+  const sel = state.scenarios[workspaceId];
+  return sel ?? { presets: [...DEFAULT_SCENARIOS], custom: [] };
+}
+
+export async function setScenarios(
+  workspaceId: string,
+  presets: string[],
+  custom: Array<{ label?: string; phrase?: string }>,
+): Promise<void> {
+  await hydrate();
+  const validIds = new Set(SCENARIO_PRESETS.map((p) => p.id));
+  state.scenarios[workspaceId] = {
+    presets: [...new Set(presets.filter((p) => validIds.has(p)))],
+    custom: custom
+      .map((c) => ({ label: String(c.label ?? c.phrase ?? "").trim().slice(0, 60), phrase: String(c.phrase ?? "").trim().slice(0, 120) }))
+      .filter((c) => c.phrase.length >= 3)
+      .slice(0, 15),
+  };
+  save();
+}
+
+/** One search per tick: the flattened (scenario x role) rotation. */
+interface ScanCombo {
+  key: string;
+  role?: string;
+  serperQ: string;
+  unipileQ: string;
+  hiringIntent: boolean;
+  dmBank: "mpc" | "growth";
+}
+
+function scanCombos(workspaceId: string): ScanCombo[] {
+  const roles = marketKeywordsFor(workspaceId);
+  const sel = scenariosFor(workspaceId);
+  const out: ScanCombo[] = [];
+  for (const id of sel.presets) {
+    const p = SCENARIO_PRESETS.find((x) => x.id === id);
+    if (!p) continue;
+    if (p.roleBased) {
+      for (const role of roles) {
+        out.push({
+          key: `${p.label}: ${role}`, role,
+          serperQ: `site:linkedin.com/posts "${role}" (${p.orGroup})`,
+          unipileQ: `${role} hiring`,
+          hiringIntent: p.hiringIntent, dmBank: p.dmBank,
+        });
+      }
+    } else {
+      out.push({
+        key: p.label,
+        serperQ: `site:linkedin.com/posts ${p.orGroup.startsWith("(") ? p.orGroup : `(${p.orGroup})`}`,
+        unipileQ: p.orGroup.replace(/["()]|\bOR\b/g, " ").replace(/\s+/g, " ").trim().slice(0, 80),
+        hiringIntent: p.hiringIntent, dmBank: p.dmBank,
+      });
+    }
+  }
+  for (const c of sel.custom) {
+    out.push({
+      key: `Custom: ${c.label || c.phrase}`,
+      serperQ: `site:linkedin.com/posts "${c.phrase}"`,
+      unipileQ: c.phrase,
+      hiringIntent: false, dmBank: "growth",
+    });
+  }
+  return out.length ? out : [{
+    key: "Posting an opening (fallback)",
+    serperQ: `site:linkedin.com/posts "${roles[0] ?? "hiring"}" (hiring OR "open role")`,
+    unipileQ: `hiring ${roles[0] ?? ""}`.trim(),
+    hiringIntent: true, dmBank: "mpc",
+  }];
+}
+
 /** One hiring-post candidate, whichever engine found it. authorRef is a
  *  provider id or public slug - both resolvable by fetchProfileLite. */
 interface MarketCandidate {
@@ -602,21 +747,22 @@ function candidatesFromUnipile(results: Dict[]): MarketCandidate[] {
  *  form - verified 2026-08-12 - while its people search works). Post URLs
  *  carry the author slug and the activity id; profile enrichment and the
  *  send still go through Unipile. */
-async function candidatesFromSerper(keyword: string): Promise<MarketCandidate[]> {
+async function candidatesFromSerper(query: string): Promise<{ items: MarketCandidate[]; error?: string }> {
   const key = process.env.SERPER_API_KEY;
-  if (!key) return [];
+  if (!key) return { items: [], error: "Serper key not configured on the server." };
   try {
     const res = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: { "X-API-KEY": key, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        // The keyword is a ROLE; the OR-group narrows to posts about hiring it.
-        q: `site:linkedin.com/posts "${keyword}" (hiring OR "open role" OR "open position" OR "looking for" OR "join our team")`,
-        num: MARKET_RESULTS_PER_SEARCH,
-        tbs: "qdr:w",
-      }),
+      body: JSON.stringify({ q: query, num: MARKET_RESULTS_PER_SEARCH, tbs: "qdr:w" }),
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      // Break layer: the card must say WHY discovery is dry, e.g. Serper's
+      // "Not enough credits" (seen live 2026-08-13).
+      let msg = `Serper ${res.status}`;
+      try { const b = await res.json() as { message?: string }; if (b?.message) msg = `Search engine: ${b.message} (Serper)`; } catch { /* status only */ }
+      return { items: [], error: msg };
+    }
     const data = await res.json() as { organic?: Array<{ link?: string; title?: string; snippet?: string; date?: string }> };
     const out: MarketCandidate[] = [];
     for (const r of data.organic ?? []) {
@@ -636,8 +782,8 @@ async function candidatesFromSerper(keyword: string): Promise<MarketCandidate[]>
         authorName: name || undefined,
       });
     }
-    return out;
-  } catch { return []; }
+    return { items: out };
+  } catch (e) { return { items: [], error: `Serper unreachable (${e instanceof Error ? e.message : e})` }; }
 }
 
 async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Promise<number> {
@@ -652,25 +798,37 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Pro
   const recheckCutoff = Date.now() - POSTER_RECHECK_DAYS * 86_400_000;
   const own = state.ownProfile[workspaceId];
 
-  // One keyword per tick, rotating through the bank: 96 ticks/day covers a
-  // 10-keyword bank ~9x over with fresh-post sorting doing the dedupe work.
-  const bank = marketKeywordsFor(workspaceId);
-  const idx = (state.keywordCursor[workspaceId] ?? 0) % bank.length;
+  // One search per tick, rotating through the flattened (scenario x role)
+  // combos; 96 ticks/day covers the whole rotation several times over.
+  const combos = scanCombos(workspaceId);
+  const idx = (state.keywordCursor[workspaceId] ?? 0) % combos.length;
   state.keywordCursor[workspaceId] = idx + 1;
-  const keyword = bank[idx];
+  const combo = combos[idx];
+  const keyword = combo.key;
+  const roles = marketKeywordsFor(workspaceId);
   save();
 
   const { unipile } = await import("../providers");
   let source = "unipile";
   let candidates: MarketCandidate[] = [];
   try {
-    candidates = candidatesFromUnipile(listOf(await unipile.searchPosts(providerIdOf(account)!, `hiring ${keyword}`, MARKET_RESULTS_PER_SEARCH)));
+    candidates = candidatesFromUnipile(listOf(await unipile.searchPosts(providerIdOf(account)!, combo.unipileQ, MARKET_RESULTS_PER_SEARCH)));
   } catch (e) {
     console.log(`[comment-radar] unipile post search failed for "${keyword}" (${e instanceof Error ? e.message : e})`);
   }
   if (!candidates.length) {
     source = "serper";
-    candidates = await candidatesFromSerper(keyword);
+    const r = await candidatesFromSerper(combo.serperQ);
+    candidates = r.items;
+    // Break layer: engine failures surface on the card, not just in logs.
+    if (r.error) {
+      state.lastError[workspaceId] = r.error;
+      save();
+      console.log(`[comment-radar] market "${keyword}": ${r.error}`);
+    } else if (state.lastError[workspaceId]) {
+      delete state.lastError[workspaceId];
+      save();
+    }
   }
 
   let created = 0;
@@ -682,8 +840,9 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Pro
     if (seenPosts.has(c.postId)) { g.seen++; continue; }
     seenPosts.add(c.postId); seenArr.push(c.postId);
 
-    // The post itself must read like hiring intent, not a passing mention.
-    if (!HIRING_INTENT_RE.test(c.text)) { g.intent++; continue; }
+    // Hiring-post scenarios require hiring intent in the text; broader
+    // scenarios (growth, funding, custom phrases) accept any real post.
+    if (combo.hiringIntent && !HIRING_INTENT_RE.test(c.text)) { g.intent++; continue; }
 
     // One touch per author per week, whichever key we knew them by.
     const lastTouch = seenAuthors[c.authorRef];
@@ -728,18 +887,19 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[]): Pro
     // Supporting evidence, never a gate: their own board's open roles.
     const hiring = company ? await checkHiring(company) : undefined;
 
-    // The MPC script: deterministic template fill, {job_title} = the role
-    // keyword that matched their post. No AI in the hot path.
+    // The MPC script: deterministic template fill. {job_title} = the matched
+    // role for role scenarios, or the desk's primary role for broader ones.
     const id = rid("licw");
+    const jobTitle = combo.role ?? roles[0] ?? "candidate";
     const firstName = authorName.split(/\s+/)[0];
-    const dmText = mpcDmFor(id, keyword, firstName && firstName !== "LinkedIn" ? firstName : undefined);
+    const dmText = mpcDmFor(id, jobTitle, firstName && firstName !== "LinkedIn" ? firstName : undefined, combo.dmBank);
 
     state.items.push({
       id, workspaceId, kind: "poster",
       postId: c.postId, postExcerpt: c.text.slice(0, 700), postAt: c.postAt,
       commentId: "", commentText: "",
       openProfile: prof.openProfile,
-      matchedRole: keyword,
+      matchedRole: combo.role ?? combo.key,
       accountId: sendAccount.accountId,
       authorProviderId: prof.providerId,
       authorName,
@@ -774,6 +934,11 @@ export interface CommentWatchView {
   autopilot: { enabled: boolean; source: "manual" | "default_on" | "off" };
   /** The market-scan keyword bank in effect (backend defaults or override). */
   keywords: string[];
+  /** Scenario picker: the suggestion menu + what is active for this workspace. */
+  scenarioPresets: Array<{ id: string; label: string; hint: string }>;
+  scenarios: { presets: string[]; custom: Array<{ label: string; phrase: string }> };
+  /** Last discovery-engine failure (e.g. Serper out of credits), if any. */
+  lastError?: string;
   lastScan?: string;
   items: CommentLeadItem[];
 }
@@ -787,7 +952,15 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
   const items = state.items
     .filter((i) => i.workspaceId === workspaceId)
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
-  return { status, autopilot, keywords: marketKeywordsFor(workspaceId), lastScan: state.lastScan[workspaceId], items };
+  return {
+    status, autopilot,
+    keywords: marketKeywordsFor(workspaceId),
+    scenarioPresets: SCENARIO_PRESETS.map((p) => ({ id: p.id, label: p.label, hint: p.hint })),
+    scenarios: scenariosFor(workspaceId),
+    lastError: state.lastError[workspaceId],
+    lastScan: state.lastScan[workspaceId],
+    items,
+  };
 }
 
 function findItem(workspaceId: string, id: string): CommentLeadItem | undefined {

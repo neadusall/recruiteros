@@ -3583,24 +3583,96 @@
       }
       var auto = (d && d.autopilot) || {};
       var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested" || t.dmStatus === "suggested"; }).length;
+      var collapsed = false;
+      try { collapsed = localStorage.getItem("lic_radar_collapsed") === "1"; } catch (e) {}
+      var presets = d.scenarioPresets || [];
+      var active = d.scenarios || { presets: [], custom: [] };
+      var activeSet = {};
+      (active.presets || []).forEach(function (p) { activeSet[p] = 1; });
+      function scenChips() {
+        var chips = (active.presets || []).map(function (id) {
+          var p = null; presets.forEach(function (x) { if (x.id === id) p = x; });
+          return '<span class="lie-chip">' + esc(p ? p.label : id) +
+            ' <a href="#" data-lic-scen-del="' + esc(id) + '" title="Remove">&times;</a></span>';
+        }).concat((active.custom || []).map(function (c, i) {
+          return '<span class="lie-chip">' + esc(c.label || c.phrase) +
+            ' <a href="#" data-lic-scen-delc="' + i + '" title="Remove">&times;</a></span>';
+        }));
+        return chips.length ? chips.join(" ") : '<span class="muted">No scenarios active: the radar has nothing to hunt.</span>';
+      }
+      var picker = presets.filter(function (p) { return !activeSet[p.id]; });
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Market radar</b>' +
-            '<div class="muted liops-sub">Type the roles you place below. The radar searches LinkedIn posts for people hiring those roles and messages ONLY open profiles (plus existing connections) with a short MPC script referencing their opening: "just wrapped a search for that title, a few candidates still warm." No InMails, no public comments, closed profiles are skipped.' +
+            (collapsed ? "" :
+            '<div class="muted liops-sub">Pick hunting scenarios below and type the roles you place. The radar searches LinkedIn posts on each scenario and messages ONLY open profiles (plus existing connections) with a short MPC script. No InMails, no public comments, closed profiles are skipped.' +
               (auto.enabled
-                ? " Autopilot is on: decision-maker touches send automatically through your account limits; community items wait for you."
-                : " Nothing sends without your approval.") + "</div></div>" +
-            '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span></div>" +
-          (items.length
-            ? items.map(row).join("")
-            : '<div class="lie-post muted">Nothing captured yet. The radar runs a market keyword search every 15 minutes.</div>') +
-          '<div class="lie-post muted">Roles you place (comma-separated; each becomes {job_title} in the MPC message):</div>' +
-          '<textarea class="lie-text" data-lic-keywords rows="1">' + esc((d.keywords || []).join(", ")) + "</textarea>" +
-          '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button> ' +
-            '<button class="btn btn-sm btn-ghost" data-lic-kwsave>Save keywords</button> ' +
-            '<button class="btn btn-sm btn-ghost" data-lic-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' +
-              (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button></div>" +
+                ? " Autopilot is on: sends happen automatically through your account limits."
+                : " Nothing sends without your approval.") + "</div>") + "</div>" +
+            '<span>' +
+              '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span> " +
+              (open ? '<span class="liops-progress">' + open + " to review</span> " : "") +
+              '<button class="btn btn-sm btn-ghost" data-lic-collapse title="' + (collapsed ? "Expand" : "Collapse") + '">' + (collapsed ? "Expand" : "Collapse") + "</button>" +
+            "</span></div>" +
+          (collapsed ? "" :
+            ((d.lastError ? '<div class="lie-post"><span class="lie-chip bad">' + esc(d.lastError) + "</span></div>" : "") +
+            (items.length
+              ? items.map(row).join("")
+              : '<div class="lie-post muted">Nothing captured yet. The radar runs one scenario search every 15 minutes.</div>') +
+            '<div class="lie-post muted">Active scenarios:</div>' +
+            '<div class="lie-post" data-lic-chips>' + scenChips() + "</div>" +
+            '<div class="lie-actions">' +
+              '<select class="lie-text" data-lic-scen-pick style="max-width:340px">' +
+                '<option value="">Add a suggested scenario...</option>' +
+                picker.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.label) + " (" + esc(p.hint) + ")</option>"; }).join("") +
+              "</select> " +
+              '<input class="lie-text" data-lic-scen-custom placeholder="Or add your own phrase to hunt, e.g. opening a med spa" style="max-width:340px"> ' +
+              '<button class="btn btn-sm btn-ghost" data-lic-scen-addc>Add custom</button>' +
+            "</div>" +
+            '<div class="lie-post muted">Roles you place (comma-separated; each becomes {job_title} in the MPC message):</div>' +
+            '<textarea class="lie-text" data-lic-keywords rows="1">' + esc((d.keywords || []).join(", ")) + "</textarea>" +
+            '<div class="lie-actions"><button class="btn btn-sm" data-lic-scan>Scan now</button> ' +
+              '<button class="btn btn-sm btn-ghost" data-lic-kwsave>Save keywords</button> ' +
+              '<button class="btn btn-sm btn-ghost" data-lic-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' +
+                (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button></div>")) +
         "</div>";
+      var colBtn = mount.querySelector("[data-lic-collapse]");
+      if (colBtn) colBtn.addEventListener("click", function () {
+        try { localStorage.setItem("lic_radar_collapsed", collapsed ? "0" : "1"); } catch (e) {}
+        paint(d);
+      });
+      if (collapsed) return;
+      function saveScenarios(np, nc) {
+        send("/linkedin/comments", "POST", { action: "scenarios_set", presets: np, custom: nc }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+        });
+      }
+      var pick = mount.querySelector("[data-lic-scen-pick]");
+      if (pick) pick.addEventListener("change", function () {
+        if (!pick.value) return;
+        saveScenarios((active.presets || []).concat([pick.value]), active.custom || []);
+      });
+      var addC = mount.querySelector("[data-lic-scen-addc]");
+      if (addC) addC.addEventListener("click", function () {
+        var inp = mount.querySelector("[data-lic-scen-custom]");
+        var v = inp && inp.value ? inp.value.trim() : "";
+        if (v.length < 3) return;
+        saveScenarios(active.presets || [], (active.custom || []).concat([{ label: v, phrase: v }]));
+      });
+      Array.prototype.forEach.call(mount.querySelectorAll("[data-lic-scen-del]"), function (a) {
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          var id = a.getAttribute("data-lic-scen-del");
+          saveScenarios((active.presets || []).filter(function (p) { return p !== id; }), active.custom || []);
+        });
+      });
+      Array.prototype.forEach.call(mount.querySelectorAll("[data-lic-scen-delc]"), function (a) {
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          var i = parseInt(a.getAttribute("data-lic-scen-delc"), 10);
+          saveScenarios(active.presets || [], (active.custom || []).filter(function (_, j) { return j !== i; }));
+        });
+      });
       var kwBtn = mount.querySelector("[data-lic-kwsave]");
       if (kwBtn) kwBtn.addEventListener("click", function () {
         kwBtn.disabled = true;

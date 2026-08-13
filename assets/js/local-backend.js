@@ -1051,6 +1051,15 @@
           status: { active: true, engineReady: true, aiReady: true, paused: false, reasons: [] },
           autopilot: { enabled: false, source: "off" },
           keywords: ["BCBA", "RBT", "Clinical Director", "Speech Language Pathologist", "Occupational Therapist", "Nurse Practitioner"],
+          scenarioPresets: [
+            { id: "hiring_role", label: "Posting an opening for a role I place", hint: "They announced they are hiring one of your roles" },
+            { id: "urgent_backfill", label: "Urgent or backfill hires", hint: "Urgent, immediate, or backfill language on your roles" },
+            { id: "struggling_to_fill", label: "Struggling to fill a role", hint: "Complaining a search is hard: your MPC lands best here" },
+            { id: "team_growth", label: "Announcing team growth", hint: "Growing, expanding, or doubling the team" },
+            { id: "new_location", label: "Opening a new location", hint: "New office, clinic, or market: staffing follows" },
+            { id: "funding_growth", label: "Funding or rapid growth news", hint: "Raises and growth announcements: hiring comes next" }
+          ],
+          scenarios: { presets: ["hiring_role", "urgent_backfill", "struggling_to_fill"], custom: [] },
           lastScan: new Date().toISOString(),
           items: [
             {
@@ -1087,6 +1096,13 @@
         if (body.action === "pause" || body.action === "resume") { cw.status.paused = body.action === "pause"; save(d); return ok({ view: cw }); }
         if (body.action === "auto_on" || body.action === "auto_off") {
           cw.autopilot = { enabled: body.action === "auto_on", source: body.action === "auto_on" ? "manual" : "off" };
+          save(d); return ok({ view: cw });
+        }
+        if (body.action === "scenarios_set") {
+          cw.scenarios = {
+            presets: Array.isArray(body.presets) ? body.presets : [],
+            custom: Array.isArray(body.custom) ? body.custom : []
+          };
           save(d); return ok({ view: cw });
         }
         if (body.action === "keywords_set") {
