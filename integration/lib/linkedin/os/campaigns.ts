@@ -102,17 +102,17 @@ function defaultBdSteps(): LiStep[] {
     { type: "wait", label: "Let the view land", hours: 24 },
     {
       type: "connect_note", label: "Connect with a note",
-      text: "Hi {first_name}, saw {company} is growing the team. I work with companies filling roles like the ones you have open and had a couple of ideas worth sharing. Open to connecting?",
+      text: "Hi {first_name}, saw {company} is hiring. I have a couple of strong people who fit your open roles. Open to connecting?",
     },
     { type: "wait_until_accepted", label: "Wait for the accept", timeoutDays: 21 },
     {
       type: "message", label: "Thanks + value",
-      text: "Thanks for connecting, {first_name}. Short version: I help teams like {company} fill hard seats faster. If hiring is on your plate this quarter, happy to share what's working in your market right now. Worth a quick note either way?",
+      text: "Thanks for connecting, {first_name}. I have a few people who match what {company} is hiring for. I can send a couple today if helpful. Worth a chat?",
     },
     { type: "wait", label: "Space the ask", hours: 72 },
     {
       type: "message", label: "Direct ask",
-      text: "Hi {first_name}, one more from me. If it would help, I can put together a quick read on the talent market for the roles you're hiring, no strings attached. Want me to send it over?",
+      text: "Hi {first_name}, last one from me. Happy to send a profile or two for your open roles today, no strings. Want them?",
     },
   ] as LiStep[]);
 }
