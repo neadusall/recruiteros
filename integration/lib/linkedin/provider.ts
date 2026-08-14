@@ -321,7 +321,11 @@ export const unipileProvider: LinkedInProvider = {
       const form = new FormData();
       form.append("account_id", account.providerAccountId);
       form.append("attendees_ids", JSON.stringify([prospect.providerProfileId]));
-      form.append("inmail", "true");
+      // Unipile spec: the InMail switch is the NESTED field linkedin[inmail]
+      // (a top-level "inmail" is silently ignored, so every send behaved as
+      // a plain message and 422'd on non-connections - proven 2026-08-14).
+      form.append("linkedin[inmail]", "true");
+      form.append("linkedin[api]", "classic");
       if (subject) form.append("subject", subject);
       form.append("text", text);
       const out = await unipile<{ message_id?: string }>("/chats", { method: "POST", body: form });
