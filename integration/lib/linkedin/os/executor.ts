@@ -485,11 +485,21 @@ async function confirmOneInner(r: LiActionRecord): Promise<boolean> {
     ?? identity?.providerIds.salesNavigator
     ?? identity?.providerIds.recruiter;
   if (!providerProfileId) return false;
+  // Primary proof: fetch the exact message we sent by its provider id -
+  // it exists on LinkedIn or it does not. (The attendee-messages endpoint
+  // only lists messages THEY authored, so it can never see our outbound -
+  // learned live 2026-08-14.)
+  if (r.providerReference) {
+    const found = await provider.getMessage(account, r.providerReference);
+    if (found) { r.confirmedAt = nowIso(); return true; }
+    return false;
+  }
+  // No provider reference (older sends): best-effort text match against the
+  // conversation is all we have.
   const msgs = await provider.listMessages(account, providerProfileId);
   const sentText = (r.payload.text ?? "").trim().slice(0, 80).toLowerCase();
   const hit = msgs.find((m) =>
-    (r.providerReference && m.providerMessageId === r.providerReference)
-    || (m.fromSelf && sentText.length >= 10 && m.text.trim().toLowerCase().startsWith(sentText)));
+    m.fromSelf && sentText.length >= 10 && m.text.trim().toLowerCase().startsWith(sentText));
   if (!hit) return false;
   r.confirmedAt = nowIso();
   return true;

@@ -190,6 +190,10 @@ export const backendBridgeProvider: LinkedInProvider = {
   async listMessages() {
     return [];
   },
+  async getMessage() {
+    // The bridge queue cannot verify provider-side delivery.
+    return null;
+  },
   async getAccountStatus() {
     return "ok";
   },

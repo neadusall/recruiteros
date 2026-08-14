@@ -99,6 +99,9 @@ export interface LinkedInProvider {
   viewProfile(account: LinkedInAccount, providerProfileId: string): Promise<ActionResult>;
   endorseTopSkills(account: LinkedInAccount, providerProfileId: string, count?: number): Promise<ActionResult>;
   listMessages(account: LinkedInAccount, providerProfileId: string): Promise<ProviderChatMessage[]>;
+  /** Fetch one sent message by the provider's message id; null when it does
+   *  not exist. The LinkedIn read-back confirmation hangs off this. */
+  getMessage(account: LinkedInAccount, providerMessageId: string): Promise<ProviderChatMessage | null>;
   getAccountStatus(account: LinkedInAccount): Promise<LinkedInAccount["status"]>;
 }
 
@@ -365,6 +368,28 @@ export const unipileProvider: LinkedInProvider = {
     });
   },
 
+  async getMessage(_account, providerMessageId) {
+    // GET /messages/{id}: the message exists on the provider or it does not.
+    // 404 = not found (unconfirmed), anything else bubbles up.
+    try {
+      const m = await unipile<{ object?: string; id?: string; provider_id?: string; text?: string; timestamp?: string; is_sender?: boolean | number }>(
+        `/messages/${encodeURIComponent(providerMessageId)}`,
+      );
+      // Live response shape (verified 2026-08-14): {object:"Message", text,
+      // delivered:1, is_sender:1, ...} - a 200 Message IS the proof.
+      if (!m || (m.object !== "Message" && !m.id && !m.provider_id && !m.text)) return null;
+      return {
+        providerMessageId: m.id ?? m.provider_id ?? providerMessageId,
+        fromSelf: m.is_sender === true || m.is_sender === 1,
+        text: m.text ?? "",
+        at: m.timestamp ?? "",
+      };
+    } catch (e) {
+      if (e instanceof UnipileError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
   async listMessages(account, providerProfileId) {
     // Correct endpoint per Unipile reference (2026-08-14): messages exchanged
     // with one attendee live at /chat_attendees/{id}/messages. The old
@@ -454,6 +479,10 @@ export const internalProvider: LinkedInProvider = {
   },
   async listMessages(account, providerProfileId) {
     return internal("/messages", { account: account.providerAccountId, providerProfileId });
+  },
+  async getMessage(_account, providerMessageId) {
+    // Dev backend has no message store; treat a send as its own proof.
+    return { providerMessageId, fromSelf: true, text: "", at: new Date().toISOString() };
   },
   async getAccountStatus() {
     return "ok";
