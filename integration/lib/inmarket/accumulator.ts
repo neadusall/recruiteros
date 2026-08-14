@@ -93,7 +93,11 @@ const CURATE_FIRST_DELAY_MS = 25_000;   // let the pool fill a little before the
 // release the guard, and let the next tick retry. Each ceiling sits comfortably below its
 // interval so an abandoned run is cleared before the next one fires.
 const CYCLE_WATCHDOG_MS = 30 * 60 * 1000;   // hourly cycle: abandon after 30 min
-const CURATE_WATCHDOG_MS = 7 * 60 * 1000;   // 8-min curation tick: abandon after 7 min
+// Env-tunable since 2026-08-14: the hardcoded 7 min silently killed every tick for days once
+// phase budgets grew past it (the tick has a single-flight guard, so a long tick skips
+// intervening intervals rather than stacking). Size this to the SLOWEST healthy tick plus
+// headroom; the watchdog exists to catch a WEDGED tick, not a busy one.
+const CURATE_WATCHDOG_MS = envNum("INMARKET_CURATE_WATCHDOG_SEC", 420) * 1000;
 const INFLOW_WATCHDOG_MS = 2 * 60 * 1000;   // 3-min inflow tick: abandon after 2 min
 
 // SCREENSHOT TICK — proactively capture the job-posting page (on the company's OWN careers site) for
