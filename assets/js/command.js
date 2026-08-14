@@ -3525,10 +3525,21 @@
       var rolesVal = unsavedRoles !== null ? unsavedRoles : roles.join(", ");
       var huntCount = (active.presets || []).length + (active.custom || []).length;
       var st7 = (d.stats && d.stats.today) || null;
+      // Today's numbers as labeled chips, each with a hover "?" explainer so
+      // a recruiter never has to guess what a stat means (owner ask 2026-08-14).
+      function statChip(num, label, tone, help) {
+        return '<span class="lie-chip ' + tone + '" title="' + esc(help) + '" style="cursor:help;margin:2px 3px 2px 0"><b>' + num + "</b> " + esc(label) + ' <span style="opacity:.55;font-weight:700">?</span></span>';
+      }
       var econ = st7
-        ? '<div class="lie-post muted">Today: <b>' + (st7.searches || 0) + '</b> hunts · <b>' + (st7.screened || 0) + '</b> posts screened · <b>' +
-          (st7.profileReads || 0) + '</b> profile reads (<b>' + (st7.readsSaved || 0) + '</b> saved by closed-profile memory, <b>' + (st7.closedFound || 0) + '</b> new closed remembered) · <b>' +
-          (st7.hiringChecks || 0) + '</b> job-board checks · <b>' + (st7.leads || 0) + '</b> leads drafted · <b>' + (st7.peersBlocked || 0) + '</b> recruiters/agencies blocked</div>'
+        ? '<div class="lie-post"><span class="muted" style="margin-right:4px">Today:</span>' +
+          statChip(st7.searches || 0, "hunts run", "", "Searches the radar ran today across your scenarios, roles, and custom hunts. One runs every 15 minutes, around the clock.") +
+          statChip(st7.screened || 0, "posts screened", "", "Hiring posts found and screened by the free checks: is it a real post, does it show hiring intent, have we seen it, did we already touch this person this week.") +
+          statChip(st7.leads || 0, "leads drafted", st7.leads ? "ok" : "", "Decision makers captured with a message drafted and ready. They land in Messages to approve below, or send automatically if their industry is on autopilot.") +
+          statChip(st7.peersBlocked || 0, "recruiters blocked", st7.peersBlocked ? "bad" : "", "Recruiters and staffing agencies the wall stopped today: never captured, never messaged. This is your protection working.") +
+          statChip(st7.profileReads || 0, "profile reads", "", "Profiles opened to verify who the poster is, whether they can receive a message, and that they are not a recruiter. The only per-person API spend.") +
+          statChip(st7.readsSaved || 0, "reads saved", st7.readsSaved ? "ok" : "", "Profile reads skipped because we already know this person is unreachable or excluded (30-day memory). Direct credit savings.") +
+          statChip(st7.hiringChecks || 0, "job-board checks", "", "Company job boards checked to confirm their open roles. Only runs for reachable decision makers after every other gate has passed.") +
+          "</div>"
         : "";
       mount.innerHTML =
         '<div class="card liops-card">' +
