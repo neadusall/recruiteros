@@ -81,11 +81,14 @@ const DEFAULT_MARKET_KEYWORDS = [
  * character threshold. House style: no em-dashes, no links, no exclamations.
  */
 const MPC_DM_TEMPLATES = [
-  "Saw your post for a {job_title}. I just wrapped a {job_title} search and two finalists who did not get the offer are still open. Want me to send them over?",
-  "Your {job_title} post came up in my feed. We just closed a {job_title} search and a couple of strong runners-up are still on the market. Happy to share profiles if useful.",
-  "Noticed you are hiring a {job_title}. I have a few vetted {job_title} candidates left from a search that just closed, still warm. Worth a look?",
-  "Quick one on your {job_title} opening: a search I ran for the same title just ended and the shortlist is still available. Want the top two?",
-  "{first_name}, saw the {job_title} post. Just came off a {job_title} search with vetted candidates still warm. I can send a couple today if helpful.",
+  // Believability rules (owner ask 2026-08-14): one title mention per note,
+  // no repeated "search just closed" story, no brochure phrases ("still
+  // warm", "top two"), soft low-pressure close. Same house style otherwise.
+  "Saw your {job_title} post. I recruit that lane and have two people in process right now who could fit. Want me to send their profiles over?",
+  "{first_name}, your {job_title} opening caught my eye. I work these searches weekly and have a couple of vetted people worth a look. Can I send them?",
+  "Noticed the {job_title} role. A recent search left me with two strong finalists who are still open. Happy to share them if useful.",
+  "Quick note on your {job_title} post. I have a short bench of vetted candidates for exactly this and can send one or two today. Interested?",
+  "{first_name}, saw you are hiring a {job_title}. I place these roles and two people I know well are actively looking. Worth a quick look?",
 ];
 const MAX_DM_CHARS = 300;
 
@@ -149,9 +152,9 @@ const DEFAULT_SCENARIOS = ["hiring_role", "urgent_backfill", "struggling_to_fill
 /** Softer bank for growth/expansion scenarios where no specific opening was
  *  posted: still MPC-flavored, anchored on the desk's primary roles. */
 const GROWTH_DM_TEMPLATES = [
-  "Congrats on the growth. We place {job_title}s all day and a search that just closed left a couple of vetted candidates still warm. Useful as you build out?",
-  "Sounds like the team is scaling. A {job_title} search I just wrapped left strong runners-up still on the market. Want me to send a couple over?",
-  "Growth like that usually means hiring is next. I keep a warm bench of vetted {job_title}s from recent searches. Happy to share a few profiles.",
+  "Congrats on the growth. I recruit {job_title}s and usually have a couple of vetted people available. Happy to share profiles when hiring picks up.",
+  "Saw the news about the team growing. If {job_title} hiring is on the roadmap, I have candidates worth meeting. Want a couple of profiles?",
+  "Your growth post caught my eye. I keep a bench of vetted {job_title}s from active searches. Glad to send a few names when useful.",
 ];
 
 /** Deterministic template pick + fill; trims to the DM threshold. */
