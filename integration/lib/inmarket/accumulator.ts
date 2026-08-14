@@ -125,6 +125,7 @@ let shotting = false;                        // overlap guard for the screenshot
 let started = false;
 let running = false;                    // overlap guard: never let two cycles run at once
 let curating = false;                   // overlap guard for the curation tick
+let tickPhases: Record<string, number> = {}; // cumulative ms after each phase of the CURRENT tick
 let inflowing = false;                  // overlap guard for the fast inflow tick
 let cursor = 0;
 let seedCursor = 0;
@@ -193,6 +194,8 @@ export interface EngineHealth {
   lastCurationMs?: number;
   lastCurationOk?: boolean;
   lastCurationError?: string;
+  /** Cumulative ms checkpoint after each tick phase — names the hog when a tick overruns. */
+  lastCurationPhases?: Record<string, number>;
 }
 
 const health: EngineHealth = { bootAt: new Date().toISOString(), cycles: 0, curationTicks: 0 };
@@ -483,6 +486,9 @@ async function runInflowTick(): Promise<void> {
 
 async function runCurationTickInner(): Promise<void> {
   const now = new Date().toISOString();
+  const tickT0 = Date.now();
+  tickPhases = {};
+  const mark = (k: string) => { tickPhases[k] = Date.now() - tickT0; };
   const { queryPool } = await import("./pool");
   const { curateFromPool, pendingValidationEmails, applyEmailValidation } = await import("./curation");
   const candidates = await queryPool({ limit: CURATE_CANDIDATES } as never, CURATE_CANDIDATES);
@@ -496,6 +502,7 @@ async function runCurationTickInner(): Promise<void> {
       { limit: CURATE_BATCH, concurrency: CURATE_CONCURRENCY, minScore: CURATE_MIN_SCORE, nowIso: now },
     );
   }
+  mark("research");
 
   // FREE EMAIL VERIFICATION — same continuous-validation seam the external paid validator uses,
   // but run in-process at $0: pull a batch of still-unverified curated emails and apply free
@@ -511,6 +518,7 @@ async function runCurationTickInner(): Promise<void> {
       if (results.length) await applyEmailValidation(results, new Date().toISOString());
     }
   } catch { /* best-effort; the next tick retries */ }
+  mark("freeVerify");
 
   // REOON FIND + VERIFY — never leave a guess unchecked. (1) For each pending PERSON, walk their
   // email syntaxes (first.last, flast, firstlast, …) through Reoon and KEEP the first deliverable
@@ -531,6 +539,7 @@ async function runCurationTickInner(): Promise<void> {
       }
     }
   } catch { /* best-effort; the next tick retries */ }
+  mark("reoon");
 
   // EMAIL FINDER (opt-in, SMTP) — the right way to convert guesses into VALID prospects: walk each
   // pending person's permutations and SMTP-verify until one is accepted, then keep that real
@@ -543,6 +552,7 @@ async function runCurationTickInner(): Promise<void> {
       await findEmailsBySmtp(FINDER_BATCH, new Date().toISOString());
     }
   } catch { /* best-effort; the next tick retries */ }
+  mark("smtpFinder");
 
   // RESIDUAL FINDER — the last rung, on the misses only. The free path above leaves two dead ends
   // behind: a row whose every syntax Reoon rejected, and a catch-all domain it cannot crack. Both
@@ -558,6 +568,7 @@ async function runCurationTickInner(): Promise<void> {
       await findEmailsByPaid(PAID_FIND_BATCH, new Date().toISOString());
     }
   } catch { /* best-effort; the next tick retries */ }
+  mark("residualFinder");
 
   // CATCH-ALL POLICY SWEEP — promote already-parked catch-all rows into supply when the operator
   // has armed that tier. No-op while the flag is off, and a no-op once the backlog is drained.
@@ -574,6 +585,7 @@ async function runCurationTickInner(): Promise<void> {
     const { webSearchBudget } = await import("./webSearch");
     await webSearchBudget();
   } catch { /* best-effort; the next tick retries */ }
+  mark("catchAllAndBudget");
 }
 
 async function runCurationTick(): Promise<void> {
@@ -592,6 +604,9 @@ async function runCurationTick(): Promise<void> {
     health.lastCurationMs = Date.now() - startedAt;
     health.lastCurationOk = ok;
     health.lastCurationError = err;
+    // Cumulative checkpoints survive an abandoned tick: the last mark present names the phase
+    // that was running (or about to run) when the watchdog fired.
+    health.lastCurationPhases = { ...tickPhases };
     void persistHealth();
   }
 }
