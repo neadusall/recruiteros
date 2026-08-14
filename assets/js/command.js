@@ -9091,6 +9091,17 @@
       '.snd-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}' +
       '.snd-actions{display:flex;gap:6px;justify-content:flex-end}' +
       '.snd-grid2{display:flex;gap:10px}.snd-grid2>div{flex:1}' +
+      '.snd-story{border:1px solid var(--border);border-left:3px solid var(--brand);border-radius:12px;background:var(--surface);padding:14px 16px;margin:0 0 16px}' +
+      '.snd-story-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}' +
+      '.snd-story-pill{display:inline-block;border:1px solid;border-radius:999px;padding:1px 10px;font-size:11px;font-weight:650}' +
+      '.snd-story-ts{font-size:11px;color:var(--muted,var(--text-dim));margin-left:auto}' +
+      '.snd-story-h{font-size:15px;font-weight:650;letter-spacing:-.01em;margin:0 0 6px}' +
+      '.snd-story-p{font-size:13px;line-height:1.55;margin:0 0 6px;max-width:860px}' +
+      '.snd-story-det{margin-top:8px;font-size:12.5px}' +
+      '.snd-story-det summary{cursor:pointer;color:var(--muted,var(--text-dim))}' +
+      '.snd-rest-row{display:flex;gap:12px;flex-wrap:wrap;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px}' +
+      '.snd-rest-row span{color:var(--muted,var(--text-dim))}' +
+      '.snd-rest-row span.muted{margin-left:auto}' +
       '</style>';
   }
 
@@ -9107,6 +9118,7 @@
           '<button class="btn btn-ghost btn-sm" id="sndRefresh">↻ Refresh</button>' +
         '</div>' +
       '</div>' +
+      '<div id="sndStoryBox"></div>' +
       '<div id="wuWrap"></div>' +
       '<div id="siWrap"></div>' +
       '<div id="sndStatsBox" class="snd-stats"></div>' +
@@ -9164,6 +9176,54 @@
     renderInfra();
     loadInfra();
     loadSenders();
+    loadSendStory();
+  }
+
+  // ── The sending story: why volume is what it is today ─────────────────────
+  // Owner-facing narrative composed server-side (/api/senders/story) from the
+  // snapshots the sending tools already write: ramp cap vs sent vs clean supply,
+  // supply-engine health, Gmail seed-test status, and the domain rest bench.
+  // The owner should never have to ask "is the hold-up senders or supply?".
+  function loadSendStory() {
+    send("/senders/story", "GET").then(function (r) {
+      var box = $("#sndStoryBox"); if (!box) return;
+      var d = r.ok && r.data && r.data.present ? r.data : null;
+      if (!d) { box.innerHTML = ""; return; }
+      var pillMap = {
+        healthy: ["All clear", "#1a7f37"],
+        supply: ["Supply-limited", "#b26a00"],
+        capacity: ["Ramp-limited", "#2e5bd7"],
+        placement: ["Placement hold", "#b42318"],
+        engine: ["Engine stalled", "#b42318"],
+      };
+      var pill = pillMap[d.verdict] || ["Status", "#6b7280"];
+      var cap = d.capacity || {}, sup = d.supply || {}, fl = d.fleet || {};
+      function chip(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(String(v)) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
+      var restRows = (fl.resting || []).map(function (x) {
+        return '<div class="snd-rest-row"><b>' + esc(x.domain) + '</b><span>' + esc(x.reason || "bounce trouble") + '</span><span class="muted">back ' + esc(x.until ? String(x.until).slice(0, 10) : "soon") + '</span></div>';
+      }).join("");
+      box.innerHTML =
+        '<div class="snd-story">' +
+          '<div class="snd-story-top">' +
+            '<span class="snd-split-t" style="margin:0">Sending status</span>' +
+            '<span class="snd-story-pill" style="border-color:' + pill[1] + ';color:' + pill[1] + '">' + esc(pill[0]) + '</span>' +
+            (d.generatedAt ? '<span class="snd-story-ts">updated ' + esc(String(d.generatedAt).replace("T", " ").slice(0, 16)) + ' UTC</span>' : '') +
+          '</div>' +
+          '<div class="snd-story-h">' + esc(d.headline || "") + '</div>' +
+          (d.narrative || []).map(function (p) { return '<p class="snd-story-p">' + esc(p) + '</p>'; }).join("") +
+          '<div class="snd-stats" style="margin:10px 0 4px">' +
+            chip((cap.capToday || 0).toLocaleString(), "Cap today") +
+            chip((cap.sentToday || 0).toLocaleString(), "Sent today") +
+            chip((cap.remaining || 0).toLocaleString(), "Room left") +
+            chip((sup.ready || 0).toLocaleString(), "Clean prospects ready") +
+            chip(fl.domainsSending || 0, "Domains sending") +
+            chip((fl.resting || []).length, "Domains resting") +
+          '</div>' +
+          (restRows
+            ? '<details class="snd-story-det"><summary>Resting domains (' + fl.resting.length + '): benched after bounces, auto-revive on schedule</summary>' + restRows + '</details>'
+            : '') +
+        '</div>';
+    });
   }
 
   function loadSenders() {
