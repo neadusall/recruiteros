@@ -298,6 +298,23 @@ async function executeOneInner(r: LiActionRecord): Promise<void> {
               subject: r.payload.subject ?? "Your hiring post",
             })
           : await provider.sendMessage({ account, prospect, text: r.payload.text ?? "" });
+        // Self-heal (2026-08-14): a plain message bounced as unreachable, but
+        // the payload never said whether they are an open profile (older
+        // actions predate the flag). One profile read answers it; open
+        // profiles resend over the free InMail lane in the same execution.
+        // Closed profiles stay failed - no InMail attempt, no credit burn.
+        if (!out.ok && !r.payload.openProfile && /invalid_recipient/i.test(out.error ?? "")) {
+          try {
+            const check = await provider.resolveProfile(account, providerProfileId);
+            if (check.openProfile === true) {
+              r.payload.openProfile = true; // remembered for any retry
+              out = await provider.sendInMail({
+                account, prospect, text: r.payload.text ?? "",
+                subject: r.payload.subject ?? "Your hiring post",
+              });
+            }
+          } catch { /* keep the original failure */ }
+        }
         break;
       case "attachment": {
         const text = [r.payload.text ?? "", r.payload.attachmentUrl ?? ""].filter(Boolean).join("\n");
