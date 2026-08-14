@@ -62,6 +62,7 @@ export interface HuntDayStats {
   closedFound: number;    // fresh closed profiles discovered (now remembered)
   hiringChecks: number;   // job-board lookups spent (open profiles only)
   leads: number;          // decision-maker leads created with drafted DMs
+  peersBlocked: number;   // recruiter/staffing posters vetoed by the wall
 }
 const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
 
@@ -372,7 +373,10 @@ export async function setAutoIndustries(workspaceId: string, industries: string[
 function huntStatsFor(workspaceId: string): HuntDayStats {
   const day = nowIso().slice(0, 10);
   const ws = state.dayStats[workspaceId] ?? (state.dayStats[workspaceId] = {});
-  return ws[day] ?? (ws[day] = { searches: 0, screened: 0, profileReads: 0, readsSaved: 0, closedFound: 0, hiringChecks: 0, leads: 0 });
+  const s = ws[day] ?? (ws[day] = { searches: 0, screened: 0, profileReads: 0, readsSaved: 0, closedFound: 0, hiringChecks: 0, leads: 0, peersBlocked: 0 });
+  // Backfill for day rows written by older builds (avoids NaN on +=).
+  if (s.peersBlocked === undefined) s.peersBlocked = 0;
+  return s;
 }
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
@@ -518,6 +522,7 @@ async function autoExecute(workspaceId: string): Promise<number> {
     i.kind === "poster" ? 0 : i.tier === "hot" ? 1 : i.tier === "warm" ? 2 : 3;
   const open = state.items
     .filter((i) => i.workspaceId === workspaceId && i.tier !== "community"
+      && !wallForItem(i) // the recruiter wall: agency-side never auto-sends
       && (enabled || (i.industry !== undefined && inds.includes(i.industry)))
       && (i.dmStatus === "suggested" || i.replyStatus === "suggested" || i.connectStatus === "suggested"))
     .sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt));
@@ -624,6 +629,31 @@ function looksLikePeer(title?: string, company?: string): boolean {
   return /\b(staffing|recruit(er|ing|ment)?|talent acquisition|search firm|headhunt|rpo\b)/i.test(t)
     // TA leadership inside an operating company IS a buyer; only firms are peers.
     && /\b(staffing|search|recruit|talent|headhunt|rpo)\b/i.test(company ?? "");
+}
+
+/* ---------------- the recruiter wall (owner mandate 2026-08-14) -----------
+   Nobody on the agency side of the desk ever gets a message: not from
+   autopilot, not from a manual approve, not from a legacy draft. Three
+   INDEPENDENT layers - any one is a veto:
+     1. the person's title/headline reads recruiting or talent acquisition
+     2. the company name reads staffing / search / RPO
+     3. the post itself uses agency language ("our client is hiring")
+   Enforced at capture (never drafted), at autopilot (never auto-sent), and
+   at approve time (blocked with the reason, covering older items). -------- */
+
+const PEER_TITLE_RE = /\b(recruiter|recruiting|recruitment|talent acquisition|talent partner|sourcer|sourcing specialist|headhunt\w*|staffing|executive search|search consultant|search firm|rpo)\b/i;
+const PEER_COMPANY_RE = /\b(staffing|recruit\w*|headhunt\w*|rpo|employment agency|personnel|workforce solutions|talent (solutions|group|partners|agency)|search (firm|group|partners|associates|consultants))\b/i;
+const PEER_POST_RE = /\b(our client|my client|on behalf of (a|an|our|my) client|client (of ours )?is (hiring|looking|searching)|we (are|'re) a (staffing|recruiting|search|talent) (firm|agency|practice)|(direct hire|contract) (role|opportunity) (with|for) (a|our) client)\b/i;
+
+function recruiterWall(o: { title?: string; headline?: string; company?: string; postText?: string }): string | null {
+  if (PEER_TITLE_RE.test(o.title ?? "") || PEER_TITLE_RE.test(o.headline ?? "")) return "their title reads recruiting/agency";
+  if (PEER_COMPANY_RE.test(o.company ?? "")) return "their company reads staffing/search firm";
+  if (PEER_POST_RE.test(o.postText ?? "")) return "the post uses agency client language";
+  return null;
+}
+
+function wallForItem(i: CommentLeadItem): string | null {
+  return recruiterWall({ title: i.title, headline: i.authorHeadline, company: i.company, postText: i.postExcerpt });
 }
 
 async function checkHiring(company: string): Promise<CommentLeadItem["hiring"]> {
@@ -1188,7 +1218,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0 };
   const stats = huntStatsFor(workspaceId);
   stats.searches += 1;
   stats.screened += candidates.length;
@@ -1244,7 +1274,11 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     const headline = c.headline ?? prof.headline;
     const { title, company } = parseHeadline(headline);
     const intel = classifyTitle(title ?? headline ?? "");
-    if (!intel.isDecisionMaker || looksLikePeer(title, company)) { g.title++; continue; }
+    // The recruiter wall: agency-side posters are never captured at all.
+    if (recruiterWall({ title, headline, company, postText: c.text }) || looksLikePeer(title, company)) {
+      g.peer++; stats.peersBlocked += 1; continue;
+    }
+    if (!intel.isDecisionMaker) { g.title++; continue; }
 
     const authorName = c.authorName ?? prof.name ?? "LinkedIn member";
 
@@ -1407,6 +1441,11 @@ export async function approveReply(
   if (!item || item.replyStatus !== "suggested" || !item.replyText) {
     return { item: item ?? null, accepted: false, reason: "not_open" };
   }
+  const replyWall = wallForItem(item);
+  if (replyWall) {
+    item.replyStatus = "blocked"; item.reason = `Recruiter/staffing firm: excluded by policy (${replyWall}).`; item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
   if (editedText && scrub(editedText).length >= 2) item.replyText = scrub(editedText).slice(0, 1200);
 
   const accounts = await connectedAccounts(workspaceId);
@@ -1480,6 +1519,11 @@ export async function approveDm(
   if (!item || item.kind !== "poster" || item.dmStatus !== "suggested" || !item.dmText) {
     return { item: item ?? null, accepted: false, reason: "not_open" };
   }
+  const dmWall = wallForItem(item);
+  if (dmWall) {
+    item.dmStatus = "blocked"; item.reason = `Recruiter/staffing firm: excluded by policy (${dmWall}).`; item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
   const direct = item.openProfile === true || item.networkDistance === "DISTANCE_1";
   if (!direct) {
     item.dmStatus = "skipped"; item.reason = "Open profiles only: closed profiles are never messaged from this lane.";
@@ -1549,6 +1593,11 @@ export async function approveConnect(
   const item = findItem(workspaceId, id);
   if (!item || item.connectStatus !== "suggested" || !item.connectText) {
     return { item: item ?? null, accepted: false, reason: "not_open" };
+  }
+  const connWall = wallForItem(item);
+  if (connWall) {
+    item.connectStatus = "blocked"; item.reason = `Recruiter/staffing firm: excluded by policy (${connWall}).`; item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
   }
   if (editedText && scrub(editedText).length >= 2) item.connectText = scrub(editedText).slice(0, 280);
 

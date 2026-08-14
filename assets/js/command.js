@@ -3528,7 +3528,7 @@
       var econ = st7
         ? '<div class="lie-post muted">Today: <b>' + (st7.searches || 0) + '</b> hunts · <b>' + (st7.screened || 0) + '</b> posts screened · <b>' +
           (st7.profileReads || 0) + '</b> profile reads (<b>' + (st7.readsSaved || 0) + '</b> saved by closed-profile memory, <b>' + (st7.closedFound || 0) + '</b> new closed remembered) · <b>' +
-          (st7.hiringChecks || 0) + '</b> job-board checks · <b>' + (st7.leads || 0) + '</b> leads drafted</div>'
+          (st7.hiringChecks || 0) + '</b> job-board checks · <b>' + (st7.leads || 0) + '</b> leads drafted · <b>' + (st7.peersBlocked || 0) + '</b> recruiters/agencies blocked</div>'
         : "";
       mount.innerHTML =
         '<div class="card liops-card">' +
