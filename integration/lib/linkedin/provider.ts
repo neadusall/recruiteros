@@ -366,14 +366,18 @@ export const unipileProvider: LinkedInProvider = {
   },
 
   async listMessages(account, providerProfileId) {
-    const data = await unipile<{ items: Array<{ id: string; is_sender: boolean; text: string; timestamp: string }> }>(
-      `/chats/messages?account_id=${account.providerAccountId}&attendee_id=${providerProfileId}`,
+    // Correct endpoint per Unipile reference (2026-08-14): messages exchanged
+    // with one attendee live at /chat_attendees/{id}/messages. The old
+    // /chats/messages?attendee_id= path does not exist, so the LinkedIn
+    // read-back confirmation silently never confirmed anything.
+    const data = await unipile<{ items: Array<{ id: string; provider_id?: string; is_sender: boolean | number; text?: string; timestamp?: string }> }>(
+      `/chat_attendees/${encodeURIComponent(providerProfileId)}/messages?account_id=${account.providerAccountId}&limit=50`,
     );
     return (data.items ?? []).map((m) => ({
-      providerMessageId: m.id,
-      fromSelf: m.is_sender,
-      text: m.text,
-      at: m.timestamp,
+      providerMessageId: m.id ?? m.provider_id ?? "",
+      fromSelf: m.is_sender === true || m.is_sender === 1,
+      text: m.text ?? "",
+      at: m.timestamp ?? "",
     }));
   },
 
