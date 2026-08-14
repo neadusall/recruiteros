@@ -456,5 +456,33 @@ export async function GET(req: Request) {
       };
     }),
   };
-  return ok({ configured: true, updatedAt: new Date(pulledAt).toISOString(), portalNote, domains, totals });
+  // Zapmail Google inbox fleet, the SMTP truth the warm-up engine cannot see.
+  // The panel above only lists mailboxes that reached the warm-up engine; a box
+  // that fails Google sign-in (534-5.7.14) is rejected at import and never shows,
+  // which is exactly how 46 blocked boxes looked "fine" for two weeks. The
+  // standalone monitor asks Google directly and drops its result at
+  // /data/zapmail-status.json; surface it here on the tenant portal so blocked,
+  // not-warming boxes are always visible.
+  let zapmailFleet: unknown = null;
+  if (tenantWs) {
+    try {
+      const fs = await import("node:fs");
+      const p = (process.env.ROS_DATA_DIR || "/data") + "/zapmail-status.json";
+      if (fs.existsSync(p)) {
+        const z = JSON.parse(fs.readFileSync(p, "utf8"));
+        const ageH = (Date.now() - new Date(z.checkedAt).getTime()) / 3.6e6;
+        zapmailFleet = {
+          total: z.total ?? null,
+          sending: z.ready ?? null,
+          blocked: z.blocked ?? 0,
+          badpass: z.badpass ?? 0,
+          avgRep: z.avgRep ?? null,
+          checkedAt: z.checkedAt ?? null,
+          stale: !!(z.checkedAt && ageH > 40),
+        };
+      }
+    } catch { /* panel renders fine without it */ }
+  }
+
+  return ok({ configured: true, updatedAt: new Date(pulledAt).toISOString(), portalNote, domains, totals, zapmailFleet });
 }

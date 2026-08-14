@@ -939,7 +939,8 @@
             { kind: "internal-smtp", domains: 2, mailboxes: 10, coldPerDay: 50 },
             { kind: "unknown", domains: 0, mailboxes: 0, coldPerDay: 0 }
           ]
-        }
+        },
+        zapmailFleet: { total: 100, sending: 54, blocked: 46, badpass: 0, avgRep: 100, checkedAt: new Date().toISOString(), stale: false }
       });
     }
     if (p === "/connected") {
