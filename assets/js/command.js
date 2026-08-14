@@ -23850,8 +23850,18 @@
       var members = (d && d.members) || [];
       var rows = members.map(function (m) {
         var you = m.userId === ctx.user.id;
-        var ctrl = (!you && (d.assignableRoles || []).length)
-          ? '<button class="btn btn-ghost btn-sm" data-remove="' + esc(m.userId) + '">Remove</button>' : "";
+        var assignable = d.assignableRoles || [];
+        var ctrl = "";
+        if (!you && assignable.length && m.role !== "owner") {
+          // Role switcher: one button per role this actor may assign (owners can mint
+          // admins; admins only recruiters). Wired to POST /team {action:"setRole"}.
+          assignable.forEach(function (r) {
+            if (r === m.role) return;
+            var label = r === "admin" ? "Make admin" : "Make recruiter";
+            ctrl += '<button class="btn btn-ghost btn-sm" data-setrole="' + esc(m.userId) + '" data-role="' + esc(r) + '">' + label + "</button>";
+          });
+          ctrl += '<button class="btn btn-ghost btn-sm" data-remove="' + esc(m.userId) + '">Remove</button>';
+        }
         return '<div class="integ"><span class="avatar" style="width:30px;height:30px;font-size:11px;background:' + colorFor(m.name) + '">' + esc(initials(m.name)) + "</span>" +
           '<div class="meta"><b>' + esc(m.name) + (you ? ' <span class="muted">(you)</span>' : "") + "</b><small>" + esc(m.email) + (m.emailVerified ? "" : " · unverified") + "</small></div>" +
           '<span class="cls cls-' + (m.role === "owner" ? "positive" : m.role === "admin" ? "soft_yes" : "unclassified") + '">' + esc(m.role) + "</span>" + ctrl + "</div>";
@@ -23868,6 +23878,13 @@
           try { navigator.clipboard.writeText(link); } catch (e) {}
           var t = btn.textContent; btn.textContent = "Copied";
           setTimeout(function () { btn.textContent = t; }, 1500);
+        });
+      });
+      if (body) Array.prototype.forEach.call(body.querySelectorAll("[data-setrole]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var role = btn.getAttribute("data-role");
+          send("/team", "POST", { action: "setRole", userId: btn.getAttribute("data-setrole"), role: role })
+            .then(function (r) { toast(r.ok ? "Role updated" : "Could not change role"); if (r.ok) renderTeam($("#view")); });
         });
       });
       if (body) Array.prototype.forEach.call(body.querySelectorAll("[data-remove]"), function (btn) {
