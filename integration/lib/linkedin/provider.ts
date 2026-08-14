@@ -302,14 +302,15 @@ export const unipileProvider: LinkedInProvider = {
   // multipart/form-data, exactly like /posts: a JSON body reaches its
   // validator as zero fields and 422s. Seen live 2026-08-13: every scheduled
   // BD first-touch message failed with "Unipile POST /chats failed: 422".
-  // Unipile's multipart validators parse array fields from a JSON-encoded
-  // string (their curl examples send attendees_ids='["<id>"]'); a bare form
-  // field arrives as a plain string and 422s just like the JSON body did.
+  // POST /chats contract, verified against Unipile's own Node SDK source
+  // (2026-08-14): multipart form; attendees_ids appended PLAIN once per id
+  // (a JSON-stringified array reads as an invalid recipient id); the InMail
+  // switch is the nested linkedin[inmail] field.
   sendMessage({ account, prospect, text }) {
     return attempt("message", async () => {
       const form = new FormData();
       form.append("account_id", account.providerAccountId);
-      form.append("attendees_ids", JSON.stringify([prospect.providerProfileId]));
+      form.append("attendees_ids", prospect.providerProfileId); // plain append per id - the SDK-verified encoding; a JSON string reads as an invalid recipient id
       form.append("text", text);
       const out = await unipile<{ message_id?: string }>("/chats", { method: "POST", body: form });
       return { providerMessageId: out.message_id };
@@ -320,7 +321,7 @@ export const unipileProvider: LinkedInProvider = {
     return attempt("inmail", async () => {
       const form = new FormData();
       form.append("account_id", account.providerAccountId);
-      form.append("attendees_ids", JSON.stringify([prospect.providerProfileId]));
+      form.append("attendees_ids", prospect.providerProfileId); // plain append per id - the SDK-verified encoding; a JSON string reads as an invalid recipient id
       // Unipile spec: the InMail switch is the NESTED field linkedin[inmail]
       // (a top-level "inmail" is silently ignored, so every send behaved as
       // a plain message and 422'd on non-connections - proven 2026-08-14).
@@ -337,7 +338,7 @@ export const unipileProvider: LinkedInProvider = {
     return attempt("voice_note", async () => {
       const form = new FormData();
       form.append("account_id", account.providerAccountId);
-      form.append("attendees_ids", JSON.stringify([prospect.providerProfileId]));
+      form.append("attendees_ids", prospect.providerProfileId); // plain append per id - the SDK-verified encoding; a JSON string reads as an invalid recipient id
       form.append("voice_message", audio);
       const out = await unipile<{ message_id?: string }>("/chats", { method: "POST", body: form });
       return { providerMessageId: out.message_id };
