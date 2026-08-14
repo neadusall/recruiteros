@@ -50,6 +50,7 @@ const ITEM_TTL_DAYS = 21;
 const MARKET_RESULTS_PER_SEARCH = 20;
 const POSTER_NEW_PER_TICK = 8;   // DM drafts created per tick
 const POSTER_RECHECK_DAYS = 7;   // never re-message the same author within a week
+const CLOSED_PROFILE_DAYS = 30;  // remember closed profiles; no repeat profile reads
 const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
 
 /** The keyword bank is the ROLES the desk places (owner decision 2026-08-13):
@@ -234,6 +235,10 @@ interface WatchState {
   ownProfile: Record<string, OwnProfile>;
   /** ws -> author providerId -> last time the market lane touched them (weekly gate). */
   posterSeen: Record<string, Record<string, string>>;
+  /** ws -> author ref/providerId -> when we learned the profile is closed.
+   *  Closed profiles are skipped for CLOSED_PROFILE_DAYS without spending
+   *  another profile read (owner ask 2026-08-14: save credit usage). */
+  closedProfiles: Record<string, Record<string, string>>;
   /** ws -> keyword bank override (backend defaults when unset). */
   marketKeywords: Record<string, string[]>;
   /** ws -> rotation cursor into the keyword bank (one search per tick). */
@@ -254,7 +259,7 @@ interface WatchState {
 }
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 const save = debouncedSaver(KEY, () => state);
@@ -270,6 +275,7 @@ async function hydrate(): Promise<void> {
           seen: snap.seen ?? {},
           ownProfile: snap.ownProfile ?? {},
           posterSeen: snap.posterSeen ?? {},
+          closedProfiles: snap.closedProfiles ?? {},
           marketKeywords: snap.marketKeywords ?? {},
           keywordCursor: snap.keywordCursor ?? {},
           scenarios: snap.scenarios ?? {},
@@ -308,6 +314,15 @@ function prune(): void {
   // items from older builds are dropped here.
   state.items = state.items.filter((i) => new Date(i.createdAt).getTime() >= cutoff && i.tier !== "community"
     && (actionable(i) || new Date(i.updatedAt).getTime() >= resolvedCutoff));
+  // Closed-profile memory expires after CLOSED_PROFILE_DAYS: people do open
+  // their profiles up or become connections; after a month we look again.
+  const closedCutoff = Date.now() - CLOSED_PROFILE_DAYS * 86_400_000;
+  for (const ws of Object.keys(state.closedProfiles)) {
+    const m = state.closedProfiles[ws];
+    for (const k of Object.keys(m)) {
+      if (new Date(m[k]).getTime() < closedCutoff) delete m[k];
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1058,6 +1073,14 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // One touch per author per week, whichever key we knew them by.
     const lastTouch = seenAuthors[c.authorRef];
     if (lastTouch && new Date(lastTouch).getTime() >= recheckCutoff) { g.weekly++; continue; }
+
+    // Closed-profile memory (owner ask 2026-08-14): someone we already know
+    // can't receive a DM is skipped for CLOSED_PROFILE_DAYS without spending
+    // another profile read on them.
+    const closedCache = state.closedProfiles[workspaceId] ?? (state.closedProfiles[workspaceId] = {});
+    const closedCutoff = Date.now() - CLOSED_PROFILE_DAYS * 86_400_000;
+    const closedAt = closedCache[c.authorRef];
+    if (closedAt && new Date(closedAt).getTime() >= closedCutoff) { g.closed++; continue; }
     seenAuthors[c.authorRef] = nowIso();
     save();
 
@@ -1070,6 +1093,19 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     const lastById = seenAuthors[prof.providerId];
     if (lastById && new Date(lastById).getTime() >= recheckCutoff) { g.weekly++; continue; }
     seenAuthors[prof.providerId] = nowIso();
+
+    // OPEN PROFILES ONLY (owner decision 2026-08-13): the DM lands without a
+    // connection. Existing 1st-degree connections also take a plain message.
+    // Everyone else is skipped, never connect-noted from this lane. Gated
+    // FIRST so a closed profile costs exactly one profile read - none of the
+    // classification, DNC, or hiring-board work below runs for them - and is
+    // remembered so future hunts spend nothing at all.
+    const direct = prof.openProfile === true || prof.networkDistance === "DISTANCE_1";
+    if (!direct) {
+      closedCache[c.authorRef] = nowIso();
+      if (prof.providerId) closedCache[prof.providerId] = nowIso();
+      g.closed++; save(); continue;
+    }
 
     // Decision-maker title, not a peer staffing firm.
     const headline = c.headline ?? prof.headline;
@@ -1088,12 +1124,6 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
         { checkRecency: true });
       if (!dnc.ok) { g.dnc++; continue; }
     } catch { g.dnc++; continue; }
-
-    // OPEN PROFILES ONLY (owner decision 2026-08-13): the DM lands without a
-    // connection. Existing 1st-degree connections also take a plain message.
-    // Everyone else is skipped, never connect-noted from this lane.
-    const direct = prof.openProfile === true || prof.networkDistance === "DISTANCE_1";
-    if (!direct) { g.closed++; continue; }
 
     // Supporting evidence, never a gate: their own board's open roles.
     const hiring = company ? await checkHiring(company) : undefined;
