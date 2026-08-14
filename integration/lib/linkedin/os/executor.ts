@@ -190,7 +190,7 @@ async function markResult(
       setStatus(r, "success");
       r.providerReference = providerReference;
     } else {
-      const retryable = !/not_supported|missing|invalid|suppressed|no_provider_profile/.test(error ?? "");
+      const retryable = !/not_supported|missing|invalid|suppressed|no_provider_profile|insufficient_credits/.test(error ?? "");
       if (retryable && r.retryCount < MAX_RETRIES) {
         r.retryCount += 1;
         r.failureReason = error;
