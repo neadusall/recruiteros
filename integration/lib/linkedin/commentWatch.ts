@@ -649,13 +649,35 @@ function looksLikePeer(title?: string, company?: string): boolean {
    at approve time (blocked with the reason, covering older items). -------- */
 
 const PEER_TITLE_RE = /\b(recruiter|recruiting|recruitment|talent acquisition|talent partner|sourcer|sourcing specialist|headhunt\w*|staffing|executive search|search consultant|search firm|rpo)\b/i;
-const PEER_COMPANY_RE = /\b(staffing|recruit\w*|headhunt\w*|rpo|employment agency|personnel|workforce solutions|talent (solutions|group|partners|agency)|search (firm|group|partners|associates|consultants))\b/i;
+const PEER_COMPANY_RE = /\b(staffing|recruit\w*|headhunt\w*|rpo|employment agency|personnel|workforce solutions|\btalent\b|search (firm|group|partners|associates|consultants))\b/i;
 const PEER_POST_RE = /\b(our client|my client|on behalf of (a|an|our|my) client|client (of ours )?is (hiring|looking|searching)|we (are|'re) a (staffing|recruiting|search|talent) (firm|agency|practice)|(direct hire|contract) (role|opportunity) (with|for) (a|our) client)\b/i;
 
+/** Does the poster's own employer appear in the post text? Company names are
+ *  normalized (Inc/LLC/punctuation stripped) and matched on their significant
+ *  tokens, so "Meridian Health Systems, LLC" matches "here at Meridian". */
+function companyMentionedInPost(company: string, postText: string): boolean {
+  const clean = company.replace(/\b(inc|llc|ltd|corp|co|group|holdings|the)\b\.?/gi, " ").replace(/[^\w\s]/g, " ");
+  const tokens = clean.split(/\s+/).filter((t) => t.length >= 3);
+  if (!tokens.length) return false;
+  const text = (postText ?? "").toLowerCase();
+  return tokens.some((t) => text.includes(t.toLowerCase()));
+}
+
+/**
+ * The recruiter wall, owner rule 2026-08-14: third-party recruiters and
+ * agencies are NEVER messaged. A recruiter/TA-titled person is allowed ONLY
+ * as verified in-house: their current company must be the company the post
+ * is hiring for (the employer's name appears in the post). Unverifiable
+ * recruiter-titled posters are treated as third-party - fail closed.
+ */
 function recruiterWall(o: { title?: string; headline?: string; company?: string; postText?: string }): string | null {
-  if (PEER_TITLE_RE.test(o.title ?? "") || PEER_TITLE_RE.test(o.headline ?? "")) return "their title reads recruiting/agency";
-  if (PEER_COMPANY_RE.test(o.company ?? "")) return "their company reads staffing/search firm";
+  if (PEER_COMPANY_RE.test(o.company ?? "")) return "their company reads staffing/search/talent firm";
   if (PEER_POST_RE.test(o.postText ?? "")) return "the post uses agency client language";
+  const recruiterTitled = PEER_TITLE_RE.test(o.title ?? "") || PEER_TITLE_RE.test(o.headline ?? "");
+  if (recruiterTitled) {
+    const verifiedInHouse = !!o.company && companyMentionedInPost(o.company, o.postText ?? "");
+    if (!verifiedInHouse) return "recruiter-titled and not verifiably hiring for their own company";
+  }
   return null;
 }
 
@@ -1386,7 +1408,10 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
   const status = await commentWatchStatus(workspaceId);
   const autopilot = await commentWatchAutopilot(workspaceId);
   const items = state.items
-    .filter((i) => i.workspaceId === workspaceId && i.tier !== "community" && actionable(i))
+    .filter((i) => i.workspaceId === workspaceId && i.tier !== "community" && actionable(i)
+      // Wall-hits never reach the approval list, including ones captured
+      // before the current wall tightened (they also cannot be approved).
+      && !(i.dmStatus === "suggested" && wallForItem(i)))
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
   return {
     status, autopilot,
