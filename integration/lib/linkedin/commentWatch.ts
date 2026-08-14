@@ -685,6 +685,22 @@ function wallForItem(i: CommentLeadItem): string | null {
   return recruiterWall({ title: i.title, headline: i.authorHeadline, company: i.company, postText: i.postExcerpt });
 }
 
+/** Deep verification (owner ask 2026-08-14): scan the poster's own profile -
+ *  their summary and every CURRENT job - for recruiting-business signals the
+ *  headline hides. "Avaia Talent" cases die here even with a clean headline:
+ *  founders and owners describe the agency in their summary and experience. */
+const SUMMARY_PEER_RE = /\b(recruit\w*|staffing|headhunt\w*|talent acquisition|executive search|search firm|direct.?hire|perm placement|placements?\b|(i|we) place\b|placing (top |great |exceptional )?(talent|candidates|professionals|people)|sourcing (candidates|talent)|helping (companies|clients|teams) (hire|find|build)|match(ing)? (candidates|talent)|rpo\b|contingency|retained search|bench of (candidates|talent))\b/i;
+
+function deepRecruiterSignals(summary?: string, currentRoles?: string[]): string | null {
+  for (const role of currentRoles ?? []) {
+    if (PEER_TITLE_RE.test(role) || PEER_COMPANY_RE.test(role)) {
+      return `current job reads recruiting (${role.slice(0, 60)})`;
+    }
+  }
+  if (summary && SUMMARY_PEER_RE.test(summary)) return "profile summary reads recruiting";
+  return null;
+}
+
 async function checkHiring(company: string): Promise<CommentLeadItem["hiring"]> {
   try {
     const { resolveCompanyRoles } = await import("../inmarket/companyRoles");
@@ -781,10 +797,21 @@ function parseComment(c: Dict): RawComment | null {
  *  Accepts a provider id OR a public slug (linkedin.com/in/<slug>). */
 async function fetchProfileLite(account: LiAccountState, identifier: string): Promise<{
   providerId?: string; name?: string; headline?: string; publicUrl?: string; openProfile?: boolean; networkDistance?: string; location?: string;
+  summary?: string; currentRoles?: string[];
 }> {
   try {
     const { unipileRequest } = await import("./provider");
     const p = await unipileRequest<Dict>(`/users/${encodeURIComponent(identifier)}?account_id=${providerIdOf(account)}`);
+    // Deep-verification material (owner ask 2026-08-14): the same profile
+    // read carries the summary and work history - free extra signal for the
+    // recruiter wall. Current roles = entries with no end date.
+    const rawExp = (Array.isArray(p.work_experience) ? p.work_experience
+      : Array.isArray(p.experience) ? p.experience : []) as Array<Record<string, unknown>>;
+    const currentRoles = rawExp
+      .filter((e) => !str(e.end) || e.current === true)
+      .map((e) => [str(e.position) ?? str(e.title) ?? "", str(e.company) ?? str(e.company_name) ?? ""].filter(Boolean).join(" at "))
+      .filter(Boolean)
+      .slice(0, 6);
     return {
       providerId: str(p.provider_id) ?? str(p.id),
       name: str(p.name) ?? ((str(p.first_name) || str(p.last_name))
@@ -795,6 +822,8 @@ async function fetchProfileLite(account: LiAccountState, identifier: string): Pr
       openProfile: typeof p.is_open_profile === "boolean" ? p.is_open_profile : undefined,
       networkDistance: str(p.network_distance),
       location: str(p.location),
+      summary: str(p.summary) ?? str(p.about),
+      currentRoles,
     };
   } catch { return {}; }
 }
@@ -1313,8 +1342,16 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     const { title, company } = parseHeadline(headline);
     const intel = classifyTitle(title ?? headline ?? "");
     // The recruiter wall: agency-side posters are never captured at all.
-    if (recruiterWall({ title, headline, company, postText: c.text }) || looksLikePeer(title, company)) {
-      g.peer++; stats.peersBlocked += 1; continue;
+    // Layer 4 (deep verification): their profile summary and current jobs,
+    // read from the same profile call - no extra credits. Wall-hits join the
+    // never-again cache so future hunts spend nothing on them.
+    const wallHit = recruiterWall({ title, headline, company, postText: c.text })
+      ?? deepRecruiterSignals(prof.summary, prof.currentRoles)
+      ?? (looksLikePeer(title, company) ? "staffing peer" : null);
+    if (wallHit) {
+      closedCache[c.authorRef] = nowIso();
+      if (prof.providerId) closedCache[prof.providerId] = nowIso();
+      g.peer++; stats.peersBlocked += 1; save(); continue;
     }
     if (!intel.isDecisionMaker) { g.title++; continue; }
 
