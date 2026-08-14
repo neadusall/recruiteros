@@ -54,6 +54,7 @@ import {
   stripRadiusSuffix, withinRadius,
 } from "./geoRadius";
 import { scraperConfigured, scrapeSearchViaSidecar } from "../linkedin/scraperProvider";
+import { rewriteSiteOperators } from "../serpRewrite";
 import { cred } from "../providers/http";
 import { koldinfoWorkerReady } from "./laxis";
 import { submitDbDiscovery, collectDbDiscovery } from "./koldinfoDiscovery";
@@ -504,12 +505,16 @@ export async function verifySerperSearch(): Promise<{ ok: boolean; error?: strin
 /* ------------------------------------------------------------------ */
 
 // DataForSEO serves real Google results, pay-as-you-go with no expiring credit
-// bundle. One live "regular" task returns up to 100 organic results for a fraction
-// of a cent, where a Serper query returns 10 for a tenth of a cent, so per RESULT
-// this is several times cheaper. It runs BEFORE Serper for exactly that reason, and
-// having two paid wide-web engines means a drained balance on one can no longer
-// stall discovery (Serper hit zero on 2026-07-30 and took two thirds of sourcing
-// output with it).
+// bundle and native auto-recharge. COST REALITY (billed, 2026-08-14): DataForSEO
+// multiplies the charge 5x for any keyword containing an advanced operator (site:,
+// inurl:, intitle:, filetype:) — a depth-100 x-ray task billed $0.06, not the
+// "fraction of a cent" this comment used to claim. The rewriteSiteOperators() call
+// below dodges the surcharge by sending the site: restriction as a quoted phrase
+// instead (measured: identical LinkedIn rows, 1/5th the bill; mapGoogleItem still
+// hard-requires linkedin.com/in URLs, so the operator's guarantee is preserved).
+// It stays BEFORE Serper because its balance cannot quietly expire the way Serper
+// credits did on 2026-07-30 and again on 2026-08-12, and having two paid wide-web
+// engines means a drained balance on one can no longer stall discovery.
 const DFS_LOGIN = () => cred("DATAFORSEO_LOGIN");
 const DFS_PASS = () => cred("DATAFORSEO_PASSWORD");
 // Soft per-RUN cap, same shape as the Serper guard. Each task is up to 100 results,
@@ -532,10 +537,12 @@ const dfsAuth = () =>
  * onto the CSE title/link/snippet shape, so the Google mapper does the parsing.
  */
 async function dataforseoXraySearch(xray: string, depth = 100): Promise<CandidateRow[]> {
+  // site: → quoted phrase, or DataForSEO bills this task 5x (see the header note).
+  const keyword = rewriteSiteOperators(xray).query.slice(0, 700);
   const res = await fetch("https://api.dataforseo.com/v3/serp/google/organic/live/regular", {
     method: "POST",
     headers: { Authorization: dfsAuth(), "Content-Type": "application/json" },
-    body: JSON.stringify([{ keyword: xray.slice(0, 700), location_code: 2840, language_code: "en", depth }]),
+    body: JSON.stringify([{ keyword, location_code: 2840, language_code: "en", depth }]),
     signal: AbortSignal.timeout(45_000),
   });
   if (!res.ok) {
