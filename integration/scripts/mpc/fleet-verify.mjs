@@ -177,6 +177,51 @@ const boxRows = [];
   await Promise.all(Array.from({ length: 3 }, boxWorker));
 }
 
+/* ---------------- Google warm-up pool (Zapmail) via Smartlead ----------------
+ * Closes the loop on the Aug 2026 Zapmail saga: 46 of 100 boxes sat behind Google's 534
+ * web-signin block, warming nothing, and nothing on the console said so. This tracks the
+ * Google warm-up pool directly from Smartlead every day: the pool is the accounts connected
+ * as Gmail (type GMAIL via OAuth, or smtp_host smtp.gmail.com via app-password) - which
+ * cleanly excludes the Outlook cold-send fleet and the lumesp mail server. A box that falls
+ * back behind Google or drops out of warm-up stops being ACTIVE here, and shows up with its
+ * reason and fix instead of the owner having to spot it on a panel. */
+let warmup = null;
+try {
+  const key = envVal("SMARTLEAD_API_KEY");
+  if (key) {
+    const accts = [];
+    for (let off = 0; off < 4000; off += 100) {
+      const r = await fetch(`https://server.smartlead.ai/api/v1/email-accounts/?api_key=${key}&offset=${off}&limit=100`, { signal: AbortSignal.timeout(20000) });
+      if (!r.ok) break;
+      const d = await r.json(); if (!Array.isArray(d) || !d.length) break;
+      accts.push(...d); if (d.length < 100) break;
+    }
+    const pool = accts.filter((a) => a.type === "GMAIL" || String(a.smtp_host || "") === "smtp.gmail.com");
+    const rows = pool.map((a) => {
+      const email = (a.from_email || a.username || "").toLowerCase();
+      const w = a.warmup_details || {};
+      const status = (w.status || "").toUpperCase();
+      const rep = parseFloat(String(w.warmup_reputation || "").replace("%", ""));
+      const conn = a.type === "GMAIL" ? "OAuth" : "app-password";
+      const reasons = [], fixes = [];
+      if (status !== "ACTIVE") { reasons.push(`Warm-up not active (status ${status || "unknown"})`); fixes.push("Reconnect this box in Smartlead; if Google shows a 534 web-signin block, sign in once at mail.google.com and accept the terms"); }
+      if (Number.isFinite(rep) && rep < 90) { reasons.push(`Warm-up reputation ${rep}%`); fixes.push("Leave it warming and do not add cold volume; investigate if it keeps dropping"); }
+      const verdict = status !== "ACTIVE" ? "unhealthy" : reasons.length ? "warning" : "healthy";
+      return { email, conn, verdict, reasons, fixes, metrics: { status, reputationPct: Number.isFinite(rep) ? rep : null } };
+    }).sort((a, b) => ({ unhealthy: 0, warning: 1, healthy: 2 }[a.verdict] - { unhealthy: 0, warning: 1, healthy: 2 }[b.verdict]) || a.email.localeCompare(b.email));
+    warmup = {
+      poolSize: rows.length,
+      active: rows.filter((r) => r.verdict !== "unhealthy").length,
+      summary: { healthy: rows.filter((r) => r.verdict === "healthy").length, warning: rows.filter((r) => r.verdict === "warning").length, unhealthy: rows.filter((r) => r.verdict === "unhealthy").length },
+      byConn: { oauth: rows.filter((r) => r.conn === "OAuth").length, appPassword: rows.filter((r) => r.conn === "app-password").length },
+      boxes: rows,
+    };
+    console.log(`warm-up pool: ${warmup.poolSize} Google boxes | ${warmup.summary.healthy} healthy / ${warmup.summary.warning} warning / ${warmup.summary.unhealthy} not warming`);
+  } else {
+    console.log("warm-up pool: SMARTLEAD_API_KEY not set, skipped");
+  }
+} catch (e) { console.log("warm-up pool: check failed", String(e.message || e).slice(0, 80)); }
+
 /* ---------------- write ---------------- */
 const vOrder = { unhealthy: 0, warning: 1, healthy: 2 };
 domainRows.sort((a, b) => vOrder[a.verdict] - vOrder[b.verdict] || a.domain.localeCompare(b.domain));
@@ -188,8 +233,9 @@ const out = {
   mailboxSummary: sum(boxRows),
   domains: domainRows,
   mailboxes: boxRows,
+  warmup,
 };
 const tmp = OUT_FILE + ".tmp";
 writeFileSync(tmp, JSON.stringify(out, null, 1));
 renameSync(tmp, OUT_FILE);
-console.log(`fleet verify: domains ${JSON.stringify(out.domainSummary)} | mailboxes ${JSON.stringify(out.mailboxSummary)}`);
+console.log(`fleet verify: domains ${JSON.stringify(out.domainSummary)} | mailboxes ${JSON.stringify(out.mailboxSummary)}${warmup ? ` | warm-up ${warmup.summary.healthy}/${warmup.poolSize} healthy` : ""}`);

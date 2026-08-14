@@ -211,6 +211,17 @@
     if (!bad.length) html += '<p class="note">Every mailbox verified healthy. The ' + mb.length + ' healthy boxes are collapsed.</p>';
     bad.forEach(function (m) { html += fleetRow(m.email, m); });
     html += '</div>';
+    // Google warm-up pool (Zapmail): the 100 Gmail boxes building reputation in Smartlead.
+    var w = f.warmup;
+    if (w) {
+      var wbad = (w.boxes || []).filter(function (b) { return b.verdict !== "healthy"; });
+      html += '<div class="hc-summary" style="margin-top:18px">' + fleetSummary("warm-up boxes", w.summary || {}) +
+        '<div class="hc-meta">' + esc(w.poolSize) + ' Google boxes · ' + esc((w.byConn && w.byConn.oauth) || 0) + ' OAuth, ' + esc((w.byConn && w.byConn.appPassword) || 0) + ' app-password</div></div>';
+      html += '<div class="card hc-group"><h3>Google warm-up pool needing attention (' + wbad.length + ' of ' + (w.boxes || []).length + ')</h3>';
+      if (!wbad.length) html += '<p class="note">All ' + esc(w.poolSize) + ' Google warm-up boxes are active. If any ever falls behind Google’s sign-in block or drops out of warm-up, it appears here with its fix.</p>';
+      wbad.forEach(function (b) { html += fleetRow(b.email + " (" + b.conn + ")", b); });
+      html += '</div>';
+    }
     $("#view").innerHTML = html;
   }
 
@@ -4801,7 +4812,16 @@
         { email: "ariel@lumeadvisor.com", verdict: "unhealthy", reasons: ["Mailbox does not exist at the provider (404)"], fixes: ["Re-provision this mailbox at Sending.ac or remove it from the senders roster"], metrics: {} },
         { email: "rnead@lumerecruiters.com", verdict: "warning", reasons: ["3 recent bounce notices from this mailbox"], fixes: ["Rotation already spreads volume; if this repeats tomorrow, retire the address"], metrics: {} },
         { email: "sam.w@lumepeople.com", verdict: "healthy", reasons: [], fixes: [], metrics: {} }
-      ]
+      ],
+      warmup: {
+        poolSize: 100, active: 99,
+        summary: { healthy: 99, warning: 0, unhealthy: 1 },
+        byConn: { oauth: 46, appPassword: 54 },
+        boxes: [
+          { email: "josh@belumesearchgroup.com", conn: "OAuth", verdict: "unhealthy", reasons: ["Warm-up not active (status PAUSED)"], fixes: ["Reconnect this box in Smartlead; if Google shows a 534 web-signin block, sign in once at mail.google.com and accept the terms"], metrics: {} },
+          { email: "ryan@lumesearchgroupmusic.com", conn: "app-password", verdict: "healthy", reasons: [], fixes: [], metrics: {} }
+        ]
+      }
     });
   } else
   if (new URLSearchParams(location.search).has("healthdemo")) {

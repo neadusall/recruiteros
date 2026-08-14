@@ -232,6 +232,16 @@ add(GROUP_WATCH, "ndr-fresh", "Bounce data freshness", !ndr ? "bad" : ageMin(ndr
     !fleet ? "amber" : fAge > 26 * 60 ? "bad" : dU + mU > 0 ? "amber" : "good",
     !fleet ? "never run" : `${dU} domains + ${mU} mailboxes unhealthy, swept ${fmtAge(fAge)}`,
     !fleet ? "Run once or install fleet-verify.timer" : dU + mU > 0 ? "Open the Fleet tab for each asset's reason and fix" : "");
+
+  // Google warm-up pool (Zapmail) health, from the same daily verification.
+  const w = fleet?.warmup;
+  if (w) {
+    const notWarming = w.summary?.unhealthy || 0;
+    add(GROUP_SEND, "warmpool", "Google warm-up pool (Zapmail)",
+      notWarming > 0 ? "bad" : (w.summary?.warning || 0) > 0 ? "amber" : "good",
+      `${w.summary?.healthy || 0}/${w.poolSize} warming`,
+      notWarming > 0 ? `${notWarming} fell out of warm-up: Fleet tab has the box list and fix` : `${w.byConn?.oauth || 0} via OAuth, ${w.byConn?.appPassword || 0} via app-password`);
+  }
 }
 
 // Reply bridge: the monitor log is written as it scans, so its mtime is the honest heartbeat.
