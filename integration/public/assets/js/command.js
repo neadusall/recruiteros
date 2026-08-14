@@ -3525,10 +3525,21 @@
       var rolesVal = unsavedRoles !== null ? unsavedRoles : roles.join(", ");
       var huntCount = (active.presets || []).length + (active.custom || []).length;
       var st7 = (d.stats && d.stats.today) || null;
+      // Today's numbers as labeled chips, each with a hover "?" explainer so
+      // a recruiter never has to guess what a stat means (owner ask 2026-08-14).
+      function statChip(num, label, tone, help) {
+        return '<span class="lie-chip ' + tone + '" title="' + esc(help) + '" style="cursor:help;margin:2px 3px 2px 0"><b>' + num + "</b> " + esc(label) + ' <span style="opacity:.55;font-weight:700">?</span></span>';
+      }
       var econ = st7
-        ? '<div class="lie-post muted">Today: <b>' + (st7.searches || 0) + '</b> hunts · <b>' + (st7.screened || 0) + '</b> posts screened · <b>' +
-          (st7.profileReads || 0) + '</b> profile reads (<b>' + (st7.readsSaved || 0) + '</b> saved by closed-profile memory, <b>' + (st7.closedFound || 0) + '</b> new closed remembered) · <b>' +
-          (st7.hiringChecks || 0) + '</b> job-board checks · <b>' + (st7.leads || 0) + '</b> leads drafted · <b>' + (st7.peersBlocked || 0) + '</b> recruiters/agencies blocked</div>'
+        ? '<div class="lie-post"><span class="muted" style="margin-right:4px">Today:</span>' +
+          statChip(st7.searches || 0, "hunts run", "", "Searches the radar ran today across your scenarios, roles, and custom hunts. One runs every 15 minutes, around the clock.") +
+          statChip(st7.screened || 0, "posts screened", "", "Hiring posts found and screened by the free checks: is it a real post, does it show hiring intent, have we seen it, did we already touch this person this week.") +
+          statChip(st7.leads || 0, "leads drafted", st7.leads ? "ok" : "", "Decision makers captured with a message drafted and ready. They land in Messages to approve below, or send automatically if their industry is on autopilot.") +
+          statChip(st7.peersBlocked || 0, "recruiters blocked", st7.peersBlocked ? "bad" : "", "Recruiters and staffing agencies the wall stopped today: never captured, never messaged. This is your protection working.") +
+          statChip(st7.profileReads || 0, "profile reads", "", "Profiles opened to verify who the poster is, whether they can receive a message, and that they are not a recruiter. The only per-person API spend.") +
+          statChip(st7.readsSaved || 0, "reads saved", st7.readsSaved ? "ok" : "", "Profile reads skipped because we already know this person is unreachable or excluded (30-day memory). Direct credit savings.") +
+          statChip(st7.hiringChecks || 0, "job-board checks", "", "Company job boards checked to confirm their open roles. Only runs for reachable decision makers after every other gate has passed.") +
+          "</div>"
         : "";
       mount.innerHTML =
         '<div class="card liops-card">' +
@@ -3771,10 +3782,16 @@
       // is hiring. No public comment; a direct custom message instead.
       if (t.kind === "poster") {
         var openP = t.dmStatus === "suggested";
+        var provenance = (t.postUrl
+            ? '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener">View the post on LinkedIn</a> · '
+            : "") +
+          (t.postAt ? "Posted " + new Date(t.postAt).toLocaleDateString() + " · " : "") +
+          "Captured " + (t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "");
         return '<div class="lie-row' + (openP ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
           '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span>' +
             (t.industry ? ' <span class="lie-chip mut">' + esc(t.industry.replace(/_/g, " ")) + "</span>" : "") + "</div>" +
           '<div class="lie-post">Their hiring post: ' + esc((t.postExcerpt || "").slice(0, 280)) + (t.postExcerpt && t.postExcerpt.length > 280 ? "..." : "") + "</div>" +
+          '<div class="lie-post muted">' + provenance + "</div>" +
           hiring + dmBlock(t) +
         "</div>";
       }
@@ -8855,25 +8872,6 @@
       '</div>' +
       '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam. A domain is <b>Ready to send</b> at 95%+ average reputation after its full warm period: <b>14+ days</b> on provider-run mailboxes (Sending.ac, Gmail), <b>30+ days</b> on the Internal SMTP server, which earns its reputation from scratch. Each warming domain shows its day count toward that mark. Click a domain for its mailboxes.</div>' +
       (wuData.portalNote ? '<div class="wu-sub"><b>Portal split:</b> ' + esc(wuData.portalNote) + '</div>' : '');
-    // Zapmail Google inbox fleet: the SMTP truth the warm-up table cannot show.
-    // Blocked mailboxes never reach the warm-up engine, so they are invisible in
-    // the domain table below; this banner is the one place they surface.
-    var zapBanner = "";
-    var z = wuData.zapmailFleet;
-    if (z && z.total) {
-      var blk = (z.blocked || 0) + (z.badpass || 0);
-      var accent = blk ? "#b26a00" : "#2e7d32";
-      var bg = blk ? "rgba(210,140,0,0.07)" : "rgba(46,125,50,0.06)";
-      zapBanner =
-        '<div class="wu-sub" style="border:1px solid ' + accent + '55;border-radius:10px;padding:10px 12px;margin-top:8px;background:' + bg + '">' +
-          '<b>Zapmail Google inbox fleet</b> · ' + esc(z.total) + ' mailboxes<br>' +
-          '<span style="color:#2e7d32"><b>' + esc(z.sending) + '</b> sending-ready and warming</span>' +
-          (blk ? ' · <span style="color:' + accent + '"><b>' + esc(blk) + '</b> blocked by Google, <b>not warming</b></span>' : ' · <span style="color:#2e7d32">all connected</span>') +
-          (z.avgRep != null ? ' · <span class="muted">avg reputation ' + esc(z.avgRep) + '% on the warming set</span>' : '') +
-          (blk ? '<div style="margin-top:6px">These mailboxes fail Google sign-in (error 534-5.7.14), so the warm-up engine rejected them and they are <b>not</b> warming. They are being reconnected to the sending platform over OAuth through Zapmail; once connected they need about <b>2 weeks</b> of warm-up before sending. They are not in the domain table below because they never reached the warm-up engine.</div>' : '') +
-          '<div class="muted" style="font-size:11px;margin-top:6px">Fleet checked ' + esc(wuAgo(z.checkedAt)) + (z.stale ? ' · <span style="color:#b3261e">this check is stale, the fleet monitor may be offline</span>' : '') + '</div>' +
-        '</div>';
-    }
     // Infrastructure split cards: only providers that actually have mailboxes.
     var infraCards = "";
     (t.byInfra || []).forEach(function (b) {
@@ -8941,7 +8939,7 @@
     var table = domains.length
       ? '<div class="wu-scroll"><table class="wu-table"><thead><tr><th>Domain</th><th>Mailboxes</th><th>Time warming</th><th>Avg reputation</th><th>Health</th><th>DNS</th><th>Warm-up/day</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
       : '<div class="empty">No domains are warming on this portal yet.</div>';
-    box.innerHTML = '<div class="wu-card">' + head + zapBanner + stats + table + '</div>';
+    box.innerHTML = '<div class="wu-card">' + head + stats + table + '</div>';
     var rb = $("#wuRefresh"); if (rb) rb.addEventListener("click", function () { loadWarmup(true); });
     Array.prototype.forEach.call(box.querySelectorAll("[data-wu-dom]"), function (tr) {
       tr.addEventListener("click", function () {
