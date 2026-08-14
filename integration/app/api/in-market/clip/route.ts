@@ -4,7 +4,7 @@
  * POST   /api/in-market/clip   { dataUrl, mime?, label? }   (dataUrl = base64 from MediaRecorder)
  *                              -> store the recording, return its reusable metadata { id, ... }.
  *        (also accepts a raw video body with Content-Type: video/*)
- * GET    /api/in-market/clip                 -> list this workspace's stored clips.
+ * GET    /api/in-market/clip                 -> list the signed-in recruiter's own clips.
  * GET    /api/in-market/clip?id=<id>         -> stream one clip for preview (<video> src).
  * DELETE /api/in-market/clip?id=<id>         -> delete one clip.
  *
@@ -23,17 +23,20 @@ export async function GET(req: Request) {
   const g = requireCapability(req, "sourcing:run");
   if ("response" in g) return g.response;
   const ws = g.ctx.workspace.id;
+  const me = (g.ctx.user.email || "").trim().toLowerCase();
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   const { listClips, readClipBytes, getClip } = await import("../../../../lib/inmarket/roleVideo");
 
   if (!id) {
-    return ok({ clips: await listClips(ws) });
+    // Recordings are personal: each recruiter sees only their own takes.
+    return ok({ clips: await listClips(ws, me) });
   }
 
   const meta = await getClip(id);
   if (!meta || meta.workspaceId !== ws) return new Response("not found", { status: 404 });
+  if (meta.ownerEmail && meta.ownerEmail !== me) return new Response("not found", { status: 404 });
   const got = await readClipBytes(id);
   if (!got) return new Response("not found", { status: 404 });
   return new Response(got.buf as any, {
@@ -79,7 +82,7 @@ export async function POST(req: Request) {
   if (buf.length > MAX_BYTES) return fail("clip too large (max 60MB)", 413);
 
   const { saveClip } = await import("../../../../lib/inmarket/roleVideo");
-  const meta = await saveClip(ws, buf, { mime, label });
+  const meta = await saveClip(ws, buf, { mime, label, ownerEmail: g.ctx.user.email });
   return ok({ clip: meta }, 201);
 }
 
@@ -90,6 +93,6 @@ export async function DELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return fail("missing id", 422);
   const { deleteClip } = await import("../../../../lib/inmarket/roleVideo");
-  const okDel = await deleteClip(ws, id);
+  const okDel = await deleteClip(ws, id, g.ctx.user.email);
   return okDel ? ok({ deleted: id }) : fail("not_found", 404);
 }

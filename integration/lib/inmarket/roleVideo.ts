@@ -97,6 +97,9 @@ export interface VideoResult {
 export interface ClipMeta {
   id: string;
   workspaceId: string;
+  /** Recruiter who recorded it (lowercased email). Clips are personal: the portal only
+   *  lists/streams a clip to its recorder. Absent on legacy clips = workspace-shared. */
+  ownerEmail?: string;
   ext: string;        // container ext, e.g. "webm" | "mp4"
   mime: string;
   bytes: number;
@@ -175,7 +178,7 @@ const EXT_BY_MIME: Record<string, string> = {
 export async function saveClip(
   workspaceId: string,
   data: Buffer,
-  opts: { mime?: string; label?: string } = {},
+  opts: { mime?: string; label?: string; ownerEmail?: string } = {},
 ): Promise<ClipMeta> {
   const mime = (opts.mime || "video/webm").split(";")[0].trim().toLowerCase();
   const ext = EXT_BY_MIME[mime] || "webm";
@@ -189,6 +192,7 @@ export async function saveClip(
   }
   const meta: ClipMeta = {
     id, workspaceId, ext, mime, bytes: data.length,
+    ownerEmail: opts.ownerEmail?.trim().toLowerCase() || undefined,
     label: opts.label?.slice(0, 120), at: new Date().toISOString(),
   };
   const clips = await ensureClips();
@@ -229,17 +233,27 @@ export async function readClipBytes(id: string): Promise<{ buf: Buffer; mime: st
   }
 }
 
-export async function listClips(workspaceId: string): Promise<ClipMeta[]> {
+/**
+ * Clips in the workspace. When `forEmail` is given (the portal listing), only that
+ * recruiter's own recordings come back; recruiters never see each other's takes.
+ * Legacy clips with no ownerEmail stay visible to everyone. Internal pipeline callers
+ * (auto-video, captions) omit `forEmail` and keep the workspace-wide view.
+ */
+export async function listClips(workspaceId: string, forEmail?: string): Promise<ClipMeta[]> {
   const clips = await ensureClips();
+  const email = forEmail?.trim().toLowerCase();
   return [...clips.values()]
     .filter((c) => c.workspaceId === workspaceId)
+    .filter((c) => !email || !c.ownerEmail || c.ownerEmail === email)
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
-export async function deleteClip(workspaceId: string, id: string): Promise<boolean> {
+export async function deleteClip(workspaceId: string, id: string, requesterEmail?: string): Promise<boolean> {
   const clips = await ensureClips();
   const meta = clips.get(id);
   if (!meta || meta.workspaceId !== workspaceId) return false;
+  // A recruiter can only delete their own recording (legacy unowned clips are fair game).
+  if (meta.ownerEmail && requesterEmail && meta.ownerEmail !== requesterEmail.trim().toLowerCase()) return false;
   clips.delete(id);
   saveClips();
   await unlink(clipPath(id, meta.ext)).catch(() => {});
