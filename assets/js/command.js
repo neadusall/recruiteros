@@ -3525,71 +3525,134 @@
       var rolesVal = unsavedRoles !== null ? unsavedRoles : roles.join(", ");
       var huntCount = (active.presets || []).length + (active.custom || []).length;
       var st7 = (d.stats && d.stats.today) || null;
-      // Today's numbers as labeled chips, each with a hover "?" explainer so
-      // a recruiter never has to guess what a stat means (owner ask 2026-08-14).
-      function statChip(num, label, tone, help) {
-        return '<span class="lie-chip ' + tone + '" title="' + esc(help) + '" style="cursor:help;margin:2px 3px 2px 0"><b>' + num + "</b> " + esc(label) + ' <span style="opacity:.55;font-weight:700">?</span></span>';
+      // Enterprise layout (owner ask 2026-08-14): header band with status
+      // pills, stat tiles with hover explainers, iconed sections, footer bar.
+      // Scoped styles injected once; every data-lih-* hook is unchanged.
+      if (!document.getElementById("lih-style")) {
+        var lihCss = document.createElement("style");
+        lihCss.id = "lih-style";
+        lihCss.textContent =
+          ".lih-card{padding:0!important;overflow:hidden}" +
+          ".lih-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 20px 14px;border-bottom:1px solid #e8ebf1}" +
+          ".lih-title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;letter-spacing:-.01em}" +
+          ".lih-title svg{width:18px;height:18px;flex:none;opacity:.9}" +
+          ".lih-sub{color:#69708c;font-size:12.5px;margin-top:4px;max-width:780px;line-height:1.5}" +
+          ".lih-pills{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;flex:none}" +
+          ".lih-pill{border-radius:999px;padding:4px 12px;font-size:11.5px;font-weight:600;white-space:nowrap}" +
+          ".lih-pill.on{background:#e7f4ec;color:#166b34}" +
+          ".lih-pill.off{background:#f1f2f6;color:#69708c}" +
+          ".lih-pill.live{background:#eef2fd;color:#2e5bd7;display:inline-flex;align-items:center;gap:6px}" +
+          ".lih-pill.live i{width:7px;height:7px;border-radius:50%;background:#2e5bd7;animation:lihpulse 2s infinite}" +
+          "@keyframes lihpulse{0%,100%{opacity:1}50%{opacity:.35}}" +
+          ".lih-alert{margin:12px 20px 0;padding:9px 13px;border:1px solid #f0d4d4;background:#fdf3f3;color:#a12c2c;border-radius:9px;font-size:12.5px}" +
+          ".lih-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));gap:8px;padding:14px 20px;border-bottom:1px solid #eef1f6;background:#fafbfd}" +
+          ".lih-stat{background:#fff;border:1px solid #e7eaf1;border-radius:10px;padding:10px 12px 9px;cursor:help;position:relative;min-width:0}" +
+          ".lih-stat:hover{border-color:#c9d2e4;box-shadow:0 1px 4px rgba(30,40,70,.06)}" +
+          ".lih-stat b{font-size:19px;font-weight:700;display:block;line-height:1.15;color:#232838}" +
+          ".lih-stat.good b{color:#166b34}.lih-stat.warn b{color:#a12c2c}" +
+          ".lih-stat .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#7d859c;display:block;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
+          ".lih-stat .q{position:absolute;top:8px;right:9px;font-size:9.5px;font-weight:700;color:#98a0b6;border:1px solid #dde2ec;border-radius:50%;width:14px;height:14px;line-height:12.5px;text-align:center}" +
+          ".lih-sec{padding:15px 20px;border-bottom:1px solid #eef1f6}" +
+          ".lih-sec:last-of-type{border-bottom:0}" +
+          ".lih-sec-h{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#565d75;margin-bottom:3px}" +
+          ".lih-sec-h svg{width:13px;height:13px;flex:none;opacity:.75}" +
+          ".lih-sec-h .cnt{background:#eef2fd;color:#2e5bd7;border-radius:999px;padding:1px 8px;font-size:10.5px;letter-spacing:0}" +
+          ".lih-sec-d{color:#7d859c;font-size:12px;margin-bottom:10px;line-height:1.45}" +
+          ".lih-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}" +
+          ".lih-in{border:1px solid #d9dde7;border-radius:8px;padding:8px 11px;font:inherit;font-size:13px;background:#fff;color:inherit}" +
+          ".lih-in:focus{outline:2px solid rgba(46,91,215,.25);border-color:#2e5bd7}" +
+          "textarea.lih-in{width:100%;box-sizing:border-box;resize:vertical;line-height:1.45}" +
+          ".lih-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}" +
+          ".lih-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 20px;background:#fafbfd;border-top:1px solid #eef1f6}" +
+          ".lih-last{margin-left:auto;color:#8b92a8;font-size:12px;white-space:nowrap}";
+        document.head.appendChild(lihCss);
+      }
+      var icoRadar = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.3"/><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r=".8" fill="currentColor" stroke="none"/><path d="M8 1.7v2.1" stroke-linecap="round"/></svg>';
+      var icoSpark = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5l1.6 4 4 1.5-4 1.6L8 12.6 6.4 8.6l-4-1.6 4-1.5L8 1.5z"/><circle cx="13" cy="13" r="1.4"/></svg>';
+      var icoBolt = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M9 1L3.5 9H7l-1 6L11.5 7H8l1-6z"/></svg>';
+      var icoList = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 3.5h9M5 8h9M5 12.5h9"/><circle cx="2.2" cy="3.5" r=".9" fill="currentColor" stroke="none"/><circle cx="2.2" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="2.2" cy="12.5" r=".9" fill="currentColor" stroke="none"/></svg>';
+      var icoScope = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4L14 14"/></svg>';
+      function statTile(num, label, tone, help) {
+        return '<div class="lih-stat ' + tone + '" title="' + esc(help) + '"><b>' + num + "</b><span class='lbl'>" + esc(label) + "</span><span class='q'>?</span></div>";
       }
       var econ = st7
-        ? '<div class="lie-post"><span class="muted" style="margin-right:4px">Today:</span>' +
-          statChip(st7.searches || 0, "hunts run", "", "Searches the radar ran today across your scenarios, roles, and custom hunts. One runs every 15 minutes, around the clock.") +
-          statChip(st7.screened || 0, "posts screened", "", "Hiring posts found and screened by the free checks: is it a real post, does it show hiring intent, have we seen it, did we already touch this person this week.") +
-          statChip(st7.leads || 0, "leads drafted", st7.leads ? "ok" : "", "Decision makers captured with a message drafted and ready. They land in Messages to approve below, or send automatically if their industry is on autopilot.") +
-          statChip(st7.peersBlocked || 0, "recruiters blocked", st7.peersBlocked ? "bad" : "", "Recruiters and staffing agencies the wall stopped today: never captured, never messaged. This is your protection working.") +
-          statChip(st7.profileReads || 0, "profile reads", "", "Profiles opened to verify who the poster is, whether they can receive a message, and that they are not a recruiter. The only per-person API spend.") +
-          statChip(st7.readsSaved || 0, "reads saved", st7.readsSaved ? "ok" : "", "Profile reads skipped because we already know this person is unreachable or excluded (30-day memory). Direct credit savings.") +
-          statChip(st7.hiringChecks || 0, "job-board checks", "", "Company job boards checked to confirm their open roles. Only runs for reachable decision makers after every other gate has passed.") +
+        ? '<div class="lih-stats">' +
+          statTile(st7.searches || 0, "Hunts run", "", "Searches the radar ran today across your scenarios, roles, and custom hunts. One runs every 15 minutes, around the clock.") +
+          statTile(st7.screened || 0, "Posts screened", "", "Hiring posts found and screened by the free checks: is it a real post, does it show hiring intent, have we seen it, did we already touch this person this week.") +
+          statTile(st7.leads || 0, "Leads drafted", st7.leads ? "good" : "", "Decision makers captured with a message drafted and ready. They land in Messages to approve below, or send automatically if their industry is on autopilot.") +
+          statTile(st7.peersBlocked || 0, "Recruiters blocked", st7.peersBlocked ? "warn" : "", "Recruiters and staffing agencies the wall stopped today: never captured, never messaged. This is your protection working.") +
+          statTile(st7.profileReads || 0, "Profile reads", "", "Profiles opened to verify who the poster is, whether they can receive a message, and that they are not a recruiter. The only per-person API spend.") +
+          statTile(st7.readsSaved || 0, "Reads saved", st7.readsSaved ? "good" : "", "Profile reads skipped because we already know this person is unreachable or excluded (30-day memory). Direct credit savings.") +
+          statTile(st7.hiringChecks || 0, "Job-board checks", "", "Company job boards checked to confirm their open roles. Only runs for reachable decision makers after every other gate has passed.") +
           "</div>"
         : "";
       mount.innerHTML =
-        '<div class="card liops-card">' +
-          '<div class="liops-head"><div><b>Role Hunter</b>' +
-            '<div class="muted liops-sub">Hunts LinkedIn for people posting roles they need to fill. Suggested scenarios search around the roles you place; custom phrases hunt anything ("Rippling is hiring", "opening a med spa"). One hunt runs every 15 minutes; found decision makers land in Messages to approve below.</div></div>' +
-            '<span>' +
-              '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span> " +
-              (st.active ? "" : '<span class="lie-chip mut">Standby</span>') +
-            "</span></div>" +
-          (st.active ? "" : ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join(""))) +
-          (d.lastError ? '<div class="lie-post"><span class="lie-chip bad">' + esc(d.lastError) + "</span></div>" : "") +
+        '<div class="card liops-card lih-card">' +
+          '<div class="lih-head">' +
+            "<div>" +
+              '<div class="lih-title">' + icoRadar + "Role Hunter</div>" +
+              '<div class="lih-sub">Finds decision makers posting roles they need filled and drafts your outreach. Standing hunts run every 15 minutes around the clock; everything lands in Messages to approve unless its industry is on autopilot.</div>' +
+            "</div>" +
+            '<div class="lih-pills">' +
+              (st.active ? '<span class="lih-pill live"><i></i>Live</span>' : '<span class="lih-pill off">Standby</span>') +
+              '<span class="lih-pill ' + (auto.enabled ? "on" : "off") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span>" +
+            "</div>" +
+          "</div>" +
+          (st.active ? "" : ((st.reasons || []).map(function (r) { return '<div class="lih-alert">' + esc(r) + "</div>"; }).join(""))) +
+          (d.lastError ? '<div class="lih-alert">' + esc(d.lastError) + "</div>" : "") +
           econ +
-          '<div class="lie-post muted">AI Search: describe who you want to find and it hunts right now (standing hunts below keep running on their own):</div>' +
-          '<div class="lie-actions">' +
-            '<input class="lie-text" data-lih-ask placeholder="e.g. CFOs at Series B fintechs hiring senior accountants" style="flex:1;min-width:260px"> ' +
-            '<button class="btn btn-sm btn-primary" data-lih-hunt>Hunt with AI</button>' +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoSpark + "AI Search</div>" +
+            '<div class="lih-sec-d">Describe who you want to find and it hunts right now. Standing hunts below keep running on their own.</div>' +
+            '<div class="lih-row">' +
+              '<input class="lih-in" data-lih-ask placeholder="e.g. CFOs at Series B fintechs hiring senior accountants" style="flex:1;min-width:260px">' +
+              '<button class="btn btn-sm btn-primary" data-lih-hunt>Hunt with AI</button>' +
+            "</div>" +
+            '<div class="lie-post" data-lih-hunt-status style="display:none;margin-top:8px"></div>' +
           "</div>" +
-          '<div class="lie-post" data-lih-hunt-status style="display:none"></div>' +
-          '<div class="lie-post muted">Active hunts (' + huntCount + "):</div>" +
-          '<div class="lie-post">' + (chips.length ? chips.join(" ") : '<span class="muted">No hunts active: the radar has nothing to look for.</span>') + "</div>" +
-          '<div class="lie-actions">' +
-            '<select class="lie-text" data-lih-pick style="max-width:340px">' +
-              '<option value="">Add a suggested scenario...</option>' +
-              picker.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.label) + " (" + esc(p.hint) + ")</option>"; }).join("") +
-            "</select> " +
-            '<input class="lie-text" data-lih-custom placeholder="Or a custom phrase to hunt, e.g. Rippling is hiring" style="max-width:340px"> ' +
-            '<button class="btn btn-sm btn-ghost" data-lih-addc>Add custom hunt</button>' +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoScope + 'Standing hunts <span class="cnt">' + huntCount + " active</span></div>" +
+            '<div class="lih-sec-d">Suggested scenarios search around the roles you place; custom phrases hunt anything ("Rippling is hiring", "opening a med spa").</div>' +
+            '<div class="lih-chips">' + (chips.length ? chips.join("") : '<span class="muted" style="font-size:12.5px">No hunts active: the radar has nothing to look for.</span>') + "</div>" +
+            '<div class="lih-row">' +
+              '<select class="lih-in" data-lih-pick style="max-width:330px">' +
+                '<option value="">Add a suggested scenario...</option>' +
+                picker.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.label) + " (" + esc(p.hint) + ")</option>"; }).join("") +
+              "</select>" +
+              '<input class="lih-in" data-lih-custom placeholder="Or a custom phrase, e.g. Rippling is hiring" style="max-width:300px">' +
+              '<button class="btn btn-sm btn-ghost" data-lih-addc>Add custom hunt</button>' +
+            "</div>" +
           "</div>" +
-          '<div class="lie-post muted">Set-and-forget industries: leads the radar classifies into these industries send <b>automatically, no approval step</b> (account pacing and daily caps still apply). Everything else waits in Messages to approve.</div>' +
-          '<div class="lie-post">' +
-            ((d.autoIndustries || []).map(function (k) {
-              var opt = null; (d.industryOptions || []).forEach(function (o) { if (o.key === k) opt = o; });
-              return '<span class="lie-chip ok">' + esc(opt ? opt.label : k) + ' <a href="#" data-lih-ind-del="' + esc(k) + '" title="Remove">&times;</a></span>';
-            }).join(" ") || '<span class="muted">No industries on autopilot: every message waits for your approval.</span>') +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoBolt + "Set-and-forget industries</div>" +
+            '<div class="lih-sec-d">Leads classified into these industries send <b>automatically, with no approval step</b> (account pacing, daily caps, and the recruiter wall still apply). Everything else waits in Messages to approve.</div>' +
+            '<div class="lih-chips">' +
+              ((d.autoIndustries || []).map(function (k) {
+                var opt = null; (d.industryOptions || []).forEach(function (o) { if (o.key === k) opt = o; });
+                return '<span class="lie-chip ok">' + esc(opt ? opt.label : k) + ' <a href="#" data-lih-ind-del="' + esc(k) + '" title="Remove">&times;</a></span>';
+              }).join("") || '<span class="muted" style="font-size:12.5px">No industries on autopilot: every message waits for your approval.</span>') +
+            "</div>" +
+            '<div class="lih-row">' +
+              '<select class="lih-in" data-lih-ind-pick style="max-width:330px">' +
+                '<option value="">Put an industry on autopilot...</option>' +
+                (d.industryOptions || []).filter(function (o) { return (d.autoIndustries || []).indexOf(o.key) < 0; })
+                  .map(function (o) { return '<option value="' + esc(o.key) + '">' + esc(o.label) + "</option>"; }).join("") +
+              "</select>" +
+            "</div>" +
           "</div>" +
-          '<div class="lie-actions">' +
-            '<select class="lie-text" data-lih-ind-pick style="max-width:340px">' +
-              '<option value="">Put an industry on autopilot...</option>' +
-              (d.industryOptions || []).filter(function (o) { return (d.autoIndustries || []).indexOf(o.key) < 0; })
-                .map(function (o) { return '<option value="' + esc(o.key) + '">' + esc(o.label) + "</option>"; }).join("") +
-            "</select>" +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoList + "Roles you hunt</div>" +
+            '<div class="lih-sec-d">Comma-separated; any industry, any title. The matched role becomes {job_title} in the message. Expand with AI suggests the adjacent titles for whatever is in the box.</div>' +
+            '<textarea class="lih-in" data-lih-roles rows="2">' + esc(rolesVal) + "</textarea>" +
+            '<div class="lih-row" style="margin-top:8px">' +
+              '<button class="btn btn-sm" data-lih-expand title="Feed it CPA and get Controller, CFO, Assistant Controller...">Expand with AI</button>' +
+              '<button class="btn btn-sm ' + (unsavedRoles !== null ? "btn-primary" : "btn-ghost") + '" data-lih-kwsave>' + (unsavedRoles !== null ? "Save roles (unsaved)" : "Save roles") + "</button>" +
+            "</div>" +
           "</div>" +
-          '<div class="lie-post muted">Roles you hunt (comma-separated; any industry, any title; the matched role becomes {job_title} in the message):</div>' +
-          '<textarea class="lie-text" data-lih-roles rows="2">' + esc(rolesVal) + "</textarea>" +
-          '<div class="lie-actions">' +
-            '<button class="btn btn-sm" data-lih-expand title="AI suggests the adjacent titles for whatever is in the box: feed it CPA and get Controller, CFO, Assistant Controller...">Expand with AI</button> ' +
-            '<button class="btn btn-sm ' + (unsavedRoles !== null ? "btn-primary" : "btn-ghost") + '" data-lih-kwsave>' + (unsavedRoles !== null ? "Save roles (unsaved)" : "Save roles") + "</button> " +
-            '<button class="btn btn-sm btn-ghost" data-lih-scan>Scan now</button> ' +
+          '<div class="lih-foot">' +
+            '<button class="btn btn-sm" data-lih-scan>Scan now</button>' +
             '<button class="btn btn-sm btn-ghost" data-lih-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' + (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button>" +
-            (d.lastScan ? ' <span class="muted" style="align-self:center">Last hunt: ' + esc(new Date(d.lastScan).toLocaleTimeString()) + "</span>" : "") +
+            (d.lastScan ? '<span class="lih-last">Last hunt ' + esc(new Date(d.lastScan).toLocaleTimeString()) + "</span>" : "") +
           "</div>" +
         "</div>";
       function saveIndustries(mutate) {
