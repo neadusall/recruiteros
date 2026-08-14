@@ -87,8 +87,8 @@
 
   /* ---------------- router ---------------- */
   // Projection calculator moved to the in-app command center (Measure → Spending).
-  var ROUTES = { overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, tools: viewTools, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, breaks: viewBreaks, security: viewSecurity };
-  var TITLES = { overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", tools: "Tools & Credits", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", breaks: "Breaks", security: "Security" };
+  var ROUTES = { health: viewHealth, fleet: viewFleet, overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, tools: viewTools, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, breaks: viewBreaks, security: viewSecurity };
+  var TITLES = { health: "System health", fleet: "Fleet verification", overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", tools: "Tools & Credits", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", breaks: "Breaks", security: "Security" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -100,6 +100,119 @@
   $$("#ownerNav .nav-item").forEach(function (a) {
     a.addEventListener("click", function () { location.hash = a.dataset.route; });
   });
+
+  /* ================= SYSTEM HEALTH ================= */
+  // The checks-and-balances board (2026-08-14). A host collector verifies every layer, every
+  // 15 minutes: sending and domains, the supply pipeline, every watcher timer, API credits.
+  // This view renders that snapshot; a stale snapshot (collector itself dead) is a red banner,
+  // never a silently green board. Auto-refreshes every 60s while open.
+  var healthTimer = null;
+  function viewHealth() {
+    if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+    var load = function () {
+      api("/owner/system-health").then(function (h) { renderHealth(h); updateHealthNavDot(h); }).catch(fail);
+    };
+    load();
+    healthTimer = setInterval(function () {
+      if (location.hash.replace("#", "") !== "health") { clearInterval(healthTimer); healthTimer = null; return; }
+      load();
+    }, 60000);
+  }
+  function updateHealthNavDot(h) {
+    var dot = $("#healthNavDot");
+    if (!dot) return;
+    var cls = h.stale || h.summary.bad ? "bad" : h.summary.amber ? "amber" : "good";
+    dot.className = "hc-navdot " + cls;
+  }
+  function renderHealth(h) {
+    var html = '<div class="v-head"><h2>System health</h2><p>Every layer of the sending machine, verified end to end: domains and bounces, the supply pipeline, the fail-safes themselves, and the API credits they run on. Green means verified working, not assumed working.</p></div>';
+    if (h.missing) {
+      html += '<div class="hc-banner">The health collector has never reported. Install it: powershell -ExecutionPolicy Bypass -File C:\\Users\\nead0\\install-health.ps1</div>';
+      $("#view").innerHTML = html; return;
+    }
+    if (h.stale) {
+      html += '<div class="hc-banner">Collector stale: last reading ' + esc(h.ageMin) + ' minutes ago (expected every 15). The board below may be outdated. Check: journalctl -u system-health.service</div>';
+    }
+    var verdict = h.summary.bad ? (h.summary.bad + " system" + (h.summary.bad > 1 ? "s" : "") + " broken") :
+      h.summary.amber ? (h.summary.amber + " item" + (h.summary.amber > 1 ? "s" : "") + " need attention") : "All systems verified";
+    html += '<div class="hc-summary">' +
+      '<div class="hc-pill good"><span class="n">' + h.summary.good + '</span><span class="l">verified</span></div>' +
+      '<div class="hc-pill amber"><span class="n">' + h.summary.amber + '</span><span class="l">attention</span></div>' +
+      '<div class="hc-pill bad"><span class="n">' + h.summary.bad + '</span><span class="l">broken</span></div>' +
+      '<div class="hc-pill"><span class="n" style="font-size:16px">' + esc(verdict) + '</span></div>' +
+      '<div class="hc-meta">Collected ' + esc(h.ageMin == null ? "?" : h.ageMin) + 'm ago · refreshes every 60s</div>' +
+      '</div>';
+    var order = { bad: 0, amber: 1, good: 2 };
+    (h.groups || []).forEach(function (g) {
+      var rows = (h.checks || []).filter(function (c) { return c.group === g; })
+        .sort(function (a, b) { return order[a.status] - order[b.status]; });
+      if (!rows.length) return;
+      html += '<div class="card hc-group"><h3>' + esc(g) + '</h3>';
+      rows.forEach(function (c) {
+        html += '<div class="hc-row">' +
+          '<span class="hc-dot ' + esc(c.status) + '"></span>' +
+          '<span class="hc-name">' + esc(c.name) + '</span>' +
+          '<span class="hc-reading ' + esc(c.status) + '">' + esc(c.reading) + '</span>' +
+          (c.detail ? '<span class="hc-detail">' + esc(c.detail) + '</span>' : '') +
+          '</div>';
+      });
+      html += '</div>';
+    });
+    $("#view").innerHTML = html;
+  }
+
+  /* ================= FLEET VERIFICATION ================= */
+  // Daily full-fleet verification (owner mandate 2026-08-14): every domain and every mailbox
+  // carries an explicit verdict, the reasons when unhealthy, and the concrete fix. Healthy
+  // mailboxes are collapsed to a count; problems are always fully listed.
+  function viewFleet() {
+    api("/owner/fleet-verify").then(renderFleet).catch(fail);
+  }
+  function vpill(v) { var c = v === "healthy" ? "good" : v === "warning" ? "amber" : "bad"; return '<span class="hc-dot ' + c + '" style="display:inline-block;margin-right:8px"></span>'; }
+  function fleetSummary(label, s) {
+    return '<div class="hc-pill good"><span class="n">' + (s.healthy || 0) + '</span><span class="l">' + label + ' healthy</span></div>' +
+      '<div class="hc-pill amber"><span class="n">' + (s.warning || 0) + '</span><span class="l">warning</span></div>' +
+      '<div class="hc-pill bad"><span class="n">' + (s.unhealthy || 0) + '</span><span class="l">unhealthy</span></div>';
+  }
+  function fleetRow(name, row) {
+    var h = '<div class="hc-row">' + vpill(row.verdict) +
+      '<span class="hc-name">' + esc(name) + '</span>';
+    if (row.verdict === "healthy") h += '<span class="hc-reading">verified healthy</span>';
+    else {
+      h += '<span class="hc-reading ' + (row.verdict === "warning" ? "amber" : "bad") + '">' + esc(row.reasons[0] || "") + (row.reasons.length > 1 ? " (+" + (row.reasons.length - 1) + " more)" : "") + '</span>';
+      var pairs = [];
+      for (var i = 0; i < row.reasons.length; i++) {
+        // A single reason already sits in the reading line; only its fix goes below.
+        var lead = row.reasons.length === 1 ? '' : esc(row.reasons[i]) + ' → ';
+        pairs.push(lead + (row.fixes[i] ? '<b>Fix:</b> ' + esc(row.fixes[i]) : esc(row.reasons[i])));
+      }
+      h += '<span class="hc-detail">' + pairs.join('<br/>') + '</span>';
+    }
+    return h + '</div>';
+  }
+  function renderFleet(f) {
+    var html = '<div class="v-head"><h2>Fleet verification</h2><p>Every sending domain and every mailbox, verified daily: DNS authentication, blacklist, web presence, bounce pressure, warm-up, rest state, and provider-side existence. Anything not healthy says why and what to do about it.</p></div>';
+    if (f.missing) {
+      html += '<div class="hc-banner">The fleet verifier has never reported. Install its timer: powershell -ExecutionPolicy Bypass -File C:\\Users\\nead0\\install-monitoring.ps1</div>';
+      $("#view").innerHTML = html; return;
+    }
+    if (f.stale) html += '<div class="hc-banner">Verification stale: last full sweep ' + esc(Math.round((f.ageMin || 0) / 60)) + ' hours ago (expected daily). journalctl -u fleet-verify.service</div>';
+    html += '<div class="hc-summary">' + fleetSummary("domains", f.domainSummary || {}) +
+      '<div class="hc-meta">Swept ' + esc(f.ageMin == null ? "?" : Math.round(f.ageMin / 60) + "h") + ' ago</div></div>';
+    html += '<div class="card hc-group"><h3>Domains (' + (f.domains || []).length + ')</h3>';
+    (f.domains || []).forEach(function (d) {
+      html += fleetRow(d.domain + (d.metrics && d.metrics.resting ? " · resting" : ""), d);
+    });
+    html += '</div>';
+    var mb = f.mailboxes || [];
+    var bad = mb.filter(function (m) { return m.verdict !== "healthy"; });
+    html += '<div class="hc-summary" style="margin-top:18px">' + fleetSummary("mailboxes", f.mailboxSummary || {}) + '</div>';
+    html += '<div class="card hc-group"><h3>Mailboxes needing attention (' + bad.length + ' of ' + mb.length + ')</h3>';
+    if (!bad.length) html += '<p class="note">Every mailbox verified healthy. The ' + mb.length + ' healthy boxes are collapsed.</p>';
+    bad.forEach(function (m) { html += fleetRow(m.email, m); });
+    html += '</div>';
+    $("#view").innerHTML = html;
+  }
 
   /* ================= OVERVIEW ================= */
   function viewOverview() {
@@ -4668,5 +4781,55 @@
     $("#view").innerHTML = '<div class="card"><p class="note">Could not load this view. ' + (status === 404 ? "Access restricted." : "Try again.") + '</p></div>';
   }
 
-  boot();
+  // Screenshot/preview harness: ?healthdemo=1 renders the Health board with SAMPLE data only
+  // (no API calls, no real numbers, gate untouched otherwise). Used for pre-deploy visual checks.
+  if (new URLSearchParams(location.search).has("fleetdemo")) {
+    $("#gate").style.display = "none";
+    $("#shell").style.display = "";
+    $("#pageTitle").textContent = "Fleet verification";
+    renderFleet({
+      ageMin: 190, stale: false,
+      domainSummary: { healthy: 28, warning: 4, unhealthy: 1 },
+      mailboxSummary: { healthy: 872, warning: 24, unhealthy: 4 },
+      domains: [
+        { domain: "lumeshire.com", verdict: "unhealthy", reasons: ["DKIM selector missing"], fixes: ["Re-provision DKIM (selector1) for this domain at Sending.ac, then publish the CNAME"], metrics: {} },
+        { domain: "lumeworkforce.com", verdict: "warning", reasons: ["Benched by the circuit breaker: 10 bounce notices against 27 sends (until 2026-08-14)", "Domain web root shows a registrar parking page"], fixes: ["No action: warm-up continues and it auto-revives when served and clean", "Deploy the branded landing page (filters browse sending domains)"], metrics: { resting: true } },
+        { domain: "lumerecruiters.com", verdict: "healthy", reasons: [], fixes: [], metrics: {} },
+        { domain: "lumetalentsearch.com", verdict: "healthy", reasons: [], fixes: [], metrics: {} }
+      ],
+      mailboxes: [
+        { email: "ariel@lumeadvisor.com", verdict: "unhealthy", reasons: ["Mailbox does not exist at the provider (404)"], fixes: ["Re-provision this mailbox at Sending.ac or remove it from the senders roster"], metrics: {} },
+        { email: "rnead@lumerecruiters.com", verdict: "warning", reasons: ["3 recent bounce notices from this mailbox"], fixes: ["Rotation already spreads volume; if this repeats tomorrow, retire the address"], metrics: {} },
+        { email: "sam.w@lumepeople.com", verdict: "healthy", reasons: [], fixes: [], metrics: {} }
+      ]
+    });
+  } else
+  if (new URLSearchParams(location.search).has("healthdemo")) {
+    $("#gate").style.display = "none";
+    $("#shell").style.display = "";
+    $("#pageTitle").textContent = "System health";
+    renderHealth({
+      ageMin: 4, stale: false,
+      summary: { good: 19, amber: 5, bad: 2 },
+      groups: ["Sending & domains", "Supply pipeline", "Watchers & fail-safes", "API credits & providers"],
+      checks: [
+        { group: "Sending & domains", status: "good", name: "Daily send volume", reading: "312 sent / cap 457", detail: "Governor: 450/day base, +20%/week while the seed test passes" },
+        { group: "Sending & domains", status: "amber", name: "Domains resting (circuit breaker)", reading: "16 resting", detail: "Benched, warm-up continues, auto-revive: lumerecruiters.com, lumetalentsearch.com +14 more" },
+        { group: "Sending & domains", status: "good", name: "Fresh bounce pressure", reading: "13 recent notices", detail: "245 addresses on the permanent suppression list" },
+        { group: "Sending & domains", status: "good", name: "Domain authentication (SPF/DKIM/DMARC)", reading: "31/31 sending domains fully authed", detail: "" },
+        { group: "Sending & domains", status: "good", name: "Gmail inbox placement (seed test)", reading: "24 inbox / 0 spam, 2d ago", detail: "Feeds the volume governor and the Google gate" },
+        { group: "Supply pipeline", status: "bad", name: "Curation tick (enrichment engine)", reading: "FAILING: curation tick exceeded 420s watchdog", detail: "Nothing downstream (managers, emails, validation) advances while this fails" },
+        { group: "Supply pipeline", status: "amber", name: "Validation backlog", reading: "1509 awaiting validation", detail: "Drains automatically while the curation tick completes" },
+        { group: "Supply pipeline", status: "good", name: "New prospects curated today", reading: "1077 today", detail: "Sourcing belt output: watchlists, JD feeds, signals" },
+        { group: "Watchers & fail-safes", status: "bad", name: "Nightly bulk validation", reading: "last run 18h ago, FAILED (exit-code)", detail: "Last run exited with an error: check journalctl -u email-validate-batch.service" },
+        { group: "Watchers & fail-safes", status: "good", name: "Bounce sweep (4-hourly)", reading: "last run 32m ago, ok", detail: "" },
+        { group: "Watchers & fail-safes", status: "good", name: "Reply monitor bridge", reading: "last run 12m ago, ok", detail: "" },
+        { group: "API credits & providers", status: "good", name: "Sending.ac mailbox API", reading: "reachable, authenticated", detail: "" },
+        { group: "API credits & providers", status: "amber", name: "Reoon validation credits", reading: "key set, balance unknown", detail: "Balance endpoint unavailable; watch validated-today instead" },
+        { group: "API credits & providers", status: "good", name: "Anthropic key (email writer)", reading: "configured", detail: "" }
+      ]
+    });
+  } else {
+    boot();
+  }
 })();

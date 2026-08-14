@@ -1042,6 +1042,96 @@
       return ok({ campaigns: d.campaigns });
     }
 
+    // --- LinkedIn comment listener (offline demo) -----------------------------
+    // Mirrors /api/linkedin/comments (the Post engagement radar) so the panel is
+    // fully clickable with no server. SAMPLE data; the real backend wins when up.
+    if (p === "/linkedin/comments") {
+      if (!d.commentWatch) {
+        d.commentWatch = {
+          status: { active: true, engineReady: true, aiReady: true, paused: false, reasons: [] },
+          autopilot: { enabled: false, source: "off" },
+          keywords: ["BCBA", "RBT", "Clinical Director", "Speech Language Pathologist", "Occupational Therapist", "Nurse Practitioner"],
+          scenarioPresets: [
+            { id: "hiring_role", label: "Posting an opening for a role I place", hint: "They announced they are hiring one of your roles" },
+            { id: "urgent_backfill", label: "Urgent or backfill hires", hint: "Urgent, immediate, or backfill language on your roles" },
+            { id: "struggling_to_fill", label: "Struggling to fill a role", hint: "Complaining a search is hard: your MPC lands best here" },
+            { id: "team_growth", label: "Announcing team growth", hint: "Growing, expanding, or doubling the team" },
+            { id: "new_location", label: "Opening a new location", hint: "New office, clinic, or market: staffing follows" },
+            { id: "funding_growth", label: "Funding or rapid growth news", hint: "Raises and growth announcements: hiring comes next" }
+          ],
+          scenarios: { presets: ["hiring_role", "urgent_backfill", "struggling_to_fill"], custom: [] },
+          lastScan: new Date().toISOString(),
+          items: [
+            {
+              id: "licw_demo0", kind: "poster", tier: "hot", decisionMaker: true, peer: false,
+              authorName: "Priya Raghavan", authorHeadline: "Chief Operating Officer at Alderwood Care Group",
+              title: "Chief Operating Officer", company: "Alderwood Care Group",
+              openProfile: true,
+              postExcerpt: "We are hiring a Clinic Director and two Nurse Practitioners for our new Bentonville location. Finding clinicians who stay past month six has been our hardest problem. If you know someone great, send them my way.",
+              hiring: { checked: true, openRoles: 9, sample: ["Clinic Director", "Nurse Practitioner", "Care Coordinator"] },
+              dmStatus: "suggested",
+              dmText: "A Clinic Director plus two NPs for a brand-new location is the exact search where month-six retention gets decided. Placing clinicians who stay is what we do all day, happy to send over a couple of profiles worth comparing against your bar. What has been the sticking point on the director search so far?",
+              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            },
+            {
+              id: "licw_demo1", kind: "poster", tier: "hot", decisionMaker: true, peer: false,
+              authorName: "Marcus Bell", authorHeadline: "Director of Engineering at Corvid Systems",
+              title: "Director of Engineering", company: "Corvid Systems",
+              openProfile: true, matchedRole: "Clinical Director",
+              postExcerpt: "We are growing again: hiring a Clinical Director for our Rogers clinic. If you know a strong BCBA leader ready for the next step, my inbox is open.",
+              hiring: { checked: true, openRoles: 4, sample: ["Clinical Director", "BCBA", "RBT"] },
+              dmStatus: "suggested",
+              dmText: "Saw your post for a Clinical Director. I just wrapped a Clinical Director search and two finalists who did not get the offer are still open. Want me to send them over?",
+              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            }
+          ]
+        };
+        save(d);
+      }
+      var cw = d.commentWatch;
+      function cwItem(id) { var f = null; cw.items.forEach(function (x) { if (x.id === id) f = x; }); return f; }
+      if (method === "POST" && body) {
+        var it = body.id ? cwItem(body.id) : null;
+        if (body.action === "scan") { cw.lastScan = new Date().toISOString(); save(d); return ok({ scanned: 0, created: 0, view: cw }); }
+        if (body.action === "pause" || body.action === "resume") { cw.status.paused = body.action === "pause"; save(d); return ok({ view: cw }); }
+        if (body.action === "auto_on" || body.action === "auto_off") {
+          cw.autopilot = { enabled: body.action === "auto_on", source: body.action === "auto_on" ? "manual" : "off" };
+          save(d); return ok({ view: cw });
+        }
+        if (body.action === "scenarios_set") {
+          cw.scenarios = {
+            presets: Array.isArray(body.presets) ? body.presets : [],
+            custom: Array.isArray(body.custom) ? body.custom : []
+          };
+          save(d); return ok({ view: cw });
+        }
+        if (body.action === "keywords_set") {
+          var kws = String(body.text || "").split(",").map(function (k) { return k.trim().toLowerCase(); }).filter(Boolean);
+          cw.keywords = kws.length ? kws : ["we are hiring", "we're hiring", "now hiring", "looking to hire", "open role", "growing our team"];
+          save(d); return ok({ view: cw });
+        }
+        if (!it) return ok({ view: cw });
+        if (body.action === "approve") {
+          if (body.text) it.replyText = body.text;
+          it.replyStatus = "approved";
+          save(d); return ok({ accepted: true, view: cw });
+        }
+        if (body.action === "dm_approve") { if (body.text) it.dmText = body.text; it.dmStatus = "approved"; save(d); return ok({ accepted: true, view: cw }); }
+        if (body.action === "dm_skip") { it.dmStatus = "skipped"; save(d); return ok({ view: cw }); }
+        if (body.action === "dm_edit") { if (body.text) it.dmText = body.text; save(d); return ok({ view: cw }); }
+        if (body.action === "skip") { it.replyStatus = "skipped"; save(d); return ok({ view: cw }); }
+        if (body.action === "edit") { if (body.text) it.replyText = body.text; save(d); return ok({ view: cw }); }
+        if (body.action === "draft") {
+          it.replyText = "Glad it landed. If you ever see the other side of this, the screening rubric is the piece worth copying.";
+          it.replyStatus = "suggested"; save(d); return ok({ drafted: true, view: cw });
+        }
+        if (body.action === "connect_approve") { it.connectStatus = "approved"; save(d); return ok({ accepted: true, view: cw }); }
+        if (body.action === "connect_skip") { it.connectStatus = "skipped"; save(d); return ok({ view: cw }); }
+        return ok({ view: cw });
+      }
+      return ok(cw);
+    }
+
     // --- JD Sourcing (offline demo) -------------------------------------------
     // Mirrors /api/sourcing so the JD Sourcing tab is fully clickable with no
     // server + no API keys. Data is clearly labeled SAMPLE/demo; once the real

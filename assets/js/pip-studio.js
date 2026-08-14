@@ -49,7 +49,25 @@
   }
 
   /* ---------------- persistence ---------------- */
-  var LS = { style: "ros_pip_style", clip: "ros_pip_clip", results: "ros_pip_results", filter: "ros_pip_filter", dur: "ros_pip_dur" };
+  // Studio state is PERSONAL (your clip, your generated videos). Cache keys are namespaced by
+  // the signed-in user so switching accounts in the same browser can never restore a teammate's
+  // recordings or "Ready" tiles. Identity comes from the portal ctx; if this page loaded with
+  // only the session cookie, resolve it synchronously (same pattern as session-bridge.js).
+  var WHO = "";
+  try { var _ctx = JSON.parse(localStorage.getItem("ros_ctx") || "null"); WHO = String((_ctx && _ctx.user && _ctx.user.email) || "").toLowerCase(); } catch (e) {}
+  if (!WHO) {
+    try {
+      var _x = new XMLHttpRequest();
+      _x.open("GET", API + "/api/auth/session", false); _x.withCredentials = true; _x.send();
+      if (_x.status === 200) { var _a = JSON.parse(_x.responseText); WHO = String((_a && _a.user && _a.user.email) || "").toLowerCase(); }
+    } catch (e) {}
+  }
+  var NS = WHO ? "::" + WHO : "";
+  var LS = { style: "ros_pip_style" + NS, clip: "ros_pip_clip" + NS, results: "ros_pip_results" + NS, filter: "ros_pip_filter" + NS, dur: "ros_pip_dur" + NS };
+  // Purge the old shared (un-namespaced) keys: they can carry another account's state.
+  ["ros_pip_style", "ros_pip_clip", "ros_pip_results", "ros_pip_filter", "ros_pip_dur"].forEach(function (k) {
+    try { localStorage.removeItem(k); } catch (e) {}
+  });
   function lsGet(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 

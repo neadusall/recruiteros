@@ -1232,14 +1232,22 @@
           "<td>" + title(s.priority) + "</td><td>" + s.weight + "</td><td>" + s.demand + "</td><td>" + s.allocated + "</td><td>" + s.usedToday + "</td></tr>";
       }).join("");
       var queue = d.queue.map(function (q) {
+        // Sent rows stay 48h so each send visibly flips to "confirmed on
+        // LinkedIn" once the read-back finds the message in the actual chat.
+        var sent = q.status === "success";
+        var statusCell = sent
+          ? (q.confirmedAt
+            ? pill("Sent · confirmed on LinkedIn", "green")
+            : pill("Sent · confirming on LinkedIn...", "amber"))
+          : statusPill(q.status) + (q.statusReason ? "<div class='lio-dim lio-clip'>" + esc(q.statusReason) + "</div>" : "");
         return "<tr data-id='" + esc(q.id) + "'><td>" + (q.at ? when(q.at) : "") + "</td>" +
           "<td>" + esc(ACTION_LABEL[q.actionType] || title(q.actionType)) + "</td>" +
           "<td>" + esc(q.personName) + "</td><td>" + esc(q.campaignName || title(q.businessUnit)) + "</td>" +
-          "<td>" + statusPill(q.status) + (q.statusReason ? "<div class='lio-dim lio-clip'>" + esc(q.statusReason) + "</div>" : "") + "</td>" +
+          "<td>" + statusCell + "</td>" +
           "<td class='lio-actions'>" +
           (q.status === "capacity_pending" ? "<button class='btn btn-sm btn-ghost' data-op='allow'>Allow temporary capacity</button>" : "") +
           "<button class='btn btn-sm btn-ghost' data-op='explain'>Why</button>" +
-          "<button class='btn btn-sm btn-ghost' data-op='cancel'>Cancel</button></td></tr>";
+          (sent ? "" : "<button class='btn btn-sm btn-ghost' data-op='cancel'>Cancel</button>") + "</td></tr>";
       }).join("");
       var weekly = Object.keys(o.weekly).map(function (k) {
         var wv = o.weekly[k];
@@ -1261,7 +1269,17 @@
         '<div class="card lio-card"><div class="lio-card-t">Fair capacity allocation</div>' +
         (alloc ? '<div class="lio-tablewrap"><table class="lio-table"><thead><tr><th>Consumer</th><th>Unit</th><th>Priority</th><th>Weight</th><th>Demand</th><th>Allocated</th><th>Used today</th></tr></thead><tbody>' + alloc + "</tbody></table></div>"
           : '<div class="empty">No competing consumers right now. Unused allocation is released dynamically.</div>') + "</div></div>" +
-        '<div class="card lio-card"><div class="lio-card-t">Wait queue and scheduled actions</div>' +
+        '<div class="card lio-card"><div class="lio-card-t">Wait queue and scheduled actions' + (function () {
+          // Send scorecard (owner ask 2026-08-14): sent / confirmed-on-LinkedIn
+          // / unreachable at a glance, computed from the 48h rows below.
+          var done = d.queue.filter(function (q) { return q.status === "success" || q.status === "failed"; });
+          if (!done.length) return "";
+          var sent = done.filter(function (q) { return q.status === "success"; });
+          var conf = sent.filter(function (q) { return q.confirmedAt; });
+          var failed = done.length - sent.length;
+          return " · " + pill(sent.length + " sent", "green") + " " + pill(conf.length + " confirmed on LinkedIn", conf.length ? "green" : "") +
+            (failed ? " " + pill(failed + " unreachable / failed", "red") : "");
+        })() + "</div>" +
         (queue ? '<div class="lio-tablewrap"><table class="lio-table"><thead><tr><th>Time</th><th>Action</th><th>Person</th><th>Source</th><th>Status</th><th></th></tr></thead><tbody>' + queue + "</tbody></table></div>"
           : '<div class="empty">Nothing queued or waiting.</div>') + "</div>";
 
