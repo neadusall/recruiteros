@@ -81,14 +81,24 @@ const DEFAULT_MARKET_KEYWORDS = [
  * character threshold. House style: no em-dashes, no links, no exclamations.
  */
 const MPC_DM_TEMPLATES = [
-  // Believability rules (owner ask 2026-08-14): one title mention per note,
-  // no repeated "search just closed" story, no brochure phrases ("still
-  // warm", "top two"), soft low-pressure close. Same house style otherwise.
-  "Saw your {job_title} post. I recruit that lane and have two people in process right now who could fit. Want me to send their profiles over?",
-  "{first_name}, your {job_title} opening caught my eye. I work these searches weekly and have a couple of vetted people worth a look. Can I send them?",
-  "Noticed the {job_title} role. A recent search left me with two strong finalists who are still open. Happy to share them if useful.",
-  "Quick note on your {job_title} post. I have a short bench of vetted candidates for exactly this and can send one or two today. Interested?",
-  "{first_name}, saw you are hiring a {job_title}. I place these roles and two people I know well are actively looking. Worth a quick look?",
+  // Owner's bank (2026-08-14): local-market proof anchored on {current_city},
+  // pulled from the post itself, else the poster's profile location, else the
+  // graceful "your market". House style: no em-dashes, no links.
+  "{first_name}, saw your recent post for a {job_title} in {current_city} and thought I might be able to help. We filled a similar role there a few months back and still know a few strong candidates. Want me to reconnect with them?",
+  "Saw your recent {job_title} post, {first_name}, and figured I'd reach out. We worked a similar search in {current_city} about 3 months ago and had a few great people we couldn't place. Happy to circle back with them.",
+  "{first_name}, I came across your recent {job_title} post and thought I could help. We recently filled one in {current_city} and had several strong finalists. I can see if any are still open if that'd be useful.",
+  "{first_name}, your {job_title} opening caught my eye. We filled a similar role in {current_city} a few months ago and met some really good people in the process. Want me to see who might still be open?",
+  "We recently filled a {job_title} in {current_city}, so when I saw your opening I figured it was worth reaching out. I still know a couple strong candidates from that search. Want me to check their interest?",
+  "Saw you're hiring a {job_title}, {first_name}. We just worked this market in {current_city} recently and had more good candidates than we could place. I'd be happy to reconnect with a few for you.",
+  "{first_name}, saw your recent post and thought I might be able to save you some searching. We filled a similar {job_title} role in {current_city} recently and still have relationships with a few of the finalists. Interested?",
+  "Your {job_title} post caught my attention. We were recruiting for a similar role in {current_city} a few months back, so we already know some of the talent in that market. Want me to make a few calls?",
+  "{first_name}, we recently wrapped up a {job_title} search in {current_city}. A few candidates we really liked didn't get the final seat and may still be open. Happy to circle back with them for your role.",
+  "Saw your recent post for a {job_title}, {first_name}. Coincidentally, we filled a similar role in {current_city} about 3 months ago. I can reach back out to a few people from that search and see who's still open.",
+  "{first_name}, timing might actually be good here. We recently placed a {job_title} in {current_city} and still know a few strong people from that search. Want me to see if any would entertain your opportunity?",
+  "We filled a similar {job_title} role in {current_city} recently, so we wouldn't exactly be starting from scratch on yours. I can reconnect with a few people we already know and see who's open. Worth doing?",
+  "{first_name}, saw the {job_title} opening. We were just in the {current_city} market on a similar search and spoke with several people who could be worth revisiting. Want me to reach back out?",
+  "Saw your recent hiring post and thought I'd reach out rather than send the usual recruiter pitch. We recently filled a {job_title} in {current_city} and still know a few strong people from that search. Want me to check?",
+  "{first_name}, saw your post and thought this might actually be one we could help with quickly. We filled a similar {job_title} in {current_city} recently. I can reconnect with a few candidates from that search if useful.",
 ];
 const MAX_DM_CHARS = 300;
 
@@ -158,18 +168,54 @@ const GROWTH_DM_TEMPLATES = [
 ];
 
 /** Deterministic template pick + fill; trims to the DM threshold. */
-function mpcDmFor(seed: string, jobTitle: string, firstName?: string, bank: "mpc" | "growth" = "mpc"): string {
+function mpcDmFor(seed: string, jobTitle: string, firstName?: string, bank: "mpc" | "growth" = "mpc", city?: string): string {
   const pool = bank === "growth" ? GROWTH_DM_TEMPLATES : MPC_DM_TEMPLATES;
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   let t = pool[h % pool.length];
-  if (t.includes("{first_name}") && !firstName) t = pool[0];
+  // No first name known: fall to a template that never mentions one.
+  if (t.includes("{first_name}") && !firstName) {
+    t = pool.find((x) => !x.includes("{first_name}")) ?? t.replace(/\{first_name\},?\s*/g, "");
+  }
   const out = t
     .replace(/\{job_title\}/g, jobTitle)
     .replace(/\{first_name\}/g, firstName ?? "")
+    .replace(/\{current_city\}/gi, city || "your market")
     .replace(/^,\s*/, "")
     .trim();
   return scrub(out).slice(0, MAX_DM_CHARS);
+}
+
+/* ---------------- {current_city} extraction (owner ask 2026-08-14) --------
+   The city the role is IN, read from the post text first ("hiring a BCBA in
+   Austin, TX"), else from the poster's profile location, else the graceful
+   "your market" so no message ever ships with a hole or a wrong guess. ---- */
+
+const CITY_STOPWORDS = new Set([
+  "the", "our", "a", "an", "this", "that", "person", "healthcare", "health",
+  "remote", "office", "clinic", "school", "person", "usa", "us", "america",
+]);
+
+/** Conservative post parse: only accept "in City, ST" / "in City, Statename"
+ *  shapes - a bare "in Something" is too often not a place. */
+export function cityFromPost(text: string): string | undefined {
+  const m = /\bin\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,2})\s*,\s*([A-Z]{2}\b|[A-Z][a-z]{3,})/.exec(text ?? "");
+  if (!m) return undefined;
+  const city = m[1].trim();
+  if (CITY_STOPWORDS.has(city.toLowerCase())) return undefined;
+  return city;
+}
+
+/** Profile location -> city: "Greater Chicago Area" -> "Chicago",
+ *  "Austin, Texas Metropolitan Area" -> "Austin". */
+export function cityFromLocation(location?: string): string | undefined {
+  if (!location) return undefined;
+  let c = location.split(",")[0].trim()
+    .replace(/^Greater\s+/i, "")
+    .replace(/\s+(Metropolitan\s+)?Area$/i, "")
+    .replace(/\s+Metro(politan)?$/i, "");
+  if (!c || c.length < 3 || /United States|Remote/i.test(c)) return undefined;
+  return c;
 }
 
 /** Belt + suspenders on top of the keyword search: the post text itself must
@@ -626,7 +672,7 @@ function parseComment(c: Dict): RawComment | null {
 /** One profile read: provider id, headline, open-profile flag, distance.
  *  Accepts a provider id OR a public slug (linkedin.com/in/<slug>). */
 async function fetchProfileLite(account: LiAccountState, identifier: string): Promise<{
-  providerId?: string; name?: string; headline?: string; publicUrl?: string; openProfile?: boolean; networkDistance?: string;
+  providerId?: string; name?: string; headline?: string; publicUrl?: string; openProfile?: boolean; networkDistance?: string; location?: string;
 }> {
   try {
     const { unipileRequest } = await import("./provider");
@@ -640,6 +686,7 @@ async function fetchProfileLite(account: LiAccountState, identifier: string): Pr
       publicUrl: str(p.public_identifier) ? `https://www.linkedin.com/in/${str(p.public_identifier)}` : undefined,
       openProfile: typeof p.is_open_profile === "boolean" ? p.is_open_profile : undefined,
       networkDistance: str(p.network_distance),
+      location: str(p.location),
     };
   } catch { return {}; }
 }
@@ -1171,7 +1218,10 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     const id = rid("licw");
     const jobTitle = combo.role ?? roles[0] ?? "candidate";
     const firstName = authorName.split(/\s+/)[0];
-    const dmText = mpcDmFor(id, jobTitle, firstName && firstName !== "LinkedIn" ? firstName : undefined, combo.dmBank);
+    // {current_city}: the post text names where the role is; the poster's
+    // profile location is the fallback; "your market" when neither is known.
+    const city = cityFromPost(c.text) ?? cityFromLocation(prof.location);
+    const dmText = mpcDmFor(id, jobTitle, firstName && firstName !== "LinkedIn" ? firstName : undefined, combo.dmBank, city);
 
     state.items.push({
       id, workspaceId, kind: "poster",
