@@ -182,12 +182,16 @@ async function attempt(
     const out = await fn();
     return { ok: true, action, providerMessageId: out.providerMessageId };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    // Log the provider's validation detail separately: a bare "422" told us
-    // nothing while every first-touch DM failed (2026-08-13/14). Kept OUT of
-    // the returned error string so the health classifier and the retryable
-    // regex in markResult keep matching on the stable message alone.
+    let message = err instanceof Error ? err.message : String(err);
+    // Surface the provider's error class in the message ("invalid_recipient:
+    // Recipient cannot be reached") - it drives retry classification (invalid_*
+    // never retries) and gives the Breaks layer a human reason instead of a
+    // bare status code. Full body still goes to the logs.
     if (err instanceof UnipileError && err.body !== undefined) {
+      const b = err.body as { type?: unknown; title?: unknown };
+      const slug = typeof b?.type === "string" ? b.type.replace(/^errors\//, "") : "";
+      const title = typeof b?.title === "string" ? b.title : "";
+      if (slug || title) message += ` (${[slug, title].filter(Boolean).join(": ")})`;
       try { console.log(`[unipile:${action}] ${message} body=${JSON.stringify(err.body).slice(0, 500)}`); } catch { /* unserializable body */ }
     }
     return { ok: false, action, error: message };

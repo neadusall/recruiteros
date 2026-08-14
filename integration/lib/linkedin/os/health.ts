@@ -87,11 +87,21 @@ export async function recordResult(
 ): Promise<LiAccountState> {
   return withEngineLock(async () => {
     const a = await ensureAccountInLock(workspaceId, accountId);
-    a.recentResults.push({ ok, at: nowIso(), kind });
-    if (a.recentResults.length > WINDOW) a.recentResults.splice(0, a.recentResults.length - WINDOW);
+    // Recipient-level failures (unreachable / invalid target) say nothing
+    // about the ACCOUNT's health. Counting them cooled the whole account
+    // down whenever a batch of unmessageable targets hit the belt, blocking
+    // the good sends too (seen live 2026-08-14: invalid_recipient loop).
+    // They surface as signals + failed actions, but stay out of the window.
+    const recipientLevel = !ok && !!error && /invalid_recipient|cannot be reached/i.test(error);
+    if (!recipientLevel) {
+      a.recentResults.push({ ok, at: nowIso(), kind });
+      if (a.recentResults.length > WINDOW) a.recentResults.splice(0, a.recentResults.length - WINDOW);
+    }
 
     if (!ok && error) {
-      if (looksLikeRestriction(error)) {
+      if (recipientLevel) {
+        pushSignal(a, "action_failed", `${kind ?? "action"}: ${error.slice(0, 160)}`);
+      } else if (looksLikeRestriction(error)) {
         pushSignal(a, "provider_restriction", error.slice(0, 200));
         stepDown(a, "cooldown", "Provider restriction style response detected");
       } else if (/auth|credential|token|401/i.test(error)) {
@@ -137,11 +147,15 @@ function stepDown(a: LiAccountState, to: AccountHealthState, reason: string): vo
 
 /** Failure-rate driven state machine over the rolling window. */
 function reevaluate(a: LiAccountState): void {
-  // Cooldown expiry: step back to elevated so recovery is gradual.
+  // Cooldown expiry: step back to elevated so recovery is gradual. The
+  // failure window is consumed by the served cooldown - carrying it forward
+  // re-triggered a fresh cooldown on the very next result, making the
+  // cooldown effectively endless (seen live 2026-08-14).
   if (a.health === "cooldown" && a.cooldownUntil && a.cooldownUntil <= nowIso()) {
     a.health = "elevated";
     a.healthReason = "Cooling down finished; velocity reduced while recovering";
     a.cooldownUntil = undefined;
+    a.recentResults = a.recentResults.filter((r) => r.ok);
   }
   if (a.health === "paused" || a.health === "disconnected" || a.health === "cooldown") return;
 
@@ -194,6 +208,8 @@ export function liftExpiredCooldown(a: LiAccountState | null): void {
   a.health = "elevated";
   a.healthReason = "Cooling down finished; velocity reduced while recovering";
   a.cooldownUntil = undefined;
+  // The served cooldown consumes the failure window (see reevaluate).
+  a.recentResults = a.recentResults.filter((r) => r.ok);
   a.updatedAt = nowIso();
   accounts.save();
 }

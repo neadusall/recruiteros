@@ -95,12 +95,15 @@ export async function liveQueue(workspaceId: string, limit = 100): Promise<Queue
   ]);
   const cName = new Map(campaigns.map((c) => [c.id, c.name]));
   const iName = new Map(idents.map((i) => [i.id, i.fullName ?? "Unknown"]));
-  // Recently sent rows stay visible so the owner can watch each send flip to
-  // "confirmed on LinkedIn" (read-back), instead of items vanishing on send.
+  // Recently sent AND recently failed rows stay visible: sends so the owner
+  // can watch each flip to "confirmed on LinkedIn" (read-back), failures so
+  // an unreachable recipient is seen and handled, never silently dropped.
   const sentCutoff = Date.now() - SENT_VISIBLE_HOURS * 3_600_000;
+  const recentlyDone = (r: LiActionRecord) =>
+    (r.status === "success" || r.status === "failed")
+    && (r.completedAt ?? "") >= new Date(sentCutoff).toISOString();
   return rows
-    .filter((r) => QUEUE_PENDING.includes(r.status)
-      || (r.status === "success" && r.completedAt && new Date(r.completedAt).getTime() >= sentCutoff))
+    .filter((r) => QUEUE_PENDING.includes(r.status) || recentlyDone(r))
     .sort((a, b) => (a.scheduledAt ?? a.requestedAt) < (b.scheduledAt ?? b.requestedAt) ? -1 : 1)
     .slice(0, limit)
     .map((r) => ({
@@ -108,7 +111,7 @@ export async function liveQueue(workspaceId: string, limit = 100): Promise<Queue
       at: r.scheduledAt ?? r.completedAt ?? undefined,
       actionType: r.actionType,
       status: r.status,
-      statusReason: r.statusReason,
+      statusReason: r.status === "failed" ? (r.failureReason ?? r.statusReason) : r.statusReason,
       personName: iName.get(r.personIdentityId) ?? "Unknown",
       campaignName: r.campaignId ? cName.get(r.campaignId) : undefined,
       businessUnit: r.businessUnit,
