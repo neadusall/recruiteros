@@ -3557,6 +3557,20 @@
             '<input class="lie-text" data-lih-custom placeholder="Or a custom phrase to hunt, e.g. Rippling is hiring" style="max-width:340px"> ' +
             '<button class="btn btn-sm btn-ghost" data-lih-addc>Add custom hunt</button>' +
           "</div>" +
+          '<div class="lie-post muted">Set-and-forget industries: leads the radar classifies into these industries send <b>automatically, no approval step</b> (account pacing and daily caps still apply). Everything else waits in Messages to approve.</div>' +
+          '<div class="lie-post">' +
+            ((d.autoIndustries || []).map(function (k) {
+              var opt = null; (d.industryOptions || []).forEach(function (o) { if (o.key === k) opt = o; });
+              return '<span class="lie-chip ok">' + esc(opt ? opt.label : k) + ' <a href="#" data-lih-ind-del="' + esc(k) + '" title="Remove">&times;</a></span>';
+            }).join(" ") || '<span class="muted">No industries on autopilot: every message waits for your approval.</span>') +
+          "</div>" +
+          '<div class="lie-actions">' +
+            '<select class="lie-text" data-lih-ind-pick style="max-width:340px">' +
+              '<option value="">Put an industry on autopilot...</option>' +
+              (d.industryOptions || []).filter(function (o) { return (d.autoIndustries || []).indexOf(o.key) < 0; })
+                .map(function (o) { return '<option value="' + esc(o.key) + '">' + esc(o.label) + "</option>"; }).join("") +
+            "</select>" +
+          "</div>" +
           '<div class="lie-post muted">Roles you hunt (comma-separated; any industry, any title; the matched role becomes {job_title} in the message):</div>' +
           '<textarea class="lie-text" data-lih-roles rows="2">' + esc(rolesVal) + "</textarea>" +
           '<div class="lie-actions">' +
@@ -3567,6 +3581,27 @@
             (d.lastScan ? ' <span class="muted" style="align-self:center">Last hunt: ' + esc(new Date(d.lastScan).toLocaleTimeString()) + "</span>" : "") +
           "</div>" +
         "</div>";
+      function saveIndustries(mutate) {
+        // Fresh-read save, same stale-tab protection as scenario chips.
+        api("/linkedin/comments").then(function (fresh) {
+          var cur = ((fresh && fresh.autoIndustries) || []).slice();
+          send("/linkedin/comments", "POST", { action: "auto_industries_set", industries: mutate(cur) })
+            .then(function (r) { if (r.ok && r.data && r.data.view) paint(r.data.view); });
+        });
+      }
+      var indPick = mount.querySelector("[data-lih-ind-pick]");
+      if (indPick) indPick.addEventListener("change", function () {
+        if (!indPick.value) return;
+        var v = indPick.value;
+        saveIndustries(function (cur) { if (cur.indexOf(v) < 0) cur.push(v); return cur; });
+      });
+      Array.prototype.forEach.call(mount.querySelectorAll("[data-lih-ind-del]"), function (a) {
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          var k = a.getAttribute("data-lih-ind-del");
+          saveIndustries(function (cur) { return cur.filter(function (x) { return x !== k; }); });
+        });
+      });
       var huntBtn = mount.querySelector("[data-lih-hunt]");
       if (huntBtn) huntBtn.addEventListener("click", function () {
         var askEl = mount.querySelector("[data-lih-ask]");
@@ -3737,7 +3772,8 @@
       if (t.kind === "poster") {
         var openP = t.dmStatus === "suggested";
         return '<div class="lie-row' + (openP ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
-          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span></div>' +
+          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span>' +
+            (t.industry ? ' <span class="lie-chip mut">' + esc(t.industry.replace(/_/g, " ")) + "</span>" : "") + "</div>" +
           '<div class="lie-post">Their hiring post: ' + esc((t.postExcerpt || "").slice(0, 280)) + (t.postExcerpt && t.postExcerpt.length > 280 ? "..." : "") + "</div>" +
           hiring + dmBlock(t) +
         "</div>";

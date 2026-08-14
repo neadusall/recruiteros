@@ -265,6 +265,8 @@ export interface CommentLeadItem {
   peer: boolean;
   hiring?: { checked: boolean; openRoles: number; sample: string[]; source?: string };
   tier: CommentTier;
+  /** Keyword-classified industry (taxonomy key) for industry-scoped autopilot. */
+  industry?: string;
   /** The reply draft + its gate. "none" = not drafted (community default). */
   replyText?: string;
   replyStatus: "none" | "suggested" | "approved" | "skipped" | "blocked";
@@ -303,6 +305,9 @@ interface WatchState {
   /** ws -> YYYY-MM-DD -> hunt economics for the monitoring strip
    *  (owner ask 2026-08-14: a place to watch what the radar spends). */
   dayStats: Record<string, Record<string, HuntDayStats>>;
+  /** ws -> industries whose leads send WITHOUT approval (set-and-forget
+   *  autopilot, owner ask 2026-08-14). Empty = industry autopilot off. */
+  autoIndustries: Record<string, string[]>;
   /** ws -> keyword bank override (backend defaults when unset). */
   marketKeywords: Record<string, string[]>;
   /** ws -> rotation cursor into the keyword bank (one search per tick). */
@@ -323,7 +328,46 @@ interface WatchState {
 }
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
+
+/* ---------------- industry classification + set-and-forget autopilot ------
+   Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
+   and let leads in those industries send WITHOUT approval. The classifier
+   is deterministic keywords over company + headline + post text (no AI in
+   the hot path); everything not matching a chosen industry still waits for
+   a human. Engine caps, health, and pacing still gate every autopilot send. */
+
+const INDUSTRY_MATCHERS: Array<{ key: string; label: string; re: RegExp }> = [
+  { key: "healthcare", label: "Healthcare & Life Sciences", re: /\b(health|clinic|medical|hospital|hospice|nurse|nursing|bcba|rbt|aba\b|behavior|therap|dental|pharma|patient|physician|slp|speech|occupational|home care|senior care|md\b|telehealth)\w*/i },
+  { key: "fintech", label: "Finance & Fintech", re: /\b(fintech|bank|payment|lending|loan|insur|capital|invest|account(ing|ant)|cpa\b|controller|audit|wealth|credit|treasury|financ)\w*/i },
+  { key: "saas", label: "SaaS & Software", re: /\b(saas|software|platform|b2b\b|cloud|devops|app\b|apps\b|crm\b|api\b)\w*/i },
+  { key: "ecommerce", label: "E-commerce & Retail", re: /\b(e-?commerce|retail|marketplace|dtc\b|d2c\b|shopify|cpg\b|consumer goods|merchandis)\w*/i },
+  { key: "ai_ml", label: "AI & Machine Learning", re: /\b(ai\b|artificial intelligence|machine learning|ml\b|llm|data scien|deep learning)\w*/i },
+  { key: "cybersecurity", label: "Cybersecurity", re: /\b(cyber|infosec|security operations|soc analyst|appsec|pentest)\w*/i },
+  { key: "edtech", label: "Education & EdTech", re: /\b(edtech|education|school|university|k-?12|teacher|tutor|learning)\w*/i },
+  { key: "logistics", label: "Logistics & Supply Chain", re: /\b(logistic|supply chain|freight|warehouse|trucking|3pl\b|fleet|shipping)\w*/i },
+  { key: "gaming", label: "Gaming", re: /\b(gaming|game studio|esports|game dev)\w*/i },
+  { key: "climate", label: "Climate & Energy", re: /\b(climate|solar|renewable|clean energy|sustainab|ev\b|battery|wind power)\w*/i },
+];
+
+export function industryOf(text: string): string {
+  for (const m of INDUSTRY_MATCHERS) {
+    if (m.re.test(text)) return m.key;
+  }
+  return "general";
+}
+
+export function autoIndustriesFor(workspaceId: string): string[] {
+  return state.autoIndustries[workspaceId] ?? [];
+}
+
+export async function setAutoIndustries(workspaceId: string, industries: string[]): Promise<string[]> {
+  await hydrate();
+  const valid = new Set([...INDUSTRY_MATCHERS.map((m) => m.key), "general"]);
+  state.autoIndustries[workspaceId] = [...new Set(industries.map((i) => String(i).trim()).filter((i) => valid.has(i)))];
+  save();
+  return autoIndustriesFor(workspaceId);
+}
 
 function huntStatsFor(workspaceId: string): HuntDayStats {
   const day = nowIso().slice(0, 10);
@@ -347,6 +391,7 @@ async function hydrate(): Promise<void> {
           posterSeen: snap.posterSeen ?? {},
           closedProfiles: snap.closedProfiles ?? {},
           dayStats: snap.dayStats ?? {},
+          autoIndustries: snap.autoIndustries ?? {},
           marketKeywords: snap.marketKeywords ?? {},
           keywordCursor: snap.keywordCursor ?? {},
           scenarios: snap.scenarios ?? {},
@@ -464,12 +509,16 @@ export async function setCommentWatchAuto(workspaceId: string, on: boolean): Pro
  */
 async function autoExecute(workspaceId: string): Promise<number> {
   const { enabled } = await commentWatchAutopilot(workspaceId);
-  if (!enabled) return 0;
+  // Industry-scoped set-and-forget (owner ask 2026-08-14): leads classified
+  // into a chosen industry send hands-free even when global autopilot is off.
+  const inds = autoIndustriesFor(workspaceId);
+  if (!enabled && !inds.length) return 0;
   const APPROVER = "comment-radar-autopilot";
   const rank = (i: CommentLeadItem): number =>
     i.kind === "poster" ? 0 : i.tier === "hot" ? 1 : i.tier === "warm" ? 2 : 3;
   const open = state.items
     .filter((i) => i.workspaceId === workspaceId && i.tier !== "community"
+      && (enabled || (i.industry !== undefined && inds.includes(i.industry)))
       && (i.dmStatus === "suggested" || i.replyStatus === "suggested" || i.connectStatus === "suggested"))
     .sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt));
   let sent = 0;
@@ -1228,6 +1277,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       postId: c.postId, postExcerpt: c.text.slice(0, 700), postAt: c.postAt,
       commentId: "", commentText: "",
       openProfile: prof.openProfile,
+      industry: industryOf([company ?? "", headline ?? "", c.text].join(" ")),
       matchedRole: combo.role ?? combo.key,
       accountId: sendAccount.accountId,
       authorProviderId: prof.providerId,
@@ -1273,6 +1323,9 @@ export interface CommentWatchView {
   items: CommentLeadItem[];
   /** Hunt economics for the monitoring strip: today + a short history. */
   stats: { today: HuntDayStats; days: Array<{ day: string } & HuntDayStats> };
+  /** Set-and-forget: leads in these industries send without approval. */
+  autoIndustries: string[];
+  industryOptions: Array<{ key: string; label: string }>;
 }
 
 const TIER_RANK: Record<CommentTier, number> = { hot: 0, warm: 1, community: 2 };
@@ -1299,6 +1352,8 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
         .slice(0, 7)
         .map(([day, s]) => ({ day, ...s })),
     },
+    autoIndustries: autoIndustriesFor(workspaceId),
+    industryOptions: INDUSTRY_MATCHERS.map((m) => ({ key: m.key, label: m.label })),
   };
 }
 

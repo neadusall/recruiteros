@@ -28,6 +28,7 @@ import {
   commentWatchView, scanWorkspace, approveReply, skipReply, editReply, draftReply,
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
   setCommentWatchAuto, setMarketKeywords, setScenarios, expandRoleFamily, aiHunt,
+  setAutoIndustries,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -77,6 +78,11 @@ export async function POST(req: Request): Promise<Response> {
   if (b.action === "hunt_now") {
     const r = await aiHunt(ws, String(b.text ?? ""));
     return ok({ ...r, view: await commentWatchView(ws) });
+  }
+  if (b.action === "auto_industries_set") {
+    const bb = b as { industries?: unknown };
+    await setAutoIndustries(ws, Array.isArray(bb.industries) ? bb.industries.map(String) : []);
+    return ok({ view: await commentWatchView(ws) });
   }
   if (!b.id) return fail("missing_id");
 
