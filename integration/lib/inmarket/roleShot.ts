@@ -1322,14 +1322,19 @@ const CARD_ACCENT = (process.env.INMARKET_CARD_ACCENT || "#2e5bd7").trim();
  */
 const MIN_CARD_H = 1000;
 
-/** The fallback is ON by default: no video at all is strictly worse than a typeset one. */
+/** OFF by default (owner mandate 2026-08-14): backgrounds must be REAL page captures. A typeset
+ *  card reads as a fabricated posting to viewers, so it ships only when explicitly enabled with
+ *  INMARKET_ROLE_CARD=1. */
 export function roleCardEnabled(): boolean {
-  return !["0", "false", "no", "off"].includes((process.env.INMARKET_ROLE_CARD || "").toLowerCase());
+  return ["1", "true", "yes", "on"].includes((process.env.INMARKET_ROLE_CARD || "").toLowerCase());
 }
 
-/** True for statuses that mean "there are real assets on disk under this key". */
+/** True for statuses whose assets may be USED as a video background. With cards disabled an
+ *  existing role_card capture no longer qualifies: it drops out of the gallery and the compose
+ *  pipeline, and the role becomes eligible for a fresh REAL capture once its verdict expires.
+ *  Already-rendered composites keep serving from disk, so sent watch links never break. */
 export function isCaptured(status: ShotStatus): boolean {
-  return status === "company_site" || status === "role_card";
+  return status === "company_site" || (status === "role_card" && roleCardEnabled());
 }
 
 function esc(s: string): string {
@@ -1520,10 +1525,9 @@ export async function captureRoleShot(req: ShotRequest, opts?: { force?: boolean
     }
   }
 
-  // GUARANTEED BACKGROUND: a live capture is best-effort, but a prospect with no video is a lost
-  // send. When the page can't be captured for ANY reason, typeset the role's own JD instead so the
-  // job still ships. Staffing intermediaries stay blocked — that rule is about who we contact, not
-  // about rendering. Disable with INMARKET_ROLE_CARD=0.
+  // OPT-IN FALLBACK: when the page can't be captured, a typeset card from the role's own JD can
+  // ship instead of nothing — but only with INMARKET_ROLE_CARD=1. Default is real captures only.
+  // Staffing intermediaries stay blocked — that rule is about who we contact, not about rendering.
   if (!result.ok && result.status !== "staffing_blocked" && roleCardEnabled()) {
     try {
       const card = await captureRoleCard(req, key, result.reason || result.status);

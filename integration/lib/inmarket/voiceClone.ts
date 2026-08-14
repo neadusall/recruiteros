@@ -21,16 +21,19 @@ import { join } from "node:path";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
-import { readClipBytes } from "./roleVideo";
+import { readClipBytes, getClip } from "./roleVideo";
 import { getVoiceClient } from "../voice/provider";
 import { defaultVoiceId } from "./nameAudio";
 import { loadSnapshot, debouncedSaver } from "../db";
 
 const VOICES_CACHE_KEY = "inmarket_voices_v1";
 
-/** A workspace's cloned voice (the "you" that speaks each recipient's name). */
+/** A recruiter's cloned voice (the "you" that speaks each recipient's name). */
 export interface StoredVoice {
   workspaceId: string;
+  /** Recruiter the voice belongs to (lowercased email). Voices are personal, like the clip
+   *  they're cloned from. Absent on legacy records = workspace-shared. */
+  ownerEmail?: string;
   voiceId: string;
   provider: string;
   /** The clip we cloned from (so the UI can show "cloned from your latest recording"). */
@@ -57,21 +60,39 @@ async function ensure(): Promise<Map<string, StoredVoice>> {
 }
 const save = debouncedSaver(VOICES_CACHE_KEY, () => (mem ? Object.fromEntries(mem) : {}), 1000);
 
-/** The voice a workspace has cloned for itself, if any. */
-export async function getWorkspaceVoice(workspaceId: string): Promise<StoredVoice | null> {
-  const m = await ensure();
-  return m.get(workspaceId) ?? null;
+/** Store key: per-recruiter when we know who, bare workspace id for legacy records. */
+function voiceKey(workspaceId: string, email?: string): string {
+  const e = email?.trim().toLowerCase();
+  return e ? `${workspaceId}|${e}` : workspaceId;
 }
 
 /**
- * Resolve the voice id to speak a name in, for this workspace:
- *   explicit override  ->  workspace's own clone  ->  env default (VOICE_CLONE_VOICE_ID).
+ * The cloned voice to use for this recruiter, if any. Voices are personal: each recruiter
+ * clones their own. A legacy workspace-keyed record (pre-ownership) is the fallback so
+ * nothing that existed before the scoping change goes silent.
+ */
+export async function getWorkspaceVoice(workspaceId: string, forEmail?: string): Promise<StoredVoice | null> {
+  const m = await ensure();
+  const e = forEmail?.trim().toLowerCase();
+  if (e) {
+    const own = m.get(voiceKey(workspaceId, e));
+    if (own) return own;
+  }
+  const legacy = m.get(workspaceId);
+  // A legacy record with no owner is shared; one that somehow has an owner is not.
+  if (legacy && (!legacy.ownerEmail || !e || legacy.ownerEmail === e)) return legacy;
+  return null;
+}
+
+/**
+ * Resolve the voice id to speak a name in, for this recruiter:
+ *   explicit override  ->  the recruiter's own clone  ->  env default (VOICE_CLONE_VOICE_ID).
  * Returns undefined when nothing is configured (caller skips the spoken name).
  */
-export async function resolveVoiceId(workspaceId: string, explicit?: string | null): Promise<string | undefined> {
+export async function resolveVoiceId(workspaceId: string, explicit?: string | null, forEmail?: string): Promise<string | undefined> {
   const ex = (explicit || "").trim();
   if (ex) return ex;
-  const own = await getWorkspaceVoice(workspaceId);
+  const own = await getWorkspaceVoice(workspaceId, forEmail);
   if (own?.voiceId) return own.voiceId;
   const def = defaultVoiceId();
   return def || undefined;
@@ -130,14 +151,22 @@ export interface CloneResult {
 export async function cloneVoiceFromClip(
   workspaceId: string,
   clipId: string,
-  opts: { name?: string; force?: boolean; motion?: "recruiting" | "bd" } = {},
+  opts: { name?: string; force?: boolean; motion?: "recruiting" | "bd"; ownerEmail?: string } = {},
 ): Promise<CloneResult> {
   const client = getVoiceClient();
   if (!client.configured()) return { ok: false, status: "not_configured", error: "no_voice_api_key" };
 
+  const ownerEmail = opts.ownerEmail?.trim().toLowerCase() || undefined;
+
   if (!opts.force) {
-    const existing = await getWorkspaceVoice(workspaceId);
+    const existing = await getWorkspaceVoice(workspaceId, ownerEmail);
     if (existing?.voiceId) return { ok: true, status: "ready", voiceId: existing.voiceId, provider: existing.provider };
+  }
+
+  // You can only clone YOUR voice: the source clip must be the requester's own recording.
+  const clipMeta = await getClip(clipId);
+  if (clipMeta?.ownerEmail && ownerEmail && clipMeta.ownerEmail !== ownerEmail) {
+    return { ok: false, status: "no_clip", error: "clip not found" };
   }
 
   const got = await readClipBytes(clipId);
@@ -162,9 +191,9 @@ export async function cloneVoiceFromClip(
 
   const m = await ensure();
   const stored: StoredVoice = {
-    workspaceId, voiceId: res.voiceId, provider: client.id, clipId, name: opts.name, at: new Date().toISOString(),
+    workspaceId, ownerEmail, voiceId: res.voiceId, provider: client.id, clipId, name: opts.name, at: new Date().toISOString(),
   };
-  m.set(workspaceId, stored);
+  m.set(voiceKey(workspaceId, ownerEmail), stored);
   save();
 
   // Best-effort: log the clone in the cost ledger (free, but visible in the owner console).
@@ -180,10 +209,15 @@ export async function cloneVoiceFromClip(
   return { ok: true, status: "ready", voiceId: res.voiceId, provider: client.id };
 }
 
-/** Forget a workspace's cloned voice (e.g. to re-clone from a fresh recording). */
-export async function forgetWorkspaceVoice(workspaceId: string): Promise<boolean> {
+/** Forget a recruiter's cloned voice (e.g. to re-clone from a fresh recording).
+ *  Also drops an unowned legacy workspace record; a teammate's owned voice is never touched. */
+export async function forgetWorkspaceVoice(workspaceId: string, forEmail?: string): Promise<boolean> {
   const m = await ensure();
-  const had = m.delete(workspaceId);
+  const e = forEmail?.trim().toLowerCase();
+  let had = false;
+  if (e) had = m.delete(voiceKey(workspaceId, e));
+  const legacy = m.get(workspaceId);
+  if (legacy && (!legacy.ownerEmail || !e || legacy.ownerEmail === e)) had = m.delete(workspaceId) || had;
   if (had) save();
   return had;
 }

@@ -52,6 +52,10 @@ export async function POST(req: Request) {
   const clipId = String(b?.clipId || "").trim();
   if (!clipId) return fail("missing_clipId", 422);
 
+  // Captions are bought against YOUR recording, not a teammate's.
+  const { canUseClip } = await import("../../../../lib/inmarket/ownership");
+  if (!(await canUseClip(g.ctx, clipId))) return fail("clip not found", 404);
+
   const { transcribeClip, setManualCaptions } = await import("../../../../lib/inmarket/captions");
 
   if (typeof b?.text === "string" && b.text.trim()) {

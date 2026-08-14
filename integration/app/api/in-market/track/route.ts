@@ -99,6 +99,8 @@ export async function GET(req: Request) {
 
   const key = url.searchParams.get("key");
   if (key) {
+    const { canAccessVideo } = await import("../../../../lib/inmarket/ownership");
+    if (!(await canAccessVideo(g.ctx, key))) return ok({ stat: null });
     const { statsForVideo } = await import("../../../../lib/inmarket/videoStats");
     return ok({ stat: await statsForVideo(key) });
   }
@@ -155,7 +157,36 @@ export async function GET(req: Request) {
     }
   } catch { /* telemetry is a bonus, never a blocker for the stats board */ }
 
-  return ok({ ...(await statsOverview({ days })), sending });
+  // Performance is personal too: a plain member's board only counts THEIR videos (workspace
+  // owner/admin keeps the full view). Totals are recomputed over the visible rows so the
+  // header numbers always match the list under them.
+  const overview = await statsOverview({ days });
+  const { isWorkspaceAdmin, canAccessVideo } = await import("../../../../lib/inmarket/ownership");
+  if (!isWorkspaceAdmin(g.ctx)) {
+    const visible: typeof overview.videos = [];
+    for (const row of overview.videos) {
+      if (await canAccessVideo(g.ctx, row.videoKey)) visible.push(row);
+    }
+    const allowed = new Set(visible.map((r) => r.videoKey));
+    const seenPeople = new Set<string>();
+    const totals = visible.reduce(
+      (t, r) => {
+        t.gifOpens += r.gifOpens; t.opens += r.opens; t.plays += r.plays;
+        t.completes += r.completes; t.uniqueViewers += r.uniqueViewers; t.watchSeconds += r.watchSeconds;
+        t.machineOpens += r.machineOpens;
+        for (const p of r.people) seenPeople.add((p.email || p.name || "").toLowerCase());
+        return t;
+      },
+      { videos: visible.length, gifOpens: 0, opens: 0, plays: 0, completes: 0, uniqueViewers: 0, watchSeconds: 0, avgWatchSeconds: 0, completionRate: 0, machineOpens: 0, identified: 0 },
+    );
+    totals.identified = seenPeople.size;
+    totals.avgWatchSeconds = totals.plays ? Math.round(totals.watchSeconds / totals.plays) : 0;
+    totals.completionRate = totals.plays ? totals.completes / totals.plays : 0;
+    overview.videos = visible;
+    overview.totals = totals;
+    overview.recent = overview.recent.filter((e: any) => !e?.videoKey || allowed.has(e.videoKey));
+  }
+  return ok({ ...overview, sending });
 }
 
 export async function DELETE(req: Request) {
@@ -163,6 +194,8 @@ export async function DELETE(req: Request) {
   if ("response" in g) return g.response;
   const key = new URL(req.url).searchParams.get("key") || "";
   if (!key) return fail("missing_key", 422);
+  const { canAccessVideo } = await import("../../../../lib/inmarket/ownership");
+  if (!(await canAccessVideo(g.ctx, key))) return fail("not_found", 404);
   const { removeVideoStats } = await import("../../../../lib/inmarket/videoStats");
   const removed = await removeVideoStats(key);
   if (!removed) return fail("not_found", 404, { detail: "That video has no stats to remove." });

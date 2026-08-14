@@ -33,6 +33,11 @@ export async function GET(req: Request) {
   const fmt = (url.searchParams.get("fmt") || "gif").toLowerCase();
   if (fmt !== "gif" && fmt !== "mp4" && fmt !== "jpg") return fail("bad_format", 400);
 
+  // Composites are personal (the recruiter's face + voice): only their owner or a workspace
+  // admin can preview them here. The public watch route stays signed-link-only as before.
+  const { canAccessVideo } = await import("../../../../lib/inmarket/ownership");
+  if (!(await canAccessVideo(g.ctx, key))) return new Response("not found", { status: 404 });
+
   const { readCompositeAsset } = await import("../../../../lib/inmarket/roleVideo");
   const buf = await readCompositeAsset(key, fmt);
   if (!buf) return new Response("not found", { status: 404 });
@@ -80,6 +85,10 @@ export async function POST(req: Request) {
   if (!company || !roleTitle) return fail("missing company or roleTitle", 422);
   if (!clipId) return fail("missing clipId", 422);
 
+  // You composite with YOUR recording, never a teammate's.
+  const { canUseClip } = await import("../../../../lib/inmarket/ownership");
+  if (!(await canUseClip(g.ctx, clipId))) return fail("clip not found", 404);
+
   const { getOrStartVideo, composeRoleVideo } = await import("../../../../lib/inmarket/roleVideo");
   const reqShot = {
     company,
@@ -98,7 +107,7 @@ export async function POST(req: Request) {
     force: b?.force === true,
     // Personalized cloned-voice "Hey {firstName}," intro (optional).
     firstName: b?.firstName ? String(b.firstName) : undefined,
-    voiceId: await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined),
+    voiceId: await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined, g.ctx.user.email),
     durationSec,
   };
   const result = b?.wait === true

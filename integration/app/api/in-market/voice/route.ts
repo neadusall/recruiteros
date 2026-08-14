@@ -30,7 +30,7 @@ export async function GET(req: Request) {
   const client = getVoiceClient();
 
   return ok({
-    voice: await getWorkspaceVoice(ws),
+    voice: await getWorkspaceVoice(ws, g.ctx.user.email),
     provider: client.id,
     providerConfigured: client.configured(),
     lipSync: { configured: lipSyncConfigured(), model: lipSyncModelLabel() },
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
 
   if (action === "forget") {
     const { forgetWorkspaceVoice } = await import("../../../../lib/inmarket/voiceClone");
-    return ok({ forgot: await forgetWorkspaceVoice(ws) });
+    return ok({ forgot: await forgetWorkspaceVoice(ws, g.ctx.user.email) });
   }
 
   if (action === "clone") {
@@ -58,6 +58,7 @@ export async function POST(req: Request) {
       name: b?.name ? String(b.name).slice(0, 60) : undefined,
       force: b?.force === true,
       motion: b?.motion === "bd" ? "bd" : "recruiting",
+      ownerEmail: g.ctx.user.email,
     });
     return r.ok ? ok(r) : fail(r.error || r.status, 400, { status: r.status });
   }

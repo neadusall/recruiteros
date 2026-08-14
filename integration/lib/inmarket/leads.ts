@@ -73,6 +73,13 @@ export async function registerVideoOwner(
   scheduleSave();
 }
 
+/** Who registered ownership of a generated video (POST /api/in-market/own), if anyone. */
+export async function videoOwnerInfo(videoKey: string): Promise<{ workspaceId: string; email?: string } | null> {
+  if (!VALID_KEY.test(videoKey || "")) return null;
+  const st = await ensure();
+  return st.owners[videoKey] ?? null;
+}
+
 /** Record a reply / lead from the watch page. Returns the stored lead (or null if invalid). */
 export async function recordLead(input: {
   videoKey: string; type?: string; name?: unknown; email?: unknown; message?: unknown;

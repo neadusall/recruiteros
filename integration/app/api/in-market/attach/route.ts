@@ -58,6 +58,10 @@ export async function POST(req: Request) {
   const videoKey = String(b?.videoKey ?? "").trim();
   if (!videoKey) return fail("missing videoKey", 422);
 
+  // You attach YOUR video to outreach; a teammate's face never rides your sequences.
+  const { canAccessVideo } = await import("../../../../lib/inmarket/ownership");
+  if (!(await canAccessVideo(g.ctx, videoKey))) return fail("video not found", 404);
+
   const company = b?.company ? String(b.company) : "";
   const roleTitle = b?.roleTitle ? String(b.roleTitle) : "";
   const ids: string[] = Array.isArray(b?.prospectIds) ? b.prospectIds.map(String) : [];

@@ -44,8 +44,12 @@ export async function POST(req: Request) {
   if (!recipients.length) return fail("no recipients (send recipients:[{firstName}] or names:[])", 422);
   if (recipients.length > MAX_PER_REQUEST) return fail(`too many recipients (max ${MAX_PER_REQUEST} per request)`, 422);
 
+  // You composite with YOUR recording, never a teammate's.
+  const { canUseClip } = await import("../../../../lib/inmarket/ownership");
+  if (!(await canUseClip(g.ctx, clipId))) return fail("clip not found", 404);
+
   const { resolveVoiceId } = await import("../../../../lib/inmarket/voiceClone");
-  const voiceId = await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined);
+  const voiceId = await resolveVoiceId(ws, b?.voiceId ? String(b.voiceId) : undefined, g.ctx.user.email);
 
   const reqShot = {
     company, roleTitle,

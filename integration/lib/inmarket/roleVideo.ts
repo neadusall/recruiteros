@@ -261,6 +261,34 @@ export async function deleteClip(workspaceId: string, id: string, requesterEmail
   return true;
 }
 
+/**
+ * Who a composite belongs to: the owner of the webcam clip inside it, with the studio's
+ * explicit /own registration (lib/inmarket/leads) as fallback for records that lost their
+ * clipId. Both null = a legacy artifact nobody can claim (admin-only in the portal).
+ */
+export async function videoOwnership(videoKey: string): Promise<{ ownerEmail: string | null; workspaceId: string | null }> {
+  let ownerEmail: string | null = null;
+  let workspaceId: string | null = null;
+  try {
+    const rec = await getVideoRecord(videoKey);
+    if (rec?.clipId) {
+      const clip = await getClip(rec.clipId);
+      if (clip) { ownerEmail = clip.ownerEmail ?? null; workspaceId = clip.workspaceId; }
+    }
+  } catch { /* fall through to the /own registry */ }
+  if (!ownerEmail || !workspaceId) {
+    try {
+      const { videoOwnerInfo } = await import("./leads");
+      const own = await videoOwnerInfo(videoKey);
+      if (own) {
+        ownerEmail = ownerEmail || (own.email ? own.email.trim().toLowerCase() : null);
+        workspaceId = workspaceId || own.workspaceId || null;
+      }
+    } catch { /* leads store unavailable = unattributed */ }
+  }
+  return { ownerEmail, workspaceId };
+}
+
 /* ------------------------------------------------------------------ */
 /* Composite verdict cache (so a layout renders at most once)         */
 /* ------------------------------------------------------------------ */
