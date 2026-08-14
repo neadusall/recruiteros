@@ -81,7 +81,13 @@ async function webPresence(domain) {
     if (!r.ok) return { state: "error", detail: `HTTP ${r.status}` };
     if (/porkbun|parked|domain is for sale|buy this domain|coming soon/.test(text)) return { state: "parked", detail: "registrar parking page" };
     const host = new URL(r.url).hostname;
-    if (!host.endsWith(domain)) return { state: "offsite-redirect", detail: `redirects to ${host}` };
+    // Redirecting a lookalike to the tenant's real brand site is accepted practice, not a
+    // defect. Redirects anywhere else (dns.google was live in the fleet) are misconfigs.
+    const BRAND_ROOTS = (envVal("FLEET_BRAND_ROOTS") || "lumesp.com").split(",").map((s) => s.trim()).filter(Boolean);
+    if (!host.endsWith(domain)) {
+      if (BRAND_ROOTS.some((b) => host === b || host.endsWith("." + b))) return { state: "ok", detail: `redirects to brand site ${host}` };
+      return { state: "offsite-redirect", detail: `redirects to ${host}` };
+    }
     return { state: "ok", detail: "" };
   } catch (e) { return { state: "unreachable", detail: String(e.message || e).slice(0, 60) }; }
 }
@@ -161,10 +167,10 @@ const boxRows = [];
       if (exists === false) { reasons.push("Mailbox does not exist at the provider (404)"); fixes.push("Re-provision this mailbox at Sending.ac or remove it from the senders roster"); }
       if (boxBounces >= 3) { reasons.push(`${boxBounces} recent bounce notices from this mailbox`); fixes.push("Rotation already spreads volume; if this repeats tomorrow, retire the address"); }
       if (domRow && domRow.verdict === "unhealthy") { reasons.push(`Parent domain ${info.domain} is unhealthy`); fixes.push("Fix the domain first; the mailbox inherits its fate"); }
-      else if (domRow?.metrics.resting) { reasons.push("Parent domain is resting"); fixes.push("No action: revives with the domain"); }
-
+      // A resting parent is expected, transient, and already tracked on the domain row: the
+      // mailbox stays healthy (verdict noise trains the owner to ignore warnings).
       const verdict = exists === false ? "unhealthy" : reasons.length ? "warning" : "healthy";
-      boxRows.push({ email, domain: info.domain, owner: info.owner, verdict, reasons, fixes, metrics: { exists, sent: info.sent, recentBounces: boxBounces } });
+      boxRows.push({ email, domain: info.domain, owner: info.owner, verdict, reasons, fixes, metrics: { exists, sent: info.sent, recentBounces: boxBounces, parentResting: !!domRow?.metrics.resting } });
       if (i % 100 === 0) console.log(`mailboxes ${i}/${list.length}`);
     }
   }
