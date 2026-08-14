@@ -191,6 +191,7 @@ const TIMERS = [
   ["email-validate-batch.timer", "Nightly bulk validation", 26 * 60],
   ["mpc-seed-test.timer", "Weekly seed placement test", 8 * 24 * 60],
   ["recruiteros-signals-watch.timer", "Signal watchlists (q15m)", 60],
+  ["fleet-verify.timer", "Daily fleet verification", 26 * 60],
   ["system-health.timer", "This health collector", 45],
 ];
 for (const [unit, label, staleMin] of TIMERS) {
@@ -221,6 +222,17 @@ for (const [unit, label, staleMin] of TIMERS) {
 // Snapshot freshness: the data the breaker and follow-ups act on.
 add(GROUP_WATCH, "ndr-fresh", "Bounce data freshness", !ndr ? "bad" : ageMin(ndr.generatedAt) <= 360 ? "good" : "bad",
   ndr ? `swept ${fmtAge(ageMin(ndr.generatedAt))}` : "never", "Stale bounce data means the circuit breaker is flying blind");
+
+// Daily fleet verification results (the Fleet tab's data).
+{
+  const fleet = readJson(`${VOL}/snap_fleet_verify_v1.json`);
+  const fAge = fleet ? ageMin(fleet.generatedAt) : null;
+  const dU = fleet?.domainSummary?.unhealthy || 0, mU = fleet?.mailboxSummary?.unhealthy || 0;
+  add(GROUP_WATCH, "fleet", "Fleet verification results",
+    !fleet ? "amber" : fAge > 26 * 60 ? "bad" : dU + mU > 0 ? "amber" : "good",
+    !fleet ? "never run" : `${dU} domains + ${mU} mailboxes unhealthy, swept ${fmtAge(fAge)}`,
+    !fleet ? "Run once or install fleet-verify.timer" : dU + mU > 0 ? "Open the Fleet tab for each asset's reason and fix" : "");
+}
 
 // Reply bridge: the monitor log is written as it scans, so its mtime is the honest heartbeat.
 {

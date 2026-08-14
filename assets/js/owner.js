@@ -87,8 +87,8 @@
 
   /* ---------------- router ---------------- */
   // Projection calculator moved to the in-app command center (Measure → Spending).
-  var ROUTES = { health: viewHealth, overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, tools: viewTools, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, breaks: viewBreaks, security: viewSecurity };
-  var TITLES = { health: "System health", overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", tools: "Tools & Credits", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", breaks: "Breaks", security: "Security" };
+  var ROUTES = { health: viewHealth, fleet: viewFleet, overview: viewOverview, pricing: viewPricing, burn: viewBurn, spend: viewSpend, tools: viewTools, people: viewPeople, accounts: viewAccounts, costs: viewCosts, passwords: viewPasswords, breaks: viewBreaks, security: viewSecurity };
+  var TITLES = { health: "System health", fleet: "Fleet verification", overview: "Overview", pricing: "Pricing", burn: "Spend master", spend: "Spend", tools: "Tools & Credits", people: "Users & roles", accounts: "Accounts", costs: "Cost model", passwords: "Passwords", breaks: "Breaks", security: "Security" };
   function route() {
     var r = (location.hash.replace("#", "") || "overview");
     if (!ROUTES[r]) r = "overview";
@@ -158,6 +158,59 @@
       });
       html += '</div>';
     });
+    $("#view").innerHTML = html;
+  }
+
+  /* ================= FLEET VERIFICATION ================= */
+  // Daily full-fleet verification (owner mandate 2026-08-14): every domain and every mailbox
+  // carries an explicit verdict, the reasons when unhealthy, and the concrete fix. Healthy
+  // mailboxes are collapsed to a count; problems are always fully listed.
+  function viewFleet() {
+    api("/owner/fleet-verify").then(renderFleet).catch(fail);
+  }
+  function vpill(v) { var c = v === "healthy" ? "good" : v === "warning" ? "amber" : "bad"; return '<span class="hc-dot ' + c + '" style="display:inline-block;margin-right:8px"></span>'; }
+  function fleetSummary(label, s) {
+    return '<div class="hc-pill good"><span class="n">' + (s.healthy || 0) + '</span><span class="l">' + label + ' healthy</span></div>' +
+      '<div class="hc-pill amber"><span class="n">' + (s.warning || 0) + '</span><span class="l">warning</span></div>' +
+      '<div class="hc-pill bad"><span class="n">' + (s.unhealthy || 0) + '</span><span class="l">unhealthy</span></div>';
+  }
+  function fleetRow(name, row) {
+    var h = '<div class="hc-row">' + vpill(row.verdict) +
+      '<span class="hc-name">' + esc(name) + '</span>';
+    if (row.verdict === "healthy") h += '<span class="hc-reading">verified healthy</span>';
+    else {
+      h += '<span class="hc-reading ' + (row.verdict === "warning" ? "amber" : "bad") + '">' + esc(row.reasons[0] || "") + (row.reasons.length > 1 ? " (+" + (row.reasons.length - 1) + " more)" : "") + '</span>';
+      var pairs = [];
+      for (var i = 0; i < row.reasons.length; i++) {
+        // A single reason already sits in the reading line; only its fix goes below.
+        var lead = row.reasons.length === 1 ? '' : esc(row.reasons[i]) + ' → ';
+        pairs.push(lead + (row.fixes[i] ? '<b>Fix:</b> ' + esc(row.fixes[i]) : esc(row.reasons[i])));
+      }
+      h += '<span class="hc-detail">' + pairs.join('<br/>') + '</span>';
+    }
+    return h + '</div>';
+  }
+  function renderFleet(f) {
+    var html = '<div class="v-head"><h2>Fleet verification</h2><p>Every sending domain and every mailbox, verified daily: DNS authentication, blacklist, web presence, bounce pressure, warm-up, rest state, and provider-side existence. Anything not healthy says why and what to do about it.</p></div>';
+    if (f.missing) {
+      html += '<div class="hc-banner">The fleet verifier has never reported. Install its timer: powershell -ExecutionPolicy Bypass -File C:\\Users\\nead0\\install-monitoring.ps1</div>';
+      $("#view").innerHTML = html; return;
+    }
+    if (f.stale) html += '<div class="hc-banner">Verification stale: last full sweep ' + esc(Math.round((f.ageMin || 0) / 60)) + ' hours ago (expected daily). journalctl -u fleet-verify.service</div>';
+    html += '<div class="hc-summary">' + fleetSummary("domains", f.domainSummary || {}) +
+      '<div class="hc-meta">Swept ' + esc(f.ageMin == null ? "?" : Math.round(f.ageMin / 60) + "h") + ' ago</div></div>';
+    html += '<div class="card hc-group"><h3>Domains (' + (f.domains || []).length + ')</h3>';
+    (f.domains || []).forEach(function (d) {
+      html += fleetRow(d.domain + (d.metrics && d.metrics.resting ? " · resting" : ""), d);
+    });
+    html += '</div>';
+    var mb = f.mailboxes || [];
+    var bad = mb.filter(function (m) { return m.verdict !== "healthy"; });
+    html += '<div class="hc-summary" style="margin-top:18px">' + fleetSummary("mailboxes", f.mailboxSummary || {}) + '</div>';
+    html += '<div class="card hc-group"><h3>Mailboxes needing attention (' + bad.length + ' of ' + mb.length + ')</h3>';
+    if (!bad.length) html += '<p class="note">Every mailbox verified healthy. The ' + mb.length + ' healthy boxes are collapsed.</p>';
+    bad.forEach(function (m) { html += fleetRow(m.email, m); });
+    html += '</div>';
     $("#view").innerHTML = html;
   }
 
@@ -4730,6 +4783,27 @@
 
   // Screenshot/preview harness: ?healthdemo=1 renders the Health board with SAMPLE data only
   // (no API calls, no real numbers, gate untouched otherwise). Used for pre-deploy visual checks.
+  if (new URLSearchParams(location.search).has("fleetdemo")) {
+    $("#gate").style.display = "none";
+    $("#shell").style.display = "";
+    $("#pageTitle").textContent = "Fleet verification";
+    renderFleet({
+      ageMin: 190, stale: false,
+      domainSummary: { healthy: 28, warning: 4, unhealthy: 1 },
+      mailboxSummary: { healthy: 872, warning: 24, unhealthy: 4 },
+      domains: [
+        { domain: "lumeshire.com", verdict: "unhealthy", reasons: ["DKIM selector missing"], fixes: ["Re-provision DKIM (selector1) for this domain at Sending.ac, then publish the CNAME"], metrics: {} },
+        { domain: "lumeworkforce.com", verdict: "warning", reasons: ["Benched by the circuit breaker: 10 bounce notices against 27 sends (until 2026-08-14)", "Domain web root shows a registrar parking page"], fixes: ["No action: warm-up continues and it auto-revives when served and clean", "Deploy the branded landing page (filters browse sending domains)"], metrics: { resting: true } },
+        { domain: "lumerecruiters.com", verdict: "healthy", reasons: [], fixes: [], metrics: {} },
+        { domain: "lumetalentsearch.com", verdict: "healthy", reasons: [], fixes: [], metrics: {} }
+      ],
+      mailboxes: [
+        { email: "ariel@lumeadvisor.com", verdict: "unhealthy", reasons: ["Mailbox does not exist at the provider (404)"], fixes: ["Re-provision this mailbox at Sending.ac or remove it from the senders roster"], metrics: {} },
+        { email: "rnead@lumerecruiters.com", verdict: "warning", reasons: ["3 recent bounce notices from this mailbox"], fixes: ["Rotation already spreads volume; if this repeats tomorrow, retire the address"], metrics: {} },
+        { email: "sam.w@lumepeople.com", verdict: "healthy", reasons: [], fixes: [], metrics: {} }
+      ]
+    });
+  } else
   if (new URLSearchParams(location.search).has("healthdemo")) {
     $("#gate").style.display = "none";
     $("#shell").style.display = "";

@@ -115,6 +115,7 @@ try {
 
 const bounced = new Set();
 const perDomain = {};
+const perBox = {};
 let warmupNdrs = 0, staleSkipped = 0;
 for (const n of ndrs) {
   const rcpt = String(n.rcpt || "").toLowerCase();
@@ -128,6 +129,7 @@ for (const n of ndrs) {
   if (benchStart && Date.parse(n.at || 0) < benchStart) { staleSkipped++; continue; }
   perDomain[d] = perDomain[d] || { bounces: 0, sent: sentByDomain.get(d) || 0 };
   perDomain[d].bounces++;
+  perBox[n.box] = (perBox[n.box] || 0) + 1; // per-mailbox counts for the daily fleet verifier
 }
 if (staleSkipped) console.log(`freshness rule: ${staleSkipped} pre-bench notices excluded from resting domains' counts`);
 
@@ -145,6 +147,7 @@ const out = {
   warmupNdrs,
   bounced: [...bounced].sort(),
   perDomain,
+  perBox,
 };
 const tmp = SIDECAR + ".tmp";
 writeFileSync(tmp, JSON.stringify(out, null, 1));
