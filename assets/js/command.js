@@ -3771,10 +3771,16 @@
       // is hiring. No public comment; a direct custom message instead.
       if (t.kind === "poster") {
         var openP = t.dmStatus === "suggested";
+        var provenance = (t.postUrl
+            ? '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener">View the post on LinkedIn</a> · '
+            : "") +
+          (t.postAt ? "Posted " + new Date(t.postAt).toLocaleDateString() + " · " : "") +
+          "Captured " + (t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "");
         return '<div class="lie-row' + (openP ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
           '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span>' +
             (t.industry ? ' <span class="lie-chip mut">' + esc(t.industry.replace(/_/g, " ")) + "</span>" : "") + "</div>" +
           '<div class="lie-post">Their hiring post: ' + esc((t.postExcerpt || "").slice(0, 280)) + (t.postExcerpt && t.postExcerpt.length > 280 ? "..." : "") + "</div>" +
+          '<div class="lie-post muted">' + provenance + "</div>" +
           hiring + dmBlock(t) +
         "</div>";
       }

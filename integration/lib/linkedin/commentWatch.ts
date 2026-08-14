@@ -51,6 +51,7 @@ const MARKET_RESULTS_PER_SEARCH = 20;
 const POSTER_NEW_PER_TICK = 8;   // DM drafts created per tick
 const POSTER_RECHECK_DAYS = 7;   // never re-message the same author within a week
 const CLOSED_PROFILE_DAYS = 30;  // remember closed profiles; no repeat profile reads
+const MAX_POST_AGE_DAYS = 14;    // hard ceiling: never message about a stale post
 const STATS_KEEP_DAYS = 14;      // hunt-economics history shown on the card
 
 /** One day of hunt economics: what ran, what was spent, what the caches saved. */
@@ -238,6 +239,9 @@ export interface CommentLeadItem {
   postId: string;
   postExcerpt: string;
   postAt?: string;
+  /** Source provenance (owner ask 2026-08-14): the actual post URL so the
+   *  team can open and verify the source before approving. */
+  postUrl?: string;
   /** commenter lane only: the comment itself. */
   commentId: string;
   commentText: string;
@@ -420,7 +424,10 @@ function actionable(i: CommentLeadItem): boolean {
     || i.connectStatus === "suggested" || i.connectStatus === "blocked";
 }
 
-const RESOLVED_TTL_HOURS = 24;
+// 14 days (owner ask 2026-08-14): sent/skipped leads stay auditable - the
+// team can trace any delivered message back to its source post well after
+// the fact. They still leave the UI the moment they are resolved.
+const RESOLVED_TTL_HOURS = 14 * 24;
 
 function prune(): void {
   const cutoff = Date.now() - ITEM_TTL_DAYS * 86_400_000;
@@ -1056,6 +1063,7 @@ function candidatesFromUnipile(results: Dict[]): MarketCandidate[] {
     if (!authorRef) continue;
     out.push({
       postId, text,
+      postUrl: str(raw.share_url) ?? str(raw.url),
       postAt: str(raw.date) ?? str(raw.parsed_datetime),
       authorRef,
       authorName: str(author.name) ?? str([str(author.first_name), str(author.last_name)].filter(Boolean).join(" ")),
@@ -1225,6 +1233,14 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   for (const c of candidates) {
     if (created >= POSTER_NEW_PER_TICK) break;
     if (c.text.length < 40) { g.nopost++; continue; }
+    // Post age is a HARD ceiling (owner ask 2026-08-14): a role posted more
+    // than two weeks ago is stale - never messaged about. Serper already
+    // filters to the past week; this gates the LinkedIn-search and
+    // DataForSEO results, which carry no age limit of their own.
+    if (c.postAt) {
+      const age = Date.now() - new Date(c.postAt).getTime();
+      if (Number.isFinite(age) && age > MAX_POST_AGE_DAYS * 86_400_000) { g.nopost++; continue; }
+    }
     if (seenPosts.has(c.postId)) { g.seen++; continue; }
     seenPosts.add(c.postId); seenArr.push(c.postId);
 
@@ -1309,6 +1325,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     state.items.push({
       id, workspaceId, kind: "poster",
       postId: c.postId, postExcerpt: c.text.slice(0, 700), postAt: c.postAt,
+      postUrl: c.postUrl,
       commentId: "", commentText: "",
       openProfile: prof.openProfile,
       industry: industryOf([company ?? "", headline ?? "", c.text].join(" ")),
