@@ -294,6 +294,12 @@ export async function videoOwnership(videoKey: string): Promise<{ ownerEmail: st
 /* ------------------------------------------------------------------ */
 
 interface VideoRow extends VideoResult { at: string }
+
+/** Every composite key in the registry (for per-recruiter rollups). */
+export async function listVideoKeys(): Promise<string[]> {
+  const m = await ensureVideos();
+  return [...m.keys()];
+}
 let vidMem: Map<string, VideoRow> | null = null;
 let vidLoading: Promise<void> | null = null;
 

@@ -185,6 +185,24 @@ export async function GET(req: Request) {
     overview.videos = visible;
     overview.totals = totals;
     overview.recent = overview.recent.filter((e: any) => !e?.videoKey || allowed.has(e.videoKey));
+    return ok({ ...overview, sending });
+  }
+
+  // Admin keeps the full board, but every row is labeled with WHOSE video it is and a
+  // per-recruiter rollup rides along, so activity reads at the individual level.
+  {
+    const { videoOwnership } = await import("../../../../lib/inmarket/roleVideo");
+    const roll: Record<string, { videos: number; opens: number; plays: number; watchSeconds: number }> = {};
+    for (const row of overview.videos) {
+      const own = await videoOwnership(row.videoKey).catch(() => ({ ownerEmail: null as string | null }));
+      (row as any).owner = own.ownerEmail || null;
+      const k = own.ownerEmail || "unassigned";
+      const r = (roll[k] = roll[k] || { videos: 0, opens: 0, plays: 0, watchSeconds: 0 });
+      r.videos++; r.opens += row.opens; r.plays += row.plays; r.watchSeconds += row.watchSeconds;
+    }
+    (overview as any).byRecruiter = Object.entries(roll)
+      .map(([email, v]) => ({ email, ...v }))
+      .sort((a, b) => b.videos - a.videos);
   }
   return ok({ ...overview, sending });
 }

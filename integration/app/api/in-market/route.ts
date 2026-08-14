@@ -158,18 +158,45 @@ export async function POST(req: Request) {
     const { capturedKeySet, listShots } = await import("../../../lib/inmarket/roleShot");
     const { autoVideoMapByCompany, autoVideoStatus } = await import("../../../lib/inmarket/autoVideo");
     const { autoCaptureStatus } = await import("../../../lib/inmarket/autoCapture");
-    const [captured, shots, videos, autoCapture, autoVideo] = await Promise.all([
+    const [captured, shots, autoCapture, autoVideo] = await Promise.all([
       capturedKeySet().catch(() => new Set<string>()),
       listShots().catch(() => [] as unknown[]),
-      autoVideoMapByCompany().catch(() => ({} as Record<string, unknown>)),
       autoCaptureStatus().catch(() => null),
       autoVideoStatus().catch(() => null),
     ]);
+    void autoVideoMapByCompany; // kept imported for other actions' bundles
+
+    // Stats are INDIVIDUAL (owner mandate 2026-08-14): "videos made" is the requester's own
+    // composites and "ready" is what THEY have not personalized yet, so the studio reads as a
+    // personal scoreboard. Owner/admin additionally gets the per-recruiter team rollup.
+    const me = (g.ctx.user.email || "").trim().toLowerCase();
+    const isAdmin = g.ctx.role === "owner" || g.ctx.role === "admin";
+    const { listVideoKeys, videoOwnership } = await import("../../../lib/inmarket/roleVideo");
+    const keys = await listVideoKeys().catch(() => [] as string[]);
+    const byOwner: Record<string, number> = {};
+    const myShotKeys = new Set<string>();
+    let mine = 0;
+    for (const k of keys) {
+      const own = await videoOwnership(k).catch(() => ({ ownerEmail: null, workspaceId: null }));
+      if (own.workspaceId && own.workspaceId !== g.ctx.workspace.id) continue;
+      byOwner[own.ownerEmail || "unassigned"] = (byOwner[own.ownerEmail || "unassigned"] || 0) + 1;
+      if (own.ownerEmail && own.ownerEmail === me) { mine++; myShotKeys.add(k.split("__")[0]); }
+    }
+    const readyForMe = [...captured].filter((k) => !myShotKeys.has(k)).length;
+    const totalVideos = Object.values(byOwner).reduce((a, b) => a + b, 0);
+
+    // Members get their personal scoreboard; owner/admin (Ryan + Josh) gets the FULL picture:
+    // overall numbers plus the per-recruiter split so activity still reads individually.
     return ok({
-      capturedShots: captured.size,                  // verified company-site postings captured
-      shotsReady: shots.length,                      // captures with an email-ready GIF (personalizable)
-      compositedVideos: Object.keys(videos).length,  // finished outreach videos (by company)
-      autoCapture, autoVideo,                        // live tick status: enabled, lastRun, totalMade
+      capturedShots: captured.size,                  // verified company-site postings captured (shared supply)
+      shotsListed: shots.length,                     // captures with an email-ready GIF
+      shotsReady: isAdmin ? shots.length : readyForMe, // admin: total personalizable; member: not yet personalized by YOU
+      compositedVideos: isAdmin ? totalVideos : mine,  // admin: workspace total; member: YOUR videos
+      myVideos: mine,                                // always available for the "you" chip
+      team: isAdmin
+        ? Object.entries(byOwner).map(([email, videos]) => ({ email, videos })).sort((a, b) => b.videos - a.videos)
+        : undefined,
+      autoCapture, autoVideo,         // live tick status: enabled, lastRun, totalMade
       at: new Date().toISOString(),
     });
   }

@@ -296,8 +296,9 @@
 <!-- Live coverage stats (polled): captured postings, personalizable, videos made -->
 <div id="pipStats" class="pipstats" aria-live="polite">
   <span class="ps-item"><b id="psCaptured">–</b> postings captured</span>
-  <span class="ps-item"><b id="psReady">–</b> ready to personalize</span>
-  <span class="ps-item"><b id="psVideos">–</b> videos made</span>
+  <span class="ps-item"><b id="psReady">–</b> <span id="psReadyLbl">ready for you to personalize</span></span>
+  <span class="ps-item"><b id="psVideos">–</b> <span id="psVideosLbl">videos you made</span></span>
+  <span class="ps-item" id="psTeam" style="display:none"></span>
   <span class="ps-sep"></span>
   <span class="ps-live" id="psLive"></span>
 </div>
@@ -498,6 +499,8 @@
   </div>
   <div class="sendstrip" id="sendStrip" style="display:none"></div>
   <div class="kpis" id="kpis"></div>
+  <!-- Admin only: per-recruiter rollup so the full picture still reads individually. -->
+  <div class="sendstrip" id="byRecStrip" style="display:none"></div>
   <div class="note-machine" id="perfMachine" style="display:none"></div>
   <div class="perfgrid">
     <div class="card">
@@ -522,6 +525,6 @@
 <div class="copied" id="toast"></div>
 <div class="modal" id="modal"><div class="modal-card" id="modalBody"></div></div>
 <script src="assets/js/config.js?v=ad110cbee0"></script>
-<script src="assets/js/pip-studio.js?v=9817e3126a"></script>
+<script src="assets/js/pip-studio.js?v=d877dd09a7"></script>
 </body>
 </html>

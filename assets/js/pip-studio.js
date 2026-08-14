@@ -789,9 +789,23 @@
     }
 
     $("chart").innerHTML = chartSvg((o && o.trend) || []);
+    renderByRecruiter((o && o.byRecruiter) || null);
     renderFeed((o && o.recent) || []);
     renderLeaderboard((o && o.videos) || []);
     loadLeads();
+  }
+
+  // Admin only: the same board, rolled up per recruiter, so overall numbers still
+  // show who is producing and who is getting watched. Members never receive this.
+  function renderByRecruiter(rows) {
+    var el = $("byRecStrip"); if (!el) return;
+    if (!rows || !rows.length) { el.style.display = "none"; return; }
+    el.innerHTML = rows.map(function (r) {
+      var who = r.email === "unassigned" ? "Unassigned" : esc(String(r.email).split("@")[0]);
+      return '<div class="cell"><span class="cl">' + who + '</span><span class="cv">' + nfmt(r.videos) + " video" + (r.videos === 1 ? "" : "s") +
+        " · " + nfmt(r.plays) + ' plays</span><span class="cs">' + nfmt(r.opens) + " visits · " + dur(r.watchSeconds) + " watched</span></div>";
+    }).join("");
+    el.style.display = "flex";
   }
 
   // Replies & leads captured on the watch pages.
@@ -856,11 +870,13 @@
               (p.completed ? '<span class="done">finished</span>' : "") + "</span>";
           }).join("") + (people.length > 6 ? '<span class="wt">+' + (people.length - 6) + " more</span>" : "")
         : '<span class="wt">' + (v.plays ? "not identified" : "nobody yet") + "</span>";
+      // Admin board: label whose video this is (rows arrive unlabeled for members).
+      var ownerChip = v.owner ? '<div class="ro">' + esc(String(v.owner).split("@")[0]) + "</div>" : "";
       var machine = v.machineOpens
         ? '<div class="ro" title="Email security scanners and preview bots that fetched this link. Excluded from every number in this row.">' + nfmt(v.machineOpens) + " scanner load" + (v.machineOpens === 1 ? "" : "s") + "</div>"
         : "";
       return "<tr>" +
-        '<td class="l"><div class="co">' + esc(v.company || "·") + '</div><div class="ro">' + esc(v.roleTitle || "") + "</div>" + machine + "</td>" +
+        '<td class="l"><div class="co">' + esc(v.company || "·") + '</div><div class="ro">' + esc(v.roleTitle || "") + "</div>" + ownerChip + machine + "</td>" +
         '<td class="people">' + whoHtml + "</td>" +
         "<td>" + nfmt(v.gifOpens) + "</td>" +
         "<td>" + nfmt(v.opens) + "</td>" +
@@ -1162,6 +1178,22 @@
         if (!j) return;
         $("psCaptured").textContent = j.capturedShots || 0;
         $("psReady").textContent = j.shotsReady || 0;
+        // Admin (owner/admin roles) gets the FULL picture: overall numbers plus the
+        // per-recruiter split. Members see their own scoreboard.
+        var team = j.team || null;
+        var rl = $("psReadyLbl"), vl = $("psVideosLbl");
+        if (rl) rl.textContent = team ? "ready to personalize" : "ready for you to personalize";
+        if (vl) vl.textContent = team ? "videos made (team)" : "videos you made";
+        var tEl = $("psTeam");
+        if (tEl) {
+          if (team && team.length) {
+            tEl.style.display = "";
+            tEl.textContent = team.map(function (t) {
+              var who = t.email === "unassigned" ? "unassigned" : String(t.email).split("@")[0];
+              return who + " " + t.videos;
+            }).join(" · ");
+          } else { tEl.style.display = "none"; }
+        }
         var vids = j.compositedVideos || 0;
         var ve = $("psVideos"); ve.textContent = vids; ve.classList.toggle("hot", vids > 0);
         var cap = j.autoCapture || {}, vid = j.autoVideo || {};
