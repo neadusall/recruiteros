@@ -118,6 +118,10 @@ export interface LiActionRecord {
     audioUrl?: string;
     attachmentUrl?: string;
     postUrl?: string;
+    /** Open profile, not a connection: the send routes over LinkedIn's free
+     *  open-profile InMail lane (a plain message 422s as invalid_recipient,
+     *  proven live 2026-08-14). Capacity still counts as a message. */
+    openProfile?: boolean;
     /** comment_post only: reply threaded under this existing comment. */
     commentId?: string;
     /** Resolved provider profile id, filled at execution when known. */

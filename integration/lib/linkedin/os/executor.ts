@@ -290,7 +290,14 @@ async function executeOneInner(r: LiActionRecord): Promise<void> {
         out = await provider.sendConnection({ account, prospect, note: r.payload.note });
         break;
       case "message":
-        out = await provider.sendMessage({ account, prospect, text: r.payload.text ?? "" });
+        // Open profiles that are not connections only accept the free
+        // open-profile InMail; a plain chat message 422s (invalid_recipient).
+        out = r.payload.openProfile
+          ? await provider.sendInMail({
+              account, prospect, text: r.payload.text ?? "",
+              subject: r.payload.subject ?? "Your hiring post",
+            })
+          : await provider.sendMessage({ account, prospect, text: r.payload.text ?? "" });
         break;
       case "attachment": {
         const text = [r.payload.text ?? "", r.payload.attachmentUrl ?? ""].filter(Boolean).join("\n");

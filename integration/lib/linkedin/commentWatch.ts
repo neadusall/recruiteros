@@ -1555,7 +1555,14 @@ export async function approveDm(
         providerProfileId: item.authorProviderId, prospectId: item.prospectId,
       },
       actionType: "message",
-      payload: { text: item.dmText, providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl },
+      payload: {
+        text: item.dmText,
+        providerProfileId: item.authorProviderId,
+        linkedinUrl: item.authorPublicUrl,
+        // Not a connection: route over the free open-profile InMail lane.
+        openProfile: item.openProfile === true && item.networkDistance !== "DISTANCE_1",
+        subject: item.matchedRole && !item.matchedRole.includes(":") ? `Your ${item.matchedRole} opening` : "Your hiring post",
+      },
       businessUnit: "bd",
       sourceType: "manual",
       approvedBy: userEmail,
