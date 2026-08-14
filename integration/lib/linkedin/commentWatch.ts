@@ -51,6 +51,18 @@ const MARKET_RESULTS_PER_SEARCH = 20;
 const POSTER_NEW_PER_TICK = 8;   // DM drafts created per tick
 const POSTER_RECHECK_DAYS = 7;   // never re-message the same author within a week
 const CLOSED_PROFILE_DAYS = 30;  // remember closed profiles; no repeat profile reads
+const STATS_KEEP_DAYS = 14;      // hunt-economics history shown on the card
+
+/** One day of hunt economics: what ran, what was spent, what the caches saved. */
+export interface HuntDayStats {
+  searches: number;       // discovery searches run (Unipile/Serper/DataForSEO)
+  screened: number;       // posts screened by the free text gates
+  profileReads: number;   // provider profile reads spent
+  readsSaved: number;     // reads skipped by the closed-profile memory
+  closedFound: number;    // fresh closed profiles discovered (now remembered)
+  hiringChecks: number;   // job-board lookups spent (open profiles only)
+  leads: number;          // decision-maker leads created with drafted DMs
+}
 const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
 
 /** The keyword bank is the ROLES the desk places (owner decision 2026-08-13):
@@ -239,6 +251,9 @@ interface WatchState {
    *  Closed profiles are skipped for CLOSED_PROFILE_DAYS without spending
    *  another profile read (owner ask 2026-08-14: save credit usage). */
   closedProfiles: Record<string, Record<string, string>>;
+  /** ws -> YYYY-MM-DD -> hunt economics for the monitoring strip
+   *  (owner ask 2026-08-14: a place to watch what the radar spends). */
+  dayStats: Record<string, Record<string, HuntDayStats>>;
   /** ws -> keyword bank override (backend defaults when unset). */
   marketKeywords: Record<string, string[]>;
   /** ws -> rotation cursor into the keyword bank (one search per tick). */
@@ -259,7 +274,13 @@ interface WatchState {
 }
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
+
+function huntStatsFor(workspaceId: string): HuntDayStats {
+  const day = nowIso().slice(0, 10);
+  const ws = state.dayStats[workspaceId] ?? (state.dayStats[workspaceId] = {});
+  return ws[day] ?? (ws[day] = { searches: 0, screened: 0, profileReads: 0, readsSaved: 0, closedFound: 0, hiringChecks: 0, leads: 0 });
+}
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
 const save = debouncedSaver(KEY, () => state);
@@ -276,6 +297,7 @@ async function hydrate(): Promise<void> {
           ownProfile: snap.ownProfile ?? {},
           posterSeen: snap.posterSeen ?? {},
           closedProfiles: snap.closedProfiles ?? {},
+          dayStats: snap.dayStats ?? {},
           marketKeywords: snap.marketKeywords ?? {},
           keywordCursor: snap.keywordCursor ?? {},
           scenarios: snap.scenarios ?? {},
@@ -321,6 +343,14 @@ function prune(): void {
     const m = state.closedProfiles[ws];
     for (const k of Object.keys(m)) {
       if (new Date(m[k]).getTime() < closedCutoff) delete m[k];
+    }
+  }
+  // Hunt-economics history: keep a rolling two weeks.
+  const statsCutoff = new Date(Date.now() - STATS_KEEP_DAYS * 86_400_000).toISOString().slice(0, 10);
+  for (const ws of Object.keys(state.dayStats)) {
+    const m = state.dayStats[ws];
+    for (const day of Object.keys(m)) {
+      if (day < statsCutoff) delete m[day];
     }
   }
 }
@@ -1060,6 +1090,9 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
   const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0 };
+  const stats = huntStatsFor(workspaceId);
+  stats.searches += 1;
+  stats.screened += candidates.length;
   for (const c of candidates) {
     if (created >= POSTER_NEW_PER_TICK) break;
     if (c.text.length < 40) { g.nopost++; continue; }
@@ -1080,13 +1113,14 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     const closedCache = state.closedProfiles[workspaceId] ?? (state.closedProfiles[workspaceId] = {});
     const closedCutoff = Date.now() - CLOSED_PROFILE_DAYS * 86_400_000;
     const closedAt = closedCache[c.authorRef];
-    if (closedAt && new Date(closedAt).getTime() >= closedCutoff) { g.closed++; continue; }
+    if (closedAt && new Date(closedAt).getTime() >= closedCutoff) { g.closed++; stats.readsSaved += 1; continue; }
     seenAuthors[c.authorRef] = nowIso();
     save();
 
     // Profile read on the seat that will send. Company pages fail here,
     // which is the point.
     const sendAccount = accounts[rota % accounts.length];
+    stats.profileReads += 1;
     const prof = await fetchProfileLite(sendAccount, c.authorRef);
     if (!prof.providerId) { g.profile++; continue; }
     if (own && prof.providerId === own.providerId) { g.profile++; continue; }
@@ -1104,7 +1138,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     if (!direct) {
       closedCache[c.authorRef] = nowIso();
       if (prof.providerId) closedCache[prof.providerId] = nowIso();
-      g.closed++; save(); continue;
+      g.closed++; stats.closedFound += 1; save(); continue;
     }
 
     // Decision-maker title, not a peer staffing firm.
@@ -1126,6 +1160,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     } catch { g.dnc++; continue; }
 
     // Supporting evidence, never a gate: their own board's open roles.
+    if (company) stats.hiringChecks += 1;
     const hiring = company ? await checkHiring(company) : undefined;
 
     // The MPC script: deterministic template fill. {job_title} = the matched
@@ -1156,6 +1191,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     });
     rota++;
     created++;
+    stats.leads += 1;
     save();
   }
 
@@ -1182,6 +1218,8 @@ export interface CommentWatchView {
   lastError?: string;
   lastScan?: string;
   items: CommentLeadItem[];
+  /** Hunt economics for the monitoring strip: today + a short history. */
+  stats: { today: HuntDayStats; days: Array<{ day: string } & HuntDayStats> };
 }
 
 const TIER_RANK: Record<CommentTier, number> = { hot: 0, warm: 1, community: 2 };
@@ -1201,6 +1239,13 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
     lastError: state.lastError[workspaceId],
     lastScan: state.lastScan[workspaceId],
     items,
+    stats: {
+      today: huntStatsFor(workspaceId),
+      days: Object.entries(state.dayStats[workspaceId] ?? {})
+        .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+        .slice(0, 7)
+        .map(([day, s]) => ({ day, ...s })),
+    },
   };
 }
 

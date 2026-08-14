@@ -3524,6 +3524,12 @@
       var picker = presets.filter(function (p) { return !activeSet[p.id]; });
       var rolesVal = unsavedRoles !== null ? unsavedRoles : roles.join(", ");
       var huntCount = (active.presets || []).length + (active.custom || []).length;
+      var st7 = (d.stats && d.stats.today) || null;
+      var econ = st7
+        ? '<div class="lie-post muted">Today: <b>' + (st7.searches || 0) + '</b> hunts · <b>' + (st7.screened || 0) + '</b> posts screened · <b>' +
+          (st7.profileReads || 0) + '</b> profile reads (<b>' + (st7.readsSaved || 0) + '</b> saved by closed-profile memory, <b>' + (st7.closedFound || 0) + '</b> new closed remembered) · <b>' +
+          (st7.hiringChecks || 0) + '</b> job-board checks · <b>' + (st7.leads || 0) + '</b> leads drafted</div>'
+        : "";
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Role Hunter</b>' +
@@ -3534,6 +3540,7 @@
             "</span></div>" +
           (st.active ? "" : ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join(""))) +
           (d.lastError ? '<div class="lie-post"><span class="lie-chip bad">' + esc(d.lastError) + "</span></div>" : "") +
+          econ +
           '<div class="lie-post muted">AI Search: describe who you want to find and it hunts right now (standing hunts below keep running on their own):</div>' +
           '<div class="lie-actions">' +
             '<input class="lie-text" data-lih-ask placeholder="e.g. CFOs at Series B fintechs hiring senior accountants" style="flex:1;min-width:260px"> ' +

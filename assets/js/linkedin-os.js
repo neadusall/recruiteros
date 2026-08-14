@@ -1269,7 +1269,17 @@
         '<div class="card lio-card"><div class="lio-card-t">Fair capacity allocation</div>' +
         (alloc ? '<div class="lio-tablewrap"><table class="lio-table"><thead><tr><th>Consumer</th><th>Unit</th><th>Priority</th><th>Weight</th><th>Demand</th><th>Allocated</th><th>Used today</th></tr></thead><tbody>' + alloc + "</tbody></table></div>"
           : '<div class="empty">No competing consumers right now. Unused allocation is released dynamically.</div>') + "</div></div>" +
-        '<div class="card lio-card"><div class="lio-card-t">Wait queue and scheduled actions</div>' +
+        '<div class="card lio-card"><div class="lio-card-t">Wait queue and scheduled actions' + (function () {
+          // Send scorecard (owner ask 2026-08-14): sent / confirmed-on-LinkedIn
+          // / unreachable at a glance, computed from the 48h rows below.
+          var done = d.queue.filter(function (q) { return q.status === "success" || q.status === "failed"; });
+          if (!done.length) return "";
+          var sent = done.filter(function (q) { return q.status === "success"; });
+          var conf = sent.filter(function (q) { return q.confirmedAt; });
+          var failed = done.length - sent.length;
+          return " · " + pill(sent.length + " sent", "green") + " " + pill(conf.length + " confirmed on LinkedIn", conf.length ? "green" : "") +
+            (failed ? " " + pill(failed + " unreachable / failed", "red") : "");
+        })() + "</div>" +
         (queue ? '<div class="lio-tablewrap"><table class="lio-table"><thead><tr><th>Time</th><th>Action</th><th>Person</th><th>Source</th><th>Status</th><th></th></tr></thead><tbody>' + queue + "</tbody></table></div>"
           : '<div class="empty">Nothing queued or waiting.</div>') + "</div>";
 
