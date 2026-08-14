@@ -1,18 +1,15 @@
 // RecruitersOS · System Health collector (the checks-and-balances layer).
 //
-// Born 2026-08-14 after a week of silent failures: bounce notices nobody read, a validation
-// service dead since July over a chmod, a curation tick suiciding on its own watchdog. Every one
-// was visible in a log or snapshot; none was visible to the owner. This collector turns every
-// layer into an explicit check with a status the Owner Console renders at a glance:
+// Born 2026-08-14 after a week of silent failures; tightened same day after the first review:
+// readings must survive an adversarial audit against ground truth, or the board is theater.
 //   good  = verified working          amber = degraded / needs attention soon
 //   bad   = broken or actively risky
-// It runs on the HOST (systemd timer, q15min) so it can see systemd, the docker volume, and the
-// network, and it writes /data/snap_system_health_v1.json for /api/owner/system-health.
-// The UI treats a snapshot older than 30 min as a RED banner: the collector watching the
-// watchers is itself watched by the page.
+// Runs on the HOST (systemd timer, q15min) so it can see systemd, the docker volume, and the
+// network; writes /data/snap_system_health_v1.json for /api/owner/system-health. The UI treats
+// a snapshot older than 30 min as a RED banner: the collector is itself watched.
 //
 //   node /opt/recruiteros/tools/system-health.mjs
-import { readFileSync, writeFileSync, renameSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, readdirSync, statSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 const VOL = "/var/lib/docker/volumes/recruiteros_app_data/_data";
@@ -32,7 +29,7 @@ function envVal(key) {
 function ageMin(iso) { const t = Date.parse(iso || 0); return Number.isFinite(t) ? Math.round((now - t) / 60000) : null; }
 function fmtAge(min) { return min == null ? "never" : min < 60 ? `${min}m ago` : min < 2880 ? `${Math.round(min / 60)}h ago` : `${Math.round(min / 1440)}d ago`; }
 
-/* ---------------- sent-log facts (today volume, per-domain) ---------------- */
+/* ---------------- sent-log facts (today volume, contacted set) ---------------- */
 const today = new Date().toISOString().slice(0, 10);
 let sentToday = 0;
 const sentTo = new Set();
@@ -46,21 +43,26 @@ for (const f of readdirSync(MPC_OUT).filter((n) => /^sent-.*\.jsonl$/.test(n))) 
 /* ---------------- Sending & domains ---------------- */
 const GROUP_SEND = "Sending & domains";
 
-// Volume vs governor cap (same formula as batch.mjs).
+// Volume vs governor cap — same knobs batch.mjs honors (env-aware, no silent formula drift).
 const placement = readJson(`${VOL}/snap_mpc_placement_v1.json`);
 const plAge = placement ? ageMin(placement.checkedAt) : null;
 const plTotal = placement ? (placement.gmail?.inbox || 0) + (placement.gmail?.spam || 0) : 0;
 const plPass = placement && plAge != null && plAge <= 7 * 1440 && plTotal > 0 && (placement.gmail.spam || 0) / plTotal <= 0.3;
 {
-  const RAMP_START = Date.parse("2026-08-13");
-  const weeks = Math.max(0, (now - RAMP_START) / (7 * 86400000));
-  const cap = Math.min(1500, Math.round(450 * (plPass ? Math.pow(1.2, weeks) : 1)));
+  const CAP_ENV = Number(envVal("MPC_DAILY_CAP") || 1800);
+  const RAMP_START = Date.parse(envVal("MPC_RAMP_START") || "2026-08-13");
+  const RAMP_BASE = envVal("MPC_RAMP_BASE") === "" ? 450 : Number(envVal("MPC_RAMP_BASE"));
+  let cap = CAP_ENV;
+  if (RAMP_BASE > 0 && Number.isFinite(RAMP_START)) {
+    const weeks = Math.max(0, (now - RAMP_START) / (7 * 86400000));
+    cap = Math.min(cap, Math.min(1500, Math.round(RAMP_BASE * (plPass ? Math.pow(1.2, weeks) : 1))));
+  }
   const utc = new Date().getUTCHours();
   const st = sentToday > cap ? "bad" : (utc >= 18 && sentToday === 0) ? "amber" : "good";
   add(GROUP_SEND, "volume", "Daily send volume", st, `${sentToday} sent / cap ${cap}`,
     sentToday > cap ? "Over the governor cap: investigate immediately" :
-    st === "amber" ? "Zero sends late in the day usually means the supply funnel is starved" :
-    "Governor: 450/day base, +20%/week while the seed test passes");
+    st === "amber" ? "Zero sends late in the day usually means the sendable pool is empty" :
+    plPass ? "Governor: growth unlocked by the passing seed test" : "Governor holding base volume until a passing seed test exists");
 }
 
 // Domain rest ledger.
@@ -69,9 +71,12 @@ const rest = readJson(`${VOL}/snap_mpc_domain_rest_v1.json`);
   const doms = Object.entries(rest?.domains || {});
   const resting = doms.filter(([, v]) => v?.state === "resting" && (!v.until || Date.parse(v.until) > now));
   const names = resting.map(([d]) => d);
+  const nextUp = resting.map(([, v]) => Date.parse(v.until || 0)).filter(Number.isFinite).sort()[0];
+  const inMin = nextUp ? Math.round((nextUp - now) / 60000) : null;
+  const nextTxt = inMin == null ? "n/a" : inMin <= 0 ? "due now (next breaker run)" : inMin < 60 ? `in ${inMin}m` : `in ${Math.round(inMin / 60)}h`;
   const st = resting.length > 20 ? "bad" : resting.length > 8 ? "amber" : "good";
   add(GROUP_SEND, "resting", "Domains resting (circuit breaker)", st, `${resting.length} resting`,
-    names.length ? `Benched, warm-up continues, auto-revive: ${names.slice(0, 6).join(", ")}${names.length > 6 ? ` +${names.length - 6} more` : ""}` : "No domain currently benched");
+    names.length ? `Warm-up continues; next auto-revive ${nextTxt}: ${names.slice(0, 5).join(", ")}${names.length > 5 ? ` +${names.length - 5} more` : ""}` : "No domain currently benched");
 }
 
 // Fresh bounce pressure + suppression from the NDR sidecar.
@@ -113,40 +118,71 @@ const eng = readJson(`${VOL}/snap_inmarket_engine_health_v1.json`);
 {
   const okTick = eng?.lastCurationOk === true;
   const engAge = eng ? ageMin(eng.lastCurationAt) : null;
+  const bootAge = eng ? ageMin(eng.bootAt) : null;
+  const warmingUp = !okTick && bootAge != null && bootAge <= 15;
   add(GROUP_SUPPLY, "tick", "Curation tick (enrichment engine)",
-    !eng ? "bad" : okTick && engAge <= 30 ? "good" : okTick ? "amber" : "bad",
-    !eng ? "no engine health data" : okTick ? `completing, last ${fmtAge(engAge)}` : `FAILING: ${eng.lastCurationError || "unknown error"}`,
-    okTick ? "" : "Nothing downstream (managers, emails, validation) advances while this fails");
+    !eng ? "bad" : okTick && engAge <= 30 ? "good" : warmingUp ? "amber" : okTick ? "amber" : "bad",
+    !eng ? "no engine health data" :
+    warmingUp ? `app restarted ${fmtAge(bootAge)}, first tick pending` :
+    okTick ? `completing, last ${fmtAge(engAge)}` : `FAILING: ${eng.lastCurationError || "unknown error"}`,
+    okTick || warmingUp ? "" : "Nothing downstream (managers, emails, validation) advances while this fails");
 }
 
-// Curation funnel numbers.
+// Curation funnel numbers: rolling 24h windows (calendar-day counts lie at 1am),
+// validatedAt for validation (a row curated Tuesday can validate Thursday).
 const cur = readJson(`${VOL}/snap_inmarket_curation_v1.json`);
+let gatesNote = "";
 {
   const arrs = []; const walk = (o) => { if (Array.isArray(o)) { if (o.length && typeof o[0] === "object") arrs.push(o); } else if (o && typeof o === "object") for (const v of Object.values(o)) walk(v); };
   walk(cur || {});
   const rows = (arrs.sort((a, b) => b.length - a.length)[0] || []).map((r) => r.lead || r);
-  let curatedToday = 0, validatedToday = 0, backlog = 0, sendable = 0;
+  const h24 = now - 24 * 3600000;
+  let curated24 = 0, validated24 = 0, backlog = 0;
+  const candidates = [];
   for (const r of rows) {
-    const day = String(r.curatedAt || "").slice(0, 10);
-    if (day === today) { curatedToday++; if (r.emailValidated === true) validatedToday++; }
+    if (Date.parse(r.curatedAt || 0) >= h24) curated24++;
+    if (Date.parse(r.validatedAt || 0) >= h24 && r.emailValidated === true) validated24++;
     if (r.likelyEmail && !r.emailInvalid) {
       if (r.emailValidated !== true) backlog++;
-      else if (!sentTo.has(String(r.likelyEmail).toLowerCase())) sendable++;
+      else if (!sentTo.has(String(r.likelyEmail).toLowerCase())) candidates.push(r);
     }
   }
-  add(GROUP_SUPPLY, "inflow", "New prospects curated today", curatedToday >= 300 ? "good" : curatedToday >= 50 ? "amber" : "bad",
-    `${curatedToday} today`, "Sourcing belt output: watchlists, JD feeds, signals");
-  add(GROUP_SUPPLY, "validated", "Emails validated today", validatedToday >= 200 ? "good" : validatedToday >= 50 ? "amber" : "bad",
-    `${validatedToday} today`, "Reoon inline validation inside the curation tick");
+  // The honest "ready to send" number applies the SAME quality gates the sender applies —
+  // the earlier version skipped them and read thousands while the real pool was 36.
+  let passGates = 0, segDeferred = 0, gateRejected = 0;
+  try {
+    const g = await import("/opt/recruiteros/tools/gates.mjs");
+    const mx = readJson(`${MPC_OUT}/mx-class.json`) || {};
+    for (const r of candidates) {
+      if (!g.assessProspect(r).eligible) { gateRejected++; continue; }
+      const dom = String(r.likelyEmail).split("@")[1]?.toLowerCase();
+      if (mx[dom]?.seg) { segDeferred++; continue; }
+      passGates++;
+    }
+    gatesNote = `${gateRejected} fail quality gates, ${segDeferred} gateway-deferred`;
+  } catch (e) {
+    passGates = candidates.length;
+    gatesNote = `gates module unavailable (${String(e.message).slice(0, 40)}): count is pre-gate`;
+  }
+  add(GROUP_SUPPLY, "inflow", "New prospects curated (24h)", curated24 >= 300 ? "good" : curated24 >= 50 ? "amber" : "bad",
+    `${curated24} in 24h`, "Sourcing belt output: watchlists, JD feeds, signals");
+  add(GROUP_SUPPLY, "validated", "Emails validated (24h)", validated24 >= 200 ? "good" : validated24 >= 50 ? "amber" : "bad",
+    `${validated24} in 24h`, "Reoon inline validation inside the curation tick");
   add(GROUP_SUPPLY, "backlog", "Validation backlog", backlog < 500 ? "good" : backlog < 2500 ? "amber" : "bad",
     `${backlog} awaiting validation`, backlog >= 500 ? "Drains automatically while the curation tick completes" : "");
-  add(GROUP_SUPPLY, "sendable", "Validated prospects ready to send", sendable >= 450 ? "good" : sendable >= 100 ? "amber" : "bad",
-    `${sendable} sendable now`, "Validated, never contacted; the send engine draws from this pool");
+  add(GROUP_SUPPLY, "sendable", "Prospects ready to send (all gates applied)", passGates >= 450 ? "good" : passGates >= 100 ? "amber" : "bad",
+    `${passGates} sendable now`, `Validated, never contacted, gate-passing. Of the rest: ${gatesNote}`);
 }
 
 /* ---------------- Watchers (are the safety nets alive?) ---------------- */
 const GROUP_WATCH = "Watchers & fail-safes";
 
+function unitProps(unit) {
+  const out = execFileSync("systemctl", ["show", unit, "-p", "LastTriggerUSec,Result,ActiveState,SubState,ExecMainStatus,Id"], { encoding: "utf8" });
+  const props = {};
+  for (const line of out.split("\n")) { const i = line.indexOf("="); if (i > 0) props[line.slice(0, i)] = line.slice(i + 1); }
+  return props;
+}
 const TIMERS = [
   ["mpc-daily.timer", "Daily send rota", 26 * 60],
   ["recruiteros-sending-health.timer", "Hourly sending health", 2 * 60],
@@ -155,37 +191,46 @@ const TIMERS = [
   ["email-validate-batch.timer", "Nightly bulk validation", 26 * 60],
   ["mpc-seed-test.timer", "Weekly seed placement test", 8 * 24 * 60],
   ["recruiteros-signals-watch.timer", "Signal watchlists (q15m)", 60],
+  ["system-health.timer", "This health collector", 45],
 ];
 for (const [unit, label, staleMin] of TIMERS) {
   try {
-    const svc = unit.replace(/\.timer$/, ".service");
-    const out = execFileSync("systemctl", ["show", unit, svc, "-p", "LastTriggerUSec,Result,ActiveState,ExecMainStatus,Id"], { encoding: "utf8" });
-    if (!/Id=/.test(out)) throw new Error("unit not found");
-    const blocks = out.split("\n\n");
-    const timerBlock = blocks.find((b) => b.includes(unit)) || "";
-    const svcBlock = blocks.find((b) => b.includes(svc)) || "";
-    const trig = (timerBlock.match(/LastTriggerUSec=(.*)/) || [])[1] || "";
-    const lastMs = trig && trig !== "n/a" ? Date.parse(trig.replace(/^[A-Za-z]+ /, "")) : NaN;
-    const mins = Number.isFinite(lastMs) ? Math.round((now - lastMs) / 60000) : null;
-    const svcResult = (svcBlock.match(/Result=(.*)/) || [])[1] || "";
-    const enabled = /ActiveState=active/.test(timerBlock);
-    const failed = svcResult && svcResult !== "success";
+    const t = unitProps(unit);
+    if (!t.Id) throw new Error("unit not found");
+    const s = unitProps(unit.replace(/\.timer$/, ".service"));
+    const enabled = t.ActiveState === "active";
+    const running = s.ActiveState === "activating" || s.ActiveState === "active";
+    const trig = t.LastTriggerUSec && t.LastTriggerUSec !== "n/a" ? Date.parse(t.LastTriggerUSec.replace(/^[A-Za-z]{3} /, "")) : NaN;
+    const mins = Number.isFinite(trig) ? Math.round((now - trig) / 60000) : null;
+    const failed = !running && s.Result && s.Result !== "success";
     const stale = mins == null || mins > staleMin;
     add(GROUP_WATCH, unit, label,
-      !enabled ? "bad" : failed ? "bad" : stale ? "amber" : "good",
-      !enabled ? "timer not active" : `last run ${fmtAge(mins)}${failed ? `, FAILED (${svcResult})` : ", ok"}`,
-      failed ? "Last run exited with an error: check journalctl -u " + svc : stale && enabled ? "Overdue for its cadence" : "");
+      !enabled ? "bad" : failed ? "bad" : running ? "good" : stale ? "amber" : "good",
+      !enabled ? "timer not active" :
+      running ? `running now (triggered ${fmtAge(mins)})` :
+      mins == null ? "never run yet" :
+      `last run ${fmtAge(mins)}${failed ? `, FAILED (${s.Result})` : ", ok"}`,
+      failed ? "Last run exited with an error: journalctl -u " + unit.replace(/\.timer$/, ".service") :
+      !running && stale && enabled ? "Overdue for its cadence" : "");
   } catch {
-    add(GROUP_WATCH, unit, label, unit === "mpc-seed-test.timer" ? "amber" : "bad", "not installed", "Install the timer to activate this layer");
+    add(GROUP_WATCH, unit, label, unit === "system-health.timer" || unit === "mpc-seed-test.timer" ? "amber" : "bad",
+      "not installed", "Install the timer to activate this layer");
   }
 }
 
 // Snapshot freshness: the data the breaker and follow-ups act on.
 add(GROUP_WATCH, "ndr-fresh", "Bounce data freshness", !ndr ? "bad" : ageMin(ndr.generatedAt) <= 360 ? "good" : "bad",
   ndr ? `swept ${fmtAge(ageMin(ndr.generatedAt))}` : "never", "Stale bounce data means the circuit breaker is flying blind");
-const rq = readJson(`${VOL}/snap_mpc_reply_queue_v1.json`);
-add(GROUP_WATCH, "replies", "Reply bridge freshness", Array.isArray(rq) ? "good" : "amber",
-  Array.isArray(rq) ? `${rq.length} bridged replies on file` : "no queue file", "Replies from all sending boxes bridge into the app inbox");
+
+// Reply bridge: the monitor log is written as it scans, so its mtime is the honest heartbeat.
+{
+  const logs = readdirSync(MPC_OUT).filter((n) => /^monitor-.*\.log$/.test(n)).sort();
+  const newest = logs[logs.length - 1];
+  const mtimeMin = newest ? Math.round((now - statSync(`${MPC_OUT}/${newest}`).mtimeMs) / 60000) : null;
+  add(GROUP_WATCH, "replies", "Reply bridge heartbeat", mtimeMin == null ? "bad" : mtimeMin <= 120 ? "good" : "amber",
+    mtimeMin == null ? "no monitor log" : `scanning, last activity ${fmtAge(mtimeMin)}`,
+    "Reads every sending box for replies; a full pass takes 40-60 min under API rate limits");
+}
 
 /* ---------------- API credits & providers ---------------- */
 const GROUP_API = "API credits & providers";
@@ -208,15 +253,17 @@ await probe("Sending.ac mailbox API", "sendingac", async () => {
 
 await probe("Reoon validation credits", "reoon", async () => {
   if (!REOON_KEY) return { status: "bad", reading: "no key configured" };
-  try {
-    const r = await fetch(`https://emailverifier.reoon.com/api/v1/check-account-balance/?key=${encodeURIComponent(REOON_KEY)}`, { signal: AbortSignal.timeout(15000) });
-    if (r.ok) {
-      const d = await r.json();
-      const credits = d.remaining_credits ?? d.credits ?? d.balance;
-      if (credits != null) return { status: credits < 2000 ? "amber" : "good", reading: `${credits} credits remaining`, detail: credits < 2000 ? "Running low: validation stops when credits hit zero" : "" };
-    }
-  } catch { /* fall through to key-presence */ }
-  return { status: "amber", reading: "key set, balance unknown", detail: "Balance endpoint unavailable; watch validated-today instead" };
+  const r = await fetch(`https://emailverifier.reoon.com/api/v1/check-account-balance/?key=${encodeURIComponent(REOON_KEY)}`, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) return { status: "amber", reading: `balance HTTP ${r.status}`, detail: "Key may be fine; watch validated-24h instead" };
+  const d = await r.json();
+  const instant = Number(d.remaining_instant_credits);
+  const daily = Number(d.remaining_daily_credits);
+  if (!Number.isFinite(instant)) return { status: "amber", reading: "balance response unrecognized", detail: JSON.stringify(d).slice(0, 100) };
+  return {
+    status: instant < 500 ? "bad" : instant < 5000 ? "amber" : "good",
+    reading: `${instant.toLocaleString("en-US")} instant credits (+${Number.isFinite(daily) ? daily.toLocaleString("en-US") : "?"} daily)`,
+    detail: instant < 5000 ? "Running low: validation stops when credits hit zero" : "",
+  };
 });
 
 await probe("Smartlead warm-up API", "smartlead", async () => {
@@ -231,8 +278,6 @@ for (const [key, label] of [["ANTHROPIC_API_KEY", "Anthropic key (email writer)"
 }
 
 /* ---------------- write ---------------- */
-const order = ["bad", "amber", "good"];
-checks.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
 const summary = { good: checks.filter((c) => c.status === "good").length, amber: checks.filter((c) => c.status === "amber").length, bad: checks.filter((c) => c.status === "bad").length };
 const out = { generatedAt: new Date().toISOString(), summary, groups: [GROUP_SEND, GROUP_SUPPLY, GROUP_WATCH, GROUP_API], checks };
 const tmp = OUT_FILE + ".tmp";

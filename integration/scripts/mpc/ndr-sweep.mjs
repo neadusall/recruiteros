@@ -95,13 +95,20 @@ console.log(`swept ${swept}/${boxList.length} boxes (${errors} errors), ${ndrs.l
 // list (a dead address is dead forever); they just stop counting against the resting domain.
 const REST_FILE = process.env.MPC_REST_FILE
   || "/var/lib/docker/volumes/recruiteros_app_data/_data/snap_mpc_domain_rest_v1.json";
-const restSince = new Map(); // domain -> bench start (ms) while resting
+const restSince = new Map(); // domain -> notices-count-from cutoff (ms)
 try {
   const ledger = JSON.parse(readFileSync(REST_FILE, "utf8"));
   const nowMs = Date.now();
   for (const [d, v] of Object.entries(ledger.domains || {})) {
-    if (v && v.state === "resting" && (!v.until || Date.parse(v.until) > nowMs) && v.since) {
+    if (!v) continue;
+    if (v.state === "resting" && (!v.until || Date.parse(v.until) > nowMs) && v.since) {
       restSince.set(d.toLowerCase(), Date.parse(v.since));
+    } else {
+      // Cleared domains get the same courtesy: notices from BEFORE their last revival stay off
+      // the books (they were served by the bench), or the 7-day window would re-bench a healthy
+      // revived domain for its own history the moment it cleared.
+      const revived = (v.history || []).filter((h) => h.event === "revived").map((h) => Date.parse(h.at)).filter(Number.isFinite).sort().pop();
+      if (revived) restSince.set(d.toLowerCase(), revived);
     }
   }
 } catch { /* no ledger: count everything */ }
