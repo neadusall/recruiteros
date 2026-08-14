@@ -907,22 +907,26 @@
       // provider-run fleets (Sending.ac, Gmail) and 30 for the internal SMTP
       // server, and a domain only reads "ready" past that mark at 95%+ rep.
       if (/(?:^|&)stats=/.test(qs)) return ok({ domain: (/(?:^|&)stats=([^&]+)/.exec(qs) || [, ""])[1], accounts: [], rollup: null });
-      function wuDom(name, days, rep, infra, kind, boxes) {
+      function wuDom(name, days, rep, infra, kind, boxes, oldestDays) {
         var target = infra === "internal-smtp" ? 30 : 14;
         var readinessLbl = days >= 7 && rep < 60 ? "attention" : (days >= target && rep >= 95 ? "ready" : "warming");
+        var mixedAges = typeof oldestDays === "number" && oldestDays - days > 1;
+        if (oldestDays == null) oldestDays = days;
         var since = new Date(Date.now() - days * 86400000).toISOString();
         var accounts = [];
         for (var i = 0; i < boxes; i++) {
           accounts.push({ email: ["ops", "team", "talent", "search", "hello"][i % 5] + "@" + name, status: "active", reputationPct: Math.max(40, rep - (i % 3)), sentTotal: Math.round(days * 18), spamCount: i % 2, messagePerDay: 25, dailySent: 12, createdAt: since, days: days, smtpStatus: infra === "internal-smtp" ? "active" : null, smtpError: null });
         }
         var actions = readinessLbl === "warming" && days < target ? ["On track, " + Math.max(1, Math.ceil(target - days)) + " more days to the " + target + "-day mark"] : [];
-        return { domain: name, mailboxes: boxes, warming: boxes, paused: 0, avgReputation: rep, minReputation: rep - 2, since: since, days: days, sentTotal: boxes * Math.round(days * 18), spamCount: boxes, spamRatePct: 0.3, readiness: readinessLbl, readyAfterDays: target, dns: { spf: true, dkim: true, dmarc: true, mx: true, dmarcPolicy: "none", dkimSelector: "default", checkedAt: new Date().toISOString(), blacklisted: false, blocklists: [] }, health: { score: rep >= 90 ? 92 : 74, label: rep >= 90 ? "healthy" : "watch" }, actions: actions, emailIds: { total: boxes, active: boxes, error: 0 }, infra: { kind: infra, source: "email-ids", coldPerDay: infra === "sending-ac" ? boxes * 2 : boxes * 5 }, mailboxKind: kind, warmupPerDay: boxes * 25, replyRatePct: 34, accounts: accounts };
+        if (mixedAges) actions.unshift("Mailboxes on this domain started warming at different times: the newest is " + days + " days in, the oldest " + oldestDays + ". The domain counts from the newest, because it is only ready to send once every mailbox on it is warmed. Do not send from this domain until the newest box clears its warm-up.");
+        return { domain: name, mailboxes: boxes, warming: boxes, paused: 0, avgReputation: rep, minReputation: rep - 2, since: since, days: days, oldestDays: oldestDays, mixedAges: mixedAges, sentTotal: boxes * Math.round(days * 18), spamCount: boxes, spamRatePct: 0.3, readiness: readinessLbl, readyAfterDays: target, dns: { spf: true, dkim: true, dmarc: true, mx: true, dmarcPolicy: "none", dkimSelector: "default", checkedAt: new Date().toISOString(), blacklisted: false, blocklists: [] }, health: { score: rep >= 90 ? 92 : 74, label: rep >= 90 ? "healthy" : "watch" }, actions: actions, emailIds: { total: boxes, active: boxes, error: 0 }, infra: { kind: infra, source: "email-ids", coldPerDay: infra === "sending-ac" ? boxes * 2 : boxes * 5 }, mailboxKind: kind, warmupPerDay: boxes * 25, replyRatePct: 34, accounts: accounts };
       }
       var wuDomains = [
         wuDom("acmesearchgroup.com", 21.4, 97, "sending-ac", "microsoft", 5),
         wuDom("acmetalent.co", 16.1, 96, "internal-smtp", "smtp", 5),
         wuDom("acmerecruits.com", 9.5, 88, "internal-smtp", "smtp", 5),
-        wuDom("acmestaffing.net", 4.2, 71, "sending-ac", "google", 5)
+        wuDom("acmestaffing.net", 4.2, 71, "sending-ac", "google", 5),
+        wuDom("acmegmailgroup.com", 0.3, 62, "sending-ac", "google", 3, 14.9)
       ];
       return ok({
         configured: true, updatedAt: new Date().toISOString(),

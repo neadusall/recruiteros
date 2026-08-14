@@ -72,6 +72,13 @@ export interface WarmupDomainRow {
   minReputation: number | null;
   since: string | null;
   days: number | null;
+  /** Age of the OLDEST mailbox on the domain. `days` tracks the youngest, since a
+   *  domain is only as warmed as its least-warmed mailbox; this preserves the
+   *  older cohort's age for the "mixed ages" note. */
+  oldestDays: number | null;
+  /** True when the domain's mailboxes started warming more than a day apart, e.g.
+   *  a domain where some boxes were reconnected weeks after the first. */
+  mixedAges: boolean;
   sentTotal: number;
   spamCount: number;
   spamRatePct: number | null;
@@ -180,13 +187,21 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
     const reps = list.map((a) => a.reputationPct).filter((r): r is number => typeof r === "number");
     // Prefer the true warm-up start (warmup_created_at) over the account's
     // upstream created_at; fall back to created_at where warm-up hasn't stamped one.
+    // A domain is only as warmed as its LEAST-warmed mailbox, so the domain-level
+    // age and readiness track the YOUNGEST start, not the oldest. Anchoring to the
+    // oldest made a domain look "day 14 of 14" when a box reconnected today read as
+    // two weeks warmed just because an older sibling on the same domain was.
     const createds = list.map((a) => a.warmupStartedAt || a.createdAt).filter((c): c is string => !!c).sort();
-    const since = createds[0] || null;
+    const oldestStart = createds[0] || null;
+    const youngestStart = createds.length ? createds[createds.length - 1] : null;
+    const since = youngestStart;
     const perDays = list.map((a) => a.warmupPerDay).filter((n): n is number => typeof n === "number");
     const warmupPerDay = perDays.length ? perDays.reduce((s, n) => s + n, 0) : null;
     const replies = list.map((a) => a.replyRatePct).filter((n): n is number => typeof n === "number");
     const replyRatePct = replies.length ? Math.round(replies.reduce((s, n) => s + n, 0) / replies.length) : null;
     const days = since ? round1((now - new Date(since).getTime()) / 86_400_000) : null;
+    const oldestDays = oldestStart ? round1((now - new Date(oldestStart).getTime()) / 86_400_000) : null;
+    const mixedAges = !!(oldestStart && youngestStart && (new Date(youngestStart).getTime() - new Date(oldestStart).getTime()) > 86_400_000);
     const sentTotal = list.reduce((s, a) => s + (a.sentTotal || 0), 0);
     const spamCount = list.reduce((s, a) => s + (a.spamCount || 0), 0);
     const warming = list.filter((a) => a.warmupStatus === "active").length;
@@ -209,6 +224,8 @@ function buildDomains(accounts: SmartleadAccount[], now: number): WarmupDomainRo
       minReputation,
       since,
       days,
+      oldestDays,
+      mixedAges,
       sentTotal,
       spamCount,
       spamRatePct,
@@ -274,6 +291,7 @@ function computeHealth(d: WarmupDomainRow): { score: number; label: "healthy" | 
 
 function computeActions(d: WarmupDomainRow): string[] {
   const a: string[] = [];
+  if (d.mixedAges && d.oldestDays != null && d.days != null) a.push(`Mailboxes on this domain started warming at different times: the newest is ${d.days} day${d.days === 1 ? "" : "s"} in, the oldest ${d.oldestDays}. The domain counts from the newest, because it is only ready to send once every mailbox on it is warmed. Do not send from this domain until the newest box clears its warm-up.`);
   if (d.dns?.blacklisted) a.push(`Listed on a public spam blocklist (${d.dns.blocklists.join(", ")}), pause this domain's sending and request delisting before resuming`);
   if (d.paused > 0) a.push(`Resume ${d.paused} paused mailbox${d.paused === 1 ? "" : "es"} in warm-up`);
   if (d.spamRatePct != null && d.spamRatePct > 2) a.push(`Spam rate ${d.spamRatePct}% is high, slow this domain's ramp and let reputation recover`);
