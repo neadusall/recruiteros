@@ -210,7 +210,15 @@ export const unipileProvider: LinkedInProvider = {
       network_distance?: string;
       is_open_profile?: boolean;
     }>(`/users/${encodeURIComponent(identifier)}?account_id=${account.providerAccountId}`);
-    const degreeMap: Record<string, 1 | 2 | 3> = { DISTANCE_1: 1, DISTANCE_2: 2, DISTANCE_3: 3 };
+    // Unipile speaks FIRST_DEGREE / SECOND_DEGREE / THIRD_DEGREE (probe-verified
+    // 2026-08-15); the DISTANCE_n spelling is kept only because older cached
+    // payloads carry it. Reading just DISTANCE_n left connectionDegree forever
+    // undefined, so every 1st-degree connection - the one recipient we can DM
+    // for free - looked unreachable and was dropped.
+    const degreeMap: Record<string, 1 | 2 | 3> = {
+      FIRST_DEGREE: 1, SECOND_DEGREE: 2, THIRD_DEGREE: 3,
+      DISTANCE_1: 1, DISTANCE_2: 2, DISTANCE_3: 3,
+    };
     return {
       providerProfileId: data.provider_id,
       publicProfileUrl: data.public_identifier

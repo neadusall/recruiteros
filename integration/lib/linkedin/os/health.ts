@@ -92,7 +92,7 @@ export async function recordResult(
     // down whenever a batch of unmessageable targets hit the belt, blocking
     // the good sends too (seen live 2026-08-14: invalid_recipient loop).
     // They surface as signals + failed actions, but stay out of the window.
-    const recipientLevel = !ok && !!error && /invalid_recipient|cannot be reached|insufficient_credits/i.test(error);
+    const recipientLevel = !ok && !!error && /invalid_recipient|cannot be reached|insufficient_credits|not_open_profile/i.test(error);
     if (!recipientLevel) {
       a.recentResults.push({ ok, at: nowIso(), kind });
       if (a.recentResults.length > WINDOW) a.recentResults.splice(0, a.recentResults.length - WINDOW);

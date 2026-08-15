@@ -1310,19 +1310,28 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     const closedCutoff = Date.now() - CLOSED_PROFILE_DAYS * 86_400_000;
     const closedAt = closedCache[c.authorRef];
     if (closedAt && new Date(closedAt).getTime() >= closedCutoff) { g.closed++; stats.readsSaved += 1; continue; }
-    seenAuthors[c.authorRef] = nowIso();
-    save();
+    // NOTE (2026-08-15): the weekly stamp used to land HERE, before the read.
+    // That marked every author we merely LOOKED at as "touched" for seven days,
+    // so a poster who was screened once and never messaged was locked out of
+    // the whole rotation. It starved the lane down to zero leads across 8/14
+    // and 8/15 (45 searches, 117 screened, 0 leads). The stamp now happens only
+    // when a message is actually drafted; the read budget is protected instead
+    // by closedCache, which absorbs every rejection path below.
+    const markClosed = (providerId?: string) => {
+      closedCache[c.authorRef] = nowIso();
+      if (providerId) closedCache[providerId] = nowIso();
+      save();
+    };
 
     // Profile read on the seat that will send. Company pages fail here,
     // which is the point.
     const sendAccount = accounts[rota % accounts.length];
     stats.profileReads += 1;
     const prof = await fetchProfileLite(sendAccount, c.authorRef);
-    if (!prof.providerId) { g.profile++; continue; }
-    if (own && prof.providerId === own.providerId) { g.profile++; continue; }
+    if (!prof.providerId) { markClosed(); g.profile++; continue; }
+    if (own && prof.providerId === own.providerId) { markClosed(prof.providerId); g.profile++; continue; }
     const lastById = seenAuthors[prof.providerId];
     if (lastById && new Date(lastById).getTime() >= recheckCutoff) { g.weekly++; continue; }
-    seenAuthors[prof.providerId] = nowIso();
 
     // OPEN PROFILES ONLY (owner decision 2026-08-13): the DM lands without a
     // connection. Existing 1st-degree connections also take a plain message.
@@ -1330,7 +1339,13 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // FIRST so a closed profile costs exactly one profile read - none of the
     // classification, DNC, or hiring-board work below runs for them - and is
     // remembered so future hunts spend nothing at all.
-    const direct = prof.openProfile === true || prof.networkDistance === "DISTANCE_1";
+    // Unipile returns FIRST_DEGREE, never DISTANCE_1 (probe-verified
+    // 2026-08-15). Matching only the DISTANCE_n spelling meant no connection
+    // ever counted as reachable, so 1st-degree posters - the people we can DM
+    // for free, forever, with no credit at all - were filed as closed profiles
+    // and skipped for thirty days.
+    const firstDegree = prof.networkDistance === "FIRST_DEGREE" || prof.networkDistance === "DISTANCE_1";
+    const direct = prof.openProfile === true || firstDegree;
     if (!direct) {
       closedCache[c.authorRef] = nowIso();
       if (prof.providerId) closedCache[prof.providerId] = nowIso();
@@ -1353,7 +1368,10 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       if (prof.providerId) closedCache[prof.providerId] = nowIso();
       g.peer++; stats.peersBlocked += 1; save(); continue;
     }
-    if (!intel.isDecisionMaker) { g.title++; continue; }
+    // A title is not going to reclassify next week, so a non-decision-maker
+    // joins the never-again cache too - otherwise dropping the pre-read stamp
+    // would let the same individual contributor cost a fresh read every hunt.
+    if (!intel.isDecisionMaker) { markClosed(prof.providerId); g.title++; continue; }
 
     const authorName = c.authorName ?? prof.name ?? "LinkedIn member";
 
@@ -1402,6 +1420,10 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       dmText, dmStatus: "suggested",
       createdAt: nowIso(), updatedAt: nowIso(),
     });
+    // The weekly stamp, at the only point that earns it: a message now exists
+    // for this person, so nothing else may draft them for POSTER_RECHECK_DAYS.
+    seenAuthors[c.authorRef] = nowIso();
+    seenAuthors[prof.providerId] = nowIso();
     rota++;
     created++;
     stats.leads += 1;

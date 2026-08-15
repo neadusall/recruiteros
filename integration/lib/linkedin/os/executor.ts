@@ -190,7 +190,7 @@ async function markResult(
       setStatus(r, "success");
       r.providerReference = providerReference;
     } else {
-      const retryable = !/not_supported|missing|invalid|suppressed|no_provider_profile|insufficient_credits/.test(error ?? "");
+      const retryable = !/not_supported|missing|invalid|suppressed|no_provider_profile|insufficient_credits|not_open_profile/.test(error ?? "");
       if (retryable && r.retryCount < MAX_RETRIES) {
         r.retryCount += 1;
         r.failureReason = error;
@@ -289,33 +289,40 @@ async function executeOneInner(r: LiActionRecord): Promise<void> {
       case "connect_note":
         out = await provider.sendConnection({ account, prospect, note: r.payload.note });
         break;
-      case "message":
-        // Open profiles that are not connections only accept the free
-        // open-profile InMail; a plain chat message 422s (invalid_recipient).
-        out = r.payload.openProfile
-          ? await provider.sendInMail({
-              account, prospect, text: r.payload.text ?? "",
-              subject: r.payload.subject ?? "Your hiring post",
-            })
-          : await provider.sendMessage({ account, prospect, text: r.payload.text ?? "" });
-        // Self-heal (2026-08-14): a plain message bounced as unreachable, but
-        // the payload never said whether they are an open profile (older
-        // actions predate the flag). One profile read answers it; open
-        // profiles resend over the free InMail lane in the same execution.
-        // Closed profiles stay failed - no InMail attempt, no credit burn.
-        if (!out.ok && !r.payload.openProfile && /invalid_recipient/i.test(out.error ?? "")) {
-          try {
-            const check = await provider.resolveProfile(account, providerProfileId);
-            if (check.openProfile === true) {
-              r.payload.openProfile = true; // remembered for any retry
-              out = await provider.sendInMail({
-                account, prospect, text: r.payload.text ?? "",
-                subject: r.payload.subject ?? "Your hiring post",
-              });
-            }
-          } catch { /* keep the original failure */ }
+      case "message": {
+        // The credit wall (owner decision 2026-08-15): this lane sends FREE
+        // messages only. A message to an Open Profile costs nothing; the exact
+        // same API call to a non-open stranger is billed as a paid InMail, and
+        // once the seat's monthly allotment is gone every further send 422s on
+        // insufficient_credits. That is what silently happened 2026-08-14: nine
+        // sends drained a Premium allotment because the capture-time
+        // openProfile flag said "true" for people LinkedIn reports as false.
+        //
+        // So the flag is never trusted at send time. One profile read (cheap,
+        // and not an InMail credit) decides the lane:
+        //   1st-degree  -> plain chat message, free
+        //   open profile -> the free open-profile message (linkedin[inmail])
+        //   anyone else  -> refused here; we never hand LinkedIn a billable send
+        const live = await provider.resolveProfile(account, providerProfileId).catch(() => null);
+        const openNow = live ? live.openProfile === true : r.payload.openProfile === true;
+        const firstDegree = live?.connectionDegree === 1;
+        // Remember what the live read said so a retry does not pay for it again.
+        r.payload.openProfile = openNow;
+        if (firstDegree) {
+          out = await provider.sendMessage({ account, prospect, text: r.payload.text ?? "" });
+        } else if (openNow) {
+          out = await provider.sendInMail({
+            account, prospect, text: r.payload.text ?? "",
+            subject: r.payload.subject ?? "Your hiring post",
+          });
+        } else {
+          out = {
+            ok: false,
+            error: "not_open_profile: recipient is neither a connection nor an Open Profile, so the only way to reach them is a paid InMail - refused",
+          };
         }
         break;
+      }
       case "attachment": {
         const text = [r.payload.text ?? "", r.payload.attachmentUrl ?? ""].filter(Boolean).join("\n");
         out = await provider.sendMessage({ account, prospect, text });
