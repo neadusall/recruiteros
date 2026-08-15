@@ -1392,6 +1392,7 @@
         toggle("pCool", "Automatic cooldown", p.pacing.autoCooldown) +
         toggle("pRealloc", "Capacity reallocation", p.pacing.capacityReallocation) +
         row("Working hours", '<div class="lio-2col"><input id="pWhS" type="number" min="0" max="23" class="lio-input lio-input-n" value="' + p.workingHours.startHour + '"><input id="pWhE" type="number" min="1" max="24" class="lio-input lio-input-n" value="' + p.workingHours.endHour + '"></div>') +
+        row("Sending days", daysPicker(p.workingHours.days)) +
         row("Timezone", '<input id="pTz" class="lio-input" value="' + esc(p.timezone) + '">') + "</div>" +
         '<div class="card lio-card"><div class="lio-card-t">Contact pressure</div>' +
         row("Rolling window (days)", '<input id="prWin" type="number" min="1" class="lio-input lio-input-n" value="' + p.pressure.windowDays + '">') +
@@ -1440,7 +1441,8 @@
             },
             workingHours: {
               startHour: parseInt(body.querySelector("#pWhS").value, 10) || 8,
-              endHour: parseInt(body.querySelector("#pWhE").value, 10) || 18
+              endHour: parseInt(body.querySelector("#pWhE").value, 10) || 18,
+              days: daysFrom(body)
             },
             timezone: body.querySelector("#pTz").value,
             pressure: {
@@ -1474,6 +1476,24 @@
   }
   function toggle(id, label, on) {
     return '<label class="lio-toggle"><input type="checkbox" id="' + id + '"' + (on ? " checked" : "") + "> " + esc(label) + "</label>";
+  }
+  /* Sending days. The policy always carried a days array, but nothing on this
+     page could edit it, so every account sat on the preset's Mon-Fri and no
+     weekend send was possible however the hours were set. 1 = Monday. */
+  var DAY_LABELS = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [7, "Sun"]];
+  function daysPicker(days) {
+    var on = days || [];
+    return '<div class="lio-days">' + DAY_LABELS.map(function (d) {
+      return '<label class="lio-toggle"><input type="checkbox" data-day="' + d[0] + '"' +
+        (on.indexOf(d[0]) >= 0 ? " checked" : "") + "> " + d[1] + "</label>";
+    }).join("") + "</div>";
+  }
+  function daysFrom(body) {
+    var out = [];
+    Array.prototype.forEach.call(body.querySelectorAll("[data-day]"), function (inp) {
+      if (inp.checked) out.push(parseInt(inp.getAttribute("data-day"), 10));
+    });
+    return out;
   }
 
   /* ---------------- export ---------------- */
