@@ -3653,16 +3653,27 @@
             "</div>" +
           "</div>" +
           '<div class="lih-sec">' +
-            '<div class="lih-sec-h">' + icoShield + "Public comments on closed profiles" +
+            '<div class="lih-sec-h">' + icoShield + "Public comments" +
               ' <span class="cnt">' + (thr.enabled ? thr.todayUsed + " of " + thr.todayAllowance + " today" : "off") + "</span></div>" +
-            '<div class="lih-sec-d">When a poster\'s profile is closed there is no way to message them, so the hunter comments on their hiring post instead and the notification reaches them anyway. Comments are public, so they are written per post and never pitch. The daily number below is a base: the hunter varies the real allowance around it each day and spaces the comments out, so the account never posts the same count at the same rhythm two days running.</div>' +
+            '<div class="lih-sec-d">The hunter comments on the post itself, which reaches the author whether or not their profile can take a message. Two kinds of post qualify: someone hiring one of your roles, and a finance leader writing about the work. Comments are public, so each one is written for that post and never pitches. The daily number below is a base: the hunter varies the real allowance around it each day and spaces the comments out, so the account never posts the same count at the same rhythm two days running.</div>' +
             (thr.enabled && thr.blockedReason ? '<div class="lie-post muted" style="margin-bottom:8px">Holding: ' + esc(thr.blockedReason) + "</div>" : "") +
             '<div class="lih-row">' +
-              '<label class="muted" style="font-size:12.5px">Per day (base) <input class="lih-in" data-lih-cpd type="number" min="0" max="40" value="' + esc(String(thr.perDay == null ? 8 : thr.perDay)) + '" style="width:78px;margin-left:6px"></label>' +
-              '<label class="muted" style="font-size:12.5px">Per week (hard cap) <input class="lih-in" data-lih-cpw type="number" min="0" max="200" value="' + esc(String(thr.perWeek == null ? 35 : thr.perWeek)) + '" style="width:88px;margin-left:6px"></label>' +
+              '<label class="muted" style="font-size:12.5px">Per day (base) <input class="lih-in" data-lih-cpd type="number" min="0" max="40" value="' + esc(String(thr.perDay == null ? 9 : thr.perDay)) + '" style="width:78px;margin-left:6px"></label>' +
+              '<label class="muted" style="font-size:12.5px">Per week (hard cap) <input class="lih-in" data-lih-cpw type="number" min="0" max="200" value="' + esc(String(thr.perWeek == null ? 63 : thr.perWeek)) + '" style="width:88px;margin-left:6px"></label>' +
               '<span class="muted" style="font-size:12.5px">Used this week: ' + (thr.weekUsed || 0) + " of " + (thr.perWeek || 0) + "</span>" +
               '<button class="btn btn-sm btn-ghost" data-lih-csave>Save limits</button>' +
               '<button class="btn btn-sm btn-ghost" data-lih-ctoggle="' + (thr.enabled ? "off" : "on") + '">' + (thr.enabled ? "Turn commenting off" : "Turn commenting on") + "</button>" +
+            "</div>" +
+            // Posting without approval is its own switch, off until the owner
+            // has read what this desk actually writes. A comment is public and
+            // cannot be deleted from here, so "drafts wait for you" is the
+            // starting state even when the rest of autopilot is on.
+            '<div class="lih-row">' +
+              '<span class="muted" style="font-size:12.5px">' + (thr.autoPost
+                ? "Autopilot posts these comments without asking."
+                : "Drafts wait for your approval. Autopilot will not post a comment until you switch this on.") + "</span>" +
+              '<button class="btn btn-sm ' + (thr.autoPost ? "btn-ghost" : "btn-primary") + '" data-lih-cauto="' + (thr.autoPost ? "off" : "on") + '">' +
+                (thr.autoPost ? "Require approval again" : "Let autopilot post them") + "</button>" +
             "</div>" +
           "</div>" +
           '<div class="lih-foot">' +
@@ -3696,6 +3707,17 @@
           if (r.ok && r.data && r.data.view) paint(r.data.view);
           if (window.__licRefresh) window.__licRefresh();
         });
+      });
+      var cAuto = mount.querySelector("[data-lih-cauto]");
+      if (cAuto) cAuto.addEventListener("click", function () {
+        var want = cAuto.getAttribute("data-lih-cauto") === "on";
+        cAuto.disabled = true;
+        send("/linkedin/comments", "POST", { action: "comment_limits_set", autoPost: want })
+          .then(function (r) {
+            cAuto.disabled = false;
+            if (r.ok && r.data && r.data.view) paint(r.data.view);
+            if (window.__licRefresh) window.__licRefresh();
+          });
       });
       var cTog = mount.querySelector("[data-lih-ctoggle]");
       if (cTog) cTog.addEventListener("click", function () {

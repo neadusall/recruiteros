@@ -20,8 +20,9 @@
  *                                    refusal leaves the draft open
  *   comment_skip    { id }
  *   comment_edit    { id, text }
- *   comment_limits_set { enabled?, perDay?, perWeek? }
- *                               -> the public-comment lane's throttle
+ *   comment_limits_set { enabled?, perDay?, perWeek?, autoPost? }
+ *                               -> the public-comment lane's throttle, and
+ *                                  whether autopilot may post without approval
  *   pause / resume  {}
  *   auto_on / auto_off {}       -> autopilot: execute drafts hands-free
  *   keywords_set    { text }    -> comma-separated market-scan keyword bank
@@ -92,11 +93,12 @@ export async function POST(req: Request): Promise<Response> {
     return ok({ view: await commentWatchView(ws) });
   }
   if (b.action === "comment_limits_set") {
-    const bb = b as { enabled?: unknown; perDay?: unknown; perWeek?: unknown };
+    const bb = b as { enabled?: unknown; perDay?: unknown; perWeek?: unknown; autoPost?: unknown };
     await setCommentLimits(ws, {
       enabled: typeof bb.enabled === "boolean" ? bb.enabled : undefined,
       perDay: bb.perDay === undefined ? undefined : Number(bb.perDay),
       perWeek: bb.perWeek === undefined ? undefined : Number(bb.perWeek),
+      autoPost: typeof bb.autoPost === "boolean" ? bb.autoPost : undefined,
     });
     return ok({ view: await commentWatchView(ws) });
   }

@@ -392,7 +392,7 @@ interface WatchState {
    *  near-duplicate guard that keeps the lane from looking templated. */
   commentRecent: Record<string, string[]>;
   /** ws -> throttle override for the public-comment lane. */
-  commentLimits: Record<string, { enabled: boolean; perDay: number; perWeek: number }>;
+  commentLimits: Record<string, { enabled: boolean; perDay: number; perWeek: number; autoPost?: boolean }>;
   /** ws -> last discovery-engine failure, surfaced on the card (break layer). */
   lastError: Record<string, string>;
   /** ws -> owner switched the listener off. */
@@ -631,6 +631,10 @@ async function autoExecute(workspaceId: string): Promise<number> {
         continue;
       }
       if (item.commentStatus === "suggested") {
+        // Autopilot does not post comments until the owner has switched it on
+        // for this workspace, however wide open the rest of autopilot is. The
+        // draft simply stays on the card waiting for a one-tap approval.
+        if (!commentLimitsFor(workspaceId).autoPost) continue;
         // The throttle is re-read every time: one comment per tick at most,
         // and the spacing gate means the rest of a tick's backlog waits.
         // A refusal leaves the draft open for the next slot.
@@ -659,6 +663,9 @@ async function autoExecute(workspaceId: string): Promise<number> {
 /** What the card shows and what approval checks against. */
 export interface CommentThrottle {
   enabled: boolean;
+  /** Whether autopilot may post these without a human approving each one.
+   *  Off until the owner has read what the desk writes. */
+  autoPost: boolean;
   /** The configured base. The allowance actually in force is jittered off it. */
   perDay: number;
   perWeek: number;
@@ -678,18 +685,27 @@ function seedHash(s: string): number {
   return h;
 }
 
-export function commentLimitsFor(workspaceId: string): { enabled: boolean; perDay: number; perWeek: number } {
+export function commentLimitsFor(
+  workspaceId: string,
+): { enabled: boolean; perDay: number; perWeek: number; autoPost: boolean } {
   const c = state.commentLimits[workspaceId];
   return {
     enabled: c?.enabled ?? true,
     perDay: c?.perDay ?? COMMENT_PER_DAY_DEFAULT,
     perWeek: c?.perWeek ?? COMMENT_PER_WEEK_DEFAULT,
+    // Auto-posting is the one thing here that defaults OFF (owner decision
+    // 2026-08-15). A comment is public and cannot be deleted through the
+    // client, so the first batch of a new desk is read before it goes out:
+    // the lane drafts, the drafts wait on the card, and this switch is what
+    // hands them to autopilot once the copy has been seen.
+    autoPost: c?.autoPost ?? false,
   };
 }
 
 export async function setCommentLimits(
-  workspaceId: string, next: { enabled?: boolean; perDay?: number; perWeek?: number },
-): Promise<{ enabled: boolean; perDay: number; perWeek: number }> {
+  workspaceId: string,
+  next: { enabled?: boolean; perDay?: number; perWeek?: number; autoPost?: boolean },
+): Promise<{ enabled: boolean; perDay: number; perWeek: number; autoPost: boolean }> {
   await hydrate();
   const cur = commentLimitsFor(workspaceId);
   const int = (v: unknown, lo: number, hi: number, fallback: number): number => {
@@ -703,6 +719,7 @@ export async function setCommentLimits(
     // The week can never be tighter than a single day's base, or the day
     // allowance would be unreachable by construction.
     perWeek: Math.max(perDay, int(next.perWeek, 0, 200, cur.perWeek)),
+    autoPost: typeof next.autoPost === "boolean" ? next.autoPost : cur.autoPost,
   };
   save();
   return commentLimitsFor(workspaceId);
@@ -755,6 +772,7 @@ export function commentThrottleFor(workspaceId: string): CommentThrottle {
   const use = commentUsage(workspaceId);
   const t: CommentThrottle = {
     enabled: limits.enabled,
+    autoPost: limits.autoPost,
     perDay: limits.perDay,
     perWeek: limits.perWeek,
     todayAllowance: allowance,
