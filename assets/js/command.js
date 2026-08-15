@@ -3572,6 +3572,8 @@
       var icoBolt = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M9 1L3.5 9H7l-1 6L11.5 7H8l1-6z"/></svg>';
       var icoList = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 3.5h9M5 8h9M5 12.5h9"/><circle cx="2.2" cy="3.5" r=".9" fill="currentColor" stroke="none"/><circle cx="2.2" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="2.2" cy="12.5" r=".9" fill="currentColor" stroke="none"/></svg>';
       var icoScope = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4L14 14"/></svg>';
+      var icoShield = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.6l5 1.9v4.2c0 3.1-2.1 5.4-5 6.7-2.9-1.3-5-3.6-5-6.7V3.5l5-1.9z"/></svg>';
+      var thr = (d && d.commentThrottle) || {};
       function statTile(num, label, tone, help) {
         return '<div class="lih-stat ' + tone + '" title="' + esc(help) + '"><b>' + num + "</b><span class='lbl'>" + esc(label) + "</span><span class='q'>?</span></div>";
       }
@@ -3584,6 +3586,7 @@
           statTile(st7.profileReads || 0, "Profile reads", "", "Profiles opened to verify who the poster is, whether they can receive a message, and that they are not a recruiter. The only per-person API spend.") +
           statTile(st7.readsSaved || 0, "Reads saved", st7.readsSaved ? "good" : "", "Profile reads skipped because we already know this person is unreachable or excluded (30-day memory). Direct credit savings.") +
           statTile(st7.hiringChecks || 0, "Job-board checks", "", "Company job boards checked to confirm their open roles. Only runs for reachable decision makers after every other gate has passed.") +
+          statTile(st7.comments || 0, "Comments posted", st7.comments ? "good" : "", "Public comments left on the hiring posts of decision makers whose profiles are closed. These are the leads that used to be thrown away. Held to the day and week limits set below.") +
           "</div>"
         : "";
       mount.innerHTML =
@@ -3649,6 +3652,19 @@
               '<button class="btn btn-sm ' + (unsavedRoles !== null ? "btn-primary" : "btn-ghost") + '" data-lih-kwsave>' + (unsavedRoles !== null ? "Save roles (unsaved)" : "Save roles") + "</button>" +
             "</div>" +
           "</div>" +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoShield + "Public comments on closed profiles" +
+              ' <span class="cnt">' + (thr.enabled ? thr.todayUsed + " of " + thr.todayAllowance + " today" : "off") + "</span></div>" +
+            '<div class="lih-sec-d">When a poster\'s profile is closed there is no way to message them, so the hunter comments on their hiring post instead and the notification reaches them anyway. Comments are public, so they are written per post and never pitch. The daily number below is a base: the hunter varies the real allowance around it each day and spaces the comments out, so the account never posts the same count at the same rhythm two days running.</div>' +
+            (thr.enabled && thr.blockedReason ? '<div class="lie-post muted" style="margin-bottom:8px">Holding: ' + esc(thr.blockedReason) + "</div>" : "") +
+            '<div class="lih-row">' +
+              '<label class="muted" style="font-size:12.5px">Per day (base) <input class="lih-in" data-lih-cpd type="number" min="0" max="40" value="' + esc(String(thr.perDay == null ? 8 : thr.perDay)) + '" style="width:78px;margin-left:6px"></label>' +
+              '<label class="muted" style="font-size:12.5px">Per week (hard cap) <input class="lih-in" data-lih-cpw type="number" min="0" max="200" value="' + esc(String(thr.perWeek == null ? 35 : thr.perWeek)) + '" style="width:88px;margin-left:6px"></label>' +
+              '<span class="muted" style="font-size:12.5px">Used this week: ' + (thr.weekUsed || 0) + " of " + (thr.perWeek || 0) + "</span>" +
+              '<button class="btn btn-sm btn-ghost" data-lih-csave>Save limits</button>' +
+              '<button class="btn btn-sm btn-ghost" data-lih-ctoggle="' + (thr.enabled ? "off" : "on") + '">' + (thr.enabled ? "Turn commenting off" : "Turn commenting on") + "</button>" +
+            "</div>" +
+          "</div>" +
           '<div class="lih-foot">' +
             '<button class="btn btn-sm" data-lih-scan>Scan now</button>' +
             '<button class="btn btn-sm btn-ghost" data-lih-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' + (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button>" +
@@ -3663,6 +3679,35 @@
             .then(function (r) { if (r.ok && r.data && r.data.view) paint(r.data.view); });
         });
       }
+      // Public-comment throttle: save the two numbers, or switch the lane off
+      // entirely (off restores the old behaviour, where a closed profile ends
+      // the hunt and is remembered as unreachable).
+      var cSave = mount.querySelector("[data-lih-csave]");
+      if (cSave) cSave.addEventListener("click", function () {
+        var pd = mount.querySelector("[data-lih-cpd]");
+        var pw = mount.querySelector("[data-lih-cpw]");
+        cSave.disabled = true;
+        send("/linkedin/comments", "POST", {
+          action: "comment_limits_set",
+          perDay: pd ? Number(pd.value) : undefined,
+          perWeek: pw ? Number(pw.value) : undefined,
+        }).then(function (r) {
+          cSave.disabled = false;
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+          if (window.__licRefresh) window.__licRefresh();
+        });
+      });
+      var cTog = mount.querySelector("[data-lih-ctoggle]");
+      if (cTog) cTog.addEventListener("click", function () {
+        var want = cTog.getAttribute("data-lih-ctoggle") === "on";
+        cTog.disabled = true;
+        send("/linkedin/comments", "POST", { action: "comment_limits_set", enabled: want })
+          .then(function (r) {
+            cTog.disabled = false;
+            if (r.ok && r.data && r.data.view) paint(r.data.view);
+            if (window.__licRefresh) window.__licRefresh();
+          });
+      });
       var indPick = mount.querySelector("[data-lih-ind-pick]");
       if (indPick) indPick.addEventListener("change", function () {
         if (!indPick.value) return;
@@ -3811,13 +3856,36 @@
       if (t.connectStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Connect blocked") + "</span></div>";
       return '<div><span class="lie-chip mut">Connect skipped</span></div>';
     }
+    // Closed profile: their inbox is shut but their POST is public, so this
+    // lane comments on the post itself and the notification reaches them
+    // anyway. The comment is public, which is why the copy warns about it and
+    // why the throttle on the card above governs how many go out.
+    function commentBlock(t, throttle) {
+      if (t.commentStatus === "suggested") {
+        var th = throttle || {};
+        var held = th.blockedReason
+          ? '<div class="lie-post muted">Throttle: ' + esc(th.blockedReason) + " Approving now will be held, not lost.</div>"
+          : "";
+        return '<div class="lie-post muted">Closed profile: no direct message is possible, so this goes on their post as a public comment. Anyone can see it, including their team and other recruiters, so it never pitches.</div>' +
+          held +
+          '<textarea class="lie-text" data-lic-comment rows="2">' + esc(t.commentDraft || "") + "</textarea>" +
+          '<div class="lie-actions">' +
+            '<button class="btn btn-sm btn-primary" data-lic="comment_approve">Comment on their post</button> ' +
+            '<button class="btn btn-sm btn-ghost" data-lic="comment_skip">Skip</button>' +
+          "</div>";
+      }
+      if (t.commentStatus === "approved") return '<div><span class="lie-chip ok">Comment approved, posting from your account</span></div>';
+      if (t.commentStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Comment blocked") + "</span></div>";
+      if (t.commentStatus === "skipped") return '<div><span class="lie-chip mut">Skipped</span></div>';
+      return "";
+    }
     function dmBlock(t) {
       var direct = t.openProfile === true || t.networkDistance === "DISTANCE_1";
       if (t.dmStatus === "suggested") {
-        // Open profiles only: closed profiles never get a message from this
-        // lane (the scan skips them; this branch only guards legacy items).
+        // Legacy guard only: closed profiles now take the comment lane, and
+        // the scan no longer drafts a DM for them at all.
         if (!direct) {
-          return '<div class="lie-post muted">Closed profile: skipped by policy (open profiles only).</div>' +
+          return '<div class="lie-post muted">Closed profile: no direct message is possible.</div>' +
             '<div class="lie-actions"><button class="btn btn-sm btn-ghost" data-lic="dm_skip">Dismiss</button></div>';
         }
         return '<div class="lie-post muted">' + (t.networkDistance === "DISTANCE_1"
@@ -3834,7 +3902,7 @@
       if (t.dmStatus === "skipped") return '<div><span class="lie-chip mut">Skipped</span></div>';
       return "";
     }
-    function row(t) {
+    function row(t, throttle) {
       var who = esc(t.authorName) +
         (t.authorHeadline ? ' <span class="muted">' + esc(t.authorHeadline.slice(0, 120)) + "</span>" : "");
       var hiring = t.hiring && t.hiring.openRoles
@@ -3844,18 +3912,21 @@
       // Poster lane: a BD decision-maker published a post while their company
       // is hiring. No public comment; a direct custom message instead.
       if (t.kind === "poster") {
-        var openP = t.dmStatus === "suggested";
+        var openP = t.dmStatus === "suggested" || t.commentStatus === "suggested";
         var provenance = (t.postUrl
             ? '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener">View the post on LinkedIn</a> · '
             : "") +
           (t.postAt ? "Posted " + new Date(t.postAt).toLocaleDateString() + " · " : "") +
           "Captured " + (t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "");
+        var lane = t.commentStatus
+          ? ' <span class="lie-chip">Closed profile: public comment</span>'
+          : ' <span class="lie-chip">Open profile: direct message</span>';
         return '<div class="lie-row' + (openP ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
-          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span>' +
+          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span>' + lane +
             (t.industry ? ' <span class="lie-chip mut">' + esc(t.industry.replace(/_/g, " ")) + "</span>" : "") + "</div>" +
           '<div class="lie-post">Their hiring post: ' + esc((t.postExcerpt || "").slice(0, 280)) + (t.postExcerpt && t.postExcerpt.length > 280 ? "..." : "") + "</div>" +
           '<div class="lie-post muted">' + provenance + "</div>" +
-          hiring + dmBlock(t) +
+          hiring + (t.commentStatus ? commentBlock(t, throttle) : dmBlock(t)) +
         "</div>";
       }
       var open = t.replyStatus === "suggested" || t.connectStatus === "suggested";
@@ -3869,15 +3940,19 @@
     function paint(d) {
       if (!document.body.contains(mount)) return;
       var items = (d && d.items) || [];
-      var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested" || t.dmStatus === "suggested"; }).length;
+      var throttle = (d && d.commentThrottle) || {};
+      var open = items.filter(function (t) {
+        return t.replyStatus === "suggested" || t.connectStatus === "suggested"
+          || t.dmStatus === "suggested" || t.commentStatus === "suggested";
+      }).length;
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Messages to approve</b>' +
-            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a drafted message. Approve, edit, or skip; approved and skipped items leave this list. Only open profiles and existing connections are ever messaged.</div></div>' +
+            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a draft. Approve, edit, or skip; approved and skipped items leave this list. Open profiles and existing connections get a private direct message. Closed profiles get a public comment on their own hiring post instead, which is throttled and never pitches.</div></div>' +
             (open ? '<span class="liops-progress">' + open + " to review</span>" : "") +
           "</div>" +
           (items.length
-            ? items.map(row).join("")
+            ? items.map(function (t) { return row(t, throttle); }).join("")
             : '<div class="lie-post muted">Nothing to review right now. The Role Hunter above fills this list as it finds people posting roles they need filled.</div>') +
         "</div>";
       Array.prototype.forEach.call(mount.querySelectorAll("[data-lic]"), function (btn) {
@@ -3888,7 +3963,8 @@
           var payload = { action: act, id: id };
           var ta = act === "approve" ? rowEl.querySelector("[data-lic-reply]")
             : act === "connect_approve" ? rowEl.querySelector("[data-lic-connect]")
-            : act === "dm_approve" ? rowEl.querySelector("[data-lic-dm]") : null;
+            : act === "dm_approve" ? rowEl.querySelector("[data-lic-dm]")
+            : act === "comment_approve" ? rowEl.querySelector("[data-lic-comment]") : null;
           if (ta) payload.text = ta.value;
           btn.disabled = true;
           send("/linkedin/comments", "POST", payload).then(function (r) {

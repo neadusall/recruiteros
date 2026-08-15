@@ -64,16 +64,56 @@ export interface HuntDayStats {
   hiringChecks: number;   // job-board lookups spent (open profiles only)
   leads: number;          // decision-maker leads created with drafted DMs
   peersBlocked: number;   // recruiter/staffing posters vetoed by the wall
+  comments?: number;      // public comments handed to the engine today
 }
 const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
+
+/* ---------------- the public-comment lane (owner ask 2026-08-14) ---------
+   A closed profile used to end the hunt: one profile read spent, the lead
+   dropped, the person remembered as unreachable. Their POST is still open
+   though, so this lane leaves a comment on it instead. The author gets the
+   notification without us needing an open profile or a connection.
+
+   A public comment is a different animal from a DM and is throttled like
+   one. Three walls, all of them below the engine's own `interactions` cap:
+
+     1. a per-day allowance that is JITTERED per workspace per day, so the
+        desk never posts the same round number of comments two days running,
+     2. a hard rolling 7-day ceiling that no jitter can lift, and
+     3. a randomized minimum gap between comments, so a day's allowance can
+        never go out as one burst.
+
+   On top of that every draft is checked against the recent ones: near
+   duplicate text across many posts is the single loudest automation tell,
+   and it is the thing that gets comments silently hidden. */
+// Owner spec 2026-08-15: 8 to 10 comments a day, every day. The jitter stays -
+// a desk that posts the same round number daily is itself a pattern - but it is
+// sized to land inside the asked-for band (9 +/- 15% = 8 to 10) rather than the
+// wider 5-to-11 swing the old base carried.
+const COMMENT_PER_DAY_DEFAULT = 9;     // before jitter
+// The weekly ceiling has to clear seven days of the daily allowance or it, not
+// the day, becomes the real limit: at the old 35 the lane could only sustain
+// 5/day however high the daily number was set.
+const COMMENT_PER_WEEK_DEFAULT = 63;   // hard rolling-7-day ceiling
+const COMMENT_DAY_JITTER = 0.15;       // day allowance varies +/- 15%
+const COMMENT_MIN_GAP_MIN = 24;        // floor of the randomized spacing
+const COMMENT_MAX_GAP_MIN = 95;        // ceiling of the randomized spacing
+const COMMENT_QUEUE_MULTIPLE = 2;      // draft at most 2 days of allowance
+const COMMENT_LOG_KEEP_DAYS = 21;      // send log kept for the weekly window
+const COMMENT_DUP_WINDOW = 25;         // recent comments checked for overlap
+const COMMENT_DUP_RATIO = 0.6;         // >60% shared words = too similar
+const MAX_COMMENT_CHARS = 400;         // well under LinkedIn's 1,250 ceiling
 
 /** The keyword bank is the ROLES the desk places (owner decision 2026-08-13):
  *  each entry is a job title or phrase, searched against LinkedIn posts to
  *  find hiring managers posting that opening. The matched keyword becomes
  *  {job_title} in the MPC message. Editable on the card / keywords_set. */
+// The desk is CFO / finance (owner decision 2026-08-15). Every keyword here is
+// a finance leadership title, so both the hiring scenarios and the industry
+// scenario below stay inside that market instead of reading as scattershot.
 const DEFAULT_MARKET_KEYWORDS = [
-  "BCBA", "RBT", "Clinical Director", "Speech Language Pathologist",
-  "Occupational Therapist", "Nurse Practitioner", "Registered Nurse",
+  "CFO", "Chief Financial Officer", "Controller", "VP of Finance",
+  "Director of Finance", "Assistant Controller", "FP&A Manager",
 ];
 
 /**
@@ -119,6 +159,9 @@ export interface ScenarioPreset {
   /** Gate hits through HIRING_INTENT_RE (true) or accept any real post. */
   hiringIntent: boolean;
   dmBank: "mpc" | "growth";
+  /** Role-based scenarios that are NOT about hiring pair the role with one of
+   *  these topics for the Unipile post search, instead of "<role> hiring". */
+  unipileTopics?: string[];
 }
 
 export const SCENARIO_PRESETS: ScenarioPreset[] = [
@@ -158,8 +201,22 @@ export const SCENARIO_PRESETS: ScenarioPreset[] = [
     roleBased: false, orGroup: `("we raised" OR "series a" OR "series b" OR "excited to announce" funding) (team OR hiring OR growing)`,
     hiringIntent: false, dmBank: "growth",
   },
+  {
+    // Owner ask 2026-08-15: comment on the industry conversation too, not only
+    // on people advertising a job. Role-based, so it inherits the desk's own
+    // keyword bank and cannot wander outside the market. No hiring intent is
+    // required here - the point is to be a present peer on the posts finance
+    // leaders actually write, which is also what stops the comment trail
+    // reading as nothing but cold hiring-post replies.
+    id: "industry_conversation", label: "Industry conversation in my market",
+    hint: "Finance leaders talking shop: comment as a peer, no opening needed",
+    roleBased: true,
+    orGroup: `"close the books" OR "month end close" OR "month-end close" OR forecasting OR "audit season" OR "cash flow" OR budgeting OR "cost cutting" OR "board deck"`,
+    hiringIntent: false, dmBank: "growth",
+    unipileTopics: ["month end close", "forecasting", "cash flow", "budgeting", "audit season", "board deck", "cost cutting"],
+  },
 ];
-const DEFAULT_SCENARIOS = ["hiring_role", "urgent_backfill", "struggling_to_fill"];
+const DEFAULT_SCENARIOS = ["hiring_role", "urgent_backfill", "struggling_to_fill", "industry_conversation"];
 
 /** Softer bank for growth/expansion scenarios where no specific opening was
  *  posted: still MPC-flavored, anchored on the desk's primary roles. */
@@ -255,6 +312,14 @@ export interface CommentLeadItem {
   accountId?: string;
   dmText?: string;
   dmStatus?: "suggested" | "approved" | "skipped" | "blocked";
+  /**
+   * poster lane, CLOSED profiles: the public comment drafted for THEIR post.
+   * Distinct from commentText above, which is a comment someone left on the
+   * owner's post. This is the only lane that ever writes in public, so it
+   * carries its own throttle and its own no-pitch copy rules.
+   */
+  commentDraft?: string;
+  commentStatus?: "suggested" | "approved" | "skipped" | "blocked";
   /** The commenter. */
   authorProviderId?: string;
   authorName: string;
@@ -319,6 +384,15 @@ interface WatchState {
   keywordCursor: Record<string, number>;
   /** ws -> active scenario selection (preset ids + custom phrases). */
   scenarios: Record<string, { presets: string[]; custom: Array<{ label: string; phrase: string }> }>;
+  /** ws -> ISO timestamps of public comments actually handed to the engine.
+   *  The day / rolling-week / spacing throttle is counted off this log, so it
+   *  measures what really went out, never what was merely drafted. */
+  commentLog: Record<string, string[]>;
+  /** ws -> the last COMMENT_DUP_WINDOW comment texts sent, for the
+   *  near-duplicate guard that keeps the lane from looking templated. */
+  commentRecent: Record<string, string[]>;
+  /** ws -> throttle override for the public-comment lane. */
+  commentLimits: Record<string, { enabled: boolean; perDay: number; perWeek: number }>;
   /** ws -> last discovery-engine failure, surfaced on the card (break layer). */
   lastError: Record<string, string>;
   /** ws -> owner switched the listener off. */
@@ -333,7 +407,7 @@ interface WatchState {
 }
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -377,9 +451,10 @@ export async function setAutoIndustries(workspaceId: string, industries: string[
 function huntStatsFor(workspaceId: string): HuntDayStats {
   const day = nowIso().slice(0, 10);
   const ws = state.dayStats[workspaceId] ?? (state.dayStats[workspaceId] = {});
-  const s = ws[day] ?? (ws[day] = { searches: 0, screened: 0, profileReads: 0, readsSaved: 0, closedFound: 0, hiringChecks: 0, leads: 0, peersBlocked: 0 });
+  const s = ws[day] ?? (ws[day] = { searches: 0, screened: 0, profileReads: 0, readsSaved: 0, closedFound: 0, hiringChecks: 0, leads: 0, peersBlocked: 0, comments: 0 });
   // Backfill for day rows written by older builds (avoids NaN on +=).
   if (s.peersBlocked === undefined) s.peersBlocked = 0;
+  if (s.comments === undefined) s.comments = 0;
   return s;
 }
 let hydrated = false;
@@ -403,6 +478,9 @@ async function hydrate(): Promise<void> {
           marketKeywords: snap.marketKeywords ?? {},
           keywordCursor: snap.keywordCursor ?? {},
           scenarios: snap.scenarios ?? {},
+          commentLog: snap.commentLog ?? {},
+          commentRecent: snap.commentRecent ?? {},
+          commentLimits: snap.commentLimits ?? {},
           lastError: snap.lastError ?? {},
           paused: snap.paused ?? {},
           autoMode: snap.autoMode ?? {},
@@ -421,7 +499,8 @@ async function hydrate(): Promise<void> {
 function actionable(i: CommentLeadItem): boolean {
   return i.replyStatus === "suggested" || i.replyStatus === "blocked"
     || i.dmStatus === "suggested" || i.dmStatus === "blocked"
-    || i.connectStatus === "suggested" || i.connectStatus === "blocked";
+    || i.connectStatus === "suggested" || i.connectStatus === "blocked"
+    || i.commentStatus === "suggested" || i.commentStatus === "blocked";
 }
 
 // 14 days (owner ask 2026-08-14): sent/skipped leads stay auditable - the
@@ -447,8 +526,16 @@ function prune(): void {
   for (const ws of Object.keys(state.closedProfiles)) {
     const m = state.closedProfiles[ws];
     for (const k of Object.keys(m)) {
-      if (new Date(m[k]).getTime() < closedCutoff) delete m[k];
+      const raw = m[k];
+      const iso = typeof raw === "string" && raw.startsWith("wall:") ? raw.slice(5) : raw;
+      if (new Date(iso).getTime() < closedCutoff) delete m[k];
     }
+  }
+  // The comment send log only has to reach back one rolling week; a little
+  // extra is kept so the card can show a short history without lying.
+  const logCutoff = Date.now() - COMMENT_LOG_KEEP_DAYS * 86_400_000;
+  for (const ws of Object.keys(state.commentLog)) {
+    state.commentLog[ws] = state.commentLog[ws].filter((iso) => new Date(iso).getTime() >= logCutoff);
   }
   // Hunt-economics history: keep a rolling two weeks.
   const statsCutoff = new Date(Date.now() - STATS_KEEP_DAYS * 86_400_000).toISOString().slice(0, 10);
@@ -531,7 +618,8 @@ async function autoExecute(workspaceId: string): Promise<number> {
     .filter((i) => i.workspaceId === workspaceId && i.tier !== "community"
       && !wallForItem(i) // the recruiter wall: agency-side never auto-sends
       && (enabled || (i.industry !== undefined && inds.includes(i.industry)))
-      && (i.dmStatus === "suggested" || i.replyStatus === "suggested" || i.connectStatus === "suggested"))
+      && (i.dmStatus === "suggested" || i.replyStatus === "suggested" || i.connectStatus === "suggested"
+        || i.commentStatus === "suggested"))
     .sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt));
   let sent = 0;
   for (const item of open) {
@@ -539,6 +627,15 @@ async function autoExecute(workspaceId: string): Promise<number> {
     try {
       if (item.kind === "poster" && item.dmStatus === "suggested") {
         const r = await approveDm(workspaceId, "", APPROVER, item.id);
+        if (r.accepted) sent++;
+        continue;
+      }
+      if (item.commentStatus === "suggested") {
+        // The throttle is re-read every time: one comment per tick at most,
+        // and the spacing gate means the rest of a tick's backlog waits.
+        // A refusal leaves the draft open for the next slot.
+        if (commentThrottleFor(workspaceId).blockedReason) continue;
+        const r = await approvePostComment(workspaceId, "", APPROVER, item.id);
         if (r.accepted) sent++;
         continue;
       }
@@ -553,6 +650,198 @@ async function autoExecute(workspaceId: string): Promise<number> {
     } catch { /* next item */ }
   }
   return sent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public-comment throttle                                              */
+/* ------------------------------------------------------------------ */
+
+/** What the card shows and what approval checks against. */
+export interface CommentThrottle {
+  enabled: boolean;
+  /** The configured base. The allowance actually in force is jittered off it. */
+  perDay: number;
+  perWeek: number;
+  /** Today's jittered allowance: stable for the whole day, different tomorrow. */
+  todayAllowance: number;
+  todayUsed: number;
+  weekUsed: number;
+  /** Set when spacing is the thing holding the next comment back. */
+  nextSlotAt?: string;
+  /** Set when a comment right now would be refused, and why. */
+  blockedReason?: string;
+}
+
+function seedHash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+export function commentLimitsFor(workspaceId: string): { enabled: boolean; perDay: number; perWeek: number } {
+  const c = state.commentLimits[workspaceId];
+  return {
+    enabled: c?.enabled ?? true,
+    perDay: c?.perDay ?? COMMENT_PER_DAY_DEFAULT,
+    perWeek: c?.perWeek ?? COMMENT_PER_WEEK_DEFAULT,
+  };
+}
+
+export async function setCommentLimits(
+  workspaceId: string, next: { enabled?: boolean; perDay?: number; perWeek?: number },
+): Promise<{ enabled: boolean; perDay: number; perWeek: number }> {
+  await hydrate();
+  const cur = commentLimitsFor(workspaceId);
+  const int = (v: unknown, lo: number, hi: number, fallback: number): number => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fallback;
+  };
+  const perDay = int(next.perDay, 0, 40, cur.perDay);
+  state.commentLimits[workspaceId] = {
+    enabled: typeof next.enabled === "boolean" ? next.enabled : cur.enabled,
+    perDay,
+    // The week can never be tighter than a single day's base, or the day
+    // allowance would be unreachable by construction.
+    perWeek: Math.max(perDay, int(next.perWeek, 0, 200, cur.perWeek)),
+  };
+  save();
+  return commentLimitsFor(workspaceId);
+}
+
+/**
+ * Today's allowance, jittered off the configured base. Seeded on workspace +
+ * date so it is stable all day (the number on the card does not flap) and
+ * different tomorrow: a desk that posts exactly 8 comments every single day
+ * is a pattern, and patterns are what get looked at.
+ */
+function dayAllowanceFor(workspaceId: string, day: string): number {
+  const { perDay } = commentLimitsFor(workspaceId);
+  if (perDay <= 0) return 0;
+  const r = (seedHash(`${workspaceId}:${day}:allow`) % 1000) / 1000;
+  const factor = 1 - COMMENT_DAY_JITTER + r * 2 * COMMENT_DAY_JITTER;
+  return Math.max(1, Math.round(perDay * factor));
+}
+
+/** The randomized spacing owed after the comment logged at `lastIso`. */
+function gapMinutesFor(workspaceId: string, lastIso: string): number {
+  const r = (seedHash(`${workspaceId}:${lastIso}:gap`) % 1000) / 1000;
+  return Math.round(COMMENT_MIN_GAP_MIN + r * (COMMENT_MAX_GAP_MIN - COMMENT_MIN_GAP_MIN));
+}
+
+/** Day count, rolling-week count, and the most recent send. */
+function commentUsage(workspaceId: string): { today: number; week: number; last?: string } {
+  const log = state.commentLog[workspaceId] ?? [];
+  const day = nowIso().slice(0, 10);
+  const weekCutoff = Date.now() - 7 * 86_400_000;
+  let today = 0;
+  let week = 0;
+  for (const iso of log) {
+    if (iso.slice(0, 10) === day) today++;
+    if (new Date(iso).getTime() >= weekCutoff) week++;
+  }
+  return { today, week, last: log.length ? log[log.length - 1] : undefined };
+}
+
+/**
+ * The gate every public comment passes, autopilot and hand-approved alike.
+ * Three walls in order of hardness: the rolling week, the jittered day, then
+ * the randomized spacing. The engine's own `interactions` cap sits above all
+ * of this and can still refuse after we say yes.
+ */
+export function commentThrottleFor(workspaceId: string): CommentThrottle {
+  const limits = commentLimitsFor(workspaceId);
+  const day = nowIso().slice(0, 10);
+  const allowance = dayAllowanceFor(workspaceId, day);
+  const use = commentUsage(workspaceId);
+  const t: CommentThrottle = {
+    enabled: limits.enabled,
+    perDay: limits.perDay,
+    perWeek: limits.perWeek,
+    todayAllowance: allowance,
+    todayUsed: use.today,
+    weekUsed: use.week,
+  };
+  if (!limits.enabled) {
+    t.blockedReason = "The public-comment lane is switched off for this workspace.";
+    return t;
+  }
+  if (use.week >= limits.perWeek) {
+    t.blockedReason = `Weekly comment ceiling reached (${use.week} of ${limits.perWeek} in the last 7 days).`;
+    return t;
+  }
+  if (use.today >= allowance) {
+    t.blockedReason = `Today's comment allowance is used (${use.today} of ${allowance}).`;
+    return t;
+  }
+  if (use.last) {
+    const gap = gapMinutesFor(workspaceId, use.last);
+    const readyAt = new Date(use.last).getTime() + gap * 60_000;
+    if (Date.now() < readyAt) {
+      t.nextSlotAt = new Date(readyAt).toISOString();
+      t.blockedReason = `Spacing: the next comment is due in about ${Math.max(1, Math.round((readyAt - Date.now()) / 60_000))} minutes.`;
+      return t;
+    }
+  }
+  return t;
+}
+
+/** Log a comment that the engine accepted. Only accepted sends count. */
+function recordComment(workspaceId: string, text: string): void {
+  const log = state.commentLog[workspaceId] ?? (state.commentLog[workspaceId] = []);
+  log.push(nowIso());
+  const recent = state.commentRecent[workspaceId] ?? (state.commentRecent[workspaceId] = []);
+  recent.push(text);
+  if (recent.length > COMMENT_DUP_WINDOW) state.commentRecent[workspaceId] = recent.slice(-COMMENT_DUP_WINDOW);
+  const stats = huntStatsFor(workspaceId);
+  stats.comments = (stats.comments ?? 0) + 1;
+  save();
+}
+
+/** Throttle internals, reachable from scripts/test-comment-throttle.mts so the
+ *  day/week/spacing walls are testable without a live snapshot behind them. */
+export const __throttleTestHooks = {
+  dayAllowanceFor,
+  tooSimilar,
+  setLog: (workspaceId: string, log: string[]): void => { state.commentLog[workspaceId] = log; },
+  setLimits: (workspaceId: string, l: { enabled: boolean; perDay: number; perWeek: number }): void => {
+    state.commentLimits[workspaceId] = l;
+  },
+};
+
+/** Everything a new draft must not read like: comments already posted, plus
+ *  the ones still waiting for approval. */
+function priorComments(workspaceId: string): string[] {
+  const sent = state.commentRecent[workspaceId] ?? [];
+  const queued = state.items
+    .filter((i) => i.workspaceId === workspaceId && i.commentStatus === "suggested" && i.commentDraft)
+    .map((i) => i.commentDraft as string);
+  return sent.concat(queued);
+}
+
+/** Content words only: the shape of the sentence, not its filler. */
+function wordSet(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 3),
+  );
+}
+
+/**
+ * The near-duplicate guard. Public comments that share most of their content
+ * words across many posts are the loudest automation signal there is, and a
+ * hidden comment gives no error back through the API, so this is checked
+ * before a draft is ever stored rather than after it fails.
+ */
+function tooSimilar(text: string, recent: string[]): boolean {
+  const a = wordSet(text);
+  if (a.size < 4) return false;
+  for (const prior of recent) {
+    const b = wordSet(prior);
+    if (b.size < 4) continue;
+    let shared = 0;
+    for (const w of a) if (b.has(w)) shared++;
+    if (shared / Math.min(a.size, b.size) > COMMENT_DUP_RATIO) return true;
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -601,6 +890,24 @@ Rules:
 - Banned openers: "Great post", "Love this", "Hope you're well", "I came across", "I saw your post". Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies".
 - End with one genuine question about the search (the bar, the sticking point, the timeline). Never mention AI.
 Return ONLY the message text, nothing else.`;
+
+/**
+ * The public-comment lane. Everything written under these rules is visible to
+ * the poster's whole network, their own team, and every competing recruiter
+ * watching that post, so it can never read as a pitch. The comment buys
+ * attention and nothing else; the business conversation happens later.
+ */
+const POST_COMMENT_RULES = `You write PUBLIC comments that a recruiting agency owner leaves on a stranger's LinkedIn post. Everyone can see this comment: the poster, their team, their network, and every competing recruiter watching the post. The reader must never suspect a machine wrote it, and must never read it as an advertisement.
+Rules:
+- React to the SPECIFIC thing their post is about with one concrete, useful observation someone who works that market would actually have. On a hiring post that is where that talent usually sits, what stalls this search, or the comp reality; on a post about the work itself it is a practical point from having seen the same problem at other companies. Or ask one genuine question. Never restate their post, never compliment it.
+- 12 to 30 words. One or two sentences.
+- NEVER pitch, never mention your services, your agency, your candidates, your bench, or placements you have made. No "DM me", no "let's connect", no "happy to help", no offering to send profiles. No links, no phone numbers, no email.
+- No emoji, no hashtags, no exclamation marks, no long dashes, no all-caps.
+- Banned openers: "Great post", "Love this", "So true", "This is spot on", "Couldn't agree more", "Thanks for sharing", "Commenting for reach".
+- Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies", "reach out".
+- Vary your sentence shape from comment to comment: do not settle into one formula.
+- Never mention AI.
+Return ONLY the comment text, nothing else.`;
 
 async function draft(system: string, user: string): Promise<string | null> {
   try {
@@ -1042,6 +1349,9 @@ export async function aiHunt(workspaceId: string, ask: string): Promise<{
 /** One search per tick: the flattened (scenario x role) rotation. */
 interface ScanCombo {
   key: string;
+  /** Which SCENARIO_PRESETS entry produced this combo, so the drafting step can
+   *  tell a hiring post from an industry post. */
+  id?: string;
   role?: string;
   serperQ: string;
   unipileQ: string;
@@ -1057,17 +1367,25 @@ function scanCombos(workspaceId: string): ScanCombo[] {
     const p = SCENARIO_PRESETS.find((x) => x.id === id);
     if (!p) continue;
     if (p.roleBased) {
-      for (const role of roles) {
+      roles.forEach((role, i) => {
+        // Role-based hiring scenarios all search "<role> hiring" on Unipile.
+        // A scenario with its own topics is not about hiring at all, so it
+        // pairs the role with one topic instead, rotated by role index so the
+        // bank spreads across the market rather than asking the same question
+        // seven times.
+        const topic = p.unipileTopics?.length
+          ? p.unipileTopics[i % p.unipileTopics.length]
+          : undefined;
         out.push({
-          key: `${p.label}: ${role}`, role,
+          key: `${p.label}: ${role}${topic ? ` (${topic})` : ""}`, id: p.id, role,
           serperQ: `site:linkedin.com/posts "${role}" (${p.orGroup})`,
-          unipileQ: `${role} hiring`,
+          unipileQ: topic ? `${role} ${topic}` : `${role} hiring`,
           hiringIntent: p.hiringIntent, dmBank: p.dmBank,
         });
-      }
+      });
     } else {
       out.push({
-        key: p.label,
+        key: p.label, id: p.id,
         serperQ: `site:linkedin.com/posts ${p.orGroup.startsWith("(") ? p.orGroup : `(${p.orGroup})`}`,
         unipileQ: p.orGroup.replace(/["()]|\bOR\b/g, " ").replace(/\s+/g, " ").trim().slice(0, 80),
         hiringIntent: p.hiringIntent, dmBank: p.dmBank,
@@ -1277,8 +1595,14 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, commentFull: 0, commentDraft: 0, commentDupe: 0 };
   const stats = huntStatsFor(workspaceId);
+  // Public-comment lane: on/off, and how deep its approval queue may get.
+  const commentLane = commentLimitsFor(workspaceId).enabled;
+  const commentQueueCap = COMMENT_QUEUE_MULTIPLE * dayAllowanceFor(workspaceId, nowIso().slice(0, 10));
+  let pendingComments = state.items.filter(
+    (i) => i.workspaceId === workspaceId && i.commentStatus === "suggested",
+  ).length;
   stats.searches += 1;
   stats.screened += candidates.length;
   for (const c of candidates) {
@@ -1306,20 +1630,34 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // Closed-profile memory (owner ask 2026-08-14): someone we already know
     // can't receive a DM is skipped for CLOSED_PROFILE_DAYS without spending
     // another profile read on them.
+    //
+    // Two kinds of entry live in this cache. Wall hits ("wall:" prefix) are
+    // recruiters and always skip: we never want them. Plain entries only mean
+    // "cannot receive a DM", which stopped being a dead end when the
+    // public-comment lane came in (owner ask 2026-08-14) - their post is
+    // still reachable, so those entries are ignored while the lane is on.
     const closedCache = state.closedProfiles[workspaceId] ?? (state.closedProfiles[workspaceId] = {});
     const closedCutoff = Date.now() - CLOSED_PROFILE_DAYS * 86_400_000;
-    const closedAt = closedCache[c.authorRef];
-    if (closedAt && new Date(closedAt).getTime() >= closedCutoff) { g.closed++; stats.readsSaved += 1; continue; }
+    const cached = closedCache[c.authorRef];
+    const wallCached = typeof cached === "string" && cached.startsWith("wall:");
+    const cachedIso = wallCached ? cached.slice(5) : cached;
+    if (cachedIso && new Date(cachedIso).getTime() >= closedCutoff && (wallCached || !commentLane)) {
+      g.closed++; stats.readsSaved += 1; continue;
+    }
     // NOTE (2026-08-15): the weekly stamp used to land HERE, before the read.
     // That marked every author we merely LOOKED at as "touched" for seven days,
-    // so a poster who was screened once and never messaged was locked out of
+    // so a poster who was screened once and never contacted was locked out of
     // the whole rotation. It starved the lane down to zero leads across 8/14
     // and 8/15 (45 searches, 117 screened, 0 leads). The stamp now happens only
-    // when a message is actually drafted; the read budget is protected instead
-    // by closedCache, which absorbs every rejection path below.
+    // when something is actually drafted for this person.
+    //
+    // The read budget is held by closedCache instead, and every rejection below
+    // writes a "wall:" entry rather than a plain one: an unresolvable profile or
+    // a non-decision-maker is a permanent disqualification, not the
+    // "cannot receive a DM" fact that the comment lane is allowed to ignore.
     const markClosed = (providerId?: string) => {
-      closedCache[c.authorRef] = nowIso();
-      if (providerId) closedCache[providerId] = nowIso();
+      closedCache[c.authorRef] = `wall:${nowIso()}`;
+      if (providerId) closedCache[providerId] = `wall:${nowIso()}`;
       save();
     };
 
@@ -1333,23 +1671,36 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     const lastById = seenAuthors[prof.providerId];
     if (lastById && new Date(lastById).getTime() >= recheckCutoff) { g.weekly++; continue; }
 
-    // OPEN PROFILES ONLY (owner decision 2026-08-13): the DM lands without a
-    // connection. Existing 1st-degree connections also take a plain message.
-    // Everyone else is skipped, never connect-noted from this lane. Gated
-    // FIRST so a closed profile costs exactly one profile read - none of the
-    // classification, DNC, or hiring-board work below runs for them - and is
-    // remembered so future hunts spend nothing at all.
+    // Which lane this poster belongs to. An open profile (or an existing
+    // 1st-degree connection) takes the private DM, exactly as before.
+    //
+    // A closed profile used to end here (owner decision 2026-08-13). It no
+    // longer does (owner ask 2026-08-14): their POST is public even when
+    // their profile is not, so the lane below leaves a comment on it and the
+    // author gets the notification without an open profile or a connection.
+    // They still clear every wall an open profile clears - recruiter wall,
+    // decision-maker title, DNC - because a public comment is seen by more
+    // people than a DM, not fewer. With the lane switched off the old
+    // behaviour returns: skip, remember, spend nothing on them again.
+    //
     // Unipile returns FIRST_DEGREE, never DISTANCE_1 (probe-verified
     // 2026-08-15). Matching only the DISTANCE_n spelling meant no connection
     // ever counted as reachable, so 1st-degree posters - the people we can DM
-    // for free, forever, with no credit at all - were filed as closed profiles
-    // and skipped for thirty days.
+    // for free, forever, with no credit at all - were routed to the public
+    // comment lane instead of the private message they should have had.
     const firstDegree = prof.networkDistance === "FIRST_DEGREE" || prof.networkDistance === "DISTANCE_1";
     const direct = prof.openProfile === true || firstDegree;
     if (!direct) {
-      closedCache[c.authorRef] = nowIso();
-      if (prof.providerId) closedCache[prof.providerId] = nowIso();
-      g.closed++; stats.closedFound += 1; save(); continue;
+      stats.closedFound += 1;
+      if (!commentLane) {
+        closedCache[c.authorRef] = nowIso();
+        if (prof.providerId) closedCache[prof.providerId] = nowIso();
+        g.closed++; save(); continue;
+      }
+      // Queue depth: never stack up more comment drafts than the desk could
+      // plausibly work through, or the approval list becomes a graveyard and
+      // the drafts go stale against posts that have moved on.
+      if (pendingComments >= commentQueueCap) { g.commentFull++; continue; }
     }
 
     // Decision-maker title, not a peer staffing firm.
@@ -1364,8 +1715,10 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       ?? deepRecruiterSignals(prof.summary, prof.currentRoles)
       ?? (looksLikePeer(title, company) ? "staffing peer" : null);
     if (wallHit) {
-      closedCache[c.authorRef] = nowIso();
-      if (prof.providerId) closedCache[prof.providerId] = nowIso();
+      // "wall:" marks a never-again entry: unlike a plain closed profile, a
+      // recruiter stays skipped whether or not the comment lane is on.
+      closedCache[c.authorRef] = `wall:${nowIso()}`;
+      if (prof.providerId) closedCache[prof.providerId] = `wall:${nowIso()}`;
       g.peer++; stats.peersBlocked += 1; save(); continue;
     }
     // A title is not going to reclassify next week, so a non-decision-maker
@@ -1389,15 +1742,49 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     if (company) stats.hiringChecks += 1;
     const hiring = company ? await checkHiring(company) : undefined;
 
-    // The MPC script: deterministic template fill. {job_title} = the matched
-    // role for role scenarios, or the desk's primary role for broader ones.
     const id = rid("licw");
     const jobTitle = combo.role ?? roles[0] ?? "candidate";
     const firstName = authorName.split(/\s+/)[0];
     // {current_city}: the post text names where the role is; the poster's
     // profile location is the fallback; "your market" when neither is known.
     const city = cityFromPost(c.text) ?? cityFromLocation(prof.location);
-    const dmText = mpcDmFor(id, jobTitle, firstName && firstName !== "LinkedIn" ? firstName : undefined, combo.dmBank, city);
+
+    // Open profile: the MPC script, deterministic template fill.
+    // {job_title} = the matched role for role scenarios, or the desk's
+    // primary role for broader ones.
+    let dmText: string | undefined;
+    let commentDraft: string | undefined;
+    if (direct) {
+      dmText = mpcDmFor(id, jobTitle, firstName && firstName !== "LinkedIn" ? firstName : undefined, combo.dmBank, city);
+    } else {
+      // Closed profile: a public comment, written fresh by the model for
+      // THIS post. There is deliberately no template bank here. A bank is
+      // safe in a private DM and dangerous in public, where the same fifteen
+      // sentences appearing under hundreds of posts is precisely the pattern
+      // that gets comments hidden. If the model is unavailable or the draft
+      // reads too close to one we already posted, the lead is dropped rather
+      // than filled with something repeatable.
+      //
+      // Two kinds of post reach this point and they need different framing. A
+      // hiring post has a role to react to; an industry post has none, and
+      // telling the model "the role they are hiring for is CFO" about someone
+      // writing on month-end close invents a job that was never mentioned and
+      // produces a comment that visibly misreads the post.
+      const author = [authorName, title, company ? `at ${company}` : undefined].filter(Boolean).join(", ");
+      const brief = combo.id === "industry_conversation"
+        ? `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would.`
+        : `The role they are hiring for is ${jobTitle}${city ? ` in ${city}` : ""}.`;
+      const drafted = await draft(POST_COMMENT_RULES,
+        `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.`);
+      if (!drafted) { g.commentDraft++; continue; }
+      const candidate = scrub(drafted).slice(0, MAX_COMMENT_CHARS);
+      // Compared against what was already posted AND what is still sitting in
+      // the approval queue: a single tick drafting eight comments that rhyme
+      // with each other is the same tell as posting eight that do.
+      if (tooSimilar(candidate, priorComments(workspaceId))) { g.commentDupe++; continue; }
+      commentDraft = candidate;
+      pendingComments++;
+    }
 
     state.items.push({
       id, workspaceId, kind: "poster",
@@ -1417,11 +1804,14 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       seniority: intel.seniority, jobFunction: intel.function,
       decisionMaker: true, peer: false, hiring, tier: "hot",
       replyStatus: "none",
-      dmText, dmStatus: "suggested",
+      ...(direct
+        ? { dmText, dmStatus: "suggested" as const }
+        : { commentDraft, commentStatus: "suggested" as const }),
       createdAt: nowIso(), updatedAt: nowIso(),
     });
-    // The weekly stamp, at the only point that earns it: a message now exists
-    // for this person, so nothing else may draft them for POSTER_RECHECK_DAYS.
+    // The weekly stamp, at the only point that earns it: a draft now exists for
+    // this person - a DM or a comment - so nothing else may draft them again
+    // for POSTER_RECHECK_DAYS.
     seenAuthors[c.authorRef] = nowIso();
     seenAuthors[prof.providerId] = nowIso();
     rota++;
@@ -1458,6 +1848,8 @@ export interface CommentWatchView {
   /** Set-and-forget: leads in these industries send without approval. */
   autoIndustries: string[];
   industryOptions: Array<{ key: string; label: string }>;
+  /** The public-comment lane: its limits and where today stands against them. */
+  commentThrottle: CommentThrottle;
 }
 
 const TIER_RANK: Record<CommentTier, number> = { hot: 0, warm: 1, community: 2 };
@@ -1470,7 +1862,7 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
     .filter((i) => i.workspaceId === workspaceId && i.tier !== "community" && actionable(i)
       // Wall-hits never reach the approval list, including ones captured
       // before the current wall tightened (they also cannot be approved).
-      && !(i.dmStatus === "suggested" && wallForItem(i)))
+      && !((i.dmStatus === "suggested" || i.commentStatus === "suggested") && wallForItem(i)))
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
   return {
     status, autopilot,
@@ -1489,6 +1881,7 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
     },
     autoIndustries: autoIndustriesFor(workspaceId),
     industryOptions: INDUSTRY_MATCHERS.map((m) => ({ key: m.key, label: m.label })),
+    commentThrottle: commentThrottleFor(workspaceId),
   };
 }
 
@@ -1678,6 +2071,109 @@ export async function approveDm(
     return { item, accepted: result.accepted, reason: result.reason };
   } catch (e) {
     item.dmStatus = "blocked"; item.reason = e instanceof Error ? e.message : "engine_error";
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+}
+
+/* ---------------- the public-comment lane: edit, skip, approve ---------- */
+
+export async function editPostComment(workspaceId: string, id: string, text: string): Promise<CommentLeadItem | null> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.commentStatus !== "suggested") return null;
+  item.commentDraft = scrub(text).slice(0, MAX_COMMENT_CHARS);
+  item.updatedAt = nowIso();
+  save();
+  return item;
+}
+
+export async function skipPostComment(workspaceId: string, id: string): Promise<CommentLeadItem | null> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.commentStatus !== "suggested") return null;
+  item.commentStatus = "skipped";
+  item.updatedAt = nowIso();
+  save();
+  return item;
+}
+
+/**
+ * Approve the public comment on a closed profile's hiring post.
+ *
+ * This is the only lane that writes where everyone can see it, so it carries
+ * gates the DM lane does not: the recruiter wall (as everywhere), the
+ * day/week/spacing throttle, and the near-duplicate check against what this
+ * workspace has already posted. A throttle refusal leaves the draft OPEN, not
+ * skipped: the comment is still worth posting, just not this minute.
+ */
+export async function approvePostComment(
+  workspaceId: string, userId: string, userEmail: string, id: string, editedText?: string,
+): Promise<{ item: CommentLeadItem | null; accepted: boolean; reason?: string }> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.commentStatus !== "suggested" || !item.commentDraft) {
+    return { item: item ?? null, accepted: false, reason: "not_open" };
+  }
+  const wall = wallForItem(item);
+  if (wall) {
+    item.commentStatus = "blocked"; item.reason = `Recruiter/staffing firm: excluded by policy (${wall}).`;
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+  if (editedText && scrub(editedText).length >= 2) item.commentDraft = scrub(editedText).slice(0, MAX_COMMENT_CHARS);
+
+  // The throttle. Refusals do NOT consume the draft: it stays in the list and
+  // can go out in the next slot.
+  const throttle = commentThrottleFor(workspaceId);
+  if (throttle.blockedReason) {
+    return { item, accepted: false, reason: throttle.blockedReason };
+  }
+  if (tooSimilar(item.commentDraft, state.commentRecent[workspaceId] ?? [])) {
+    return { item, accepted: false, reason: "This reads too close to a comment already posted from this account. Edit it before approving." };
+  }
+
+  const accounts = await connectedAccounts(workspaceId);
+  // The seat that scouted the post comments on it (multi-account rota).
+  const account = accounts.find((a) => a.accountId === item.accountId)
+    ?? accounts.find((a) => a.ownerUserId === userId)
+    ?? accounts.find((a) => !a.ownerUserId)
+    ?? accounts[0];
+  if (!account) {
+    item.commentStatus = "blocked"; item.reason = "No connected LinkedIn account."; item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+
+  try {
+    const result = await requestLinkedInAction({
+      workspaceId,
+      accountId: account.accountId,
+      person: {
+        fullName: item.authorName, linkedinUrl: item.authorPublicUrl,
+        company: item.company, title: item.title,
+        providerProfileId: item.authorProviderId, prospectId: item.prospectId,
+      },
+      actionType: "comment_post",
+      payload: {
+        postUrl: item.postId, text: item.commentDraft,
+        providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl,
+      },
+      businessUnit: "bd",
+      sourceType: "manual",
+      approvedBy: userEmail,
+      idempotencyKey: `licw_pubcomment_${item.id}`,
+    });
+    if (result.accepted) {
+      item.commentStatus = "approved"; item.reason = undefined;
+      // Only an accepted action counts against the day and the week.
+      recordComment(workspaceId, item.commentDraft);
+    } else {
+      item.commentStatus = "blocked"; item.reason = result.reason || "The engine declined this action.";
+    }
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: result.accepted, reason: result.reason };
+  } catch (e) {
+    item.commentStatus = "blocked"; item.reason = e instanceof Error ? e.message : "engine_error";
     item.updatedAt = nowIso(); save();
     return { item, accepted: false, reason: item.reason };
   }

@@ -11,10 +11,17 @@
  *   connect_skip    { id }
  *   dm_approve      { id, text? } -> market radar: send the direct message.
  *                                    OPEN PROFILES ONLY (plus existing
- *                                    connections); never InMail, and closed
- *                                    profiles are never messaged at all
+ *                                    connections); never InMail
  *   dm_skip         { id }
  *   dm_edit         { id, text }
+ *   comment_approve { id, text? } -> market radar, CLOSED profiles: leave the
+ *                                    public comment on their hiring post.
+ *                                    Day/week/spacing throttled; a throttle
+ *                                    refusal leaves the draft open
+ *   comment_skip    { id }
+ *   comment_edit    { id, text }
+ *   comment_limits_set { enabled?, perDay?, perWeek? }
+ *                               -> the public-comment lane's throttle
  *   pause / resume  {}
  *   auto_on / auto_off {}       -> autopilot: execute drafts hands-free
  *   keywords_set    { text }    -> comma-separated market-scan keyword bank
@@ -28,7 +35,7 @@ import {
   commentWatchView, scanWorkspace, approveReply, skipReply, editReply, draftReply,
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
   setCommentWatchAuto, setMarketKeywords, setScenarios, expandRoleFamily, aiHunt,
-  setAutoIndustries,
+  setAutoIndustries, approvePostComment, skipPostComment, editPostComment, setCommentLimits,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -84,6 +91,15 @@ export async function POST(req: Request): Promise<Response> {
     await setAutoIndustries(ws, Array.isArray(bb.industries) ? bb.industries.map(String) : []);
     return ok({ view: await commentWatchView(ws) });
   }
+  if (b.action === "comment_limits_set") {
+    const bb = b as { enabled?: unknown; perDay?: unknown; perWeek?: unknown };
+    await setCommentLimits(ws, {
+      enabled: typeof bb.enabled === "boolean" ? bb.enabled : undefined,
+      perDay: bb.perDay === undefined ? undefined : Number(bb.perDay),
+      perWeek: bb.perWeek === undefined ? undefined : Number(bb.perWeek),
+    });
+    return ok({ view: await commentWatchView(ws) });
+  }
   if (!b.id) return fail("missing_id");
 
   if (b.action === "approve") {
@@ -113,6 +129,19 @@ export async function POST(req: Request): Promise<Response> {
   if (b.action === "dm_edit") {
     if (!b.text) return fail("missing_text");
     await editDm(ws, String(b.id), String(b.text));
+    return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "comment_approve") {
+    const r = await approvePostComment(ws, g.ctx.user.id, g.ctx.user.email, String(b.id), b.text);
+    return ok({ accepted: r.accepted, reason: r.reason, view: await commentWatchView(ws) });
+  }
+  if (b.action === "comment_skip") {
+    await skipPostComment(ws, String(b.id));
+    return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "comment_edit") {
+    if (!b.text) return fail("missing_text");
+    await editPostComment(ws, String(b.id), String(b.text));
     return ok({ view: await commentWatchView(ws) });
   }
   if (b.action === "edit") {
