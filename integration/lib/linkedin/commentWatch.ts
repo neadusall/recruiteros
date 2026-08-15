@@ -281,6 +281,36 @@ export function cityFromLocation(location?: string): string | undefined {
  *  read like hiring intent, not just mention the keyword in passing. */
 const HIRING_INTENT_RE = /\b(hiring|hire|open (role|position|req)|recruit(ing|er)?|looking for (a|an|someone)|join (our|the) team|growing (our|the) team|position (open|available)|role (open|available)|expanding (our|the) team|add(ing)? to (our|the) team)\b/i;
 
+/** Off-market posters. LinkedIn's post search has no geography filter, so a
+ *  "CFO hiring" query returns the whole world: the first live batch on the
+ *  finance desk was three-quarters India, and the drafts talked confidently
+ *  about the Chennai and Vadodara markets. A comment that misreads the market
+ *  is worse in public than no comment, so a profile whose location names a
+ *  country this desk does not work is skipped. Locations that name no country
+ *  at all are allowed through rather than starving the lane. Override the
+ *  list with ROLE_HUNTER_OFF_MARKET (comma separated) if the desk changes. */
+const OFF_MARKET_DEFAULT = [
+  "india", "pakistan", "bangladesh", "sri lanka", "nepal",
+  "united kingdom", "ireland", "germany", "france", "spain", "portugal", "italy",
+  "netherlands", "belgium", "sweden", "norway", "denmark", "finland", "poland",
+  "romania", "ukraine", "turkey", "greece", "switzerland", "austria",
+  "canada", "mexico", "brazil", "argentina", "colombia", "chile", "peru",
+  "australia", "new zealand", "singapore", "malaysia", "indonesia", "philippines",
+  "vietnam", "thailand", "japan", "china", "hong kong", "taiwan", "south korea",
+  "united arab emirates", "saudi arabia", "qatar", "israel", "egypt",
+  "nigeria", "kenya", "ghana", "south africa", "morocco",
+];
+function offMarketReason(location?: string): string | null {
+  const loc = (location ?? "").toLowerCase().trim();
+  if (!loc) return null;
+  const list = (process.env.ROLE_HUNTER_OFF_MARKET ?? "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  for (const country of list.length ? list : OFF_MARKET_DEFAULT) {
+    if (loc.includes(country)) return `poster is in ${country}, outside this desk's market`;
+  }
+  return null;
+}
+
 export type CommentTier = "hot" | "warm" | "community";
 
 export interface CommentLeadItem {
@@ -326,6 +356,9 @@ export interface CommentLeadItem {
   authorHeadline?: string;
   authorPublicUrl?: string;
   networkDistance?: string;
+  /** Poster's profile location, kept so the market gate can be re-checked at
+   *  approval time and not only at capture. */
+  posterLocation?: string;
   title?: string;
   company?: string;
   seniority?: string;
@@ -997,6 +1030,14 @@ function companyMentionedInPost(company: string, postText: string): boolean {
  */
 function recruiterWall(o: { title?: string; headline?: string; company?: string; postText?: string }): string | null {
   if (PEER_COMPANY_RE.test(o.company ?? "")) return "their company reads staffing/search/talent firm";
+  // The company name is parsed out of the headline, and plenty of headlines
+  // never offer an "at <company>" to parse - emoji-separated founder headlines
+  // especially. Testing the raw headline as well is what stops an
+  // "HR Solutions" agency owner reading as a hiring manager (seen live
+  // 2026-08-15, one draft away from a public comment).
+  if (PEER_COMPANY_RE.test(o.headline ?? "") || /\bHR\s+(solutions?|services|consult\w*)\b/i.test(o.headline ?? "")) {
+    return "their headline reads staffing/search/HR-services firm";
+  }
   if (PEER_POST_RE.test(o.postText ?? "")) return "the post uses agency client language";
   const recruiterTitled = PEER_TITLE_RE.test(o.title ?? "") || PEER_TITLE_RE.test(o.headline ?? "");
   if (recruiterTitled) {
@@ -1613,7 +1654,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, commentFull: 0, commentDraft: 0, commentDupe: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, commentFull: 0, commentDraft: 0, commentDupe: 0 };
   const stats = huntStatsFor(workspaceId);
   // Public-comment lane: on/off, and how deep its approval queue may get.
   const commentLane = commentLimitsFor(workspaceId).enabled;
@@ -1706,6 +1747,12 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // ever counted as reachable, so 1st-degree posters - the people we can DM
     // for free, forever, with no credit at all - were routed to the public
     // comment lane instead of the private message they should have had.
+    // Off-market posters die here, before any drafting: the profile read is
+    // already spent, and a wrong-market comment is a permanent disqualification
+    // rather than a "come back next week".
+    const offMarket = offMarketReason(prof.location);
+    if (offMarket) { markClosed(prof.providerId); g.offMarket++; continue; }
+
     const firstDegree = prof.networkDistance === "FIRST_DEGREE" || prof.networkDistance === "DISTANCE_1";
     const direct = prof.openProfile === true || firstDegree;
     if (!direct) {
@@ -1818,6 +1865,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       authorHeadline: headline,
       authorPublicUrl: prof.publicUrl ?? c.postUrl,
       networkDistance: prof.networkDistance,
+      posterLocation: prof.location,
       title: title ?? headline, company,
       seniority: intel.seniority, jobFunction: intel.function,
       decisionMaker: true, peer: false, hiring, tier: "hot",
@@ -2136,6 +2184,14 @@ export async function approvePostComment(
   const wall = wallForItem(item);
   if (wall) {
     item.commentStatus = "blocked"; item.reason = `Recruiter/staffing firm: excluded by policy (${wall}).`;
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+  // Re-checked here as well as at capture, so a draft taken under an older
+  // market list cannot be approved into a public comment about the wrong one.
+  const offMarket = offMarketReason(item.posterLocation);
+  if (offMarket) {
+    item.commentStatus = "blocked"; item.reason = `Outside this desk's market: ${offMarket}.`;
     item.updatedAt = nowIso(); save();
     return { item, accepted: false, reason: item.reason };
   }
