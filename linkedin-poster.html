@@ -431,7 +431,7 @@
     </div>
     <div class="card" style="margin-bottom:16px">
       <h3>Find real photos</h3>
-      <p class="hint">Search licensed stock photography and add the winners to your library. Licensing and photo credit are handled for you. Drafts also pull a matching photo in automatically when media is designed for a post.</p>
+      <p class="hint">Search licensed stock photography and add the winners to your library. Licensing and photo credit are handled for you. Drafts pull a matching photo in automatically, and it goes out clean: no headline, stat or brand line printed over it.</p>
       <div class="btnrow" style="margin-top:0">
         <input type="text" id="stockQ" placeholder="What should the photo show? e.g. law firm meeting" style="flex:1 1 260px;min-width:200px" />
         <button class="btn primary" id="btnStockSearch">Find photos</button>
@@ -1104,7 +1104,7 @@
     var pqMatch = pq ? stockPool.filter(function (i) { return i.query === pq; }) : [];
     var photoPool = pqMatch.concat(stockPool.filter(function (i) { return pqMatch.indexOf(i) < 0; })).slice(0, 8);
     var photoOpts = photoPool.length ?
-      '<div class="imgrow" style="align-items:center"><span class="sub" style="flex:1 1 100%">Photos on hand' + (pq ? ' for "' + esc(pq) + '"' : "") + ": click one and the media is designed around it.</span>" +
+      '<div class="imgrow" style="align-items:center"><span class="sub" style="flex:1 1 100%">Photos on hand' + (pq ? ' for "' + esc(pq) + '"' : "") + ": click one and it goes on the post as-is.</span>" +
       photoPool.map(function (i) {
         return '<img class="thumb" src="' + mediaUrl(i.id) + '" title="' + esc(i.name) + '" data-act="use-photo" data-id="' + d.id + '" data-img="' + i.id + '" />';
       }).join("") + "</div>" : "";
@@ -1143,7 +1143,7 @@
       (d.error ? '<div class="errbox">Publish failed: ' + esc(d.error) + "</div>" : "") +
       '<div class="imgrow">' +
       '<button class="btn small" data-act="choose-img" data-id="' + d.id + '">' + (img ? "Change media" : "Attach media") + "</button>" +
-      '<button class="btn small" data-act="make-ai-media" data-id="' + d.id + '" title="Designs media from the post itself: real photos with branded treatments, plus stat graphics built from its own numbers. Press it again for the next look.">Create media for me</button>' +
+      '<button class="btn small" data-act="make-ai-media" data-id="' + d.id + '" title="Picks media for the post: real photos first, clean and untouched, then stat graphics built from its own numbers. Press it again for the next one.">Create media for me</button>' +
       '<button class="btn small" data-act="open-card" data-id="' + d.id + '">Quote card</button>' +
       '<button class="btn small" data-act="make-carousel" data-id="' + d.id + '">Carousel</button>' +
       (img ? '<span class="sub">' + esc(img.name) + "</span>" : '<span class="sub">No media attached.</span>') +
@@ -1896,9 +1896,9 @@
         .catch(function (err) { toast(err.message); }).then(function () { busy(b, false); });
     } else if (act === "use-photo") {
       flushDraftText(id);
-      toast("Designing your media around that photo…");
+      toast("Attaching that photo…");
       api("make_ai_media", { draftId: id, imageId: b.dataset.img })
-        .then(function () { pickOpen = false; toast("Built around your photo and attached. Click it again for a different treatment."); return load(); })
+        .then(function () { pickOpen = false; toast("Photo attached as-is. Nothing is printed on it."); return load(); })
         .catch(function (err) { toast(err.message); });
     } else if (act === "make-carousel") {
       flushDraftText(id);

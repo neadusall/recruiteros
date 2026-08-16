@@ -714,10 +714,11 @@ export async function regenerateDraft(ws: string, draftId: string, guidance?: st
   d.error = undefined;
   d.updatedAt = nowIso();
   persist();
-  // The graphic tracks the words: a regenerated post refreshes its auto card
-  // so the stat never goes stale. Uploaded photos and carousels stay put.
+  // The media tracks the words: a regenerated post re-picks its auto media so
+  // the photo still fits the new scene. Uploaded photos and carousels (kind
+  // "card", but a PDF) stay put.
   const att = d.imageId ? s.images.find((i) => i.id === d.imageId) : undefined;
-  if (!att || (att.kind === "card" && att.mime === "image/png")) {
+  if (!att || (att.kind === "card" && att.mime.startsWith("image/"))) {
     d.imageId = undefined;
     await autoAttachCard(ws, d.id);
   }
@@ -806,10 +807,10 @@ async function generateOriginal(settings: PosterSettings, angle: string, topic?:
   return scrubDashes(out).slice(0, 3000);
 }
 
-/** Every draft ships with a creative already attached: the dynamic stat card
- *  built from the post's own numbers (same renderer as "Create media for me";
- *  headline-only when no AI key). Falls back to the branded quote card if the
- *  stat render hiccups. Best-effort: a media failure never blocks the draft. */
+/** Every draft ships with a real photo attached when the library has one that
+ *  fits the post's scene, cleaned up and otherwise untouched. Nothing typeset
+ *  is ever attached on its own: generated stat and quote cards are opt-in from
+ *  the poster. Best-effort: no media never blocks the draft. */
 async function autoAttachCard(ws: string, draftId: string): Promise<void> {
   const s = wsState(ws);
   const d = s.drafts.find((x) => x.id === draftId);
@@ -817,17 +818,8 @@ async function autoAttachCard(ws: string, draftId: string): Promise<void> {
   try {
     const spec = await draftStatSpec(d);
     d.mediaVariant = d.mediaVariant ?? cardSeed(d.id);
-    // Hands-off drafts lead with a real photo look when one is available.
-    const img = await renderStatCard(ws, spec, d.mediaVariant, { preferPhoto: true });
-    d.imageId = img.id;
-    d.updatedAt = nowIso();
-    persist();
-    return;
-  } catch { /* fall through to the quote card */ }
-  const hook = (d.text.split("\n")[0] || "").trim();
-  if (!hook) return;
-  try {
-    const img = await generateQuoteCard(ws, { headline: hook.slice(0, 140) });
+    const img = await renderStatCard(ws, spec, d.mediaVariant, { photoOnly: true });
+    if (!img) return; // no photo on hand: the post goes out on its words
     d.imageId = img.id;
     d.updatedAt = nowIso();
     persist();
@@ -1808,7 +1800,7 @@ const CARD_DARK: CardTone = {
 
 type CardTemplate =
   | "heroLeft" | "heroPoster" | "barsLead" | "splitDuel" | "heroRail" | "statement"
-  | "trendDip" | "donut" | "columns" | "panelSplit" | "photoHead";
+  | "trendDip" | "donut" | "columns" | "panelSplit";
 
 /** Which layouts this spec can carry, most distinctive first. */
 function cardTemplates(spec: StatMediaSpec): CardTemplate[] {
@@ -1826,13 +1818,14 @@ function cardTemplates(spec: StatMediaSpec): CardTemplate[] {
   return t;
 }
 
-/** Every distinct look for this spec: layouts in light (plus the photo card
- *  when the library has uploads), then the same layouts in dark. */
-export function cardCombos(spec: StatMediaSpec, photoCount = 0): { template: CardTemplate; dark: boolean }[] {
+/** Every distinct look for this spec: the layouts in light, then the same
+ *  layouts in dark. These are drawn cards; photos never carry this type. */
+export function cardCombos(spec: StatMediaSpec): { template: CardTemplate; dark: boolean }[] {
   const t = cardTemplates(spec);
-  const light: { template: CardTemplate; dark: boolean }[] = t.map((x) => ({ template: x, dark: false }));
-  if (photoCount > 0) light.push({ template: "photoHead", dark: false });
-  return [...light, ...t.map((x) => ({ template: x, dark: true }))];
+  return [
+    ...t.map((x) => ({ template: x, dark: false })),
+    ...t.map((x) => ({ template: x, dark: true })),
+  ];
 }
 
 /** Deterministic per-draft starting look, so sibling drafts don't match. */
@@ -1913,50 +1906,6 @@ function barsBlock(parts: string[], T: CardTone, x: number, y: number, spec: Sta
     y += 56;
   }
   return y;
-}
-
-/**
- * Overlay for the photo card: a solid dark band across the lower third with
- * the kicker, headline, and hero in white. Composited over a library photo.
- */
-export function photoOverlaySvg(spec: StatMediaSpec, credit?: string): string {
-  const W = 1200, H = 1500, M = 96;
-  const parts: string[] = [];
-  if (credit) {
-    // Top-right corner: the dark band owns the foot of this layout.
-    parts.push(`<text x="${W - 28}" y="44" text-anchor="end" font-family="${CARD_FONT}" font-size="19" fill="#f0f2f6" fill-opacity="0.85">${escXml(credit)}</text>`);
-  }
-  const hFs = spec.headline.length > 60 ? 56 : 64;
-  const hLines = wrapLines(spec.headline, Math.floor((W - 2 * M) / (hFs * 0.5)), 3);
-  const heroH = spec.hero ? 150 : 0;
-  const bandH = 140 + hLines.length * Math.round(hFs * 1.2) + heroH + 90;
-  const bandY = H - bandH;
-  parts.push(`<rect x="0" y="${bandY}" width="${W}" height="${bandH}" fill="#0a0c10" fill-opacity="0.78"/>`);
-  parts.push(`<rect x="0" y="${bandY}" width="${W}" height="6" fill="#5598e7"/>`);
-  let y = bandY + 92;
-  parts.push(`<rect x="${M}" y="${y - 10}" width="52" height="7" rx="3.5" fill="#5598e7"/>`);
-  parts.push(`<text x="${M + 72}" y="${y}" font-family="${CARD_FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="#c9d4e4">${escXml(spec.kicker.toUpperCase())}</text>`);
-  y += 78;
-  for (const l of hLines) {
-    parts.push(`<text x="${M}" y="${y}" font-family="${CARD_FONT}" font-size="${hFs}" font-weight="800" letter-spacing="-1" fill="#ffffff">${escXml(l)}</text>`);
-    y += Math.round(hFs * 1.2);
-  }
-  if (spec.hero) {
-    y += 26;
-    const negative = /^[-−↓]/.test(spec.hero.value);
-    const fs = fitFs(spec.hero.value, 620, 120);
-    parts.push(`<text x="${M}" y="${y + fs * 0.78}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-3" fill="${negative ? "#ff8d7a" : "#7db4f2"}">${escXml(spec.hero.value)}</text>`);
-    const heroW = Math.round(spec.hero.value.length * fs * 0.58) + 34;
-    let ly = y + 46;
-    for (const l of wrapLines(spec.hero.label, 30, 2)) {
-      parts.push(`<text x="${M + heroW}" y="${ly}" font-family="${CARD_FONT}" font-size="29" fill="#c9d4e4">${escXml(l)}</text>`);
-      ly += 40;
-    }
-  }
-  if (spec.source) {
-    parts.push(`<text x="${M}" y="${H - 34}" font-family="${CARD_FONT}" font-size="21" fill="#8fa0b8">${escXml(spec.source)}</text>`);
-  }
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${parts.join("\n")}</svg>`;
 }
 
 /**
@@ -2206,17 +2155,16 @@ export async function generateStatMedia(ws: string, opts: { draftId: string; ima
   d.mediaVariant = d.mediaVariant == null ? cardSeed(d.id) : d.mediaVariant + 1;
   let img: PosterImage;
   if (opts.imageId) {
-    // The recruiter picked a specific photo: design around exactly that one,
-    // treatments rotating on repeat picks.
+    // The recruiter picked a specific photo: use exactly that one, cleaned up
+    // for the feed and left alone otherwise.
     const photo = s.images.find((i) => i.id === opts.imageId && (i.kind === "stock" || i.kind === "upload") && i.mime.startsWith("image/"));
     if (!photo) throw Object.assign(new Error("image_not_found"), { status: 404 });
-    const treats = photoTreatmentsFor(spec);
-    const treatment = treats[((d.mediaVariant % treats.length) + treats.length) % treats.length];
     const base = await fs.readFile(path.join(mediaDir(), photo.file));
-    const bytes = await renderPhotoLook(base, spec, treatment, s.settings.brandLine || "", photo.credit);
-    img = await saveRenderedCard(s, bytes, spec.headline);
+    img = await saveRenderedCard(s, await renderCleanPhoto(base), spec.headline);
   } else {
-    img = await renderStatCard(ws, spec, d.mediaVariant);
+    const card = await renderStatCard(ws, spec, d.mediaVariant);
+    if (!card) throw Object.assign(new Error("media_failed"), { status: 500 });
+    img = card;
   }
   d.imageId = img.id;
   d.updatedAt = nowIso();
@@ -2394,211 +2342,71 @@ async function ensureStockPhotos(ws: string, spec: StatMediaSpec): Promise<Poste
   return out;
 }
 
-/* --------------------- photo treatments (brand looks) --------------------- */
-
-type PhotoTreatment = "scrim" | "panel" | "statBig" | "duotone" | "band";
-
-/** Which photo looks this spec can carry, most editorial first. */
-function photoTreatmentsFor(spec: StatMediaSpec): PhotoTreatment[] {
-  const t: PhotoTreatment[] = ["scrim", "panel"];
-  if (spec.hero) t.push("statBig");
-  t.push("duotone", "band");
-  return t;
-}
-
-function creditTag(parts: string[], credit: string | undefined, W: number, H: number, light = true): void {
-  if (!credit) return;
-  parts.push(`<text x="${W - 28}" y="${H - 26}" text-anchor="end" font-family="${CARD_FONT}" font-size="19" fill="${light ? "#d7dde8" : "#6d6c66"}" fill-opacity="0.9">${escXml(credit)}</text>`);
-}
-
-/** Editorial magazine look: full-bleed photo, dark gradient up from the foot,
- *  kicker at the top, the claim and its number at the bottom. */
-function photoScrimSvg(spec: StatMediaSpec, brand: string, credit?: string): string {
-  const W = 1200, H = 1500, M = 96;
-  const parts: string[] = [];
-  parts.push(`<defs><linearGradient id="sc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a0c10" stop-opacity="0"/><stop offset="0.42" stop-color="#0a0c10" stop-opacity="0.06"/><stop offset="0.72" stop-color="#0a0c10" stop-opacity="0.62"/><stop offset="1" stop-color="#0a0c10" stop-opacity="0.92"/></linearGradient><linearGradient id="tc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a0c10" stop-opacity="0.5"/><stop offset="1" stop-color="#0a0c10" stop-opacity="0"/></linearGradient></defs>`);
-  parts.push(`<rect width="${W}" height="${H}" fill="url(#sc)"/>`);
-  parts.push(`<rect width="${W}" height="220" fill="url(#tc)"/>`);
-  parts.push(`<rect x="${M}" y="108" width="52" height="7" rx="3.5" fill="#5598e7"/>`);
-  parts.push(`<text x="${M + 72}" y="118" font-family="${CARD_FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="#e6ecf5">${escXml(spec.kicker.toUpperCase())}</text>`);
-  const hFs = spec.headline.length > 60 ? 60 : 70;
-  const hLines = wrapLines(spec.headline, Math.floor((W - 2 * M) / (hFs * 0.5)), 3);
-  const heroH = spec.hero ? 190 : 0;
-  let y = H - 120 - heroH - hLines.length * Math.round(hFs * 1.16);
-  for (const l of hLines) {
-    parts.push(`<text x="${M}" y="${y}" font-family="${CARD_FONT}" font-size="${hFs}" font-weight="800" letter-spacing="-1.5" fill="#ffffff">${escXml(l)}</text>`);
-    y += Math.round(hFs * 1.16);
-  }
-  if (spec.hero) {
-    y += 40;
-    const negative = /^[-−↓]/.test(spec.hero.value);
-    const fs = fitFs(spec.hero.value, 640, 140);
-    parts.push(`<text x="${M}" y="${y + fs * 0.6}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-4" fill="${negative ? "#ff8d7a" : "#7db4f2"}">${escXml(spec.hero.value)}</text>`);
-    const heroW = Math.round(spec.hero.value.length * fs * 0.58) + 34;
-    let ly = y + 22;
-    for (const l of wrapLines(spec.hero.label, 30, 2)) {
-      parts.push(`<text x="${M + heroW}" y="${ly}" font-family="${CARD_FONT}" font-size="29" fill="#d7dde8">${escXml(l)}</text>`);
-      ly += 40;
-    }
-  }
-  if (brand) parts.push(`<text x="${M}" y="${H - 26}" font-family="${CARD_FONT}" font-size="21" fill="#aab6c8">${escXml(brand)}</text>`);
-  creditTag(parts, credit, W, H);
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${parts.join("\n")}</svg>`;
-}
-
-/** Clean B2B look: photo on top, a calm light panel below carrying the story.
- *  The photo is composited over the transparent top region afterwards. */
-function photoPanelSvg(spec: StatMediaSpec, brand: string, credit?: string): string {
-  const W = 1200, H = 1500, M = 96, PH = 860;
-  const T = CARD_LIGHT;
-  const parts: string[] = [];
-  parts.push(`<rect width="${W}" height="${H}" fill="${T.bg}"/>`);
-  parts.push(`<rect x="0" y="${PH}" width="${W}" height="6" fill="${T.accent}"/>`);
-  let y = PH + 104;
-  y = kickerRow(parts, T, M, y, spec.kicker);
-  const hFs = spec.headline.length > 60 ? 50 : 56;
-  y = headlineBlock(parts, T, M, y, spec.headline, hFs, 3) + 26;
-  if (spec.hero) {
-    const negative = /^[-−↓]/.test(spec.hero.value);
-    const fs = fitFs(spec.hero.value, 620, 120);
-    parts.push(`<text x="${M}" y="${y + fs * 0.62}" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-3" fill="${negative ? T.neg : T.accent}">${escXml(spec.hero.value)}</text>`);
-    const heroW = Math.round(spec.hero.value.length * fs * 0.58) + 34;
-    let ly = y + 24;
-    for (const l of wrapLines(spec.hero.label, 30, 2)) {
-      parts.push(`<text x="${M + heroW}" y="${ly}" font-family="${CARD_FONT}" font-size="28" fill="${T.secondary}">${escXml(l)}</text>`);
-      ly += 38;
-    }
-  }
-  if (brand) parts.push(`<text x="${M}" y="${H - 40}" font-family="${CARD_FONT}" font-size="21" fill="${T.muted}">${escXml(brand)}</text>`);
-  creditTag(parts, credit, W, H, false);
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${parts.join("\n")}</svg>`;
-}
-
-/** Poster look: darkened photo, one giant number in the middle of it. */
-function photoStatBigSvg(spec: StatMediaSpec, brand: string, credit?: string): string {
-  const W = 1200, H = 1500, C = W / 2;
-  const parts: string[] = [];
-  parts.push(`<rect width="${W}" height="${H}" fill="#0a0c10" fill-opacity="0.58"/>`);
-  parts.push(`<rect x="${C - 26}" y="150" width="52" height="7" rx="3.5" fill="#5598e7"/>`);
-  parts.push(`<text x="${C}" y="212" text-anchor="middle" font-family="${CARD_FONT}" font-size="25" font-weight="700" letter-spacing="4.5" fill="#e6ecf5">${escXml(spec.kicker.toUpperCase())}</text>`);
-  const hero = spec.hero as { value: string; label: string };
-  const negative = /^[-−↓]/.test(hero.value);
-  const fs = fitFs(hero.value, W - 160, 330);
-  parts.push(`<text x="${C}" y="${H / 2 + fs * 0.28}" text-anchor="middle" font-family="${CARD_FONT}" font-size="${fs}" font-weight="800" letter-spacing="-8" fill="${negative ? "#ff8d7a" : "#8fbdf5"}">${escXml(hero.value)}</text>`);
-  let y = H / 2 + fs * 0.28 + 86;
-  for (const l of wrapLines(hero.label, 34, 2)) {
-    parts.push(`<text x="${C}" y="${y}" text-anchor="middle" font-family="${CARD_FONT}" font-size="34" fill="#e6ecf5">${escXml(l)}</text>`);
-    y += 48;
-  }
-  const hLines = wrapLines(spec.headline, 42, 2);
-  let hy = H - 150 - (hLines.length - 1) * 54;
-  for (const l of hLines) {
-    parts.push(`<text x="${C}" y="${hy}" text-anchor="middle" font-family="${CARD_FONT}" font-size="40" font-weight="700" fill="#ffffff">${escXml(l)}</text>`);
-    hy += 54;
-  }
-  if (brand) parts.push(`<text x="${C}" y="${H - 26}" text-anchor="middle" font-family="${CARD_FONT}" font-size="21" fill="#aab6c8">${escXml(brand)}</text>`);
-  creditTag(parts, credit, W, H);
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${parts.join("\n")}</svg>`;
-}
-
-/** Photo + treatment -> finished 1200x1500 PNG. Exported for render harnesses. */
-export async function renderPhotoLook(baseBytes: Buffer, spec: StatMediaSpec, treatment: PhotoTreatment, brand: string, credit?: string): Promise<Buffer> {
+/**
+ * A library photo, cleaned up for the feed and nothing else: EXIF honored,
+ * capped to LinkedIn's 4:5 box, its own framing kept. Owner mandate
+ * 2026-08-15: nothing typeset ever gets burned onto a photo, so no kicker,
+ * headline, stat, brand line or credit is composited here.
+ */
+export async function renderCleanPhoto(baseBytes: Buffer): Promise<Buffer> {
   const sharp = (await import("sharp")).default;
-  // Small photos can't carry a full-bleed 1200x1500 crop without a mushy
-  // upscale; they drop to the panel look, whose photo region is shallow.
-  if (treatment !== "panel") {
-    const meta = await sharp(baseBytes).rotate().metadata();
-    const w = meta.width ?? 0, h = meta.height ?? 0;
-    if (!w || !h || Math.max(1200 / w, 1500 / h) > 1.45) treatment = "panel";
-  }
-  if (treatment === "panel") {
-    const photo = await sharp(baseBytes).rotate().resize(1200, 860, { fit: "cover" }).jpeg({ quality: 90 }).toBuffer();
-    return sharp(Buffer.from(photoPanelSvg(spec, brand, credit)))
-      .png()
-      .composite([{ input: photo, top: 0, left: 0 }])
-      .toBuffer();
-  }
-  let base = sharp(baseBytes).rotate().resize(1200, 1500, { fit: "cover" });
-  if (treatment === "duotone") {
-    // Brand-blue duotone: grayscale, tinted toward the accent, slightly dimmed
-    // so the type always clears it.
-    base = base.grayscale().tint({ r: 74, g: 128, b: 196 }).modulate({ brightness: 0.92 });
-  }
-  const overlay =
-    treatment === "statBig" ? photoStatBigSvg(spec, brand, credit) :
-    treatment === "band" ? photoOverlaySvg(spec, credit) :
-    photoScrimSvg(spec, brand, credit);
-  return base.composite([{ input: Buffer.from(overlay) }]).png().toBuffer();
+  return sharp(baseBytes)
+    .rotate()
+    // "inside" not "cover": no crop through a face, and small photos are left
+    // at their own size rather than upscaled into mush.
+    .resize(1200, 1500, { fit: "inside", withoutEnlargement: true })
+    // JPEG, not PNG: photography, so a PNG re-encode is several MB for nothing.
+    .jpeg({ quality: 90 })
+    .toBuffer();
 }
 
-/** Render the spec in the variant's look -> PNG -> library. Real photos lead:
- *  licensed stock (auto-imported for the post's own scene) and the recruiter's
- *  uploads carry branded treatments; the SVG data-graphic layouts follow. */
-async function renderStatCard(ws: string, spec: StatMediaSpec, variant: number, opts: { preferPhoto?: boolean } = {}): Promise<PosterImage> {
+/** Render the variant's media -> PNG -> library. Real photos lead: licensed
+ *  stock (auto-imported for the post's own scene) and the recruiter's uploads
+ *  go out clean; the SVG data-graphic layouts follow. Returns null when
+ *  photoOnly is set and the library has no usable photo. */
+async function renderStatCard(ws: string, spec: StatMediaSpec, variant: number, opts: { photoOnly?: boolean } = {}): Promise<PosterImage | null> {
   const s = wsState(ws);
-  const brand = s.settings.brandLine || "";
-  // Real photos from the library become card backdrops; generated cards and
-  // PDFs are excluded so a card never sits on top of another card.
   const uploads = s.images.filter((i) => i.kind === "upload" && i.mime.startsWith("image/"));
   let stock: PosterImage[] = [];
   try { stock = await ensureStockPhotos(ws, spec); } catch { stock = []; }
 
-  // Photo looks first (treatment-major, so consecutive clicks change the
-  // photo before repeating a treatment), then the SVG chart layouts.
-  const treats = photoTreatmentsFor(spec);
-  const pics = stock.slice(0, 3);
-  const photoLooks: { img: PosterImage; treatment: PhotoTreatment }[] = [];
-  for (let ti = 0; ti < treats.length; ti++) {
-    for (let pi = 0; pi < pics.length; pi++) {
-      photoLooks.push({ img: pics[pi], treatment: treats[(ti + pi) % treats.length] });
-    }
-  }
-  const svgCombos = cardCombos(spec, uploads.length);
-  const total = photoLooks.length + svgCombos.length;
-  const idx = opts.preferPhoto && photoLooks.length
-    ? ((variant % photoLooks.length) + photoLooks.length) % photoLooks.length
-    : ((variant % total) + total) % total;
+  // Photos first (scene-matched stock, then the recruiter's own uploads), then
+  // the SVG chart layouts. Consecutive clicks walk the photos before any card.
+  const pics = [...stock.slice(0, 3), ...uploads.slice(0, 3)];
+  const svgCombos = opts.photoOnly ? [] : cardCombos(spec);
+  const total = pics.length + svgCombos.length;
+  if (!total) return null;
+  const idx = ((variant % total) + total) % total;
 
   const sharp = (await import("sharp")).default;
   let bytes: Buffer | null = null;
-  if (idx < photoLooks.length) {
-    const look = photoLooks[idx];
+  if (idx < pics.length) {
     try {
-      const base = await fs.readFile(path.join(mediaDir(), look.img.file));
-      bytes = await renderPhotoLook(base, spec, look.treatment, brand, look.img.credit);
-    } catch { bytes = null; /* bad or missing photo file: use an SVG look */ }
+      const base = await fs.readFile(path.join(mediaDir(), pics[idx].file));
+      bytes = await renderCleanPhoto(base);
+    } catch { bytes = null; /* bad or missing photo file */ }
   } else {
-    const combo = svgCombos[idx - photoLooks.length];
-    if (combo.template === "photoHead" && uploads.length) {
-      try {
-        const photo = uploads[((variant % uploads.length) + uploads.length) % uploads.length];
-        const base = await fs.readFile(path.join(mediaDir(), photo.file));
-        bytes = await sharp(base)
-          .rotate() // honor EXIF before the cover crop
-          .resize(1200, 1500, { fit: "cover" })
-          .composite([{ input: Buffer.from(photoOverlaySvg(spec)) }])
-          .png()
-          .toBuffer();
-      } catch { bytes = null; }
-    }
-    if (!bytes) {
-      const t = combo.template === "photoHead" ? cardTemplates(spec)[0] : combo.template;
-      bytes = await sharp(Buffer.from(statMediaSvg(spec, t, combo.dark))).png().toBuffer();
-    }
+    const combo = svgCombos[idx - pics.length];
+    bytes = await sharp(Buffer.from(statMediaSvg(spec, combo.template, combo.dark))).png().toBuffer();
   }
   if (!bytes) {
+    // A dead photo file must not silently become a typeset card on the
+    // hands-off path; only the explicit "design me media" click falls back.
+    if (opts.photoOnly) return null;
     bytes = await sharp(Buffer.from(statMediaSvg(spec, cardTemplates(spec)[0], false))).png().toBuffer();
   }
   return saveRenderedCard(s, bytes, spec.headline);
 }
 
-/** Finished PNG -> media library entry (kind "card"). */
+/** Finished render -> media library entry (kind "card"). Drawn cards arrive as
+ *  PNG, cleaned-up photos as JPEG; the leading bytes say which. */
 async function saveRenderedCard(s: WorkspaceState, bytes: Buffer, headline: string): Promise<PosterImage> {
   const id = rid();
-  const file = id + ".png";
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+  const file = id + (jpeg ? ".jpg" : ".png");
   await writeMedia(file, bytes);
   const img: PosterImage = {
-    id, file, mime: "image/png", kind: "card",
+    id, file, mime: jpeg ? "image/jpeg" : "image/png", kind: "card",
     name: ("AI media: " + headline).slice(0, 80),
     createdAt: nowIso(),
   };
