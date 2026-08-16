@@ -497,12 +497,34 @@ async function googleXraySearch(xray: string, page: number): Promise<CandidateRo
 }
 
 /** Live health check for the Connected → JD Sourcing "Test connection" on the Google engine. */
+/**
+ * The probe query every wide-web "Test connection" fires.
+ *
+ * It has to LOOK like a real x-ray — a quoted job title restricted to profile URLs —
+ * because the obvious short form ('site:linkedin.com/in recruiter') mostly returns
+ * LinkedIn's own product pages (business.linkedin.com/in/en/hire/recruiter), not people.
+ * That made a green test prove only that the vendor was reachable, never that profiles
+ * came back, which is precisely the gap that let these engines sit "healthy" while
+ * contributing nothing.
+ */
+const PROBE_XRAY = 'site:linkedin.com/in "VP of Sales"';
+
+/** A wide-web probe that answered but found nobody is not a pass. */
+function probeResult(rows: CandidateRow[], vendor: string): { ok: boolean; error?: string; found?: number } {
+  if (!rows.length) {
+    return {
+      ok: false, found: 0,
+      error: `${vendor} answered but returned no LinkedIn profiles for a broad test query — the account is reachable, the results are not.`,
+    };
+  }
+  return { ok: true, found: rows.length };
+}
+
 export async function verifyGoogleSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
   if (!G_KEY()) return { ok: false, error: "Add your Google API key first." };
   if (!G_CX()) return { ok: false, error: "Add the Programmable Search engine ID (cx) first." };
   try {
-    const rows = await googleXraySearch('site:linkedin.com/in recruiter', 1);
-    return { ok: true, found: rows.length };
+    return probeResult(await googleXraySearch(PROBE_XRAY, 1), "Google");
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || "search request failed" };
   }
@@ -563,8 +585,7 @@ async function serperXraySearch(xray: string, page: number): Promise<CandidateRo
 export async function verifySerperSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
   if (!SERPER_KEY()) return { ok: false, error: "Add your Serper API key first." };
   try {
-    const rows = await serperXraySearch('site:linkedin.com/in recruiter', 1);
-    return { ok: true, found: rows.length };
+    return probeResult(await serperXraySearch(PROBE_XRAY, 1), "Serper");
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || "search request failed" };
   }
@@ -654,8 +675,9 @@ async function dataforseoXraySearch(xray: string, depth = 100): Promise<Candidat
 export async function verifyDataForSeoSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
   if (!dataforseoSearchConfigured()) return { ok: false, error: "Add your DataForSEO API login and password first." };
   try {
-    const rows = await dataforseoXraySearch('site:linkedin.com/in recruiter', 10);
-    return { ok: true, found: rows.length };
+    // Depth 20 rather than 10: it is the primary engine, so the probe should be a fair
+    // sample of a real page of results, and the extra depth costs a fraction of a cent.
+    return probeResult(await dataforseoXraySearch(PROBE_XRAY, 20), "DataForSEO");
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || "search request failed" };
   }
