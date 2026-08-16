@@ -151,8 +151,12 @@ export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: str
   if (!RAPIDAPI_KEY()) return { ok: false, error: "Add your RapidAPI key first." };
   if (!PS_HOST()) return { ok: false, error: "Add the search host first." };
   try {
-    const rows = await rapidApiPeopleSearch({ name: "recruiter", page: 1, limit: 3 });
-    return { ok: true, found: rows.length };
+    // Same rule as the wide-web probes: a listing that answers but returns nobody is
+    // not a pass, and one blank answer is not proof, so it gets a second look.
+    return probeResult(
+      await probeTwice(() => rapidApiPeopleSearch({ name: "recruiter", page: 1, limit: 3 })),
+      "The people-search listing",
+    );
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || "search request failed" };
   }

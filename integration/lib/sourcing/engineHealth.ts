@@ -64,7 +64,14 @@ export interface WorkspaceEngineHealth {
 }
 
 /** Result of the last billed liveness probe for one workspace's paid engine. */
-interface ProbeResult { at: string; ok: boolean; error?: string; found?: number }
+interface ProbeResult {
+  at: string;
+  ok: boolean;
+  error?: string;
+  found?: number;
+  /** Consecutive probes that answered cleanly but returned nobody. See liveProbe(). */
+  emptyStreak?: number;
+}
 
 interface HealthBlob {
   /** `${workspaceId}:${engine}` -> last state, so we only notify on transitions. */
@@ -132,23 +139,18 @@ async function checkDataForSeo(workspaceId: string): Promise<EngineStatus> {
   // No money means no search; probing would only burn a request to learn that.
   if (balance <= 0.05) return { engine: "dataforseo", state: "down", detail: `Balance empty (${usd}). Top up at app.dataforseo.com.`, remaining: balance, checkedAt };
 
-  const pk = `${workspaceId}:dataforseo`;
-  const prev = store.probes[pk];
-  const due = !prev || !prev.ok || Date.now() - new Date(prev.at).getTime() > PROBE_EVERY_MS;
-  let probe = prev;
-  if (due) {
-    const res = await verifyDataForSeoSearch();
-    probe = { at: checkedAt, ok: res.ok, error: res.error, found: res.found };
-    store.probes[pk] = probe;
-  }
+  const probe = await liveProbe(`${workspaceId}:dataforseo`, verifyDataForSeoSearch);
   if (probe && !probe.ok) {
+    const state = probeState(probe);
     return {
-      engine: "dataforseo", state: "down", remaining: balance, checkedAt,
-      detail: `Login and balance are fine (${usd}) but the search itself failed: ${probe.error || "search request failed"}`,
+      engine: "dataforseo", state, remaining: balance, checkedAt,
+      detail: state === "stale"
+        ? `Login and balance are fine (${usd}) but the last search returned no profiles. This vendor blanks intermittently, so it is being re-checked before anyone is alerted.`
+        : `Login and balance are fine (${usd}) but the search itself failed: ${probe.error || "search request failed"}`,
     };
   }
-  const proof = probe?.at === checkedAt
-    ? `Live: search answered with ${probe?.found ?? 0} result(s).`
+  const proof = probe && probe.at === checkedAt
+    ? `Live: search answered with ${probe.found ?? 0} result(s).`
     : `Search answered at ${probe?.at}.`;
   if (balance < DFS_LOW_USD) return { engine: "dataforseo", state: "low", detail: `${proof} Balance running low: ${usd} left.`, remaining: balance, checkedAt };
   return { engine: "dataforseo", state: "ok", detail: `${proof} Balance: ${usd}.`, remaining: balance, checkedAt };
@@ -169,6 +171,55 @@ const PROBE_EVERY_MS = (() => {
   const h = parseInt(process.env.SOURCING_PROBE_EVERY_H || "", 10);
   return (Number.isFinite(h) && h > 0 ? h : 24) * 3600_000;
 })();
+
+/** Consecutive empty probes before an engine is called down rather than watched. */
+const EMPTY_STREAK_TO_DOWN = 2;
+
+/**
+ * Run (or reuse) the cached liveness probe for one engine, with HYSTERESIS on the
+ * "answered cleanly but returned nobody" case.
+ *
+ * A hard failure — auth refused, HTTP error, network — is down immediately; it will not
+ * fix itself. An EMPTY answer is a different animal. Measured on this box across five
+ * back-to-back cycles, DataForSEO returned a blank page for a perfectly valid x-ray on
+ * one cycle in five, and blank TWICE IN A ROW on that cycle, even though the query
+ * returns ~10 profiles the rest of the time. Marking down on a single empty answer would
+ * page the owner over vendor noise and teach them to ignore the alerts.
+ *
+ * So an empty answer parks at "stale", which is visible but does not alert, and only
+ * escalates to "down" once the NEXT check is empty too — an hour later, four blank calls
+ * apart. A run of results resets the streak.
+ *
+ * A probe that is not `ok` is always re-run on the next tick, so the escalation happens
+ * at the watch's own cadence with no extra scheduling.
+ */
+async function liveProbe(
+  key: string,
+  run: () => Promise<{ ok: boolean; error?: string; found?: number }>,
+): Promise<ProbeResult | undefined> {
+  const prev = store.probes[key];
+  const due = !prev || !prev.ok || Date.now() - new Date(prev.at).getTime() > PROBE_EVERY_MS;
+  if (!due) return prev;
+  const res = await run();
+  // probeResult() reports an empty answer as ok:false WITH found:0; a hard failure has
+  // no `found` at all. That is what separates "returned nobody" from "did not answer".
+  const empty = !res.ok && res.found === 0;
+  const next: ProbeResult = {
+    at: nowIso(),
+    ok: res.ok,
+    error: res.error,
+    found: res.found,
+    emptyStreak: empty ? (prev?.emptyStreak ?? 0) + 1 : 0,
+  };
+  store.probes[key] = next;
+  return next;
+}
+
+/** The state an unhealthy probe maps to: watched while it might just be vendor noise. */
+function probeState(probe: ProbeResult): EngineState {
+  const empty = probe.found === 0;
+  return empty && (probe.emptyStreak ?? 0) < EMPTY_STREAK_TO_DOWN ? "stale" : "down";
+}
 
 /**
  * RapidAPI people search.
@@ -196,23 +247,18 @@ async function checkRapidApi(workspaceId: string): Promise<EngineStatus> {
 
   // 1) Does it actually answer? One billed request, at most every PROBE_EVERY_MS
   //    while healthy. The probe also refreshes the quota headers below for free.
-  const pk = `${workspaceId}:rapidapi`;
-  const prev = store.probes[pk];
-  const due = !prev || !prev.ok || Date.now() - new Date(prev.at).getTime() > PROBE_EVERY_MS;
-  let probe = prev;
-  if (due) {
-    const res = await verifySourcingSearch();
-    probe = { at: checkedAt, ok: res.ok, error: res.error, found: res.found };
-    store.probes[pk] = probe;
-  }
+  const probe = await liveProbe(`${workspaceId}:rapidapi`, verifySourcingSearch);
   if (probe && !probe.ok) {
+    const state = probeState(probe);
     return {
-      engine: "rapidapi", state: "down", checkedAt,
-      detail: `The people search is not answering on ${host}: ${probe.error || "search request failed"}`,
+      engine: "rapidapi", state, checkedAt,
+      detail: state === "stale"
+        ? `The people search on ${host} answered but returned nobody. Re-checking before anyone is alerted.`
+        : `The people search is not answering on ${host}: ${probe.error || "search request failed"}`,
     };
   }
-  const proof = probe?.at === checkedAt
-    ? `Live: search answered with ${probe?.found ?? 0} result(s).`
+  const proof = probe && probe.at === checkedAt
+    ? `Live: search answered with ${probe.found ?? 0} result(s).`
     : `Search answered at ${probe?.at}.`;
 
   // 2) How much plan is left on THIS listing?
