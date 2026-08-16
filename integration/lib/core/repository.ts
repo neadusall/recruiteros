@@ -59,9 +59,18 @@ class InMemoryCore implements CoreRepository {
       this.hydrated = dbEnabled()
         ? loadSnapshot<any>("core").then((s) => {
             if (!s) return;
-            this.campaigns = new Map(s.campaigns || []);
-            this.prospects = new Map(s.prospects || []);
-            this.activity = s.activity || [];
+            // Scrub null-valued entries. A snapshot written mid-crash left one
+            // [id, null] campaign pair on the live box (2026-08-16), and every
+            // iteration over the map then threw "Cannot read properties of null
+            // (reading 'workspaceId')" — which parked every autoflow send in
+            // every workspace at max attempts. Dropping the pair loses nothing
+            // (there is no record to keep), and the next persist writes the
+            // snapshot back clean.
+            const pairs = (raw: unknown) =>
+              (Array.isArray(raw) ? raw : []).filter((e: any) => Array.isArray(e) && e[0] && e[1]);
+            this.campaigns = new Map(pairs(s.campaigns));
+            this.prospects = new Map(pairs(s.prospects));
+            this.activity = (s.activity || []).filter(Boolean);
           }).catch(() => {})
         : Promise.resolve();
     }

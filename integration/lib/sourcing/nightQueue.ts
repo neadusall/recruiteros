@@ -769,6 +769,19 @@ async function step(item: NightItem): Promise<void> {
     // A recovered interactive search carries the profile the dead request already
     // derived (a Dive-deeper refinement included); a plain overnight item parses it.
     const parsedIcp = item.icp ?? (await parseJobDescription(item.jd));
+    // A parse that came back empty is the fallback profile, not a thin role: with no
+    // titles and no companies the queries below degrade to bare geography, and the
+    // "search" dutifully returns whoever lives nearby (a real run delivered 25 random
+    // sales directors this way, 2026-08-16). Interactively the plan card says
+    // "couldn't read the brief" and a human retries; out here the item must say it.
+    // finish() rather than throw: a truncated/garbled parse is usually deterministic,
+    // so burning MAX_SEARCH_ATTEMPTS on re-parses would spend model calls to reach
+    // the same dead end with a worse message.
+    if (!item.icp && !parsedIcp.titles.length && !parsedIcp.targetCompanies.length) {
+      finish(item, "error",
+        "the job description could not be read into a candidate profile, so the search was not run (nobody would have matched). Re-queue it once, and if it fails again the brief itself needs a clearer title or example companies.");
+      return;
+    }
     const icp = remote ? applyRemoteIcp(parsedIcp) : pinIcpLocation(parsedIcp, item.location, radiusMi);
     const breadth: SearchBreadth = item.breadth === "focused" || item.breadth === "wide" ? item.breadth : "balanced";
     const queries = generateQueries(icp, { breadth, radiusMi, remote });

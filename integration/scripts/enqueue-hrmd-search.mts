@@ -21,6 +21,15 @@
  */
 import { readFileSync } from "fs";
 import { addNightItem } from "../lib/sourcing/nightQueue";
+import { deleteSourcingRun } from "../lib/sourcing/store";
+
+// The first attempt (srun_msvvre1h007, 2026-08-16) ran on a fallback ICP - the
+// parse's 2600-token ceiling truncated on this brief's ~90 companies - and saved
+// 25 random sales directors. It must not exist when the good run lands: the
+// autoflow folds same-name lists, so leaving it would merge the junk into the
+// real list. Idempotent: already-deleted is a no-op.
+const junkGone = await deleteSourcingRun("ws_mqf6o989003", "srun_msvvre1h007");
+console.log(junkGone ? "deleted junk run srun_msvvre1h007" : "junk run already gone");
 
 const BRIEF = new URL("../../docs/runbooks/healthcare-regional-marketing-director-brief.md", import.meta.url);
 const md = readFileSync(BRIEF, "utf8");

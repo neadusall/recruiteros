@@ -129,9 +129,14 @@ export async function parseJobDescription(jd: string): Promise<CandidateICP> {
 
   const response = await anthropicClient().messages.create({
     model: MODEL,
-    // Generous ceiling: the JSON carries up to ~30 target companies plus radius-
-    // expanded metros, and a truncated array makes JSON.parse fail -> empty fallback.
-    max_tokens: 2600,
+    // Generous ceiling: a rich brief legitimately carries ~90 target companies
+    // (each becomes its own poaching query - the prompt says "no cap"), plus
+    // 20+ titles and radius-expanded metros, and a truncated array makes
+    // JSON.parse fail -> empty fallback. 2600 was measured too small for
+    // exactly that shape on 2026-08-16: the healthcare-marketing brief's JSON
+    // truncated, the parse fell back to an empty profile, and the run searched
+    // geography alone.
+    max_tokens: 8000,
     system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }] as any,
     messages: [
       {
