@@ -3587,6 +3587,7 @@
           statTile(st7.readsSaved || 0, "Reads saved", st7.readsSaved ? "good" : "", "Profile reads skipped because we already know this person is unreachable or excluded (30-day memory). Direct credit savings.") +
           statTile(st7.hiringChecks || 0, "Job-board checks", "", "Company job boards checked to confirm their open roles. Only runs for reachable decision makers after every other gate has passed.") +
           statTile(st7.comments || 0, "Comments posted", st7.comments ? "good" : "", "Public comments left on the hiring posts of decision makers whose profiles are closed. These are the leads that used to be thrown away. Held to the day and week limits set below.") +
+          statTile(st7.bdHandoffs || 0, "Handed to BD", st7.bdHandoffs ? "good" : "", "People we commented on who have since become prospects in the Commented (Role Hunter) campaign, roughly two days after the comment so it lands first. This is the number that says the lane produced pipeline rather than activity. Nothing emails them until you activate that campaign.") +
           "</div>"
         : "";
       mount.innerHTML =
@@ -3655,7 +3656,7 @@
           '<div class="lih-sec">' +
             '<div class="lih-sec-h">' + icoShield + "Public comments" +
               ' <span class="cnt">' + (thr.enabled ? thr.todayUsed + " of " + thr.todayAllowance + " today" : "off") + "</span></div>" +
-            '<div class="lih-sec-d">The hunter comments on the post itself, which reaches the author whether or not their profile can take a message. Two kinds of post qualify: someone hiring one of your roles, and a finance leader writing about the work. Comments are public, so each one is written for that post and never pitches. The daily number below is a base: the hunter varies the real allowance around it each day and spaces the comments out, so the account never posts the same count at the same rhythm two days running.</div>' +
+            '<div class="lih-sec-d">The hunter comments on the post itself, which reaches the author whether or not their profile can take a message. Two kinds of post qualify: someone hiring one of your roles, and a finance leader writing about the work. Comments are public, so each one is written for that post and never advertises: it says one thing about that search only someone running these searches would know, in the first person plural, and stops there. No offer, no link, no ask. The only way to get the rest is to click your name, which is the whole point of the lane. The daily number below is a base: the hunter varies the real allowance around it each day and spaces the comments out, so the account never posts the same count at the same rhythm two days running.</div>' +
             (thr.enabled && thr.blockedReason ? '<div class="lie-post muted" style="margin-bottom:8px">Holding: ' + esc(thr.blockedReason) + "</div>" : "") +
             '<div class="lih-row">' +
               '<label class="muted" style="font-size:12.5px">Per day (base) <input class="lih-in" data-lih-cpd type="number" min="0" max="40" value="' + esc(String(thr.perDay == null ? 9 : thr.perDay)) + '" style="width:78px;margin-left:6px"></label>' +
@@ -3845,6 +3846,27 @@
   function liCommentsPanel(mount) {
     if (!mount) return;
     mount.innerHTML = loading();
+    // An approved item stops being actionable server-side, so the next view
+    // drops it and the row disappears the instant you press the button. These
+    // receipts are what tells you the comment (or message) is actually going
+    // out; they stay on the card for the rest of the session.
+    var receipts = [];
+    var RECEIPT_COPY = {
+      comment_approve: "Comment approved: it posts on their hiring post from your LinkedIn account.",
+      dm_approve: "Message approved: sending from your LinkedIn account.",
+      connect_approve: "Connect request approved and queued.",
+      approve: "Reply approved: sending from your LinkedIn account."
+    };
+    function receiptsBlock() {
+      if (!receipts.length) return "";
+      return '<div class="lie-row done">' +
+        receipts.map(function (r) {
+          return '<div class="lie-post"><span class="lie-chip ok">Shipping</span> ' +
+            (r.name ? "<b>" + esc(r.name) + "</b>: " : "") + esc(r.copy) +
+            ' <span class="muted">' + esc(r.at) + "</span></div>";
+        }).join("") +
+      "</div>";
+    }
     function tierChip(t) {
       if (t.tier === "hot") return '<span class="lie-chip ok">Hot: decision-maker, hiring now</span>';
       if (t.tier === "warm") return '<span class="lie-chip">Warm: decision-maker</span>';
@@ -3888,7 +3910,7 @@
         var held = th.blockedReason
           ? '<div class="lie-post muted">Throttle: ' + esc(th.blockedReason) + " Approving now will be held, not lost.</div>"
           : "";
-        return '<div class="lie-post muted">Closed profile: no direct message is possible, so this goes on their post as a public comment. Anyone can see it, including their team and other recruiters, so it never pitches.</div>' +
+        return '<div class="lie-post muted">Closed profile: no direct message is possible, so this goes on their post as a public comment. Anyone can see it, including their team and other recruiters, so it never asks for anything: it proves you work this desk and leaves the click as the only next step.</div>' +
           held +
           '<textarea class="lie-text" data-lic-comment rows="2">' + esc(t.commentDraft || "") + "</textarea>" +
           '<div class="lie-actions">' +
@@ -3970,9 +3992,10 @@
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Messages to approve</b>' +
-            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a draft. Approve, edit, or skip; approved and skipped items leave this list. Open profiles and existing connections get a private direct message. Closed profiles get a public comment on their own hiring post instead, which is throttled and never pitches.</div></div>' +
+            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a draft. Approve, edit, or skip; approved and skipped items leave this list. Open profiles and existing connections get a private direct message. Closed profiles get a public comment on their own hiring post instead, throttled, US posters only, and written to earn a profile click rather than ask for one.</div></div>' +
             (open ? '<span class="liops-progress">' + open + " to review</span>" : "") +
           "</div>" +
+          receiptsBlock() +
           (items.length
             ? items.map(function (t) { return row(t, throttle); }).join("")
             : '<div class="lie-post muted">Nothing to review right now. The Role Hunter above fills this list as it finds people posting roles they need filled.</div>') +
@@ -3988,10 +4011,24 @@
             : act === "dm_approve" ? rowEl.querySelector("[data-lic-dm]")
             : act === "comment_approve" ? rowEl.querySelector("[data-lic-comment]") : null;
           if (ta) payload.text = ta.value;
+          var whoEl = rowEl.querySelector(".lie-who");
+          var whoName = whoEl && whoEl.firstChild ? String(whoEl.firstChild.textContent || "").trim() : "";
           btn.disabled = true;
+          btn.textContent = act === "comment_approve" ? "Posting..." : "Working...";
           send("/linkedin/comments", "POST", payload).then(function (r) {
+            var held = r.data && r.data.accepted === false;
+            // Only an accepted action actually leaves the desk. A throttle or
+            // policy refusal keeps the draft in the list, so it gets the
+            // reason and no receipt.
+            if (r.ok && !held && RECEIPT_COPY[act]) {
+              receipts.unshift({
+                name: whoName, copy: RECEIPT_COPY[act],
+                at: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+              });
+              toast(RECEIPT_COPY[act]);
+            }
             if (r.ok && r.data && r.data.view) paint(r.data.view);
-            if (r.data && r.data.accepted === false && r.data.reason) toast(r.data.reason);
+            if (held && r.data.reason) toast(r.data.reason);
           });
         });
       });

@@ -65,6 +65,7 @@ export interface HuntDayStats {
   leads: number;          // decision-maker leads created with drafted DMs
   peersBlocked: number;   // recruiter/staffing posters vetoed by the wall
   comments?: number;      // public comments handed to the engine today
+  bdHandoffs?: number;    // posters commented on that became BD prospects
 }
 const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
 
@@ -284,14 +285,23 @@ const HIRING_INTENT_RE = /\b(hiring|hire|open (role|position|req)|recruit(ing|er
 /** Off-market posters. LinkedIn's post search has no geography filter, so a
  *  "CFO hiring" query returns the whole world: the first live batch on the
  *  finance desk was three-quarters India, and the drafts talked confidently
- *  about the Chennai and Vadodara markets. A comment that misreads the market
- *  is worse in public than no comment, so a profile whose location names a
- *  country this desk does not work is skipped. Locations that name no country
- *  at all are allowed through rather than starving the lane. Override the
- *  list with ROLE_HUNTER_OFF_MARKET (comma separated) if the desk changes. */
+ *  about the Chennai and Vadodara markets.
+ *
+ *  This used to be a denylist of countries we do not work, which let anything
+ *  ambiguous through. Owner mandate 2026-08-15 inverted it: this desk works
+ *  the UNITED STATES ONLY, so a poster now has to prove they are in it. A
+ *  location that names no country and no state no longer squeaks past - it is
+ *  refused like any other unknown, because a public comment about "your market"
+ *  written to someone in Manchester or Mumbai is exactly the failure this gate
+ *  exists to stop. Set ROLE_HUNTER_US_ONLY=0 to fall back to the old
+ *  denylist-only behaviour if the desk ever works outside the US again.
+ *  ROLE_HUNTER_OFF_MARKET (comma separated) still adds extra hard denies, and
+ *  ROLE_HUNTER_US_EXTRA (comma separated) adds location tokens that should
+ *  count as US, e.g. a metro spelling this list does not know yet. */
 const OFF_MARKET_DEFAULT = [
   "india", "pakistan", "bangladesh", "sri lanka", "nepal",
-  "united kingdom", "ireland", "germany", "france", "spain", "portugal", "italy",
+  "united kingdom", "england", "scotland", "wales", "northern ireland",
+  "ireland", "germany", "france", "spain", "portugal", "italy",
   "netherlands", "belgium", "sweden", "norway", "denmark", "finland", "poland",
   "romania", "ukraine", "turkey", "greece", "switzerland", "austria",
   "canada", "mexico", "brazil", "argentina", "colombia", "chile", "peru",
@@ -299,14 +309,114 @@ const OFF_MARKET_DEFAULT = [
   "vietnam", "thailand", "japan", "china", "hong kong", "taiwan", "south korea",
   "united arab emirates", "saudi arabia", "qatar", "israel", "egypt",
   "nigeria", "kenya", "ghana", "south africa", "morocco",
+  // Canadian provinces, because "Toronto, ON" and "London, Ontario" never say
+  // "Canada" and would otherwise sail through the state-abbreviation check.
+  "ontario", "quebec", "british columbia", "alberta", "manitoba",
+  "saskatchewan", "nova scotia", "new brunswick", "newfoundland",
+  // Collides with the state of Georgia; the country's capital disambiguates.
+  "tbilisi",
 ];
-function offMarketReason(location?: string): string | null {
+
+/** The 50 states plus DC, spelled out. */
+const US_STATES = [
+  "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+  "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+  "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine",
+  "maryland", "massachusetts", "michigan", "minnesota", "mississippi",
+  "missouri", "montana", "nebraska", "nevada", "new hampshire", "new jersey",
+  "new mexico", "new york", "north carolina", "north dakota", "ohio",
+  "oklahoma", "oregon", "pennsylvania", "rhode island", "south carolina",
+  "south dakota", "tennessee", "texas", "utah", "vermont", "virginia",
+  "washington", "west virginia", "wisconsin", "wyoming",
+  "district of columbia", "puerto rico",
+];
+
+/** Postal codes, matched only as a standalone comma-delimited segment, so
+ *  "Austin, TX" passes and the "in" inside "Berlin" does not. */
+const US_ABBR = new Set([
+  "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id",
+  "il", "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms",
+  "mo", "mt", "ne", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok",
+  "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv",
+  "wi", "wy", "dc", "pr",
+]);
+
+const US_COUNTRY_RE = /(^|[\s,(])(united states(\s+of\s+america)?|u\.?s\.?a\.?|u\.?s\.?)(\s*$|[\s,)])/;
+
+function envList(name: string): string[] {
+  return (process.env[name] ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/** True when the location positively resolves to somewhere in the US.
+ *
+ *  The last resort is the bundled GeoNames table that JD Sourcing already
+ *  ships (~169k US places, no network, no key): it is the thing that knows
+ *  "Greater Cleveland Area", "Dallas-Fort Worth Metroplex" and "Long Island"
+ *  are US without a state or a country anywhere in the string. Imported
+ *  lazily so the 5MB place blob is only parsed on a desk that actually runs
+ *  this lane. */
+async function looksUnitedStates(loc: string): Promise<boolean> {
+  if (US_COUNTRY_RE.test(loc)) return true;
+  if (envList("ROLE_HUNTER_US_EXTRA").some((t) => loc.includes(t))) return true;
+  // A bare state abbreviation is NOT taken as proof on its own, because half
+  // of them are also ISO country codes: "Munich, DE", "Bengaluru, IN" and
+  // "Vancouver, CA" all end in a valid US postal code. The gazetteer settles
+  // it by resolving the CITY inside that state, and returns null when the two
+  // do not belong together (probe-verified 2026-08-15), so the collisions die
+  // here while "Austin, TX" and "Wilmington, DE" live.
+  try {
+    const { geocodeUsPlace } = await import("../sourcing/geoRadius");
+    if (geocodeUsPlace(loc)) return true;
+  } catch { /* gazetteer unavailable: fall through */ }
+  // Last resort for a town the gazetteer does not carry: a state spelled out
+  // in full. Full names only, never the two-letter codes above.
+  return US_STATES.some((s) => loc.includes(s));
+}
+
+/** Exported for the US-gate selftest; the lane calls it internally. */
+export async function offMarketReason(location?: string): Promise<string | null> {
   const loc = (location ?? "").toLowerCase().trim();
-  if (!loc) return null;
-  const list = (process.env.ROLE_HUNTER_OFF_MARKET ?? "")
-    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-  for (const country of list.length ? list : OFF_MARKET_DEFAULT) {
-    if (loc.includes(country)) return `poster is in ${country}, outside this desk's market`;
+  const extraDenies = envList("ROLE_HUNTER_OFF_MARKET");
+  const usOnly = (process.env.ROLE_HUNTER_US_ONLY ?? "1") !== "0";
+  // Hard denies run first, so a state name sitting next to a foreign country
+  // ("London, Ontario", "Washington, England") can never buy a pass, and so a
+  // bare foreign city cannot be rescued by the gazetteer's US namesake.
+  for (const country of extraDenies.length ? extraDenies : OFF_MARKET_DEFAULT) {
+    if (loc && loc.includes(country)) return `poster is in ${country}, outside this desk's market`;
+  }
+  if (!usOnly) return null;
+  if (!loc) return "the poster's location is not shown, and this desk only works the United States";
+  // A two-letter tail that is not a US postal code is a foreign subdivision:
+  // "Toronto, ON" and "Vancouver, BC" never spell out Canada, and the
+  // gazetteer would happily match them to Toronto, Ohio.
+  const segs = loc.split(",").map((s) => s.trim()).filter(Boolean);
+  const tailCode = (segs[segs.length - 1] ?? "").replace(/\s+\d{5}(-\d{4})?$/, "").trim();
+  if (segs.length > 1 && /^[a-z]{2}$/.test(tailCode) && !US_ABBR.has(tailCode)) {
+    return `"${location}" ends in a non-US region code`;
+  }
+  if (!(await looksUnitedStates(loc))) return `"${location}" is not a United States location, and this desk only works the United States`;
+  return null;
+}
+
+/** Post-text screen, run BEFORE the paid profile read: a post that names where
+ *  the job is, and names somewhere outside the US, is dropped for free.
+ *
+ *  Deliberately narrow, because the expensive mistake here is the false
+ *  positive: a US company mentioning its offshore team ("our engineering team
+ *  in India supports the Dallas hire") is a lead, not a foreign post, and the
+ *  first cut of this regex threw it away. So the country has to arrive either
+ *  directly behind a hiring cue ("hiring in Germany") or behind a place and a
+ *  comma ("Manchester, United Kingdom"). A bare "in <country>" no longer
+ *  counts. */
+const FOREIGN_COUNTRIES = OFF_MARKET_DEFAULT.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+const FOREIGN_POST_RES = [
+  new RegExp(`\\b(?:hiring|recruiting|role|roles|position|positions|job|jobs|opening|openings|vacancy|based|located|headquartered)\\s+in\\s+(${FOREIGN_COUNTRIES})\\b`, "i"),
+  new RegExp(`[a-z][a-z .'-]{1,28},\\s*(${FOREIGN_COUNTRIES})\\b`, "i"),
+];
+export function foreignPostReason(text: string): string | null {
+  for (const re of FOREIGN_POST_RES) {
+    const m = re.exec(text || "");
+    if (m) return m[1].toLowerCase();
   }
   return null;
 }
@@ -488,6 +598,7 @@ function huntStatsFor(workspaceId: string): HuntDayStats {
   // Backfill for day rows written by older builds (avoids NaN on +=).
   if (s.peersBlocked === undefined) s.peersBlocked = 0;
   if (s.comments === undefined) s.comments = 0;
+  if (s.bdHandoffs === undefined) s.bdHandoffs = 0;
   return s;
 }
 let hydrated = false;
@@ -895,6 +1006,33 @@ function tooSimilar(text: string, recent: string[]): boolean {
   return false;
 }
 
+/** Belt on top of the prompt (owner ask 2026-08-15). The public-comment rules
+ *  now permit an implied pitch, which means the model is being asked to walk a
+ *  line, and a prompt alone is not a control. Anything that crosses into an
+ *  actual advertisement, or into a number nobody can stand behind, is dropped
+ *  rather than queued: a bad public comment cannot be recalled after approval.
+ *  The post's own text is passed in because a figure the POSTER stated is fair
+ *  to react to, while the same figure invented by us is not. */
+const CTA_LEAK_RE = /\b(dm me|dm us|message me|drop me|shoot me|send me|let'?s connect|happy to help|glad to help|reach out|get in touch|send (?:you |over |across )|(?:a few|some|couple of) (?:profiles|candidates|names|resumes)|book a|quick call|hop on a|calendly|we can help|we'?d be happy|we specialize|we place|our (candidates|bench|clients|team can))\b/i;
+const CONTACT_LEAK_RE = /(https?:\/\/|www\.|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b|\b\d{3}[-.\s)]\s?\d{3}[-.\s]\d{4}\b)/i;
+
+export function pitchLeakReason(text: string, postText: string): string | null {
+  if (CTA_LEAK_RE.test(text)) return "reads as a pitch";
+  if (CONTACT_LEAK_RE.test(text)) return "carries a link or contact detail";
+  // Every multi-digit number in the draft has to have come from their post.
+  // Digit runs are compared rather than phrases, because the fabrication
+  // arrives in any dress: "$178k", "40%", "92 days", "3 of the last 12". A
+  // number the POSTER stated is fair to react to; anything else is a claim
+  // this desk cannot stand behind in public. Spelled-out quantities ("four
+  // months", "half your size") stay available and read better anyway.
+  const postDigits = new Set((postText || "").match(/\d+/g) ?? []);
+  for (const m of text.match(/\d[\d,.]*/g) ?? []) {
+    const digits = m.replace(/[^\d]/g, "");
+    if (digits.length >= 2 && !postDigits.has(digits)) return `invents a figure (${m.trim()})`;
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------ */
 /* LLM drafting                                                         */
 /* ------------------------------------------------------------------ */
@@ -945,18 +1083,40 @@ Return ONLY the message text, nothing else.`;
 /**
  * The public-comment lane. Everything written under these rules is visible to
  * the poster's whole network, their own team, and every competing recruiter
- * watching that post, so it can never read as a pitch. The comment buys
- * attention and nothing else; the business conversation happens later.
+ * watching that post.
+ *
+ * The pitch (owner ask 2026-08-15). A public comment that asks for anything is
+ * dead on arrival: it gets hidden, it tells every competitor on the thread who
+ * is working the account, and it makes the poster defensive before the first
+ * conversation. So the pitch here is STRUCTURAL, not verbal. The comment says
+ * one true, non-obvious thing about how that exact search actually behaves,
+ * says it in the first person plural so the reader registers there is a desk
+ * behind it, and then stops one beat early. No offer is made, so there is
+ * nothing to refuse; the only way to get the rest of what this person knows is
+ * to click the name. That click is the conversion, and it is the reason this
+ * lane exists for CLOSED profiles: the profile is the landing page, the
+ * comment is the ad that never looks like one.
+ *
+ * The failure mode to guard hardest is a fabricated statistic. A made-up comp
+ * band or time-to-fill number, in public, under a hiring manager's post, is a
+ * lie the desk cannot walk back and a competitor can disprove in one reply.
+ * Numbers are therefore allowed ONLY when the post itself supplied them.
  */
 const POST_COMMENT_RULES = `You write PUBLIC comments that a recruiting agency owner leaves on a stranger's LinkedIn post. Everyone can see this comment: the poster, their team, their network, and every competing recruiter watching the post. The reader must never suspect a machine wrote it, and must never read it as an advertisement.
+
+Your goal is NOT to win a reply. It is to make one hiring decision-maker think "this person actually runs these searches" and click the name. Everything below serves that.
+
 Rules:
-- React to the SPECIFIC thing their post is about with one concrete, useful observation someone who works that market would actually have. On a hiring post that is where that talent usually sits, what stalls this search, or the comp reality; on a post about the work itself it is a practical point from having seen the same problem at other companies. Or ask one genuine question. Never restate their post, never compliment it.
-- 12 to 30 words. One or two sentences.
-- NEVER pitch, never mention your services, your agency, your candidates, your bench, or placements you have made. No "DM me", no "let's connect", no "happy to help", no offering to send profiles. No links, no phone numbers, no email.
+- Say ONE true, non-obvious thing about how their specific situation actually plays out, at the level of mechanism: where that talent is really sitting right now, which adjacent title converts and which one never does, what makes this search stall at the offer, what the counteroffer risk looks like, what the market reads into how the role is scoped. On a post about the work rather than a role, it is the same move applied to the problem they described. Never restate their post, never compliment it, never give generic hiring advice ("hiring is hard", "culture matters"). The line must be specific enough that it could be wrong.
+- Write it as "we", exactly once, as the quiet tell that a desk sits behind the observation: "we keep seeing", "the ones we watch close", "we stopped sourcing those from". Never name the firm, never say "my agency", "my clients", "our candidates", "our bench", or any placement you have made.
+- NEVER invent a number. No comp bands, no time-to-fill, no counts, no percentages, unless the post itself stated them, in which case you may react to their number. If you have no specific fact, describe the pattern in words instead.
+- Stop one beat early. Name the pattern; do not hand over the whole playbook. The incompleteness must be SILENT: never point at it, never say "more where that came from", "happy to share", "the full picture", or anything that acknowledges you are holding something back.
+- Make no offer and no ask. No "DM me", no "let's connect", no "happy to help", no offering to send profiles, no question that functions as a hook. No links, no phone numbers, no email, no calendar. Never describe a service, never say "we can help", "we specialize", "we place".
+- 14 to 38 words. One or two sentences.
 - No emoji, no hashtags, no exclamation marks, no long dashes, no all-caps.
 - Banned openers: "Great post", "Love this", "So true", "This is spot on", "Couldn't agree more", "Thanks for sharing", "Commenting for reach".
 - Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies", "reach out".
-- Vary your sentence shape from comment to comment: do not settle into one formula.
+- Vary your sentence shape from comment to comment: do not settle into one formula. If nothing specific and true can be said about this post, ask the one question an operator who runs these searches weekly would ask, never a generic one.
 - Never mention AI.
 Return ONLY the comment text, nothing else.`;
 
@@ -1230,11 +1390,64 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
   let sent = 0;
   try { sent = await autoExecute(workspaceId); } catch { /* drafts stay open for manual review */ }
 
+  // The second step: comments posted a couple of days ago become BD rows.
+  let handedOff = 0;
+  try { handedOff = await handoffCommentedToBd(workspaceId); } catch (e) {
+    console.log(`[comment-bd] ${workspaceId}: handoff error (${e instanceof Error ? e.message : e})`);
+  }
+
   state.lastScan[workspaceId] = nowIso();
   prune();
   save();
-  console.log(`[comment-radar] ${workspaceId}: scanned=${scanned} created=${created + dmCreated} autopilot_sent=${sent}`);
+  console.log(`[comment-radar] ${workspaceId}: scanned=${scanned} created=${created + dmCreated} autopilot_sent=${sent} bd_handoff=${handedOff}`);
   return { scanned, created: created + dmCreated, skipped: null };
+}
+
+/**
+ * Hand every comment we actually posted, and have now let sit for the delay,
+ * to BD as a prospect (owner direction 2026-08-15).
+ *
+ * The approved lane item IS the pending queue: it survives 14 days here, the
+ * delay is hours, and stamping `prospectId` is what marks a poster done. So
+ * this is idempotent with no extra store, and a poster whose handoff throws is
+ * simply picked up by the next tick.
+ */
+async function handoffCommentedToBd(workspaceId: string): Promise<number> {
+  const { handoffPoster, bdHandoffDelayHours } = await import("./commentToBd");
+  const cutoff = Date.now() - bdHandoffDelayHours() * 3_600_000;
+  let done = 0;
+  for (const item of state.items) {
+    if (item.workspaceId !== workspaceId) continue;
+    if (item.kind !== "poster" || item.commentStatus !== "approved") continue;
+    if (item.prospectId) continue;
+    // updatedAt is the approval stamp: the moment the engine took the comment.
+    if (new Date(item.updatedAt).getTime() > cutoff) continue;
+    try {
+      const prospectId = await handoffPoster(workspaceId, {
+        id: item.id,
+        authorName: item.authorName,
+        authorPublicUrl: item.authorPublicUrl,
+        authorHeadline: item.authorHeadline,
+        company: item.company,
+        title: item.title,
+        posterLocation: item.posterLocation,
+        postExcerpt: item.postExcerpt,
+        postUrl: item.postUrl,
+        commentDraft: item.commentDraft,
+        openRoles: item.hiring?.openRoles,
+      });
+      if (!prospectId) continue;
+      item.prospectId = prospectId;
+      item.updatedAt = nowIso();
+      const st = huntStatsFor(workspaceId);
+      st.bdHandoffs = (st.bdHandoffs ?? 0) + 1;
+      save();
+      done++;
+    } catch (e) {
+      console.log(`[comment-bd] ${workspaceId}: ${item.authorName} handoff failed (${e instanceof Error ? e.message : e})`);
+    }
+  }
+  return done;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1513,7 +1726,10 @@ async function candidatesFromSerper(query: string): Promise<{ items: MarketCandi
     const res = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: { "X-API-KEY": key, "Content-Type": "application/json" },
-      body: JSON.stringify({ q: query, num: MARKET_RESULTS_PER_SEARCH, tbs: "qdr:w" }),
+      // gl/hl pin the index to the US edition (owner mandate 2026-08-15):
+      // cheaper than discovering a Manchester poster after a paid profile
+      // read. DataForSEO already does this with location_code 2840.
+      body: JSON.stringify({ q: query, num: MARKET_RESULTS_PER_SEARCH, tbs: "qdr:w", gl: "us", hl: "en" }),
     });
     if (!res.ok) {
       // Break layer: the card must say WHY discovery is dry, e.g. Serper's
@@ -1654,7 +1870,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, commentFull: 0, commentDraft: 0, commentDupe: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0 };
   const stats = huntStatsFor(workspaceId);
   // Public-comment lane: on/off, and how deep its approval queue may get.
   const commentLane = commentLimitsFor(workspaceId).enabled;
@@ -1681,6 +1897,13 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // Hiring-post scenarios require hiring intent in the text; broader
     // scenarios (growth, funding, custom phrases) accept any real post.
     if (combo.hiringIntent && !HIRING_INTENT_RE.test(c.text)) { g.intent++; continue; }
+
+    // US only (owner mandate 2026-08-15). A post that says outright where the
+    // job is, and says somewhere abroad, dies here: free, before the profile
+    // read that would otherwise be spent finding that out. The poster's own
+    // location is checked further down, after the read.
+    const foreign = foreignPostReason(c.text);
+    if (foreign) { g.foreignPost++; continue; }
 
     // One touch per author per week, whichever key we knew them by.
     const lastTouch = seenAuthors[c.authorRef];
@@ -1750,7 +1973,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // Off-market posters die here, before any drafting: the profile read is
     // already spent, and a wrong-market comment is a permanent disqualification
     // rather than a "come back next week".
-    const offMarket = offMarketReason(prof.location);
+    const offMarket = await offMarketReason(prof.location);
     if (offMarket) { markClosed(prof.providerId); g.offMarket++; continue; }
 
     const firstDegree = prof.networkDistance === "FIRST_DEGREE" || prof.networkDistance === "DISTANCE_1";
@@ -1843,6 +2066,8 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
         `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.`);
       if (!drafted) { g.commentDraft++; continue; }
       const candidate = scrub(drafted).slice(0, MAX_COMMENT_CHARS);
+      const leak = pitchLeakReason(candidate, c.text);
+      if (leak) { g.commentLeak++; console.log(`[comment-radar] draft dropped, ${leak}: ${candidate}`); continue; }
       // Compared against what was already posted AND what is still sitting in
       // the approval queue: a single tick drafting eight comments that rhyme
       // with each other is the same tell as posting eight that do.
@@ -2189,7 +2414,7 @@ export async function approvePostComment(
   }
   // Re-checked here as well as at capture, so a draft taken under an older
   // market list cannot be approved into a public comment about the wrong one.
-  const offMarket = offMarketReason(item.posterLocation);
+  const offMarket = await offMarketReason(item.posterLocation);
   if (offMarket) {
     item.commentStatus = "blocked"; item.reason = `Outside this desk's market: ${offMarket}.`;
     item.updatedAt = nowIso(); save();
