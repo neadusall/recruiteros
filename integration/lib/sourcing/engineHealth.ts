@@ -31,7 +31,7 @@ import { pushNotification } from "../outbound/notify";
 import {
   verifySerperSearch, serperSearchConfigured, rapidApiSearchConfigured,
   dataforseoSearchConfigured, dataforseoAccountBalance, verifyDataForSeoSearch,
-  verifySourcingSearch, peopleSearchHost,
+  verifySourcingSearch, peopleSearchHost, widePrimary,
 } from "./discovery";
 import { getRapidQuotaFor } from "./rapidQuota";
 
@@ -287,15 +287,21 @@ function worstOf(engines: EngineStatus[]): EngineState {
 
 /** Human sentence for the notification body. */
 function alertBody(wsName: string, e: EngineStatus): string {
+  // Which wide-web engine leads is a setting, so the copy follows it rather than naming
+  // a winner: telling an owner their "primary" is down when it is actually the second
+  // pass sends them to the wrong dashboard.
+  const lead = widePrimary();
+  const isLead = e.engine === lead;
+  const role = isLead ? "the primary wide web-search pass" : "the wide web-search top-up";
   const who =
-    e.engine === "dataforseo" ? "DataForSEO (the primary wide web-search pass)"
-    : e.engine === "serper" ? "Serper (the wide web-search top-up)"
+    e.engine === "dataforseo" ? `DataForSEO (${role})`
+    : e.engine === "serper" ? `Serper (${role})`
     : "the RapidAPI people-search engine";
-  if (e.engine === "dataforseo" && e.state === "down") {
-    return `${who} is not answering for ${wsName}: ${e.detail} This is the engine that now carries most of JD Sourcing's candidates, so searches will return far fewer people until it is restored. Top up or check the login at app.dataforseo.com.`;
-  }
-  if (e.engine === "serper" && e.state === "down") {
-    return `${who} is not answering for ${wsName}: ${e.detail} DataForSEO runs first and absorbs the volume, so runs continue without it — but they lose the second pass that picked up what DataForSEO missed. Top up at serper.dev when convenient.`;
+  const topUpAt = e.engine === "dataforseo" ? "app.dataforseo.com" : "serper.dev";
+  if ((e.engine === "dataforseo" || e.engine === "serper") && e.state === "down") {
+    return isLead
+      ? `${who} is not answering for ${wsName}: ${e.detail} This is the engine that carries most of JD Sourcing's candidates, so searches will return far fewer people until it is restored. Top up or check the login at ${topUpAt}.`
+      : `${who} is not answering for ${wsName}: ${e.detail} The primary pass runs first and absorbs the volume, so runs continue without it — but they lose the second pass that picked up what the primary missed. Top up at ${topUpAt} when convenient.`;
   }
   if (e.engine === "rapidapi" && e.state === "down") {
     return `${who} is refusing requests for ${wsName}: ${e.detail} JD Sourcing runs will skip the paid people search until this is fixed. Check the key, the listing subscription and the search host/path under Setup -> JD Sourcing.`;

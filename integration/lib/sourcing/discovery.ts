@@ -21,6 +21,14 @@
  *       daily cap, and it outlives the CSE JSON API (Google retires it Jan 1, 2027).
  *       Configure SERPER_API_KEY; runs after the free passes, before rapidapi, so the
  *       cheap key absorbs volume the expensive listing would otherwise carry.
+ *
+ *   THE TWO PAID SERP ENGINES (serper, dataforseo) serve the SAME Google results over
+ *   the SAME X-ray, so which one leads is a cost/reliability call rather than a quality
+ *   one — and it has already flipped once. SOURCING_WIDE_PRIMARY decides (default
+ *   "serper"); the other always still runs, second, on what the first did not fill, and
+ *   each one's per-run allowance doubles when the other cannot run. That symmetry is the
+ *   point: Serper's prepaid bundle has expired silently twice, and DataForSEO blanks on
+ *   a valid query about one call in five, so neither is trustworthy enough to be alone.
  *   - rapidapi: a marketplace LinkedIn/people-search listing (the chosen scale path).
  *       Configure RAPIDAPI_KEY + RAPIDAPI_PEOPLE_SEARCH_HOST/PATH to point at whatever
  *       listing you subscribe to. Listings differ, so the result mapping is defensive,
@@ -636,6 +644,32 @@ const DFS_CAP_EXPLICIT = (): boolean => {
   const n = parseInt(cred("DATAFORSEO_MAX_QUERIES") || "", 10);
   return Number.isFinite(n) && n > 0;
 };
+const SERPER_CAP_EXPLICIT = (): boolean => {
+  const n = parseInt(cred("SERPER_MAX_QUERIES") || "", 10);
+  return Number.isFinite(n) && n > 0;
+};
+
+/**
+ * Which paid wide-web engine runs FIRST. Both serve Google results over the same x-ray,
+ * so this is a cost and reliability call, not a quality one — and it has already flipped
+ * once, which is why it is a setting rather than an ordering baked into the code.
+ *
+ *   serper     (default) measured 2-6x cheaper per profile, but its credits are a prepaid
+ *              bundle that has now expired silently twice (2026-07-30, 2026-08-12), each
+ *              time taking most of the candidate supply with it before anyone noticed.
+ *   dataforseo pricier per profile (~$0.02/query for ~76 profiles here) but pay-as-you-go
+ *              against a balance that cannot lapse mid-run, and 100 results in one call.
+ *
+ * Whichever is second still runs, on whatever the first did not fill.
+ */
+export type WidePrimary = "serper" | "dataforseo";
+const WIDE_PRIMARY = (): WidePrimary =>
+  (cred("SOURCING_WIDE_PRIMARY") || "serper").trim().toLowerCase() === "dataforseo" ? "dataforseo" : "serper";
+
+/** Which wide-web engine leads for this workspace — for health copy and diagnostics. */
+export function widePrimary(): WidePrimary {
+  return WIDE_PRIMARY();
+}
 
 export function dataforseoSearchConfigured(): boolean {
   return Boolean(DFS_LOGIN() && DFS_PASS());
@@ -1120,23 +1154,29 @@ export async function runDiscovery(
   // Spread the free daily Google quota across queries: a few pages each, run-capped.
   const googleBudget = G_MAX_QUERIES();
   let googleUsed = 0;
-  // The wide-web allowance, shared in spirit by the two paid SERP engines.
+  // The wide-web allowance, in QUERIES, shared in spirit by the two paid SERP engines.
   const wideDefault = breadth === "wide" ? 300 : 100;
-  // Serper is cheap but not free: a per-run soft cap keeps one big run's spend bounded.
-  // Wide mode raises the default ceiling (more queries × deeper pages still lands
-  // around a nickel a run); an explicit SERPER_MAX_QUERIES in Setup always wins.
-  const serperBudget = SERPER_MAX_QUERIES(wideDefault);
+  // Which of the two goes first this run.
+  const primaryWide = WIDE_PRIMARY();
+  // SERPER'S BUDGET IS COUNTED IN PAGE FETCHES, not queries — it pages, DataForSEO does
+  // not. That distinction used to be silent and it mattered: a default of 100 at four
+  // pages per query covered only ~25 queries of a 109-query run, so most of the run got
+  // no Serper pass at all while the number in Setup implied full coverage. The default is
+  // now scaled by the page depth, so "100" means about 100 queries' worth on either
+  // engine. An explicit SERPER_MAX_QUERIES in Setup is still taken as literal page
+  // fetches (Lumesp's 500 = ~125 queries at balanced) and always wins.
+  const widePages = wideDefault * pPages;
+  let serperBudget = SERPER_MAX_QUERIES(useDfs ? widePages : widePages * 2);
   let serperUsed = 0;
   // DataForSEO: one task per query (depth covers what paging would), so the cap is
   // effectively "how many queries may use it".
   //
-  // IT IS THE PRIMARY WIDE-WEB PASS, and Serper sits behind it as a top-up. So when
-  // Serper cannot run at all — no key, or credits gone, which is the live state on this
-  // box — DataForSEO has to be allowed to cover the queries Serper would have taken.
-  // Otherwise every query past its own cap gets NO wide-web pass whatsoever, and the run
-  // reports success having searched a fraction of what it was asked to. Real runs here
-  // fan out to 57-319 queries against a default cap of 100, so that gap is the common
-  // case, not the edge. An explicit DATAFORSEO_MAX_QUERIES always wins.
+  // SYMMETRIC COVER: whichever engine cannot run, the other's allowance doubles so the
+  // queries it would have taken still get a wide-web pass. Without that, every query past
+  // the survivor's own cap gets NO wide-web pass whatsoever and the run reports success
+  // having searched a fraction of what it was asked to — real runs here fan out to
+  // 57-319 queries against a default cap of 100, so the gap is the common case, not the
+  // edge. An explicit DATAFORSEO_MAX_QUERIES always wins and turns the top-up off.
   let dfsBudget = DFS_MAX_QUERIES(useSerper ? wideDefault : wideDefault * 2);
   let dfsUsed = 0;
   // How many blank DataForSEO pages this run will pay to re-ask (see the retry below).
@@ -1203,18 +1243,22 @@ export async function runDiscovery(
       }
     }
 
-    // 2.5) CHEAPEST paid: one DataForSEO live task over the same X-ray. Depth 100
-    // makes it a single call per query (no paging), and per result it undercuts
-    // Serper several times over, so it absorbs volume before Serper spends.
-    if (useDfs && collected < perQuery && !capped && dfsUsed < dfsBudget) {
+    // 2.5 / 3) THE TWO PAID WIDE-WEB PASSES, in the order SOURCING_WIDE_PRIMARY sets.
+    // Both serve real Google results over the same x-ray, so whichever runs first
+    // absorbs the volume and the other only picks up what it did not fill. Each is
+    // written as a closure so the order is data, not duplicated code.
+
+    /** One DataForSEO live task over the x-ray. Depth covers what paging would. */
+    const dfsPass = async (): Promise<void> => {
+      if (!useDfs || collected >= perQuery || capped || dfsUsed >= dfsBudget) return;
       dfsUsed++; // reserved before the await, same as the budgets above
       try {
         let rows = await dfLimit(() => dataforseoXraySearch(query.xray));
         // Google answers a perfectly good x-ray with a blank page now and then (measured:
-        // the same query returned 19 results and 0 within a minute). DataForSEO is the
-        // primary pass, so a transient blank silently costs the run that entire query.
-        // Retry once — BUDGETED, because a query with genuinely no results would otherwise
-        // double its own bill, and there is no way to tell the two apart from one answer.
+        // the same query returned 19 results and 0 within a minute). A transient blank
+        // would silently cost the run this entire query, so retry once — BUDGETED,
+        // because a query with genuinely no results would otherwise double its own bill
+        // and there is no way to tell the two apart from a single answer.
         if (!rows.length && dfsRetries < DFS_RETRY_BUDGET && dfsUsed < dfsBudget) {
           dfsRetries++;
           dfsUsed++; // a retry is a real billed task; the budget stays an honest spend cap
@@ -1222,19 +1266,21 @@ export async function runDiscovery(
         }
         if (rows.length) {
           collected += absorb(rows, query.group);
-          if (byKey.size >= cap) { capped = true; return; }
+          if (byKey.size >= cap) capped = true;
         }
       } catch (err: any) {
         warnings.push(`dataforseo(${query.group}): ${err.message}`);
-        if (err && err.quota) { useDfs = false; } // balance gone / login bad, stop for the run
+        if (err && err.quota) {
+          useDfs = false; // balance gone / login bad, stop for the run
+          // Hand its share to the other engine so one dead vendor cannot halve the reach.
+          if (!SERPER_CAP_EXPLICIT()) serperBudget = Math.max(serperBudget, widePages * 2);
+        }
       }
-    }
+    };
 
-    // 3) CHEAP paid: Serper.dev Google results over the same X-ray. Runs before the
-    // expensive people-search listing so the pennies key absorbs volume first, and it
-    // keeps digging when the CSE free pass ran dry (or was never / can no longer be
-    // configured: Google closed the CSE API to new signups, retiring it Jan 1, 2027).
-    if (useSerper && collected < perQuery && !capped) {
+    /** Serper pages through 10-result pages; pPages deep per query. */
+    const serperPass = async (): Promise<void> => {
+      if (!useSerper || collected >= perQuery || capped) return;
       for (let page = 1; page <= pPages && collected < perQuery && !capped; page++) {
         if (serperUsed >= serperBudget) break;
         serperUsed++; // reserved before the await, same as the Google budget above
@@ -1244,8 +1290,8 @@ export async function runDiscovery(
           warnings.push(`serper(${query.group} p${page}): ${err.message}`);
           if (err && err.quota) {
             useSerper = false; // credits gone / key bad, stop for the run
-            // The top-up just retired mid-run. Hand its share to the primary pass, so a
-            // Serper balance that empties halfway does not silently halve the run's reach.
+            // Same hand-off in the other direction: a Serper bundle that empties halfway
+            // through must not silently halve the run.
             if (!DFS_CAP_EXPLICIT()) dfsBudget = Math.max(dfsBudget, wideDefault * 2);
           }
           break;
@@ -1254,6 +1300,11 @@ export async function runDiscovery(
         collected += absorb(rows, query.group);
         if (byKey.size >= cap) { capped = true; return; }
       }
+    };
+
+    for (const pass of (primaryWide === "dataforseo" ? [dfsPass, serperPass] : [serperPass, dfsPass])) {
+      await pass();
+      if (capped) return;
     }
 
     // 4) PAID scale: RapidAPI people-search for whatever the free passes didn't fill.
@@ -1444,14 +1495,19 @@ export async function runDiscovery(
     // the fatal path.
     if (rapidDead) reasons.push(`the paid people search is not usable for this workspace (${rapidDead})`);
     else if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
-    // The actionable fix for a run with no wide web search is a DataForSEO login: it is
-    // the primary pass, it is pay-as-you-go with no bundle to expire, and Google closed
-    // the CSE API to new signups (gone Jan 1, 2027), so don't send anyone there.
+    // A run with no wide web search at all needs one of the two paid SERP keys. Don't
+    // send anyone to Google CSE: it is closed to new signups and retires Jan 1, 2027.
     if (!useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()) {
-      reasons.push("the wide web-search pass is off (add your DataForSEO login in Setup under JD Sourcing, in the Cheapest pass fields, then run again)");
+      reasons.push("the wide web-search pass is off (add a Serper key, or a DataForSEO login, in Setup under JD Sourcing, then run again)");
     }
-    if (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured()) reasons.push("the DataForSEO pass — the primary wide web search — stopped early (login rejected or balance empty; check your app.dataforseo.com balance)");
-    if (!useSerper && engines.includes("serper") && serperSearchConfigured()) reasons.push("the Serper top-up pass stopped early (key rejected or out of credits; check your serper.dev balance)");
+    // Name whichever engine is actually leading, so the fix points at the right dashboard.
+    const leadWide = primaryWide;
+    if (!useSerper && engines.includes("serper") && serperSearchConfigured()) {
+      reasons.push(`the Serper pass${leadWide === "serper" ? " — the primary wide web search —" : " (the top-up)"} stopped early (key rejected or out of credits; check your serper.dev balance)`);
+    }
+    if (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured()) {
+      reasons.push(`the DataForSEO pass${leadWide === "dataforseo" ? " — the primary wide web search —" : " (the top-up)"} stopped early (login rejected or balance empty; check your app.dataforseo.com balance)`);
+    }
     if (!useSearx && engines.includes("searx")) reasons.push("the built-in free search engine did not respond");
     if (engines.includes("koldinfo") && !useKold) reasons.push("the free contact-database sweep is offline (the enrichment worker is unreachable or missing its login)");
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
@@ -1464,12 +1520,11 @@ export async function runDiscovery(
     // ("it stopped with SRC-CREDITS"), which points the engineer straight at the fix
     // without the recruiter ever seeing an engine name, a key or a query.
     // Ordered most-actionable first: the first match wins.
-    // A dead Serper is no longer, on its own, a run-ending event: DataForSEO is the
-    // primary pass and covers the volume. So SRC-CREDITS is reserved for the primary
-    // failing, or for Serper failing with no primary left standing behind it.
+    // One dead SERP engine is not, on its own, a run-ending event: the other covers the
+    // volume. SRC-CREDITS is for the case where NEITHER wide-web engine is left standing.
     stopReason =
-      (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured()) ||
-      (!useSerper && engines.includes("serper") && serperSearchConfigured() && !useDfs)
+      (!useSerper && engines.includes("serper") && serperSearchConfigured() && !useDfs) ||
+      (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured() && !useSerper)
         ? { code: "SRC-CREDITS", message: "The wide web search stopped early: its account is out of credit, or its key was refused. Nobody could be pulled in. This one needs an admin, re-running it will not help." }
       : !useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()
         ? { code: "SRC-NOKEY", message: "The wide web search is not switched on for this workspace, so the main source never ran. An admin has to turn it on in Setup." }

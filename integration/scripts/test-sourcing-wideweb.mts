@@ -28,10 +28,15 @@ const realFetch = globalThis.fetch;
 /** Count DataForSEO tasks and Serper searches issued by a run. */
 interface Counts { dfs: number; serper: number }
 
-function stub(counts: Counts, opts: { serperDies?: boolean; dfsItems?: unknown[] } = {}): void {
+function stub(
+  counts: Counts,
+  opts: { serperDies?: boolean; dfsItems?: unknown[]; serperPages?: boolean } = {},
+): string[] {
+  const order: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("dataforseo.com")) {
+      order.push("dataforseo");
       counts.dfs++;
       return new Response(JSON.stringify({
         status_code: 20000,
@@ -39,20 +44,42 @@ function stub(counts: Counts, opts: { serperDies?: boolean; dfsItems?: unknown[]
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (url.includes("serper.dev")) {
+      order.push("serper");
       counts.serper++;
       if (opts.serperDies) {
         return new Response(JSON.stringify({ message: "insufficient credits" }), { status: 403 });
       }
-      return new Response(JSON.stringify({ organic: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      // An empty page makes Serper give up on that query after page 1, which never
+      // exercises the page budget. serperPages returns one fresh profile per call so
+      // the pass keeps paging to its per-query depth, the way a live run does.
+      const organic = opts.serperPages
+        ? [{ title: `Person ${counts.serper} - VP of Sales`, link: `https://www.linkedin.com/in/person-${counts.serper}`, snippet: "Dallas, Texas" }]
+        : [];
+      return new Response(JSON.stringify({ organic }), { status: 200, headers: { "content-type": "application/json" } });
     }
     return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
+  return order;
 }
 
+// A COMPLETE ICP. Every array field has to be present: the scorer iterates them
+// directly, so a trimmed-down fixture throws inside absorb() the moment a pass actually
+// returns rows — which looks exactly like an engine fault and is not one.
 const icp: CandidateICP = {
-  titles: ["VP of Sales"], geos: ["Dallas, TX"], industries: [], skills: [],
-  seniority: [], mustHave: [], niceToHave: [], disqualifiers: [],
-} as unknown as CandidateICP;
+  label: "VP Sales — Dallas",
+  seniority: "vp",
+  managesTeam: true,
+  titles: ["VP of Sales", "Vice President of Sales"],
+  geos: ["Dallas, TX"],
+  remoteOk: false,
+  industries: ["Software"],
+  targetCompanies: [],
+  sellsTo: [],
+  verticals: [],
+  mustHave: [],
+  niceToHave: [],
+  disqualifiers: [],
+};
 
 /** N distinct queries, enough to run past the default 100-query cap. */
 function queries(n: number): SourcingQuery[] {
@@ -68,12 +95,36 @@ function queries(n: number): SourcingQuery[] {
 /** Only the wide-web engines; keeps the run off every other network path. */
 const ENGINES = ["dataforseo", "serper"] as const;
 
+/** Which engine was called first across the whole run. */
+function firstCalled(order: string[]): string {
+  return order[0] ?? "";
+}
+
 async function run(): Promise<void> {
-  /* --- Serper absent: DataForSEO covers the whole run ------------------- */
-  delete process.env.SERPER_API_KEY;
+  /* --- default order: Serper leads, DataForSEO second -------------------- */
+  delete process.env.SOURCING_WIDE_PRIMARY;
   delete process.env.DATAFORSEO_MAX_QUERIES;
+  delete process.env.SERPER_MAX_QUERIES;
+  process.env.SERPER_API_KEY = "sk-test";
   process.env.DATAFORSEO_LOGIN = "probe@example.com";
   process.env.DATAFORSEO_PASSWORD = "pw";
+  {
+    const counts: Counts = { dfs: 0, serper: 0 };
+    const order = stub(counts);
+    await runDiscovery(queries(4), icp, { cap: 5000, engines: ENGINES as unknown as string[] } as never);
+    check("Serper runs first by default", firstCalled(order) === "serper");
+  }
+  {
+    const counts: Counts = { dfs: 0, serper: 0 };
+    const order = stub(counts);
+    process.env.SOURCING_WIDE_PRIMARY = "dataforseo";
+    await runDiscovery(queries(4), icp, { cap: 5000, engines: ENGINES as unknown as string[] } as never);
+    check("SOURCING_WIDE_PRIMARY=dataforseo flips the order", firstCalled(order) === "dataforseo");
+    delete process.env.SOURCING_WIDE_PRIMARY;
+  }
+
+  /* --- Serper absent: DataForSEO covers the whole run ------------------- */
+  delete process.env.SERPER_API_KEY;
   {
     const counts: Counts = { dfs: 0, serper: 0 };
     stub(counts);
@@ -82,23 +133,37 @@ async function run(): Promise<void> {
     check("no Serper calls are made when it is unconfigured", counts.serper === 0);
   }
 
-  /* --- Serper present: the standard 100 applies -------------------------- */
+  /* --- Serper present: DataForSEO keeps the standard 100 ----------------- */
   process.env.SERPER_API_KEY = "sk-test";
   {
     const counts: Counts = { dfs: 0, serper: 0 };
     stub(counts);
     await runDiscovery(queries(260), icp, { cap: 5000, engines: ENGINES as unknown as string[] } as never);
     check("with Serper available, DataForSEO keeps the standard 100 cap", counts.dfs === 100);
-    check("Serper still runs as the top-up", counts.serper > 0);
+    check("Serper leads and carries the volume", counts.serper > counts.dfs);
   }
 
-  /* --- Serper dies mid-run: the primary picks the slack up --------------- */
+  /* --- Serper dies mid-run: the second pass picks the slack up ----------- */
   {
     const counts: Counts = { dfs: 0, serper: 0 };
     stub(counts, { serperDies: true });
     await runDiscovery(queries(260), icp, { cap: 5000, engines: ENGINES as unknown as string[] } as never);
     check("when Serper dies mid-run, DataForSEO's budget is raised to 200", counts.dfs === 200);
     check("Serper stops being called once it reports no credits", counts.serper < 5);
+  }
+
+  /* --- and the same cover in the other direction ------------------------- */
+  {
+    // DataForSEO unconfigured: Serper's page budget doubles so it can cover alone.
+    const counts: Counts = { dfs: 0, serper: 0 };
+    delete process.env.DATAFORSEO_LOGIN;
+    delete process.env.DATAFORSEO_PASSWORD;
+    stub(counts, { serperPages: true });
+    await runDiscovery(queries(400), icp, { cap: 20000, engines: ENGINES as unknown as string[] } as never);
+    check("with no DataForSEO, Serper's page budget doubles to 800", counts.serper === 800);
+    check("no DataForSEO calls are made when it is unconfigured", counts.dfs === 0);
+    process.env.DATAFORSEO_LOGIN = "probe@example.com";
+    process.env.DATAFORSEO_PASSWORD = "pw";
   }
 
   /* --- an explicit cap is never raised on the operator's behalf ---------- */
