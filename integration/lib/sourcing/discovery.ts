@@ -509,6 +509,19 @@ async function googleXraySearch(xray: string, page: number): Promise<CandidateRo
  */
 const PROBE_XRAY = 'site:linkedin.com/in "VP of Sales"';
 
+/**
+ * Run a probe, retrying ONCE when it comes back empty.
+ *
+ * Google — through any vendor — intermittently answers a perfectly good x-ray with a
+ * blank page. Measured on this account: `"linkedin.com/in" "VP of Sales"` returned 19
+ * organic results and 0 within the same minute. Without this retry the health watch
+ * would flap a healthy engine to "down" and page the owner over nothing.
+ */
+async function probeTwice(fn: () => Promise<CandidateRow[]>): Promise<CandidateRow[]> {
+  const rows = await fn();
+  return rows.length ? rows : fn();
+}
+
 /** A wide-web probe that answered but found nobody is not a pass. */
 function probeResult(rows: CandidateRow[], vendor: string): { ok: boolean; error?: string; found?: number } {
   if (!rows.length) {
@@ -524,7 +537,7 @@ export async function verifyGoogleSearch(): Promise<{ ok: boolean; error?: strin
   if (!G_KEY()) return { ok: false, error: "Add your Google API key first." };
   if (!G_CX()) return { ok: false, error: "Add the Programmable Search engine ID (cx) first." };
   try {
-    return probeResult(await googleXraySearch(PROBE_XRAY, 1), "Google");
+    return probeResult(await probeTwice(() => googleXraySearch(PROBE_XRAY, 1)), "Google");
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || "search request failed" };
   }
@@ -585,7 +598,7 @@ async function serperXraySearch(xray: string, page: number): Promise<CandidateRo
 export async function verifySerperSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
   if (!SERPER_KEY()) return { ok: false, error: "Add your Serper API key first." };
   try {
-    return probeResult(await serperXraySearch(PROBE_XRAY, 1), "Serper");
+    return probeResult(await probeTwice(() => serperXraySearch(PROBE_XRAY, 1)), "Serper");
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || "search request failed" };
   }
@@ -675,9 +688,9 @@ async function dataforseoXraySearch(xray: string, depth = 100): Promise<Candidat
 export async function verifyDataForSeoSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
   if (!dataforseoSearchConfigured()) return { ok: false, error: "Add your DataForSEO API login and password first." };
   try {
-    // Depth 20 rather than 10: it is the primary engine, so the probe should be a fair
-    // sample of a real page of results, and the extra depth costs a fraction of a cent.
-    return probeResult(await dataforseoXraySearch(PROBE_XRAY, 20), "DataForSEO");
+    // Depth 20, not 100: measured here, depth 100 on this exact query returned 0 organic
+    // results in the same minute depth 20 returned 19. A deep page is not a better probe.
+    return probeResult(await probeTwice(() => dataforseoXraySearch(PROBE_XRAY, 20)), "DataForSEO");
   } catch (e: any) {
     return { ok: false, error: (e && e.message) || "search request failed" };
   }
@@ -1122,6 +1135,9 @@ export async function runDiscovery(
   // case, not the edge. An explicit DATAFORSEO_MAX_QUERIES always wins.
   let dfsBudget = DFS_MAX_QUERIES(useSerper ? wideDefault : wideDefault * 2);
   let dfsUsed = 0;
+  // How many blank DataForSEO pages this run will pay to re-ask (see the retry below).
+  const DFS_RETRY_BUDGET = 25;
+  let dfsRetries = 0;
   // People-search listing requests attempted this run (its monthly credits are the
   // scarce paid resource, so the count is stamped onto the saved list).
   let rapidUsed = 0;
@@ -1189,7 +1205,17 @@ export async function runDiscovery(
     if (useDfs && collected < perQuery && !capped && dfsUsed < dfsBudget) {
       dfsUsed++; // reserved before the await, same as the budgets above
       try {
-        const rows = await dfLimit(() => dataforseoXraySearch(query.xray));
+        let rows = await dfLimit(() => dataforseoXraySearch(query.xray));
+        // Google answers a perfectly good x-ray with a blank page now and then (measured:
+        // the same query returned 19 results and 0 within a minute). DataForSEO is the
+        // primary pass, so a transient blank silently costs the run that entire query.
+        // Retry once — BUDGETED, because a query with genuinely no results would otherwise
+        // double its own bill, and there is no way to tell the two apart from one answer.
+        if (!rows.length && dfsRetries < DFS_RETRY_BUDGET && dfsUsed < dfsBudget) {
+          dfsRetries++;
+          dfsUsed++; // a retry is a real billed task; the budget stays an honest spend cap
+          rows = await dfLimit(() => dataforseoXraySearch(query.xray));
+        }
         if (rows.length) {
           collected += absorb(rows, query.group);
           if (byKey.size >= cap) { capped = true; return; }

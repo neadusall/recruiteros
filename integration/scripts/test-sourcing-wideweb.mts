@@ -112,6 +112,30 @@ async function run(): Promise<void> {
   }
   delete process.env.DATAFORSEO_MAX_QUERIES;
 
+  /* --- a blank page is retried once, but the retry is budgeted ----------- */
+  {
+    // Every DataForSEO answer here is empty, so every query would retry if unbounded.
+    // The budget caps the wasted spend: total billed calls must still respect the run
+    // cap, and the retry must never let DataForSEO bill past it.
+    const counts: Counts = { dfs: 0, serper: 0 };
+    stub(counts);
+    process.env.DATAFORSEO_MAX_QUERIES = "30";
+    await runDiscovery(queries(260), icp, { cap: 5000, engines: ENGINES as unknown as string[] } as never);
+    check("retries never bill past the run cap", counts.dfs === 30);
+    delete process.env.DATAFORSEO_MAX_QUERIES;
+  }
+  {
+    // A first answer with rows must NOT trigger a retry — the retry is for blanks only.
+    const counts: Counts = { dfs: 0, serper: 0 };
+    stub(counts, {
+      dfsItems: [{ type: "organic", title: "Ada Lovelace - VP of Sales", url: "https://www.linkedin.com/in/ada-lovelace", description: "Dallas, Texas" }],
+    });
+    process.env.DATAFORSEO_MAX_QUERIES = "10";
+    await runDiscovery(queries(10), icp, { cap: 5000, engines: ENGINES as unknown as string[] } as never);
+    check("a non-empty answer is never re-billed", counts.dfs === 10);
+    delete process.env.DATAFORSEO_MAX_QUERIES;
+  }
+
   /* --- LinkedIn's own marketing pages are not candidates ----------------- */
   {
     const counts: Counts = { dfs: 0, serper: 0 };
