@@ -199,6 +199,20 @@ export async function getRapidQuota(kind?: RapidQuotaKind): Promise<RapidQuotaSn
 }
 
 /**
+ * Latest reading for ONE listing host, or null if that listing has never answered.
+ *
+ * The engine-health watch needs this rather than getRapidQuota(): it must judge the
+ * people-search subscription on its OWN meter. Reading the snapshot generically and
+ * taking the tightest row let an unrelated listing (the skip-trace phone rung, the
+ * JSearch job feed) decide whether JD Sourcing's search was healthy.
+ */
+export async function getRapidQuotaFor(host: string): Promise<RapidQuotaSnapshot | null> {
+  if (!host) return null;
+  await hydrate();
+  return store.hosts[host] ?? null;
+}
+
+/**
  * Per-day usage for one listing, oldest first, as DELTAS (requests spent that day)
  * rather than the raw cumulative reading. A negative delta means the plan's monthly
  * window rolled between readings, so that day's spend is the new reading itself.

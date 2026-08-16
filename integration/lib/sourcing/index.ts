@@ -14,6 +14,7 @@ export { generateQueries, geoVariants } from "./generateQueries";
 export { scoreCandidate } from "./score";
 export {
   runDiscovery, rapidApiSearchConfigured, verifySourcingSearch,
+  peopleSearchHost, PeopleSearchFatal, isPeopleSearchFatal,
   googleSearchConfigured, verifyGoogleSearch, searxSearchConfigured,
   serperSearchConfigured, verifySerperSearch,
   dataforseoSearchConfigured, verifyDataForSeoSearch, dataforseoAccountBalance,

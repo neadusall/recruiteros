@@ -112,6 +112,35 @@ export function rapidApiSearchConfigured(): boolean {
   return Boolean(RAPIDAPI_KEY() && PS_HOST());
 }
 
+/** The listing host the people search is pointed at, for health/quota reporting. */
+export function peopleSearchHost(): string {
+  return PS_HOST();
+}
+
+/**
+ * A people-search failure that RETRYING CANNOT FIX: the key was refused, the
+ * subscription is gone, or the listing has no such endpoint. Every remaining query in
+ * the run would fail identically — and still bill — so the run marks the engine dead
+ * on the first one instead of repeating it once per query per page.
+ *
+ * This class exists because the opposite used to happen: a dead key produced one
+ * `rapidapi(group p1): ... 403` warning per query, which the successful-run cleanup
+ * then collapsed into "search coverage may be partial", wording that reads like a rate
+ * limit. A wrong key looked like a busy afternoon.
+ */
+export class PeopleSearchFatal extends Error {
+  readonly fatal = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "PeopleSearchFatal";
+  }
+}
+
+/** True for an error that should stop the whole engine, not just the current query. */
+export function isPeopleSearchFatal(e: unknown): e is PeopleSearchFatal {
+  return Boolean(e && typeof e === "object" && (e as { fatal?: boolean }).fatal === true);
+}
+
 /**
  * Live one-shot health check for the Connected → JD Sourcing "Test connection".
  * Fires a tiny search and reports whether the listing actually answered — so the
@@ -232,13 +261,37 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
   let res: Response;
   if (PS_METHOD() === "POST") {
     // Body-based listing: the path is literal (no interpolation); search rides in the body.
-    const url = `https://${host}${PS_PATH()}`;
     const bodyObj: Record<string, unknown> = { keywords: p.name, count: p.limit };
     if (p.currentCompany) bodyObj.current_company = p.currentCompany;
     if (p.geoLocation) bodyObj.geocode_location = p.geoLocation;
     if (p.pastCompany) bodyObj.past_company = p.pastCompany;
     if (p.headcount) bodyObj.company_headcount = p.headcount;
-    res = await fetchRetry429(() => fetch(url, { method: "POST", headers, body: JSON.stringify(bodyObj) }));
+    const body = JSON.stringify(bodyObj);
+    const postTo = (path: string) => fetch(`https://${host}${path}`, { method: "POST", headers, body });
+
+    const raw = effectivePsPath(host);
+    res = await fetchRetry429(() => postTo(raw));
+
+    // SELF-HEAL, same as the GET branch below. This used to be GET-only, so a POST
+    // listing that renamed its endpoint had no recovery at all and every query in every
+    // run 404'd against a path nobody would think to re-check.
+    if (res.status === 404 && !(healedPath && healedPath.host === host)) {
+      for (const variant of PS_PATH_VARIANTS) {
+        if (variant === raw.split("?")[0]) continue;
+        const tryRes = await postTo(variant).catch(() => null);
+        if (tryRes && tryRes.status !== 404) {
+          healedPath = { host, path: variant };
+          res = tryRes;
+          break;
+        }
+      }
+      if (!(healedPath && healedPath.host === host)) {
+        throw new PeopleSearchFatal(
+          `rapidapi ${host} 404 (no people-search endpoint answered on this listing; tried the configured path "${raw}" and ${PS_PATH_VARIANTS.join(", ")}. ` +
+          `Fix RAPIDAPI_PEOPLE_SEARCH_HOST/PATH in Setup, or subscribe to a listing that has a people search)`
+        );
+      }
+    }
   } else {
     const buildPath = (rawBase: string): string => {
       const templated = rawBase.includes("{query}") || rawBase.includes("{page}");
@@ -283,7 +336,7 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
         }
       }
       if (!(healedPath && healedPath.host === host)) {
-        throw new Error(
+        throw new PeopleSearchFatal(
           `rapidapi ${host} 404 (no people-search endpoint answered on this listing; tried the configured path and ${PS_PATH_VARIANTS.join(", ")}. ` +
           `Fix RAPIDAPI_PEOPLE_SEARCH_HOST/PATH in Setup, or subscribe to a listing with a people search)`
         );
@@ -293,7 +346,18 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
   // Credit meter: every response (errors included, a 429 still reports the pool)
   // carries the subscription's quota headers; remember the latest reading.
   noteRapidQuota(host, res.headers);
-  if (!res.ok) throw new Error(`rapidapi ${host} ${res.status}`);
+  if (!res.ok) {
+    // 401/403 = the key itself. Retrying, paging or moving to the next query cannot
+    // change the answer, so this ends the engine for the run rather than being logged
+    // once per query and buried. 402 is RapidAPI's "plan exhausted / not subscribed".
+    if (res.status === 401 || res.status === 403 || res.status === 402) {
+      throw new PeopleSearchFatal(
+        `rapidapi ${host} ${res.status} (the RapidAPI key was refused, or this account is not subscribed to this listing / has run out of plan requests). ` +
+        `Check the key and the subscription in Setup -> JD Sourcing.`
+      );
+    }
+    throw new Error(`rapidapi ${host} ${res.status}`);
+  }
   const data = await res.json().catch(() => ({}));
   // Surface an explicit API-level failure (e.g. captcha) instead of silently returning [].
   if (data && data.success === false && data.error) throw new Error(`rapidapi ${host}: ${String(data.error)}`);
@@ -814,6 +878,10 @@ export async function runDiscovery(
   let useSerper = engines.includes("serper") && serperSearchConfigured();
   let useDfs = engines.includes("dataforseo") && dataforseoSearchConfigured();
   const useRapid = engines.includes("rapidapi") && rapidApiSearchConfigured();
+  // Set the moment the listing proves it cannot serve this run at all (bad key, dead
+  // endpoint, plan exhausted). Every later query skips the paid engine instead of
+  // paying for the same refusal again.
+  let rapidDead: string | null = null;
   const useScraper = engines.includes("scraper") && scraperConfigured();
   // The free contact-database sweep (title + geo over the Business Email DB). Needs
   // the browser worker up AND holding KoldInfo creds; the probe is cheap and local.
@@ -1111,7 +1179,7 @@ export async function runDiscovery(
     }
 
     // 4) PAID scale: RapidAPI people-search for whatever the free passes didn't fill.
-    if (useRapid && collected < perQuery && !capped) {
+    if (useRapid && !rapidDead && collected < perQuery && !capped) {
       const post = PS_METHOD() === "POST";
       // POST listings return a batch sized by `count` in one call (no paging);
       // GET listings page through results. Same handling of the rows either way.
@@ -1139,6 +1207,18 @@ export async function runDiscovery(
             pastCompany: pastId,
           }));
         } catch (err) {
+          if (isPeopleSearchFatal(err)) {
+            // The listing is wrong, not busy. Retire the engine for the whole run and
+            // say so under its own prefix, so the successful-run cleanup below (which
+            // collapses per-query engine noise into "coverage may be partial") cannot
+            // dress a dead key up as a rate limit.
+            rapidDead = (err as Error).message;
+            warnings.push(
+              `people_search_down: the paid people search stopped answering and was skipped for the rest of this run. ` +
+              `${rapidDead}`
+            );
+            break;
+          }
           warnings.push(`rapidapi(${query.group}${post ? "" : " p" + page}): ${(err as Error).message}`);
           break; // stop this query on error; move on
         }
@@ -1281,7 +1361,11 @@ export async function runDiscovery(
   if (!candidates.length) {
     const rapid404 = warnings.filter((w) => w.startsWith("rapidapi(") && / 404/.test(w)).length;
     const reasons: string[] = [];
-    if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
+    // rapidDead carries the precise cause (key refused / no such endpoint / plan spent);
+    // rapid404 is the older per-query count, kept for listings that 404 without tripping
+    // the fatal path.
+    if (rapidDead) reasons.push(`the paid people search is not usable for this workspace (${rapidDead})`);
+    else if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
     // The actionable fix for a run with no wide web search is the Serper key: Google
     // closed the CSE API to new signups (gone Jan 1, 2027), so don't send anyone there.
     if (!useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()) {
@@ -1307,8 +1391,8 @@ export async function runDiscovery(
         ? { code: "SRC-CREDITS", message: "The wide web search stopped early: its account is out of credit, or its key was refused. Nobody could be pulled in. This one needs an admin, re-running it will not help." }
       : !useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()
         ? { code: "SRC-NOKEY", message: "The wide web search is not switched on for this workspace, so the main source never ran. An admin has to turn it on in Setup." }
-      : rapid404
-        ? { code: "SRC-PEOPLE", message: `The people search refused every request (${rapid404}), because it is pointed at the wrong address in Setup. An admin has to correct it.` }
+      : rapidDead || rapid404
+        ? { code: "SRC-PEOPLE", message: "The people search refused every request, because its key or its address in Setup is wrong. An admin has to correct it; re-running will not help." }
       : engines.includes("koldinfo") && !useKold
         ? { code: "SRC-CONTACTDB", message: "The contact database is offline, so nobody could be looked up. An admin has to bring it back." }
       : opts.excludeKeys?.size && scanned === 0
