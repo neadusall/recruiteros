@@ -57,6 +57,7 @@ export type ProofVertical =
   | "finance_leadership"
   | "behavioral_health"
   | "healthcare_ops"
+  | "growth_marketing"
   | "operations";
 
 /* ------------------------------------------------------------------ */
@@ -186,6 +187,51 @@ const HEALTHCARE_OPS: ProofTerm[] = [
   { term: "Meditech", kind: "system", weight: 1 },
 ];
 
+/**
+ * Demand generation and multi-site growth marketing.
+ *
+ * WHY THIS SHELF EXISTS. A healthcare MARKETING role lands on healthcare_ops by keyword
+ * ("healthcare", "patient", "clinical" are unavoidable in the brief), and that shelf is
+ * clinical-operations vocabulary — LNHA, MDS, PDPM, PointClickCare. Searching a marketing
+ * role on it returns nursing-home administrators, and scores the actual marketers at zero
+ * because none of them carry those words. This shelf carries the words a growth marketer
+ * genuinely puts on a profile, so the two can sit side by side on a role that is both.
+ *
+ * No credentials on purpose: marketing has no gate-keeping licence, and inventing one
+ * (a certification, a degree) would filter out strong operators who never bothered.
+ */
+const GROWTH_MARKETING: ProofTerm[] = [
+  // The seat itself. "patient acquisition" is the phrase that separates a healthcare
+  // growth marketer from a healthcare brand marketer, which is the whole distinction
+  // a demand-gen search is trying to draw.
+  { term: "patient acquisition", aliases: ["new patient acquisition", "patient growth", "new patient volume"], kind: "domain", weight: 3 },
+  { term: "demand generation", aliases: ["demand gen"], kind: "domain", weight: 3 },
+  { term: "healthcare marketing", aliases: ["medical marketing", "clinic marketing", "practice marketing"], kind: "domain", weight: 3 },
+  { term: "de novo", aliases: ["de novo expansion", "clinic launch", "new clinic opening"], kind: "domain", weight: 3 },
+  { term: "regional marketing", aliases: ["field marketing", "area marketing"], kind: "scope", weight: 3 },
+  { term: "multi-location", aliases: ["multi-site", "multisite", "multiple locations"], kind: "scope", weight: 3 },
+
+  { term: "paid search", aliases: ["SEM", "PPC", "Google Ads", "AdWords"], kind: "domain", weight: 2 },
+  { term: "SEO", aliases: ["search engine optimization", "local SEO"], kind: "domain", weight: 2 },
+  { term: "paid social", aliases: ["Meta Ads", "Facebook Ads"], kind: "domain", weight: 2 },
+  { term: "lead generation", aliases: ["lead gen"], kind: "domain", weight: 2 },
+  { term: "market expansion", aliases: ["new market entry", "market entry"], kind: "domain", weight: 2 },
+  { term: "referral marketing", aliases: ["physician liaison", "provider relations", "referral development"], kind: "domain", weight: 2 },
+  { term: "marketing automation", aliases: ["lifecycle marketing", "email automation"], kind: "domain", weight: 2 },
+  { term: "agency management", aliases: ["agency oversight"], kind: "scope", weight: 2 },
+  // Spend-efficiency acronyms. Marked strict: lower-cased they are ordinary letter runs
+  // ("cac" inside a word, "ltv"), and an upper-case hit is the real signal.
+  { term: "CAC", aliases: ["cost per acquisition", "customer acquisition cost"], kind: "domain", weight: 2, strict: true },
+  { term: "ROAS", aliases: ["return on ad spend"], kind: "domain", weight: 2, strict: true },
+  { term: "LTV", aliases: ["lifetime value"], kind: "domain", weight: 1, strict: true },
+
+  { term: "HubSpot", kind: "system", weight: 2 },
+  { term: "Salesforce", aliases: ["Salesforce Health Cloud"], kind: "system", weight: 2 },
+  { term: "Podium", kind: "system", weight: 2 },
+  { term: "Google Analytics", aliases: ["GA4"], kind: "system", weight: 1 },
+  { term: "conversion rate", aliases: ["conversion rate optimization", "funnel optimization"], kind: "domain", weight: 1 },
+];
+
 const OPERATIONS: ProofTerm[] = [
   { term: "PMP", aliases: ["Project Management Professional"], kind: "credential", weight: 2, strict: true },
   { term: "Six Sigma", aliases: ["Lean Six Sigma", "Black Belt", "Green Belt"], kind: "credential", weight: 2 },
@@ -205,6 +251,7 @@ export const PROOF_LIBRARY: Record<ProofVertical, ProofTerm[]> = {
   finance_leadership: FINANCE_LEADERSHIP,
   behavioral_health: BEHAVIORAL_HEALTH,
   healthcare_ops: HEALTHCARE_OPS,
+  growth_marketing: GROWTH_MARKETING,
   operations: OPERATIONS,
 };
 
@@ -214,6 +261,7 @@ export const VERTICAL_LABEL: Record<ProofVertical, string> = {
   finance_leadership: "Finance leadership",
   behavioral_health: "Behavioral health",
   healthcare_ops: "Healthcare operations",
+  growth_marketing: "Growth and demand generation",
   operations: "Operations",
 };
 
@@ -230,6 +278,10 @@ const VERTICAL_HINTS: Record<ProofVertical, string[]> = {
   finance_leadership: ["cfo", "vp finance", "finance director", "fp&a", "financial planning", "treasury", "controller"],
   behavioral_health: ["bcba", "behavior analyst", "aba", "autism", "applied behavior", "clinic director", "rbt", "therapist", "counselor", "social worker"],
   healthcare_ops: ["nursing", "snf", "skilled nursing", "long-term care", "long term care", "assisted living", "healthcare", "clinical", "patient", "hospice", "home health", "medicare", "medicaid"],
+  // Deliberately specific. "marketing" alone is the only broad hint here; the rest name
+  // the craft, so a finance or accounting brief that mentions a CRM in passing does not
+  // drag this shelf in ahead of the one it actually needs.
+  growth_marketing: ["marketing", "demand generation", "demand gen", "patient acquisition", "growth marketing", "digital marketing", "seo", "sem", "ppc", "paid social", "google ads", "lead generation", "marketing automation", "brand awareness"],
   operations: ["operations", "coo", "plant", "manufacturing", "supply chain", "warehouse", "logistics", "distribution"],
 };
 
