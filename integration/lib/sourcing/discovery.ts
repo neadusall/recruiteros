@@ -432,6 +432,12 @@ export function locationFromSnippet(hay: string | undefined): string | undefined
 function mapGoogleItem(o: any): CandidateRow | null {
   const link = str(o && o.link);
   if (!link || !/linkedin\.com\/in\//i.test(link)) return null; // only person profiles
+  // ...and LinkedIn's OWN marketing pages are not people. business.linkedin.com/in/en/
+  // hire/recruiter satisfies the test above and would enter the list as a candidate
+  // named "LinkedIn Recruiter". A live DataForSEO probe returned two of these in the
+  // first six "profiles" for a generic term, so this matters more now that the wide-web
+  // pass is carrying the run.
+  if (/\/\/(business|premium|learning|talent|enterprise|sales|engineering|news|about)\.linkedin\.com/i.test(link)) return null;
   const url = link.split("?")[0];
   const mt = o.pagemap && Array.isArray(o.pagemap.metatags) ? o.pagemap.metatags[0] : null;
   // Title is usually "Name - Headline | LinkedIn"; strip the LinkedIn tail.
@@ -586,6 +592,11 @@ const DFS_PASS = () => cred("DATAFORSEO_PASSWORD");
 const DFS_MAX_QUERIES = (fallback = 100) => {
   const n = parseInt(cred("DATAFORSEO_MAX_QUERIES") || "", 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+/** Did the operator set an explicit cap? If so the run never raises it on their behalf. */
+const DFS_CAP_EXPLICIT = (): boolean => {
+  const n = parseInt(cred("DATAFORSEO_MAX_QUERIES") || "", 10);
+  return Number.isFinite(n) && n > 0;
 };
 
 export function dataforseoSearchConfigured(): boolean {
@@ -1070,14 +1081,24 @@ export async function runDiscovery(
   // Spread the free daily Google quota across queries: a few pages each, run-capped.
   const googleBudget = G_MAX_QUERIES();
   let googleUsed = 0;
+  // The wide-web allowance, shared in spirit by the two paid SERP engines.
+  const wideDefault = breadth === "wide" ? 300 : 100;
   // Serper is cheap but not free: a per-run soft cap keeps one big run's spend bounded.
   // Wide mode raises the default ceiling (more queries × deeper pages still lands
   // around a nickel a run); an explicit SERPER_MAX_QUERIES in Setup always wins.
-  const serperBudget = SERPER_MAX_QUERIES(breadth === "wide" ? 300 : 100);
+  const serperBudget = SERPER_MAX_QUERIES(wideDefault);
   let serperUsed = 0;
   // DataForSEO: one task per query (depth covers what paging would), so the cap is
-  // effectively "how many queries may use it". Cheaper per result than Serper.
-  const dfsBudget = DFS_MAX_QUERIES(breadth === "wide" ? 300 : 100);
+  // effectively "how many queries may use it".
+  //
+  // IT IS THE PRIMARY WIDE-WEB PASS, and Serper sits behind it as a top-up. So when
+  // Serper cannot run at all — no key, or credits gone, which is the live state on this
+  // box — DataForSEO has to be allowed to cover the queries Serper would have taken.
+  // Otherwise every query past its own cap gets NO wide-web pass whatsoever, and the run
+  // reports success having searched a fraction of what it was asked to. Real runs here
+  // fan out to 57-319 queries against a default cap of 100, so that gap is the common
+  // case, not the edge. An explicit DATAFORSEO_MAX_QUERIES always wins.
+  let dfsBudget = DFS_MAX_QUERIES(useSerper ? wideDefault : wideDefault * 2);
   let dfsUsed = 0;
   // People-search listing requests attempted this run (its monthly credits are the
   // scarce paid resource, so the count is stamped onto the saved list).
@@ -1169,7 +1190,12 @@ export async function runDiscovery(
         try { rows = await spLimit(() => serperXraySearch(query.xray, page)); }
         catch (err: any) {
           warnings.push(`serper(${query.group} p${page}): ${err.message}`);
-          if (err && err.quota) { useSerper = false; } // credits gone / key bad, stop for the run
+          if (err && err.quota) {
+            useSerper = false; // credits gone / key bad, stop for the run
+            // The top-up just retired mid-run. Hand its share to the primary pass, so a
+            // Serper balance that empties halfway does not silently halve the run's reach.
+            if (!DFS_CAP_EXPLICIT()) dfsBudget = Math.max(dfsBudget, wideDefault * 2);
+          }
           break;
         }
         if (!rows.length) break; // exhausted this query on Serper
@@ -1366,13 +1392,14 @@ export async function runDiscovery(
     // the fatal path.
     if (rapidDead) reasons.push(`the paid people search is not usable for this workspace (${rapidDead})`);
     else if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
-    // The actionable fix for a run with no wide web search is the Serper key: Google
-    // closed the CSE API to new signups (gone Jan 1, 2027), so don't send anyone there.
+    // The actionable fix for a run with no wide web search is a DataForSEO login: it is
+    // the primary pass, it is pay-as-you-go with no bundle to expire, and Google closed
+    // the CSE API to new signups (gone Jan 1, 2027), so don't send anyone there.
     if (!useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()) {
-      reasons.push("the wide web-search pass is off (paste your Serper key in Setup under JD Sourcing, in the Wide pass field, then run again)");
+      reasons.push("the wide web-search pass is off (add your DataForSEO login in Setup under JD Sourcing, in the Cheapest pass fields, then run again)");
     }
-    if (!useSerper && engines.includes("serper") && serperSearchConfigured()) reasons.push("the Serper search pass stopped early (key rejected or out of credits; check your serper.dev balance)");
-    if (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured()) reasons.push("the DataForSEO search pass stopped early (login rejected or balance empty; check your app.dataforseo.com balance)");
+    if (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured()) reasons.push("the DataForSEO pass — the primary wide web search — stopped early (login rejected or balance empty; check your app.dataforseo.com balance)");
+    if (!useSerper && engines.includes("serper") && serperSearchConfigured()) reasons.push("the Serper top-up pass stopped early (key rejected or out of credits; check your serper.dev balance)");
     if (!useSearx && engines.includes("searx")) reasons.push("the built-in free search engine did not respond");
     if (engines.includes("koldinfo") && !useKold) reasons.push("the free contact-database sweep is offline (the enrichment worker is unreachable or missing its login)");
     if (opts.excludeKeys?.size && scanned === 0) reasons.push(`Fresh only is ON and ${opts.excludeKeys.size} previously-surfaced people are being excluded (uncheck it to see the full list again)`);
@@ -1385,9 +1412,12 @@ export async function runDiscovery(
     // ("it stopped with SRC-CREDITS"), which points the engineer straight at the fix
     // without the recruiter ever seeing an engine name, a key or a query.
     // Ordered most-actionable first: the first match wins.
+    // A dead Serper is no longer, on its own, a run-ending event: DataForSEO is the
+    // primary pass and covers the volume. So SRC-CREDITS is reserved for the primary
+    // failing, or for Serper failing with no primary left standing behind it.
     stopReason =
-      (!useSerper && engines.includes("serper") && serperSearchConfigured()) ||
-      (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured())
+      (!useDfs && engines.includes("dataforseo") && dataforseoSearchConfigured()) ||
+      (!useSerper && engines.includes("serper") && serperSearchConfigured() && !useDfs)
         ? { code: "SRC-CREDITS", message: "The wide web search stopped early: its account is out of credit, or its key was refused. Nobody could be pulled in. This one needs an admin, re-running it will not help." }
       : !useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()
         ? { code: "SRC-NOKEY", message: "The wide web search is not switched on for this workspace, so the main source never ran. An admin has to turn it on in Setup." }

@@ -30,7 +30,7 @@ import { adminListAccounts, workspaceOwner, ensureAuthReady } from "../auth";
 import { pushNotification } from "../outbound/notify";
 import {
   verifySerperSearch, serperSearchConfigured, rapidApiSearchConfigured,
-  dataforseoSearchConfigured, dataforseoAccountBalance,
+  dataforseoSearchConfigured, dataforseoAccountBalance, verifyDataForSeoSearch,
   verifySourcingSearch, peopleSearchHost,
 } from "./discovery";
 import { getRapidQuotaFor } from "./rapidQuota";
@@ -110,8 +110,16 @@ async function checkSerper(): Promise<EngineStatus> {
  *  thousand wide-web searches of headroom at its live-task pricing). */
 const DFS_LOW_USD = 2;
 
-/** DataForSEO: FREE balance endpoint, so this check spends nothing. */
-async function checkDataForSeo(): Promise<EngineStatus> {
+/**
+ * DataForSEO — now the PRIMARY wide-web pass, so it is checked like one.
+ *
+ * The balance endpoint is free, which is why this used to be balance-only. But a
+ * balance proves the login authenticates and there is money behind it, NOT that a
+ * search comes back with anything: this engine sat "ok, Balance: $49.25" while having
+ * returned 0 candidates in every saved run. So the money check (free) is followed by a
+ * real search (about $0.002 at depth 10, daily), the same shape as the RapidAPI probe.
+ */
+async function checkDataForSeo(workspaceId: string): Promise<EngineStatus> {
   const checkedAt = nowIso();
   if (!dataforseoSearchConfigured()) {
     return { engine: "dataforseo", state: "unconfigured", detail: "No DataForSEO API login set for this workspace.", checkedAt };
@@ -121,9 +129,29 @@ async function checkDataForSeo(): Promise<EngineStatus> {
     return { engine: "dataforseo", state: "down", detail: error || "balance check failed", checkedAt };
   }
   const usd = `$${balance.toFixed(2)}`;
+  // No money means no search; probing would only burn a request to learn that.
   if (balance <= 0.05) return { engine: "dataforseo", state: "down", detail: `Balance empty (${usd}). Top up at app.dataforseo.com.`, remaining: balance, checkedAt };
-  if (balance < DFS_LOW_USD) return { engine: "dataforseo", state: "low", detail: `Balance running low: ${usd} left.`, remaining: balance, checkedAt };
-  return { engine: "dataforseo", state: "ok", detail: `Balance: ${usd}.`, remaining: balance, checkedAt };
+
+  const pk = `${workspaceId}:dataforseo`;
+  const prev = store.probes[pk];
+  const due = !prev || !prev.ok || Date.now() - new Date(prev.at).getTime() > PROBE_EVERY_MS;
+  let probe = prev;
+  if (due) {
+    const res = await verifyDataForSeoSearch();
+    probe = { at: checkedAt, ok: res.ok, error: res.error, found: res.found };
+    store.probes[pk] = probe;
+  }
+  if (probe && !probe.ok) {
+    return {
+      engine: "dataforseo", state: "down", remaining: balance, checkedAt,
+      detail: `Login and balance are fine (${usd}) but the search itself failed: ${probe.error || "search request failed"}`,
+    };
+  }
+  const proof = probe?.at === checkedAt
+    ? `Live: search answered with ${probe?.found ?? 0} result(s).`
+    : `Search answered at ${probe?.at}.`;
+  if (balance < DFS_LOW_USD) return { engine: "dataforseo", state: "low", detail: `${proof} Balance running low: ${usd} left.`, remaining: balance, checkedAt };
+  return { engine: "dataforseo", state: "ok", detail: `${proof} Balance: ${usd}.`, remaining: balance, checkedAt };
 }
 
 /**
@@ -214,11 +242,14 @@ function worstOf(engines: EngineStatus[]): EngineState {
 /** Human sentence for the notification body. */
 function alertBody(wsName: string, e: EngineStatus): string {
   const who =
-    e.engine === "serper" ? "Serper (the wide web-search pass)"
-    : e.engine === "dataforseo" ? "DataForSEO (the cheapest wide web-search pass)"
+    e.engine === "dataforseo" ? "DataForSEO (the primary wide web-search pass)"
+    : e.engine === "serper" ? "Serper (the wide web-search top-up)"
     : "the RapidAPI people-search engine";
+  if (e.engine === "dataforseo" && e.state === "down") {
+    return `${who} is not answering for ${wsName}: ${e.detail} This is the engine that now carries most of JD Sourcing's candidates, so searches will return far fewer people until it is restored. Top up or check the login at app.dataforseo.com.`;
+  }
   if (e.engine === "serper" && e.state === "down") {
-    return `${who} is not answering for ${wsName}: ${e.detail} Serper supplies most of JD Sourcing's candidates, so searches will return far fewer people until this is restored. Top up at serper.dev.`;
+    return `${who} is not answering for ${wsName}: ${e.detail} DataForSEO runs first and absorbs the volume, so runs continue without it — but they lose the second pass that picked up what DataForSEO missed. Top up at serper.dev when convenient.`;
   }
   if (e.engine === "rapidapi" && e.state === "down") {
     return `${who} is refusing requests for ${wsName}: ${e.detail} JD Sourcing runs will skip the paid people search until this is fixed. Check the key, the listing subscription and the search host/path under Setup -> JD Sourcing.`;
@@ -249,7 +280,7 @@ export async function checkEngineHealth(opts: { notify?: boolean } = {}): Promis
         // Sequential on purpose: two cheap calls, and it keeps the credential
         // context unambiguous for the duration of each check.
         const s = await checkSerper();
-        const d = await checkDataForSeo();
+        const d = await checkDataForSeo(acct.workspaceId);
         const r = await checkRapidApi(acct.workspaceId);
         return [s, d, r];
       });
