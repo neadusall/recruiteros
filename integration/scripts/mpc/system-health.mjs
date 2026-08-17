@@ -111,6 +111,26 @@ add(GROUP_SEND, "placement", "Gmail inbox placement (seed test)",
   !plPass ? "Failing or stale: growth locked, google-hosted prospects deferred" :
   plAge > 5 * 1440 ? "Passing but aging: expires at 7 days and locks growth" : "Feeds the volume governor and the Google gate");
 
+// Candidate job blasts (Candidates tab): an active blast with people still queued
+// must be moving; a blast that hasn't sent in over a day during the week means its
+// clock or its inbox pool is broken.
+{
+  const blasts = readJson(`${VOL}/snap_job_blasts_v1.json`);
+  if (Array.isArray(blasts) && blasts.length) {
+    const active = blasts.filter((b) => b && b.status === "sending");
+    const stuck = active.filter((b) => {
+      const queued = (b.recipients || []).some((r) => r && r.status === "queued");
+      const lastMin = ageMin(b.lastSendAt || b.updatedAt || b.createdAt);
+      const weekday = ![0, 6].includes(new Date().getUTCDay());
+      return queued && weekday && (lastMin == null || lastMin > 26 * 60);
+    });
+    add(GROUP_SEND, "jobblasts", "Candidate job blasts",
+      stuck.length ? "amber" : "good",
+      `${active.length} active / ${blasts.length} total${stuck.length ? `, ${stuck.length} stalled` : ""}`,
+      stuck.length ? "A blast with queued candidates has not sent in over a day: check the sending cron and the recruiter's inbox pool" : "");
+  }
+}
+
 /* ---------------- Supply pipeline ---------------- */
 const GROUP_SUPPLY = "Supply pipeline";
 

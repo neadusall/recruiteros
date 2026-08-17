@@ -3525,71 +3525,162 @@
       var rolesVal = unsavedRoles !== null ? unsavedRoles : roles.join(", ");
       var huntCount = (active.presets || []).length + (active.custom || []).length;
       var st7 = (d.stats && d.stats.today) || null;
-      // Today's numbers as labeled chips, each with a hover "?" explainer so
-      // a recruiter never has to guess what a stat means (owner ask 2026-08-14).
-      function statChip(num, label, tone, help) {
-        return '<span class="lie-chip ' + tone + '" title="' + esc(help) + '" style="cursor:help;margin:2px 3px 2px 0"><b>' + num + "</b> " + esc(label) + ' <span style="opacity:.55;font-weight:700">?</span></span>';
+      // Enterprise layout (owner ask 2026-08-14): header band with status
+      // pills, stat tiles with hover explainers, iconed sections, footer bar.
+      // Scoped styles injected once; every data-lih-* hook is unchanged.
+      if (!document.getElementById("lih-style")) {
+        var lihCss = document.createElement("style");
+        lihCss.id = "lih-style";
+        lihCss.textContent =
+          ".lih-card{padding:0!important;overflow:hidden}" +
+          ".lih-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 20px 14px;border-bottom:1px solid #e8ebf1}" +
+          ".lih-title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;letter-spacing:-.01em}" +
+          ".lih-title svg{width:18px;height:18px;flex:none;opacity:.9}" +
+          ".lih-sub{color:#69708c;font-size:12.5px;margin-top:4px;max-width:780px;line-height:1.5}" +
+          ".lih-pills{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;flex:none}" +
+          ".lih-pill{border-radius:999px;padding:4px 12px;font-size:11.5px;font-weight:600;white-space:nowrap}" +
+          ".lih-pill.on{background:#e7f4ec;color:#166b34}" +
+          ".lih-pill.off{background:#f1f2f6;color:#69708c}" +
+          ".lih-pill.live{background:#eef2fd;color:#2e5bd7;display:inline-flex;align-items:center;gap:6px}" +
+          ".lih-pill.live i{width:7px;height:7px;border-radius:50%;background:#2e5bd7;animation:lihpulse 2s infinite}" +
+          "@keyframes lihpulse{0%,100%{opacity:1}50%{opacity:.35}}" +
+          ".lih-alert{margin:12px 20px 0;padding:9px 13px;border:1px solid #f0d4d4;background:#fdf3f3;color:#a12c2c;border-radius:9px;font-size:12.5px}" +
+          ".lih-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));gap:8px;padding:14px 20px;border-bottom:1px solid #eef1f6;background:#fafbfd}" +
+          ".lih-stat{background:#fff;border:1px solid #e7eaf1;border-radius:10px;padding:10px 12px 9px;cursor:help;position:relative;min-width:0}" +
+          ".lih-stat:hover{border-color:#c9d2e4;box-shadow:0 1px 4px rgba(30,40,70,.06)}" +
+          ".lih-stat b{font-size:19px;font-weight:700;display:block;line-height:1.15;color:#232838}" +
+          ".lih-stat.good b{color:#166b34}.lih-stat.warn b{color:#a12c2c}" +
+          ".lih-stat .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#7d859c;display:block;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
+          ".lih-stat .q{position:absolute;top:8px;right:9px;font-size:9.5px;font-weight:700;color:#98a0b6;border:1px solid #dde2ec;border-radius:50%;width:14px;height:14px;line-height:12.5px;text-align:center}" +
+          ".lih-sec{padding:15px 20px;border-bottom:1px solid #eef1f6}" +
+          ".lih-sec:last-of-type{border-bottom:0}" +
+          ".lih-sec-h{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#565d75;margin-bottom:3px}" +
+          ".lih-sec-h svg{width:13px;height:13px;flex:none;opacity:.75}" +
+          ".lih-sec-h .cnt{background:#eef2fd;color:#2e5bd7;border-radius:999px;padding:1px 8px;font-size:10.5px;letter-spacing:0}" +
+          ".lih-sec-d{color:#7d859c;font-size:12px;margin-bottom:10px;line-height:1.45}" +
+          ".lih-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}" +
+          ".lih-in{border:1px solid #d9dde7;border-radius:8px;padding:8px 11px;font:inherit;font-size:13px;background:#fff;color:inherit}" +
+          ".lih-in:focus{outline:2px solid rgba(46,91,215,.25);border-color:#2e5bd7}" +
+          "textarea.lih-in{width:100%;box-sizing:border-box;resize:vertical;line-height:1.45}" +
+          ".lih-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}" +
+          ".lih-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 20px;background:#fafbfd;border-top:1px solid #eef1f6}" +
+          ".lih-last{margin-left:auto;color:#8b92a8;font-size:12px;white-space:nowrap}";
+        document.head.appendChild(lihCss);
+      }
+      var icoRadar = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.3"/><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r=".8" fill="currentColor" stroke="none"/><path d="M8 1.7v2.1" stroke-linecap="round"/></svg>';
+      var icoSpark = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5l1.6 4 4 1.5-4 1.6L8 12.6 6.4 8.6l-4-1.6 4-1.5L8 1.5z"/><circle cx="13" cy="13" r="1.4"/></svg>';
+      var icoBolt = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M9 1L3.5 9H7l-1 6L11.5 7H8l1-6z"/></svg>';
+      var icoList = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 3.5h9M5 8h9M5 12.5h9"/><circle cx="2.2" cy="3.5" r=".9" fill="currentColor" stroke="none"/><circle cx="2.2" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="2.2" cy="12.5" r=".9" fill="currentColor" stroke="none"/></svg>';
+      var icoScope = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4L14 14"/></svg>';
+      var icoShield = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.6l5 1.9v4.2c0 3.1-2.1 5.4-5 6.7-2.9-1.3-5-3.6-5-6.7V3.5l5-1.9z"/></svg>';
+      var thr = (d && d.commentThrottle) || {};
+      function statTile(num, label, tone, help) {
+        return '<div class="lih-stat ' + tone + '" title="' + esc(help) + '"><b>' + num + "</b><span class='lbl'>" + esc(label) + "</span><span class='q'>?</span></div>";
       }
       var econ = st7
-        ? '<div class="lie-post"><span class="muted" style="margin-right:4px">Today:</span>' +
-          statChip(st7.searches || 0, "hunts run", "", "Searches the radar ran today across your scenarios, roles, and custom hunts. One runs every 15 minutes, around the clock.") +
-          statChip(st7.screened || 0, "posts screened", "", "Hiring posts found and screened by the free checks: is it a real post, does it show hiring intent, have we seen it, did we already touch this person this week.") +
-          statChip(st7.leads || 0, "leads drafted", st7.leads ? "ok" : "", "Decision makers captured with a message drafted and ready. They land in Messages to approve below, or send automatically if their industry is on autopilot.") +
-          statChip(st7.peersBlocked || 0, "recruiters blocked", st7.peersBlocked ? "bad" : "", "Recruiters and staffing agencies the wall stopped today: never captured, never messaged. This is your protection working.") +
-          statChip(st7.profileReads || 0, "profile reads", "", "Profiles opened to verify who the poster is, whether they can receive a message, and that they are not a recruiter. The only per-person API spend.") +
-          statChip(st7.readsSaved || 0, "reads saved", st7.readsSaved ? "ok" : "", "Profile reads skipped because we already know this person is unreachable or excluded (30-day memory). Direct credit savings.") +
-          statChip(st7.hiringChecks || 0, "job-board checks", "", "Company job boards checked to confirm their open roles. Only runs for reachable decision makers after every other gate has passed.") +
+        ? '<div class="lih-stats">' +
+          statTile(st7.searches || 0, "Hunts run", "", "Searches the radar ran today across your scenarios, roles, and custom hunts. One runs every 15 minutes, around the clock.") +
+          statTile(st7.screened || 0, "Posts screened", "", "Hiring posts found and screened by the free checks: is it a real post, does it show hiring intent, have we seen it, did we already touch this person this week.") +
+          statTile(st7.leads || 0, "Leads drafted", st7.leads ? "good" : "", "Decision makers captured with a message drafted and ready. They land in Messages to approve below, or send automatically if their industry is on autopilot.") +
+          statTile(st7.peersBlocked || 0, "Recruiters blocked", st7.peersBlocked ? "warn" : "", "Recruiters and staffing agencies the wall stopped today: never captured, never messaged. This is your protection working.") +
+          statTile(st7.profileReads || 0, "Profile reads", "", "Profiles opened to verify who the poster is, whether they can receive a message, and that they are not a recruiter. The only per-person API spend.") +
+          statTile(st7.readsSaved || 0, "Reads saved", st7.readsSaved ? "good" : "", "Profile reads skipped because we already know this person is unreachable or excluded (30-day memory). Direct credit savings.") +
+          statTile(st7.hiringChecks || 0, "Job-board checks", "", "Company job boards checked to confirm their open roles. Only runs for reachable decision makers after every other gate has passed.") +
+          statTile(st7.comments || 0, "Comments posted", st7.comments ? "good" : "", "Public comments left on the hiring posts of decision makers whose profiles are closed. These are the leads that used to be thrown away. Held to the day and week limits set below.") +
+          statTile(st7.bdHandoffs || 0, "Handed to BD", st7.bdHandoffs ? "good" : "", "People we commented on who have since become prospects in the Commented (Role Hunter) campaign, roughly two days after the comment so it lands first. This is the number that says the lane produced pipeline rather than activity. Nothing emails them until you activate that campaign.") +
           "</div>"
         : "";
       mount.innerHTML =
-        '<div class="card liops-card">' +
-          '<div class="liops-head"><div><b>Role Hunter</b>' +
-            '<div class="muted liops-sub">Hunts LinkedIn for people posting roles they need to fill. Suggested scenarios search around the roles you place; custom phrases hunt anything ("Rippling is hiring", "opening a med spa"). One hunt runs every 15 minutes; found decision makers land in Messages to approve below.</div></div>' +
-            '<span>' +
-              '<span class="lie-chip ' + (auto.enabled ? "ok" : "mut") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span> " +
-              (st.active ? "" : '<span class="lie-chip mut">Standby</span>') +
-            "</span></div>" +
-          (st.active ? "" : ((st.reasons || []).map(function (r) { return '<div class="lie-post muted">' + esc(r) + "</div>"; }).join(""))) +
-          (d.lastError ? '<div class="lie-post"><span class="lie-chip bad">' + esc(d.lastError) + "</span></div>" : "") +
+        '<div class="card liops-card lih-card">' +
+          '<div class="lih-head">' +
+            "<div>" +
+              '<div class="lih-title">' + icoRadar + "Role Hunter</div>" +
+              '<div class="lih-sub">Finds decision makers posting roles they need filled and drafts your outreach. Standing hunts run every 15 minutes around the clock; everything lands in Messages to approve unless its industry is on autopilot.</div>' +
+            "</div>" +
+            '<div class="lih-pills">' +
+              (st.active ? '<span class="lih-pill live"><i></i>Live</span>' : '<span class="lih-pill off">Standby</span>') +
+              '<span class="lih-pill ' + (auto.enabled ? "on" : "off") + '">Autopilot ' + (auto.enabled ? "on" : "off") + "</span>" +
+            "</div>" +
+          "</div>" +
+          (st.active ? "" : ((st.reasons || []).map(function (r) { return '<div class="lih-alert">' + esc(r) + "</div>"; }).join(""))) +
+          (d.lastError ? '<div class="lih-alert">' + esc(d.lastError) + "</div>" : "") +
           econ +
-          '<div class="lie-post muted">AI Search: describe who you want to find and it hunts right now (standing hunts below keep running on their own):</div>' +
-          '<div class="lie-actions">' +
-            '<input class="lie-text" data-lih-ask placeholder="e.g. CFOs at Series B fintechs hiring senior accountants" style="flex:1;min-width:260px"> ' +
-            '<button class="btn btn-sm btn-primary" data-lih-hunt>Hunt with AI</button>' +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoSpark + "AI Search</div>" +
+            '<div class="lih-sec-d">Describe who you want to find and it hunts right now. Standing hunts below keep running on their own.</div>' +
+            '<div class="lih-row">' +
+              '<input class="lih-in" data-lih-ask placeholder="e.g. CFOs at Series B fintechs hiring senior accountants" style="flex:1;min-width:260px">' +
+              '<button class="btn btn-sm btn-primary" data-lih-hunt>Hunt with AI</button>' +
+            "</div>" +
+            '<div class="lie-post" data-lih-hunt-status style="display:none;margin-top:8px"></div>' +
           "</div>" +
-          '<div class="lie-post" data-lih-hunt-status style="display:none"></div>' +
-          '<div class="lie-post muted">Active hunts (' + huntCount + "):</div>" +
-          '<div class="lie-post">' + (chips.length ? chips.join(" ") : '<span class="muted">No hunts active: the radar has nothing to look for.</span>') + "</div>" +
-          '<div class="lie-actions">' +
-            '<select class="lie-text" data-lih-pick style="max-width:340px">' +
-              '<option value="">Add a suggested scenario...</option>' +
-              picker.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.label) + " (" + esc(p.hint) + ")</option>"; }).join("") +
-            "</select> " +
-            '<input class="lie-text" data-lih-custom placeholder="Or a custom phrase to hunt, e.g. Rippling is hiring" style="max-width:340px"> ' +
-            '<button class="btn btn-sm btn-ghost" data-lih-addc>Add custom hunt</button>' +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoScope + 'Standing hunts <span class="cnt">' + huntCount + " active</span></div>" +
+            '<div class="lih-sec-d">Suggested scenarios search around the roles you place; custom phrases hunt anything ("Rippling is hiring", "opening a med spa").</div>' +
+            '<div class="lih-chips">' + (chips.length ? chips.join("") : '<span class="muted" style="font-size:12.5px">No hunts active: the radar has nothing to look for.</span>') + "</div>" +
+            '<div class="lih-row">' +
+              '<select class="lih-in" data-lih-pick style="max-width:330px">' +
+                '<option value="">Add a suggested scenario...</option>' +
+                picker.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.label) + " (" + esc(p.hint) + ")</option>"; }).join("") +
+              "</select>" +
+              '<input class="lih-in" data-lih-custom placeholder="Or a custom phrase, e.g. Rippling is hiring" style="max-width:300px">' +
+              '<button class="btn btn-sm btn-ghost" data-lih-addc>Add custom hunt</button>' +
+            "</div>" +
           "</div>" +
-          '<div class="lie-post muted">Set-and-forget industries: leads the radar classifies into these industries send <b>automatically, no approval step</b> (account pacing and daily caps still apply). Everything else waits in Messages to approve.</div>' +
-          '<div class="lie-post">' +
-            ((d.autoIndustries || []).map(function (k) {
-              var opt = null; (d.industryOptions || []).forEach(function (o) { if (o.key === k) opt = o; });
-              return '<span class="lie-chip ok">' + esc(opt ? opt.label : k) + ' <a href="#" data-lih-ind-del="' + esc(k) + '" title="Remove">&times;</a></span>';
-            }).join(" ") || '<span class="muted">No industries on autopilot: every message waits for your approval.</span>') +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoBolt + "Set-and-forget industries</div>" +
+            '<div class="lih-sec-d">Leads classified into these industries send <b>automatically, with no approval step</b> (account pacing, daily caps, and the recruiter wall still apply). Everything else waits in Messages to approve.</div>' +
+            '<div class="lih-chips">' +
+              ((d.autoIndustries || []).map(function (k) {
+                var opt = null; (d.industryOptions || []).forEach(function (o) { if (o.key === k) opt = o; });
+                return '<span class="lie-chip ok">' + esc(opt ? opt.label : k) + ' <a href="#" data-lih-ind-del="' + esc(k) + '" title="Remove">&times;</a></span>';
+              }).join("") || '<span class="muted" style="font-size:12.5px">No industries on autopilot: every message waits for your approval.</span>') +
+            "</div>" +
+            '<div class="lih-row">' +
+              '<select class="lih-in" data-lih-ind-pick style="max-width:330px">' +
+                '<option value="">Put an industry on autopilot...</option>' +
+                (d.industryOptions || []).filter(function (o) { return (d.autoIndustries || []).indexOf(o.key) < 0; })
+                  .map(function (o) { return '<option value="' + esc(o.key) + '">' + esc(o.label) + "</option>"; }).join("") +
+              "</select>" +
+            "</div>" +
           "</div>" +
-          '<div class="lie-actions">' +
-            '<select class="lie-text" data-lih-ind-pick style="max-width:340px">' +
-              '<option value="">Put an industry on autopilot...</option>' +
-              (d.industryOptions || []).filter(function (o) { return (d.autoIndustries || []).indexOf(o.key) < 0; })
-                .map(function (o) { return '<option value="' + esc(o.key) + '">' + esc(o.label) + "</option>"; }).join("") +
-            "</select>" +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoList + "Roles you hunt</div>" +
+            '<div class="lih-sec-d">Comma-separated; any industry, any title. The matched role becomes {job_title} in the message. Expand with AI suggests the adjacent titles for whatever is in the box.</div>' +
+            '<textarea class="lih-in" data-lih-roles rows="2">' + esc(rolesVal) + "</textarea>" +
+            '<div class="lih-row" style="margin-top:8px">' +
+              '<button class="btn btn-sm" data-lih-expand title="Feed it CPA and get Controller, CFO, Assistant Controller...">Expand with AI</button>' +
+              '<button class="btn btn-sm ' + (unsavedRoles !== null ? "btn-primary" : "btn-ghost") + '" data-lih-kwsave>' + (unsavedRoles !== null ? "Save roles (unsaved)" : "Save roles") + "</button>" +
+            "</div>" +
           "</div>" +
-          '<div class="lie-post muted">Roles you hunt (comma-separated; any industry, any title; the matched role becomes {job_title} in the message):</div>' +
-          '<textarea class="lie-text" data-lih-roles rows="2">' + esc(rolesVal) + "</textarea>" +
-          '<div class="lie-actions">' +
-            '<button class="btn btn-sm" data-lih-expand title="AI suggests the adjacent titles for whatever is in the box: feed it CPA and get Controller, CFO, Assistant Controller...">Expand with AI</button> ' +
-            '<button class="btn btn-sm ' + (unsavedRoles !== null ? "btn-primary" : "btn-ghost") + '" data-lih-kwsave>' + (unsavedRoles !== null ? "Save roles (unsaved)" : "Save roles") + "</button> " +
-            '<button class="btn btn-sm btn-ghost" data-lih-scan>Scan now</button> ' +
+          '<div class="lih-sec">' +
+            '<div class="lih-sec-h">' + icoShield + "Public comments" +
+              ' <span class="cnt">' + (thr.enabled ? thr.todayUsed + " of " + thr.todayAllowance + " today" : "off") + "</span></div>" +
+            '<div class="lih-sec-d">The hunter comments on the post itself, which reaches the author whether or not their profile can take a message. Two kinds of post qualify: someone hiring one of your roles, and a finance leader writing about the work. Comments are public, so each one is written for that post and never advertises: it says one thing about that search only someone running these searches would know, in the first person plural, and stops there. No offer, no link, no ask. The only way to get the rest is to click your name, which is the whole point of the lane. The daily number below is a base: the hunter varies the real allowance around it each day and spaces the comments out, so the account never posts the same count at the same rhythm two days running.</div>' +
+            (thr.enabled && thr.blockedReason ? '<div class="lie-post muted" style="margin-bottom:8px">Holding: ' + esc(thr.blockedReason) + "</div>" : "") +
+            '<div class="lih-row">' +
+              '<label class="muted" style="font-size:12.5px">Per day (base) <input class="lih-in" data-lih-cpd type="number" min="0" max="40" value="' + esc(String(thr.perDay == null ? 9 : thr.perDay)) + '" style="width:78px;margin-left:6px"></label>' +
+              '<label class="muted" style="font-size:12.5px">Per week (hard cap) <input class="lih-in" data-lih-cpw type="number" min="0" max="200" value="' + esc(String(thr.perWeek == null ? 63 : thr.perWeek)) + '" style="width:88px;margin-left:6px"></label>' +
+              '<span class="muted" style="font-size:12.5px">Used this week: ' + (thr.weekUsed || 0) + " of " + (thr.perWeek || 0) + "</span>" +
+              '<button class="btn btn-sm btn-ghost" data-lih-csave>Save limits</button>' +
+              '<button class="btn btn-sm btn-ghost" data-lih-ctoggle="' + (thr.enabled ? "off" : "on") + '">' + (thr.enabled ? "Turn commenting off" : "Turn commenting on") + "</button>" +
+            "</div>" +
+            // Posting without approval is its own switch, off until the owner
+            // has read what this desk actually writes. A comment is public and
+            // cannot be deleted from here, so "drafts wait for you" is the
+            // starting state even when the rest of autopilot is on.
+            '<div class="lih-row">' +
+              '<span class="muted" style="font-size:12.5px">' + (thr.autoPost
+                ? "Autopilot posts these comments without asking."
+                : "Drafts wait for your approval. Autopilot will not post a comment until you switch this on.") + "</span>" +
+              '<button class="btn btn-sm ' + (thr.autoPost ? "btn-ghost" : "btn-primary") + '" data-lih-cauto="' + (thr.autoPost ? "off" : "on") + '">' +
+                (thr.autoPost ? "Require approval again" : "Let autopilot post them") + "</button>" +
+            "</div>" +
+          "</div>" +
+          '<div class="lih-foot">' +
+            '<button class="btn btn-sm" data-lih-scan>Scan now</button>' +
             '<button class="btn btn-sm btn-ghost" data-lih-auto="' + (auto.enabled ? "auto_off" : "auto_on") + '">' + (auto.enabled ? "Turn autopilot off" : "Turn autopilot on") + "</button>" +
-            (d.lastScan ? ' <span class="muted" style="align-self:center">Last hunt: ' + esc(new Date(d.lastScan).toLocaleTimeString()) + "</span>" : "") +
+            (d.lastScan ? '<span class="lih-last">Last hunt ' + esc(new Date(d.lastScan).toLocaleTimeString()) + "</span>" : "") +
           "</div>" +
         "</div>";
       function saveIndustries(mutate) {
@@ -3600,6 +3691,46 @@
             .then(function (r) { if (r.ok && r.data && r.data.view) paint(r.data.view); });
         });
       }
+      // Public-comment throttle: save the two numbers, or switch the lane off
+      // entirely (off restores the old behaviour, where a closed profile ends
+      // the hunt and is remembered as unreachable).
+      var cSave = mount.querySelector("[data-lih-csave]");
+      if (cSave) cSave.addEventListener("click", function () {
+        var pd = mount.querySelector("[data-lih-cpd]");
+        var pw = mount.querySelector("[data-lih-cpw]");
+        cSave.disabled = true;
+        send("/linkedin/comments", "POST", {
+          action: "comment_limits_set",
+          perDay: pd ? Number(pd.value) : undefined,
+          perWeek: pw ? Number(pw.value) : undefined,
+        }).then(function (r) {
+          cSave.disabled = false;
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+          if (window.__licRefresh) window.__licRefresh();
+        });
+      });
+      var cAuto = mount.querySelector("[data-lih-cauto]");
+      if (cAuto) cAuto.addEventListener("click", function () {
+        var want = cAuto.getAttribute("data-lih-cauto") === "on";
+        cAuto.disabled = true;
+        send("/linkedin/comments", "POST", { action: "comment_limits_set", autoPost: want })
+          .then(function (r) {
+            cAuto.disabled = false;
+            if (r.ok && r.data && r.data.view) paint(r.data.view);
+            if (window.__licRefresh) window.__licRefresh();
+          });
+      });
+      var cTog = mount.querySelector("[data-lih-ctoggle]");
+      if (cTog) cTog.addEventListener("click", function () {
+        var want = cTog.getAttribute("data-lih-ctoggle") === "on";
+        cTog.disabled = true;
+        send("/linkedin/comments", "POST", { action: "comment_limits_set", enabled: want })
+          .then(function (r) {
+            cTog.disabled = false;
+            if (r.ok && r.data && r.data.view) paint(r.data.view);
+            if (window.__licRefresh) window.__licRefresh();
+          });
+      });
       var indPick = mount.querySelector("[data-lih-ind-pick]");
       if (indPick) indPick.addEventListener("change", function () {
         if (!indPick.value) return;
@@ -3715,6 +3846,27 @@
   function liCommentsPanel(mount) {
     if (!mount) return;
     mount.innerHTML = loading();
+    // An approved item stops being actionable server-side, so the next view
+    // drops it and the row disappears the instant you press the button. These
+    // receipts are what tells you the comment (or message) is actually going
+    // out; they stay on the card for the rest of the session.
+    var receipts = [];
+    var RECEIPT_COPY = {
+      comment_approve: "Comment approved: it posts on their hiring post from your LinkedIn account.",
+      dm_approve: "Message approved: sending from your LinkedIn account.",
+      connect_approve: "Connect request approved and queued.",
+      approve: "Reply approved: sending from your LinkedIn account."
+    };
+    function receiptsBlock() {
+      if (!receipts.length) return "";
+      return '<div class="lie-row done">' +
+        receipts.map(function (r) {
+          return '<div class="lie-post"><span class="lie-chip ok">Shipping</span> ' +
+            (r.name ? "<b>" + esc(r.name) + "</b>: " : "") + esc(r.copy) +
+            ' <span class="muted">' + esc(r.at) + "</span></div>";
+        }).join("") +
+      "</div>";
+    }
     function tierChip(t) {
       if (t.tier === "hot") return '<span class="lie-chip ok">Hot: decision-maker, hiring now</span>';
       if (t.tier === "warm") return '<span class="lie-chip">Warm: decision-maker</span>';
@@ -3748,13 +3900,36 @@
       if (t.connectStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Connect blocked") + "</span></div>";
       return '<div><span class="lie-chip mut">Connect skipped</span></div>';
     }
+    // Closed profile: their inbox is shut but their POST is public, so this
+    // lane comments on the post itself and the notification reaches them
+    // anyway. The comment is public, which is why the copy warns about it and
+    // why the throttle on the card above governs how many go out.
+    function commentBlock(t, throttle) {
+      if (t.commentStatus === "suggested") {
+        var th = throttle || {};
+        var held = th.blockedReason
+          ? '<div class="lie-post muted">Throttle: ' + esc(th.blockedReason) + " Approving now will be held, not lost.</div>"
+          : "";
+        return '<div class="lie-post muted">Closed profile: no direct message is possible, so this goes on their post as a public comment. Anyone can see it, including their team and other recruiters, so it never asks for anything: it proves you work this desk and leaves the click as the only next step.</div>' +
+          held +
+          '<textarea class="lie-text" data-lic-comment rows="2">' + esc(t.commentDraft || "") + "</textarea>" +
+          '<div class="lie-actions">' +
+            '<button class="btn btn-sm btn-primary" data-lic="comment_approve">Comment on their post</button> ' +
+            '<button class="btn btn-sm btn-ghost" data-lic="comment_skip">Skip</button>' +
+          "</div>";
+      }
+      if (t.commentStatus === "approved") return '<div><span class="lie-chip ok">Comment approved, posting from your account</span></div>';
+      if (t.commentStatus === "blocked") return '<div><span class="lie-chip bad">' + esc(t.reason || "Comment blocked") + "</span></div>";
+      if (t.commentStatus === "skipped") return '<div><span class="lie-chip mut">Skipped</span></div>';
+      return "";
+    }
     function dmBlock(t) {
       var direct = t.openProfile === true || t.networkDistance === "DISTANCE_1";
       if (t.dmStatus === "suggested") {
-        // Open profiles only: closed profiles never get a message from this
-        // lane (the scan skips them; this branch only guards legacy items).
+        // Legacy guard only: closed profiles now take the comment lane, and
+        // the scan no longer drafts a DM for them at all.
         if (!direct) {
-          return '<div class="lie-post muted">Closed profile: skipped by policy (open profiles only).</div>' +
+          return '<div class="lie-post muted">Closed profile: no direct message is possible.</div>' +
             '<div class="lie-actions"><button class="btn btn-sm btn-ghost" data-lic="dm_skip">Dismiss</button></div>';
         }
         return '<div class="lie-post muted">' + (t.networkDistance === "DISTANCE_1"
@@ -3771,7 +3946,7 @@
       if (t.dmStatus === "skipped") return '<div><span class="lie-chip mut">Skipped</span></div>';
       return "";
     }
-    function row(t) {
+    function row(t, throttle) {
       var who = esc(t.authorName) +
         (t.authorHeadline ? ' <span class="muted">' + esc(t.authorHeadline.slice(0, 120)) + "</span>" : "");
       var hiring = t.hiring && t.hiring.openRoles
@@ -3781,18 +3956,21 @@
       // Poster lane: a BD decision-maker published a post while their company
       // is hiring. No public comment; a direct custom message instead.
       if (t.kind === "poster") {
-        var openP = t.dmStatus === "suggested";
+        var openP = t.dmStatus === "suggested" || t.commentStatus === "suggested";
         var provenance = (t.postUrl
             ? '<a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener">View the post on LinkedIn</a> · '
             : "") +
           (t.postAt ? "Posted " + new Date(t.postAt).toLocaleDateString() + " · " : "") +
           "Captured " + (t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "");
+        var lane = t.commentStatus
+          ? ' <span class="lie-chip">Closed profile: public comment</span>'
+          : ' <span class="lie-chip">Open profile: direct message</span>';
         return '<div class="lie-row' + (openP ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
-          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span>' +
+          '<div class="lie-who">' + who + ' <span class="lie-chip ok">Market scan: hiring manager posting</span>' + lane +
             (t.industry ? ' <span class="lie-chip mut">' + esc(t.industry.replace(/_/g, " ")) + "</span>" : "") + "</div>" +
           '<div class="lie-post">Their hiring post: ' + esc((t.postExcerpt || "").slice(0, 280)) + (t.postExcerpt && t.postExcerpt.length > 280 ? "..." : "") + "</div>" +
           '<div class="lie-post muted">' + provenance + "</div>" +
-          hiring + dmBlock(t) +
+          hiring + (t.commentStatus ? commentBlock(t, throttle) : dmBlock(t)) +
         "</div>";
       }
       var open = t.replyStatus === "suggested" || t.connectStatus === "suggested";
@@ -3806,15 +3984,20 @@
     function paint(d) {
       if (!document.body.contains(mount)) return;
       var items = (d && d.items) || [];
-      var open = items.filter(function (t) { return t.replyStatus === "suggested" || t.connectStatus === "suggested" || t.dmStatus === "suggested"; }).length;
+      var throttle = (d && d.commentThrottle) || {};
+      var open = items.filter(function (t) {
+        return t.replyStatus === "suggested" || t.connectStatus === "suggested"
+          || t.dmStatus === "suggested" || t.commentStatus === "suggested";
+      }).length;
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Messages to approve</b>' +
-            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a drafted message. Approve, edit, or skip; approved and skipped items leave this list. Only open profiles and existing connections are ever messaged.</div></div>' +
+            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a draft. Approve, edit, or skip; approved and skipped items leave this list. Open profiles and existing connections get a private direct message. Closed profiles get a public comment on their own hiring post instead, throttled, US posters only, and written to earn a profile click rather than ask for one.</div></div>' +
             (open ? '<span class="liops-progress">' + open + " to review</span>" : "") +
           "</div>" +
+          receiptsBlock() +
           (items.length
-            ? items.map(row).join("")
+            ? items.map(function (t) { return row(t, throttle); }).join("")
             : '<div class="lie-post muted">Nothing to review right now. The Role Hunter above fills this list as it finds people posting roles they need filled.</div>') +
         "</div>";
       Array.prototype.forEach.call(mount.querySelectorAll("[data-lic]"), function (btn) {
@@ -3825,12 +4008,27 @@
           var payload = { action: act, id: id };
           var ta = act === "approve" ? rowEl.querySelector("[data-lic-reply]")
             : act === "connect_approve" ? rowEl.querySelector("[data-lic-connect]")
-            : act === "dm_approve" ? rowEl.querySelector("[data-lic-dm]") : null;
+            : act === "dm_approve" ? rowEl.querySelector("[data-lic-dm]")
+            : act === "comment_approve" ? rowEl.querySelector("[data-lic-comment]") : null;
           if (ta) payload.text = ta.value;
+          var whoEl = rowEl.querySelector(".lie-who");
+          var whoName = whoEl && whoEl.firstChild ? String(whoEl.firstChild.textContent || "").trim() : "";
           btn.disabled = true;
+          btn.textContent = act === "comment_approve" ? "Posting..." : "Working...";
           send("/linkedin/comments", "POST", payload).then(function (r) {
+            var held = r.data && r.data.accepted === false;
+            // Only an accepted action actually leaves the desk. A throttle or
+            // policy refusal keeps the draft in the list, so it gets the
+            // reason and no receipt.
+            if (r.ok && !held && RECEIPT_COPY[act]) {
+              receipts.unshift({
+                name: whoName, copy: RECEIPT_COPY[act],
+                at: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+              });
+              toast(RECEIPT_COPY[act]);
+            }
             if (r.ok && r.data && r.data.view) paint(r.data.view);
-            if (r.data && r.data.accepted === false && r.data.reason) toast(r.data.reason);
+            if (held && r.data.reason) toast(r.data.reason);
           });
         });
       });
@@ -10532,6 +10730,13 @@
       '.cd-spacer{flex:1}' +
       '.cn-src{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid var(--line,var(--border));background:var(--bg-soft,var(--surface-2));color:var(--muted,var(--text-dim));white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}' +
       '.cn-src.ats{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 45%,var(--border))}' +
+      // Qualified pill: the same 1-100 fit score OS Text shows (thresholds 80/60),
+      // joined back to Candidates by phone/email. Hover = the scoring reason.
+      '.cn-score{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:default}' +
+      '.cn-score.hi{color:#1c7c3c;background:#eef7f0;border:1px solid #cfe8d7}' +
+      '.cn-score.md{color:#8a6100;background:#fdf6e3;border:1px solid #f0e0b0}' +
+      '.cn-score.lo{color:#b3261e;background:#fdecec;border:1px solid #f2c4c0}' +
+      '.cn-score.na{color:var(--muted,var(--text-dim));background:var(--bg-soft,var(--surface-2));border:1px solid var(--line,var(--border));font-weight:500}' +
       // Compact table: title lives under the name, location under the company, the
       // LinkedIn "in" chip next to the name, so email + phone stay on screen at 1280.
       '.cn-sub{display:block;font-size:12px;color:var(--muted,var(--text-dim));margin-top:2px;font-weight:400;white-space:normal}' +
@@ -10566,6 +10771,7 @@
       '<button class="cd-tbtn" id="cnEnrichAll" title="Fill missing emails and phones across your pipeline, cheapest source first">Enrich pipeline contacts</button>' +
       '<button class="cd-tbtn" id="cnLiSearch">Enrich LinkedIn searches</button>' +
       '<button class="cd-tbtn" id="cnLists">Saved lists</button>' +
+      '<button class="cd-tbtn" id="cnBlasts" title="Your candidate job-marketing sends: progress, pause, resume">Job blasts</button>' +
       '<button class="cd-tbtn" id="cnExport">Export CSV</button>' +
       '<span class="cd-spacer"></span>' +
       '<select id="cnSavedSelect" title="Open a saved list (JD Sourcing lists appear here)" style="background:var(--surface-2,var(--surface));color:inherit;border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">Saved lists…</option></select>';
@@ -10669,6 +10875,11 @@
       ["source", "Source", function (r) { return [r.source || "Other"]; }],
       ["status", "Status / Stage", function (r) { return [r.statusLabel || "No stage"]; }],
       ["comm", "Communication", function (r) { return [commBucket(r)]; }],
+      ["score", "Qualified score", function (r) {
+        var s = r.osScore && typeof r.osScore.score === "number" ? r.osScore.score : null;
+        if (s === null) return ["Not scored"];
+        return [s >= 80 ? "Strong fit (80+)" : s >= 60 ? "Possible fit (60-79)" : "Weak fit (under 60)"];
+      }],
       ["contact", "Contact info", function (r) {
         return [r.email ? "Has email" : "Missing email", r.phone ? "Has phone" : "Missing phone", r.linkedinUrl ? "Has LinkedIn" : "Missing LinkedIn"];
       }],
@@ -10802,11 +11013,26 @@
         '<td class="cn-co">' + cell(r.company) + (r.location ? '<span class="cn-sub">' + esc(r.location) + "</span>" : "") + "</td>" +
         '<td class="pr-c-email">' + (r.email ? '<a class="cn-email" href="mailto:' + esc(r.email) + '" title="' + esc(r.email) + '">' + esc(r.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
         "<td>" + (r.phone ? '<a href="tel:' + esc(r.phone) + '" style="color:inherit;text-decoration:none">' + esc(r.phone) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
+        "<td>" + scorePill(r) + "</td>" +
         "<td>" + statusSel + "</td>" +
         '<td class="pr-c-act"><button class="pr-enrich" data-enrich="' + esc(r.id) + '" data-pending="' + (pending ? "1" : "") + '" title="' + enrichTitle + '">' + enrichLbl + "</button></td>" +
         "</tr>";
-      if (r.exp) tr += '<tr class="pr-exp-row" id="cnexp_' + esc(r.id) + '" hidden><td></td><td colspan="6" class="pr-exp">' + esc(r.exp) + "</td></tr>";
+      if (r.exp) tr += '<tr class="pr-exp-row" id="cnexp_' + esc(r.id) + '" hidden><td></td><td colspan="7" class="pr-exp">' + esc(r.exp) + "</td></tr>";
       return tr;
+    }
+
+    /* The OS Text qualification score (1-100) as a pill; hover explains the
+       score. People OS Text has not scored yet show a quiet dash pill. */
+    function scorePill(r) {
+      var hit = r.osScore;
+      if (!hit || typeof hit.score !== "number") {
+        return '<span class="cn-score na" title="Not scored yet. Scores come from OS Text: push this person into a campaign and the fit scoring runs automatically.">-</span>';
+      }
+      var cls = hit.score >= 80 ? "hi" : hit.score >= 60 ? "md" : "lo";
+      var tip = "Fit " + hit.score + "/100";
+      if (hit.campaignName) tip += " · " + hit.campaignName;
+      if (hit.reason) tip += ": " + hit.reason;
+      return '<span class="cn-score ' + cls + '" title="' + esc(tip) + '">' + hit.score + "</span>";
     }
 
     function paint() {
@@ -10846,6 +11072,7 @@
               '<button class="btn btn-ghost btn-sm" id="cnEmailSel" title="One personalized email per person through your connected sending path.">Email…</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnResumeSel" title="Email everyone selected a personal ask for their current resume. Replies land in the resume inbox and move them into Screening automatically.">Request resume</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnPushSel" title="Send the selected candidates straight into an OS Text campaign, no CSV, no drag and drop.">Push to OS Text</button>' +
+              '<button class="btn btn-ghost btn-sm" id="cnMarketSel" title="Paste a job description and AI writes 50+ short, distinct emails marketing that job. Sends go out paced through the chosen recruiter\'s warmed inboxes with their signature.">Market a job</button>' +
               '<select class="pr-bulk-sel" id="cnBulkStatus">' + statusOpts + "</select>" +
               '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="cnBulkSeq">' + seqOpts + "</select>" +
                 '<button class="btn btn-ghost btn-sm" id="cnSeqAssign">Assign</button></span>' +
@@ -10867,6 +11094,7 @@
           '<button class="btn btn-primary btn-sm" id="cnPushList" style="margin-left:auto" title="Send this whole list into an OS Text campaign under the same name.">Push list to OS Text</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnEmailList" title="Email everyone on this list.">Email list</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnResumeList" title="Ask everyone on this list for their current resume by email.">Request resumes</button>' +
+          '<button class="btn btn-ghost btn-sm" id="cnMarketList" title="Market one job to this whole list: AI writes 50+ distinct emails from the job description and sends them paced through a recruiter\'s warmed inboxes.">Market a job</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnShowAll">Show all</button></div>'
         : "";
       var shownRows = list.slice(0, state.limit);
@@ -10874,7 +11102,7 @@
       var countLbl = (state.q || Object.keys(state.facets).length || listName) ? (list.length + " of " + rowsAll.length) : String(rowsAll.length);
       var tableHead = '<thead><tr>' +
         '<th class="pr-c-check"><input type="checkbox" id="cnSelAll"' + (allOn ? " checked" : "") + ' title="Select everyone matching the current filters" /></th>' +
-        "<th>Name &amp; Title</th><th>Company</th><th>Email</th><th>Phone</th><th>Status</th><th></th></tr></thead>";
+        "<th>Name &amp; Title</th><th>Company</th><th>Email</th><th>Phone</th><th title=\"OS Text qualification score, 1-100\">Qualified</th><th>Status</th><th></th></tr></thead>";
       var table = rows
         ? '<div class="pr-table-wrap"><table class="pr-table cn-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>" +
           (list.length > shownRows.length ? '<div class="cd-more" id="cnMore" style="text-align:center;padding:12px 0">Show 150 more (' + (list.length - shownRows.length) + " remaining)</div>" : "")
@@ -10900,10 +11128,12 @@
       var pushList = $("#cnPushList", el); if (pushList) pushList.addEventListener("click", function () { pushToOsText(list.map(function (r) { return r.id; }), listName); });
       var emailList = $("#cnEmailList", el); if (emailList) emailList.addEventListener("click", function () { bulkEmail(list.map(function (r) { return r.id; })); });
       var resumeList = $("#cnResumeList", el); if (resumeList) resumeList.addEventListener("click", function () { requestResumeAsk(list.map(function (r) { return r.id; })); });
+      var marketList = $("#cnMarketList", el); if (marketList) marketList.addEventListener("click", function () { openJobBlastModal(list.map(function (r) { return r.id; }), listName); });
       var enrSel = $("#cnEnrichSel", el); if (enrSel) enrSel.addEventListener("click", function () { enrichSelected(selIds, enrSel); });
       var emailSel = $("#cnEmailSel", el); if (emailSel) emailSel.addEventListener("click", function () { bulkEmail(selIds); });
       var resumeSel = $("#cnResumeSel", el); if (resumeSel) resumeSel.addEventListener("click", function () { requestResumeAsk(selIds); });
       var pushSel = $("#cnPushSel", el); if (pushSel) pushSel.addEventListener("click", function () { pushToOsText(selIds, listName); });
+      var marketSel = $("#cnMarketSel", el); if (marketSel) marketSel.addEventListener("click", function () { openJobBlastModal(selIds, listName); });
       var stSel = $("#cnBulkStatus", el); if (stSel) stSel.addEventListener("change", function () { if (stSel.value) bulkSetStatus(selIds, stSel.value); });
       var seqBtn = $("#cnSeqAssign", el); if (seqBtn) seqBtn.addEventListener("click", function () {
         var sel = $("#cnBulkSeq", el); if (!sel || !sel.value) { toast("Pick a sequence to assign."); return; }
@@ -11350,6 +11580,183 @@
       })(0);
     }
 
+    /* OS Text qualification scores: same batched-lookup shape as the paired-jobs
+       join (email/phone keys, 500 per call). Writes r.osScore and repaints; the
+       tab never waits on it, and a workspace without OS Text stays quiet. */
+    function loadOsTextScores() {
+      var withContact = rowsAll.filter(function (r) { return r.email || r.phone; });
+      var contacts = withContact.slice(0, 1500).map(function (r) { return { key: r.id, email: r.email || "", phone: r.phone || "" }; });
+      if (!contacts.length) return;
+      var chunks = [];
+      for (var i = 0; i < contacts.length; i += 500) chunks.push(contacts.slice(i, i + 500));
+      var found = 0;
+      (function next(ci) {
+        if (ci >= chunks.length) { if (found) renderAll(); return; }
+        send("/ostext/scores", "POST", { contacts: chunks[ci] }).then(function (r) {
+          var map = (r.ok && r.data && r.data.scores) || {};
+          Object.keys(map).forEach(function (k) { if (byId[k]) { byId[k].osScore = map[k]; found++; } });
+          next(ci + 1);
+        }).catch(function () { next(ci + 1); });
+      })(0);
+    }
+
+    /* ---- Market a job: JD -> 50+ AI spintax emails -> paced recruiter send ---- */
+    function jbStatusPill(s) {
+      var map = { sending: ["Sending", "#eef7f0", "#1c7c3c", "#cfe8d7"], paused: ["Paused", "#fdf6e3", "#8a6100", "#f0e0b0"], done: ["Done", "#eef2fd", "#2e5bd7", "#d7e0f8"] };
+      var m = map[s] || [s, "var(--bg-soft)", "inherit", "var(--border)"];
+      return '<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;background:' + m[1] + ';color:' + m[2] + ';border:1px solid ' + m[3] + '">' + esc(m[0]) + "</span>";
+    }
+
+    function openJobBlastModal(ids, defName) {
+      var split = splitIds(ids || []);
+      var total = (ids || []).length;
+      if (!total) { toast("Select candidates first (or open a saved list)."); return; }
+      var bank = null, facts = null, members = [], capacity = null;
+      var bodyHtml =
+        '<div class="jb-wrap" style="display:flex;flex-direction:column;gap:12px;max-width:640px">' +
+          '<div style="font-size:13px;color:var(--muted,var(--text-dim))">Marketing to <b>' + total + '</b> selected candidate' + (total === 1 ? "" : "s") + '. Paste the job description; AI writes 50+ short, distinct emails (each person gets their own wording), sent paced through the recruiter\'s warmed inboxes with their signature. People without an email or a first name are held, never guessed.</div>' +
+          '<label style="font-size:12.5px;font-weight:600">Job description' +
+            '<textarea id="jbJd" rows="7" style="width:100%;margin-top:4px;padding:9px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--surface));color:inherit;font-size:13px;resize:vertical" placeholder="Paste the full job description here"></textarea></label>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+            '<label style="flex:1;min-width:180px;font-size:12.5px;font-weight:600">Sends as (recruiter)<select id="jbRec" style="width:100%;margin-top:4px;padding:7px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--surface));color:inherit"><option value="">Loading team…</option></select></label>' +
+            '<label style="flex:1;min-width:160px;font-size:12.5px;font-weight:600">Blast name<input id="jbName" type="text" value="' + esc(defName || "") + '" placeholder="e.g. the role + market" style="width:100%;margin-top:4px;padding:7px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--surface));color:inherit"></label>' +
+            '<label style="width:120px;font-size:12.5px;font-weight:600">Per day<input id="jbCap" type="number" value="150" min="10" max="2000" style="width:100%;margin-top:4px;padding:7px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--surface));color:inherit"></label>' +
+          '</div>' +
+          '<div id="jbCapacity" style="font-size:12px;color:var(--muted,var(--text-dim))"></div>' +
+          '<div><button class="btn btn-primary" id="jbGen">Write the emails</button> <span id="jbGenMsg" style="font-size:12.5px;color:var(--muted,var(--text-dim))"></span></div>' +
+          '<div id="jbResult"></div>' +
+          '<div id="jbCreateRow" style="display:none;gap:8px" >' +
+            '<button class="btn btn-primary" id="jbStart">Create and start sending</button> ' +
+            '<button class="btn btn-ghost" id="jbHold">Create paused</button>' +
+            '<div style="font-size:12px;color:var(--muted,var(--text-dim));margin-top:6px">Sending starts inside business hours and paces itself across the day. You can pause any time under Job blasts.</div>' +
+          '</div>' +
+        '</div>';
+      openModal("Market a job to candidates", "One job, one recruiter, 50+ unique emails", bodyHtml, function (card, close) {
+        var recSel = card.querySelector("#jbRec");
+        function paintCapacity() {
+          var host = card.querySelector("#jbCapacity"); if (!host) return;
+          if (!capacity) { host.textContent = ""; return; }
+          var rem = capacity.remainingToday != null ? capacity.remainingToday : "?";
+          var n = capacity.inboxes != null ? capacity.inboxes : "?";
+          host.innerHTML = "This recruiter has <b>" + esc(String(n)) + "</b> sending inbox" + (n === 1 ? "" : "es") + " with <b>" + esc(String(rem)) + "</b> sends left today. Bigger audiences simply take more days; nothing is lost.";
+        }
+        function fetchMeta(recruiterId) {
+          api("/jobblast" + (recruiterId ? "?recruiterId=" + encodeURIComponent(recruiterId) : "")).then(function (d) {
+            if (!d) return;
+            members = d.members || [];
+            capacity = d.capacity || null;
+            if (recSel && recSel.options.length <= 1) {
+              recSel.innerHTML = '<option value="">Pick a recruiter…</option>' + members.map(function (m) {
+                return '<option value="' + esc(m.userId) + '">' + esc(m.name || m.email) + "</option>";
+              }).join("");
+            }
+            paintCapacity();
+          }).catch(function () {});
+        }
+        fetchMeta("");
+        recSel.addEventListener("change", function () { if (recSel.value) fetchMeta(recSel.value); });
+        card.querySelector("#jbGen").addEventListener("click", function () {
+          var jd = card.querySelector("#jbJd").value.trim();
+          if (jd.length < 40) { toast("Paste the job description first."); return; }
+          var btn = card.querySelector("#jbGen"), msg = card.querySelector("#jbGenMsg");
+          btn.disabled = true; msg.textContent = "Writing and quality-checking the variants (about a minute)…";
+          send("/jobblast", "POST", { action: "generate", jd: jd }).then(function (r) {
+            btn.disabled = false;
+            if (!r.ok) { msg.textContent = ""; toast((r.data && r.data.detail) || "Could not generate the emails."); return; }
+            msg.textContent = "";
+            facts = r.data.facts; bank = r.data.bank;
+            var nameInput = card.querySelector("#jbName");
+            if (nameInput && !nameInput.value.trim()) nameInput.value = (facts.roleTitle || "Job blast") + (facts.location ? " · " + facts.location : "");
+            var enough = bank.distinctEmails >= 50 && bank.templates.length >= 10;
+            var factBits = [facts.roleTitle, facts.company, facts.location, facts.workModel, facts.comp].filter(Boolean).map(esc).join(" · ");
+            var samples = (r.data.samples || []).filter(function (s) { return s && s.body; });
+            card.querySelector("#jbResult").innerHTML =
+              '<div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">' +
+                '<div style="font-size:13px"><b>' + factBits + "</b></div>" +
+                '<div style="font-size:13px">' +
+                  '<b>' + bank.templates.length + "</b> approved email angles · <b>" + (bank.distinctEmails >= 1000 ? "1000+" : bank.distinctEmails) + "</b> distinct emails after wording spins" +
+                  (bank.rejected ? ' · <span style="color:var(--muted,var(--text-dim))">' + bank.rejected + " drafts rejected by the quality gate</span>" : "") +
+                "</div>" +
+                (enough ? "" : '<div style="font-size:12.5px;color:#8a6100;background:#fdf6e3;border:1px solid #f0e0b0;border-radius:8px;padding:6px 10px">Fewer than 50 distinct emails came through the quality gate. You can still send, or generate again for more variety.</div>') +
+                samples.map(function (s, i) {
+                  return '<details' + (i === 0 ? " open" : "") + ' style="border:1px solid var(--line,var(--border));border-radius:8px;padding:8px 10px">' +
+                    "<summary style=\"cursor:pointer;font-size:12.5px;font-weight:600\">Example " + (i + 1) + ": " + esc(s.subject) + "</summary>" +
+                    '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;margin:8px 0 0">' + esc(s.body) + "</pre></details>";
+                }).join("") +
+              "</div>";
+            card.querySelector("#jbCreateRow").style.display = "block";
+          }).catch(function () { btn.disabled = false; msg.textContent = ""; toast("Could not reach the server."); });
+        });
+        function createBlast(start) {
+          if (!bank || !facts) { toast("Generate the emails first."); return; }
+          var recruiterId = recSel.value;
+          if (!recruiterId) { toast("Pick the recruiter this sends as."); recSel.focus(); return; }
+          var name = card.querySelector("#jbName").value.trim() || (facts.roleTitle + " outreach");
+          var cap = parseInt(card.querySelector("#jbCap").value, 10) || 150;
+          var b1 = card.querySelector("#jbStart"), b2 = card.querySelector("#jbHold");
+          b1.disabled = b2.disabled = true;
+          send("/jobblast", "POST", {
+            action: "create", name: name, recruiterId: recruiterId, facts: facts,
+            templates: bank.templates, dailyCap: cap,
+            prospectIds: split.pids, dataIds: split.dids, start: start
+          }).then(function (r) {
+            if (!r.ok) { b1.disabled = b2.disabled = false; toast((r.data && r.data.detail) || "Could not create the blast."); return; }
+            close();
+            var c = r.data.blast.counts;
+            toast(start
+              ? "Blast created: " + c.total + " candidates queued. Sending starts now, paced through the recruiter's inboxes."
+              : "Blast created paused: " + c.total + " candidates queued. Start it under Job blasts.");
+            openBlastsPanel();
+          }).catch(function () { b1.disabled = b2.disabled = false; toast("Could not reach the server."); });
+        }
+        card.querySelector("#jbStart").addEventListener("click", function () { createBlast(true); });
+        card.querySelector("#jbHold").addEventListener("click", function () { createBlast(false); });
+      });
+    }
+
+    function openBlastsPanel() {
+      var bodyHtml = '<div id="jbList" style="min-width:0;max-width:100%">' + loading() + "</div>";
+      openModal("Job blasts", "Candidate job marketing: what is sending, what went out, what is held", bodyHtml, function (card) {
+        function paintBlasts() {
+          var host = card.querySelector("#jbList"); if (!host) return;
+          api("/jobblast").then(function (d) {
+            var blasts = (d && d.blasts) || [];
+            if (!blasts.length) { host.innerHTML = '<div class="empty">No job blasts yet. Select candidates and hit Market a job.</div>'; return; }
+            host.innerHTML = blasts.map(function (b) {
+              var c = b.counts || {};
+              var pct = c.total ? Math.round(((c.sent || 0) / c.total) * 100) : 0;
+              return '<div class="card" style="padding:12px 14px;margin-bottom:10px;display:flex;flex-direction:column;gap:7px">' +
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:13.5px">' + esc(b.name) + "</b>" + jbStatusPill(b.status) +
+                  '<span style="font-size:12px;color:var(--muted,var(--text-dim))">sends as ' + esc(b.recruiterName || "?") + " · " + (b.templates || 0) + " angles · " + (b.distinctEmails >= 1000 ? "1000+" : b.distinctEmails || 0) + " distinct emails</span></div>" +
+                '<div style="height:6px;border-radius:4px;background:var(--bg-soft,var(--surface-2));overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--accent,var(--brand))"></div></div>' +
+                '<div style="font-size:12.5px;color:var(--muted,var(--text-dim))">' + (c.sent || 0) + " sent · " + (c.queued || 0) + " queued · " + (c.failed || 0) + " failed · " + (c.held || 0) + " held" +
+                  (b.lastError ? ' · <span style="color:#8a6100">waiting: ' + esc(b.lastError === "no_tenant_inbox" ? "no inbox with capacity right now, retries automatically" : b.lastError) + "</span>" : "") + "</div>" +
+                '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+                  (b.status === "sending" ? '<button class="btn btn-ghost btn-sm" data-jb="pause" data-id="' + esc(b.id) + '">Pause</button>' : "") +
+                  (b.status === "paused" ? '<button class="btn btn-primary btn-sm" data-jb="resume" data-id="' + esc(b.id) + '">Start sending</button>' : "") +
+                  (b.status === "sending" ? '<button class="btn btn-ghost btn-sm" data-jb="tick" data-id="' + esc(b.id) + '">Send a wave now</button>' : "") +
+                  '<button class="btn btn-ghost btn-sm" data-jb="delete" data-id="' + esc(b.id) + '">Delete</button>' +
+                "</div></div>";
+            }).join("") + '<div style="text-align:right"><button class="btn btn-ghost btn-sm" id="jbRefresh">Refresh</button></div>';
+            var refresh = card.querySelector("#jbRefresh"); if (refresh) refresh.addEventListener("click", paintBlasts);
+            Array.prototype.forEach.call(host.querySelectorAll("[data-jb]"), function (btn) {
+              btn.addEventListener("click", function () {
+                var act = btn.getAttribute("data-jb"), id = btn.getAttribute("data-id");
+                if (act === "delete" && !confirm("Delete this blast? Anyone still queued will not be emailed.")) return;
+                btn.disabled = true;
+                send("/jobblast", "POST", { action: act, id: id }).then(function (r) {
+                  if (!r.ok) toast((r.data && r.data.detail) || "That did not work.");
+                  else if (act === "tick") toast("Wave requested. Sends go out inside business hours, paced.");
+                  paintBlasts();
+                }).catch(function () { btn.disabled = false; toast("Could not reach the server."); });
+              });
+            });
+          }).catch(function () { host.innerHTML = '<div class="empty">Could not load blasts.</div>'; });
+        }
+        paintBlasts();
+      });
+    }
+
     /* ---- data load: both stores in parallel ---- */
     function load() {
       var pDone = api("/prospects").catch(function () { return null; });
@@ -11374,6 +11781,7 @@
         rowsAll.forEach(function (r) { byId[r.id] = r; if (r.altDataId) byId[r.altDataId] = r; });
         renderAll();
         loadPairedJobs();
+        loadOsTextScores();
       });
       refreshSavedDropdown();
       openPendingList();
@@ -11393,6 +11801,7 @@
     $("#cnEnrichAll", el).addEventListener("click", function () { enrichAllProspects(this); });
     $("#cnLiSearch", el).addEventListener("click", importLinkedInSearch);
     $("#cnLists", el).addEventListener("click", openListsModal);
+    $("#cnBlasts", el).addEventListener("click", openBlastsPanel);
     $("#cnExport", el).addEventListener("click", exportCsv);
     var cnSaved = $("#cnSavedSelect", el);
     if (cnSaved) cnSaved.addEventListener("change", function () { selectSavedList(cnSaved.value); });

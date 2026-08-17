@@ -10730,6 +10730,13 @@
       '.cd-spacer{flex:1}' +
       '.cn-src{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid var(--line,var(--border));background:var(--bg-soft,var(--surface-2));color:var(--muted,var(--text-dim));white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}' +
       '.cn-src.ats{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 45%,var(--border))}' +
+      // Qualified pill: the same 1-100 fit score OS Text shows (thresholds 80/60),
+      // joined back to Candidates by phone/email. Hover = the scoring reason.
+      '.cn-score{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:default}' +
+      '.cn-score.hi{color:#1c7c3c;background:#eef7f0;border:1px solid #cfe8d7}' +
+      '.cn-score.md{color:#8a6100;background:#fdf6e3;border:1px solid #f0e0b0}' +
+      '.cn-score.lo{color:#b3261e;background:#fdecec;border:1px solid #f2c4c0}' +
+      '.cn-score.na{color:var(--muted,var(--text-dim));background:var(--bg-soft,var(--surface-2));border:1px solid var(--line,var(--border));font-weight:500}' +
       // Compact table: title lives under the name, location under the company, the
       // LinkedIn "in" chip next to the name, so email + phone stay on screen at 1280.
       '.cn-sub{display:block;font-size:12px;color:var(--muted,var(--text-dim));margin-top:2px;font-weight:400;white-space:normal}' +
@@ -10764,6 +10771,7 @@
       '<button class="cd-tbtn" id="cnEnrichAll" title="Fill missing emails and phones across your pipeline, cheapest source first">Enrich pipeline contacts</button>' +
       '<button class="cd-tbtn" id="cnLiSearch">Enrich LinkedIn searches</button>' +
       '<button class="cd-tbtn" id="cnLists">Saved lists</button>' +
+      '<button class="cd-tbtn" id="cnBlasts" title="Your candidate job-marketing sends: progress, pause, resume">Job blasts</button>' +
       '<button class="cd-tbtn" id="cnExport">Export CSV</button>' +
       '<span class="cd-spacer"></span>' +
       '<select id="cnSavedSelect" title="Open a saved list (JD Sourcing lists appear here)" style="background:var(--surface-2,var(--surface));color:inherit;border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">Saved lists…</option></select>';
@@ -10867,6 +10875,11 @@
       ["source", "Source", function (r) { return [r.source || "Other"]; }],
       ["status", "Status / Stage", function (r) { return [r.statusLabel || "No stage"]; }],
       ["comm", "Communication", function (r) { return [commBucket(r)]; }],
+      ["score", "Qualified score", function (r) {
+        var s = r.osScore && typeof r.osScore.score === "number" ? r.osScore.score : null;
+        if (s === null) return ["Not scored"];
+        return [s >= 80 ? "Strong fit (80+)" : s >= 60 ? "Possible fit (60-79)" : "Weak fit (under 60)"];
+      }],
       ["contact", "Contact info", function (r) {
         return [r.email ? "Has email" : "Missing email", r.phone ? "Has phone" : "Missing phone", r.linkedinUrl ? "Has LinkedIn" : "Missing LinkedIn"];
       }],
@@ -11000,11 +11013,26 @@
         '<td class="cn-co">' + cell(r.company) + (r.location ? '<span class="cn-sub">' + esc(r.location) + "</span>" : "") + "</td>" +
         '<td class="pr-c-email">' + (r.email ? '<a class="cn-email" href="mailto:' + esc(r.email) + '" title="' + esc(r.email) + '">' + esc(r.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
         "<td>" + (r.phone ? '<a href="tel:' + esc(r.phone) + '" style="color:inherit;text-decoration:none">' + esc(r.phone) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
+        "<td>" + scorePill(r) + "</td>" +
         "<td>" + statusSel + "</td>" +
         '<td class="pr-c-act"><button class="pr-enrich" data-enrich="' + esc(r.id) + '" data-pending="' + (pending ? "1" : "") + '" title="' + enrichTitle + '">' + enrichLbl + "</button></td>" +
         "</tr>";
-      if (r.exp) tr += '<tr class="pr-exp-row" id="cnexp_' + esc(r.id) + '" hidden><td></td><td colspan="6" class="pr-exp">' + esc(r.exp) + "</td></tr>";
+      if (r.exp) tr += '<tr class="pr-exp-row" id="cnexp_' + esc(r.id) + '" hidden><td></td><td colspan="7" class="pr-exp">' + esc(r.exp) + "</td></tr>";
       return tr;
+    }
+
+    /* The OS Text qualification score (1-100) as a pill; hover explains the
+       score. People OS Text has not scored yet show a quiet dash pill. */
+    function scorePill(r) {
+      var hit = r.osScore;
+      if (!hit || typeof hit.score !== "number") {
+        return '<span class="cn-score na" title="Not scored yet. Scores come from OS Text: push this person into a campaign and the fit scoring runs automatically.">-</span>';
+      }
+      var cls = hit.score >= 80 ? "hi" : hit.score >= 60 ? "md" : "lo";
+      var tip = "Fit " + hit.score + "/100";
+      if (hit.campaignName) tip += " · " + hit.campaignName;
+      if (hit.reason) tip += ": " + hit.reason;
+      return '<span class="cn-score ' + cls + '" title="' + esc(tip) + '">' + hit.score + "</span>";
     }
 
     function paint() {
@@ -11044,6 +11072,7 @@
               '<button class="btn btn-ghost btn-sm" id="cnEmailSel" title="One personalized email per person through your connected sending path.">Email…</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnResumeSel" title="Email everyone selected a personal ask for their current resume. Replies land in the resume inbox and move them into Screening automatically.">Request resume</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnPushSel" title="Send the selected candidates straight into an OS Text campaign, no CSV, no drag and drop.">Push to OS Text</button>' +
+              '<button class="btn btn-ghost btn-sm" id="cnMarketSel" title="Paste a job description and AI writes 50+ short, distinct emails marketing that job. Sends go out paced through the chosen recruiter\'s warmed inboxes with their signature.">Market a job</button>' +
               '<select class="pr-bulk-sel" id="cnBulkStatus">' + statusOpts + "</select>" +
               '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="cnBulkSeq">' + seqOpts + "</select>" +
                 '<button class="btn btn-ghost btn-sm" id="cnSeqAssign">Assign</button></span>' +
@@ -11065,6 +11094,7 @@
           '<button class="btn btn-primary btn-sm" id="cnPushList" style="margin-left:auto" title="Send this whole list into an OS Text campaign under the same name.">Push list to OS Text</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnEmailList" title="Email everyone on this list.">Email list</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnResumeList" title="Ask everyone on this list for their current resume by email.">Request resumes</button>' +
+          '<button class="btn btn-ghost btn-sm" id="cnMarketList" title="Market one job to this whole list: AI writes 50+ distinct emails from the job description and sends them paced through a recruiter\'s warmed inboxes.">Market a job</button>' +
           '<button class="btn btn-ghost btn-sm" id="cnShowAll">Show all</button></div>'
         : "";
       var shownRows = list.slice(0, state.limit);
@@ -11072,7 +11102,7 @@
       var countLbl = (state.q || Object.keys(state.facets).length || listName) ? (list.length + " of " + rowsAll.length) : String(rowsAll.length);
       var tableHead = '<thead><tr>' +
         '<th class="pr-c-check"><input type="checkbox" id="cnSelAll"' + (allOn ? " checked" : "") + ' title="Select everyone matching the current filters" /></th>' +
-        "<th>Name &amp; Title</th><th>Company</th><th>Email</th><th>Phone</th><th>Status</th><th></th></tr></thead>";
+        "<th>Name &amp; Title</th><th>Company</th><th>Email</th><th>Phone</th><th title=\"OS Text qualification score, 1-100\">Qualified</th><th>Status</th><th></th></tr></thead>";
       var table = rows
         ? '<div class="pr-table-wrap"><table class="pr-table cn-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>" +
           (list.length > shownRows.length ? '<div class="cd-more" id="cnMore" style="text-align:center;padding:12px 0">Show 150 more (' + (list.length - shownRows.length) + " remaining)</div>" : "")
@@ -11098,10 +11128,12 @@
       var pushList = $("#cnPushList", el); if (pushList) pushList.addEventListener("click", function () { pushToOsText(list.map(function (r) { return r.id; }), listName); });
       var emailList = $("#cnEmailList", el); if (emailList) emailList.addEventListener("click", function () { bulkEmail(list.map(function (r) { return r.id; })); });
       var resumeList = $("#cnResumeList", el); if (resumeList) resumeList.addEventListener("click", function () { requestResumeAsk(list.map(function (r) { return r.id; })); });
+      var marketList = $("#cnMarketList", el); if (marketList) marketList.addEventListener("click", function () { openJobBlastModal(list.map(function (r) { return r.id; }), listName); });
       var enrSel = $("#cnEnrichSel", el); if (enrSel) enrSel.addEventListener("click", function () { enrichSelected(selIds, enrSel); });
       var emailSel = $("#cnEmailSel", el); if (emailSel) emailSel.addEventListener("click", function () { bulkEmail(selIds); });
       var resumeSel = $("#cnResumeSel", el); if (resumeSel) resumeSel.addEventListener("click", function () { requestResumeAsk(selIds); });
       var pushSel = $("#cnPushSel", el); if (pushSel) pushSel.addEventListener("click", function () { pushToOsText(selIds, listName); });
+      var marketSel = $("#cnMarketSel", el); if (marketSel) marketSel.addEventListener("click", function () { openJobBlastModal(selIds, listName); });
       var stSel = $("#cnBulkStatus", el); if (stSel) stSel.addEventListener("change", function () { if (stSel.value) bulkSetStatus(selIds, stSel.value); });
       var seqBtn = $("#cnSeqAssign", el); if (seqBtn) seqBtn.addEventListener("click", function () {
         var sel = $("#cnBulkSeq", el); if (!sel || !sel.value) { toast("Pick a sequence to assign."); return; }
@@ -11548,6 +11580,183 @@
       })(0);
     }
 
+    /* OS Text qualification scores: same batched-lookup shape as the paired-jobs
+       join (email/phone keys, 500 per call). Writes r.osScore and repaints; the
+       tab never waits on it, and a workspace without OS Text stays quiet. */
+    function loadOsTextScores() {
+      var withContact = rowsAll.filter(function (r) { return r.email || r.phone; });
+      var contacts = withContact.slice(0, 1500).map(function (r) { return { key: r.id, email: r.email || "", phone: r.phone || "" }; });
+      if (!contacts.length) return;
+      var chunks = [];
+      for (var i = 0; i < contacts.length; i += 500) chunks.push(contacts.slice(i, i + 500));
+      var found = 0;
+      (function next(ci) {
+        if (ci >= chunks.length) { if (found) renderAll(); return; }
+        send("/ostext/scores", "POST", { contacts: chunks[ci] }).then(function (r) {
+          var map = (r.ok && r.data && r.data.scores) || {};
+          Object.keys(map).forEach(function (k) { if (byId[k]) { byId[k].osScore = map[k]; found++; } });
+          next(ci + 1);
+        }).catch(function () { next(ci + 1); });
+      })(0);
+    }
+
+    /* ---- Market a job: JD -> 50+ AI spintax emails -> paced recruiter send ---- */
+    function jbStatusPill(s) {
+      var map = { sending: ["Sending", "#eef7f0", "#1c7c3c", "#cfe8d7"], paused: ["Paused", "#fdf6e3", "#8a6100", "#f0e0b0"], done: ["Done", "#eef2fd", "#2e5bd7", "#d7e0f8"] };
+      var m = map[s] || [s, "var(--bg-soft)", "inherit", "var(--border)"];
+      return '<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;background:' + m[1] + ';color:' + m[2] + ';border:1px solid ' + m[3] + '">' + esc(m[0]) + "</span>";
+    }
+
+    function openJobBlastModal(ids, defName) {
+      var split = splitIds(ids || []);
+      var total = (ids || []).length;
+      if (!total) { toast("Select candidates first (or open a saved list)."); return; }
+      var bank = null, facts = null, members = [], capacity = null;
+      var bodyHtml =
+        '<div class="jb-wrap" style="display:flex;flex-direction:column;gap:12px;max-width:640px">' +
+          '<div style="font-size:13px;color:var(--muted,var(--text-dim))">Marketing to <b>' + total + '</b> selected candidate' + (total === 1 ? "" : "s") + '. Paste the job description; AI writes 50+ short, distinct emails (each person gets their own wording), sent paced through the recruiter\'s warmed inboxes with their signature. People without an email or a first name are held, never guessed.</div>' +
+          '<label style="font-size:12.5px;font-weight:600">Job description' +
+            '<textarea id="jbJd" rows="7" style="width:100%;margin-top:4px;padding:9px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--surface));color:inherit;font-size:13px;resize:vertical" placeholder="Paste the full job description here"></textarea></label>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+            '<label style="flex:1;min-width:180px;font-size:12.5px;font-weight:600">Sends as (recruiter)<select id="jbRec" style="width:100%;margin-top:4px;padding:7px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--surface));color:inherit"><option value="">Loading team…</option></select></label>' +
+            '<label style="flex:1;min-width:160px;font-size:12.5px;font-weight:600">Blast name<input id="jbName" type="text" value="' + esc(defName || "") + '" placeholder="e.g. the role + market" style="width:100%;margin-top:4px;padding:7px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--surface));color:inherit"></label>' +
+            '<label style="width:120px;font-size:12.5px;font-weight:600">Per day<input id="jbCap" type="number" value="150" min="10" max="2000" style="width:100%;margin-top:4px;padding:7px 10px;border-radius:8px;border:1px solid var(--line,var(--border));background:var(--bg,var(--surface));color:inherit"></label>' +
+          '</div>' +
+          '<div id="jbCapacity" style="font-size:12px;color:var(--muted,var(--text-dim))"></div>' +
+          '<div><button class="btn btn-primary" id="jbGen">Write the emails</button> <span id="jbGenMsg" style="font-size:12.5px;color:var(--muted,var(--text-dim))"></span></div>' +
+          '<div id="jbResult"></div>' +
+          '<div id="jbCreateRow" style="display:none;gap:8px" >' +
+            '<button class="btn btn-primary" id="jbStart">Create and start sending</button> ' +
+            '<button class="btn btn-ghost" id="jbHold">Create paused</button>' +
+            '<div style="font-size:12px;color:var(--muted,var(--text-dim));margin-top:6px">Sending starts inside business hours and paces itself across the day. You can pause any time under Job blasts.</div>' +
+          '</div>' +
+        '</div>';
+      openModal("Market a job to candidates", "One job, one recruiter, 50+ unique emails", bodyHtml, function (card, close) {
+        var recSel = card.querySelector("#jbRec");
+        function paintCapacity() {
+          var host = card.querySelector("#jbCapacity"); if (!host) return;
+          if (!capacity) { host.textContent = ""; return; }
+          var rem = capacity.remainingToday != null ? capacity.remainingToday : "?";
+          var n = capacity.inboxes != null ? capacity.inboxes : "?";
+          host.innerHTML = "This recruiter has <b>" + esc(String(n)) + "</b> sending inbox" + (n === 1 ? "" : "es") + " with <b>" + esc(String(rem)) + "</b> sends left today. Bigger audiences simply take more days; nothing is lost.";
+        }
+        function fetchMeta(recruiterId) {
+          api("/jobblast" + (recruiterId ? "?recruiterId=" + encodeURIComponent(recruiterId) : "")).then(function (d) {
+            if (!d) return;
+            members = d.members || [];
+            capacity = d.capacity || null;
+            if (recSel && recSel.options.length <= 1) {
+              recSel.innerHTML = '<option value="">Pick a recruiter…</option>' + members.map(function (m) {
+                return '<option value="' + esc(m.userId) + '">' + esc(m.name || m.email) + "</option>";
+              }).join("");
+            }
+            paintCapacity();
+          }).catch(function () {});
+        }
+        fetchMeta("");
+        recSel.addEventListener("change", function () { if (recSel.value) fetchMeta(recSel.value); });
+        card.querySelector("#jbGen").addEventListener("click", function () {
+          var jd = card.querySelector("#jbJd").value.trim();
+          if (jd.length < 40) { toast("Paste the job description first."); return; }
+          var btn = card.querySelector("#jbGen"), msg = card.querySelector("#jbGenMsg");
+          btn.disabled = true; msg.textContent = "Writing and quality-checking the variants (about a minute)…";
+          send("/jobblast", "POST", { action: "generate", jd: jd }).then(function (r) {
+            btn.disabled = false;
+            if (!r.ok) { msg.textContent = ""; toast((r.data && r.data.detail) || "Could not generate the emails."); return; }
+            msg.textContent = "";
+            facts = r.data.facts; bank = r.data.bank;
+            var nameInput = card.querySelector("#jbName");
+            if (nameInput && !nameInput.value.trim()) nameInput.value = (facts.roleTitle || "Job blast") + (facts.location ? " · " + facts.location : "");
+            var enough = bank.distinctEmails >= 50 && bank.templates.length >= 10;
+            var factBits = [facts.roleTitle, facts.company, facts.location, facts.workModel, facts.comp].filter(Boolean).map(esc).join(" · ");
+            var samples = (r.data.samples || []).filter(function (s) { return s && s.body; });
+            card.querySelector("#jbResult").innerHTML =
+              '<div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">' +
+                '<div style="font-size:13px"><b>' + factBits + "</b></div>" +
+                '<div style="font-size:13px">' +
+                  '<b>' + bank.templates.length + "</b> approved email angles · <b>" + (bank.distinctEmails >= 1000 ? "1000+" : bank.distinctEmails) + "</b> distinct emails after wording spins" +
+                  (bank.rejected ? ' · <span style="color:var(--muted,var(--text-dim))">' + bank.rejected + " drafts rejected by the quality gate</span>" : "") +
+                "</div>" +
+                (enough ? "" : '<div style="font-size:12.5px;color:#8a6100;background:#fdf6e3;border:1px solid #f0e0b0;border-radius:8px;padding:6px 10px">Fewer than 50 distinct emails came through the quality gate. You can still send, or generate again for more variety.</div>') +
+                samples.map(function (s, i) {
+                  return '<details' + (i === 0 ? " open" : "") + ' style="border:1px solid var(--line,var(--border));border-radius:8px;padding:8px 10px">' +
+                    "<summary style=\"cursor:pointer;font-size:12.5px;font-weight:600\">Example " + (i + 1) + ": " + esc(s.subject) + "</summary>" +
+                    '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;margin:8px 0 0">' + esc(s.body) + "</pre></details>";
+                }).join("") +
+              "</div>";
+            card.querySelector("#jbCreateRow").style.display = "block";
+          }).catch(function () { btn.disabled = false; msg.textContent = ""; toast("Could not reach the server."); });
+        });
+        function createBlast(start) {
+          if (!bank || !facts) { toast("Generate the emails first."); return; }
+          var recruiterId = recSel.value;
+          if (!recruiterId) { toast("Pick the recruiter this sends as."); recSel.focus(); return; }
+          var name = card.querySelector("#jbName").value.trim() || (facts.roleTitle + " outreach");
+          var cap = parseInt(card.querySelector("#jbCap").value, 10) || 150;
+          var b1 = card.querySelector("#jbStart"), b2 = card.querySelector("#jbHold");
+          b1.disabled = b2.disabled = true;
+          send("/jobblast", "POST", {
+            action: "create", name: name, recruiterId: recruiterId, facts: facts,
+            templates: bank.templates, dailyCap: cap,
+            prospectIds: split.pids, dataIds: split.dids, start: start
+          }).then(function (r) {
+            if (!r.ok) { b1.disabled = b2.disabled = false; toast((r.data && r.data.detail) || "Could not create the blast."); return; }
+            close();
+            var c = r.data.blast.counts;
+            toast(start
+              ? "Blast created: " + c.total + " candidates queued. Sending starts now, paced through the recruiter's inboxes."
+              : "Blast created paused: " + c.total + " candidates queued. Start it under Job blasts.");
+            openBlastsPanel();
+          }).catch(function () { b1.disabled = b2.disabled = false; toast("Could not reach the server."); });
+        }
+        card.querySelector("#jbStart").addEventListener("click", function () { createBlast(true); });
+        card.querySelector("#jbHold").addEventListener("click", function () { createBlast(false); });
+      });
+    }
+
+    function openBlastsPanel() {
+      var bodyHtml = '<div id="jbList" style="min-width:0;max-width:100%">' + loading() + "</div>";
+      openModal("Job blasts", "Candidate job marketing: what is sending, what went out, what is held", bodyHtml, function (card) {
+        function paintBlasts() {
+          var host = card.querySelector("#jbList"); if (!host) return;
+          api("/jobblast").then(function (d) {
+            var blasts = (d && d.blasts) || [];
+            if (!blasts.length) { host.innerHTML = '<div class="empty">No job blasts yet. Select candidates and hit Market a job.</div>'; return; }
+            host.innerHTML = blasts.map(function (b) {
+              var c = b.counts || {};
+              var pct = c.total ? Math.round(((c.sent || 0) / c.total) * 100) : 0;
+              return '<div class="card" style="padding:12px 14px;margin-bottom:10px;display:flex;flex-direction:column;gap:7px">' +
+                '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:13.5px">' + esc(b.name) + "</b>" + jbStatusPill(b.status) +
+                  '<span style="font-size:12px;color:var(--muted,var(--text-dim))">sends as ' + esc(b.recruiterName || "?") + " · " + (b.templates || 0) + " angles · " + (b.distinctEmails >= 1000 ? "1000+" : b.distinctEmails || 0) + " distinct emails</span></div>" +
+                '<div style="height:6px;border-radius:4px;background:var(--bg-soft,var(--surface-2));overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--accent,var(--brand))"></div></div>' +
+                '<div style="font-size:12.5px;color:var(--muted,var(--text-dim))">' + (c.sent || 0) + " sent · " + (c.queued || 0) + " queued · " + (c.failed || 0) + " failed · " + (c.held || 0) + " held" +
+                  (b.lastError ? ' · <span style="color:#8a6100">waiting: ' + esc(b.lastError === "no_tenant_inbox" ? "no inbox with capacity right now, retries automatically" : b.lastError) + "</span>" : "") + "</div>" +
+                '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+                  (b.status === "sending" ? '<button class="btn btn-ghost btn-sm" data-jb="pause" data-id="' + esc(b.id) + '">Pause</button>' : "") +
+                  (b.status === "paused" ? '<button class="btn btn-primary btn-sm" data-jb="resume" data-id="' + esc(b.id) + '">Start sending</button>' : "") +
+                  (b.status === "sending" ? '<button class="btn btn-ghost btn-sm" data-jb="tick" data-id="' + esc(b.id) + '">Send a wave now</button>' : "") +
+                  '<button class="btn btn-ghost btn-sm" data-jb="delete" data-id="' + esc(b.id) + '">Delete</button>' +
+                "</div></div>";
+            }).join("") + '<div style="text-align:right"><button class="btn btn-ghost btn-sm" id="jbRefresh">Refresh</button></div>';
+            var refresh = card.querySelector("#jbRefresh"); if (refresh) refresh.addEventListener("click", paintBlasts);
+            Array.prototype.forEach.call(host.querySelectorAll("[data-jb]"), function (btn) {
+              btn.addEventListener("click", function () {
+                var act = btn.getAttribute("data-jb"), id = btn.getAttribute("data-id");
+                if (act === "delete" && !confirm("Delete this blast? Anyone still queued will not be emailed.")) return;
+                btn.disabled = true;
+                send("/jobblast", "POST", { action: act, id: id }).then(function (r) {
+                  if (!r.ok) toast((r.data && r.data.detail) || "That did not work.");
+                  else if (act === "tick") toast("Wave requested. Sends go out inside business hours, paced.");
+                  paintBlasts();
+                }).catch(function () { btn.disabled = false; toast("Could not reach the server."); });
+              });
+            });
+          }).catch(function () { host.innerHTML = '<div class="empty">Could not load blasts.</div>'; });
+        }
+        paintBlasts();
+      });
+    }
+
     /* ---- data load: both stores in parallel ---- */
     function load() {
       var pDone = api("/prospects").catch(function () { return null; });
@@ -11572,6 +11781,7 @@
         rowsAll.forEach(function (r) { byId[r.id] = r; if (r.altDataId) byId[r.altDataId] = r; });
         renderAll();
         loadPairedJobs();
+        loadOsTextScores();
       });
       refreshSavedDropdown();
       openPendingList();
@@ -11591,6 +11801,7 @@
     $("#cnEnrichAll", el).addEventListener("click", function () { enrichAllProspects(this); });
     $("#cnLiSearch", el).addEventListener("click", importLinkedInSearch);
     $("#cnLists", el).addEventListener("click", openListsModal);
+    $("#cnBlasts", el).addEventListener("click", openBlastsPanel);
     $("#cnExport", el).addEventListener("click", exportCsv);
     var cnSaved = $("#cnSavedSelect", el);
     if (cnSaved) cnSaved.addEventListener("change", function () { selectSavedList(cnSaved.value); });

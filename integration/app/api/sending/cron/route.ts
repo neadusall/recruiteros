@@ -103,7 +103,16 @@ async function run(req: Request) {
     replies = await runReplySync();
   } catch (e: any) { replies = { error: e?.message ?? "reply_sync_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, variants, replies });
+  // Candidate job blasts (lib/recruiting/jobBlast): send the next paced wave of
+  // every active blast. Window-gated + capped inside the tick; a workspace with
+  // no active blast is a no-op.
+  let jobBlasts: unknown = null;
+  try {
+    const { runJobBlastTickAll } = await import("../../../../lib/recruiting/jobBlast");
+    jobBlasts = await runJobBlastTickAll();
+  } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
+
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, variants, replies, jobBlasts });
 }
 
 export const GET = run;
