@@ -10737,6 +10737,16 @@
       '.cn-score.md{color:#8a6100;background:#fdf6e3;border:1px solid #f0e0b0}' +
       '.cn-score.lo{color:#b3261e;background:#fdecec;border:1px solid #f2c4c0}' +
       '.cn-score.na{color:var(--muted,var(--text-dim));background:var(--bg-soft,var(--surface-2));border:1px solid var(--line,var(--border));font-weight:500}' +
+      // The "?" explainers: every action on this screen has a plain-language
+      // definition one click away, so nobody presses a button on a guess.
+      '.cn-qhelp{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--line,var(--border));background:var(--panel,var(--surface));color:var(--muted,var(--text-dim));font-size:12px;font-weight:700;cursor:pointer;flex:0 0 auto}' +
+      '.cn-qhelp:hover{border-color:var(--accent,var(--brand));color:var(--accent,var(--brand))}' +
+      '.cn-helpdl{display:flex;flex-direction:column;gap:10px;font-size:13px}' +
+      '.cn-helpdl h4{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));margin:8px 0 0}' +
+      '.cn-helpdl .row{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:7px 0;border-bottom:1px solid var(--line,var(--surface-2))}' +
+      '.cn-helpdl .row:last-child{border-bottom:0}' +
+      '.cn-helpdl b{font-weight:600}' +
+      '@media(max-width:560px){.cn-helpdl .row{grid-template-columns:1fr;gap:2px}}' +
       // Compact table: title lives under the name, location under the company, the
       // LinkedIn "in" chip next to the name, so email + phone stay on screen at 1280.
       '.cn-sub{display:block;font-size:12px;color:var(--muted,var(--text-dim));margin-top:2px;font-weight:400;white-space:normal}' +
@@ -10766,13 +10776,14 @@
 
     /* ---- top toolbar (static; wired once) ---- */
     $("#cnToolbar", el).innerHTML =
-      '<button class="cd-tbtn primary" id="cnImport">+ Add people (CSV)</button>' +
+      '<button class="cd-tbtn primary" id="cnImport" title="Upload a spreadsheet of people into this table. Nobody is contacted.">+ Add people (CSV)</button>' +
       (can("ats:manage") ? '<button class="cd-tbtn" id="cnLoxo" title="Pull people from your connected ATS into Candidates">⟳ Sync Loxo</button>' : '') +
       '<button class="cd-tbtn" id="cnEnrichAll" title="Fill missing emails and phones across your pipeline, cheapest source first">Enrich pipeline contacts</button>' +
       '<button class="cd-tbtn" id="cnLiSearch">Enrich LinkedIn searches</button>' +
-      '<button class="cd-tbtn" id="cnLists">Saved lists</button>' +
+      '<button class="cd-tbtn" id="cnLists" title="Open, rename, push, or delete your saved candidate lists">Saved lists</button>' +
       '<button class="cd-tbtn" id="cnBlasts" title="Your candidate job-marketing sends: progress, pause, resume">Job blasts</button>' +
-      '<button class="cd-tbtn" id="cnExport">Export CSV</button>' +
+      '<button class="cd-tbtn" id="cnExport" title="Download what is currently in view as a spreadsheet">Export CSV</button>' +
+      '<button class="cn-qhelp" id="cnHelpTop" title="What every button on this screen does, in plain language">?</button>' +
       '<span class="cd-spacer"></span>' +
       '<select id="cnSavedSelect" title="Open a saved list (JD Sourcing lists appear here)" style="background:var(--surface-2,var(--surface));color:inherit;border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">Saved lists…</option></select>';
 
@@ -11068,7 +11079,9 @@
               '<span class="pr-enrich-grp">Enrich' +
                 '<label><input type="checkbox" id="cnEnrEmail" checked /> Email</label>' +
                 '<label><input type="checkbox" id="cnEnrPhone" checked /> Phone</label>' +
-                '<button class="btn btn-primary btn-sm" id="cnEnrichSel">Run</button></span>' +
+                '<select class="pr-bulk-sel" id="cnEnrBatch" title="How many of the selected to enrich in this run. People missing the checked info run first; enriched rows leave the selection, so pressing Run again continues with the next batch.">' +
+                  '<option value="10">10 at a time</option><option value="25" selected>25 at a time</option><option value="50">50 at a time</option><option value="100">100 at a time</option><option value="all">All selected</option></select>' +
+                '<button class="btn btn-primary btn-sm" id="cnEnrichSel" title="Find missing emails and phones for this batch, cheapest source first. Nothing is sent to anyone.">Run</button></span>' +
               '<button class="btn btn-ghost btn-sm" id="cnEmailSel" title="One personalized email per person through your connected sending path.">Email…</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnResumeSel" title="Email everyone selected a personal ask for their current resume. Replies land in the resume inbox and move them into Screening automatically.">Request resume</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnPushSel" title="Send the selected candidates straight into an OS Text campaign, no CSV, no drag and drop.">Push to OS Text</button>' +
@@ -11079,7 +11092,8 @@
               '<button class="btn btn-ghost btn-sm" id="cnAddCamp" title="Put everyone selected into a campaign you pick. Tip: filter by a list\'s tag first, then Select all.">+ Add to campaign</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnSaveList">Save as list</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnDelSel">Delete</button>' +
-              '<button class="btn btn-ghost btn-sm" id="cnClearSel">Clear</button></span></div>'
+              '<button class="btn btn-ghost btn-sm" id="cnClearSel">Clear</button>' +
+              '<button class="cn-qhelp" id="cnHelpSel" title="What each of these actions does, in plain language">?</button></span></div>'
         : "";
       // Reach readout for whatever is in view (saved list, filters, or everyone):
       // people with a validated email = messageable by email; with a phone = by text/call.
@@ -11143,6 +11157,7 @@
       var saveBtn = $("#cnSaveList", el); if (saveBtn) saveBtn.addEventListener("click", function () { saveSelectedAsList(selIds); });
       var delBtn = $("#cnDelSel", el); if (delBtn) delBtn.addEventListener("click", function () { deleteSelected(selIds); });
       var clrBtn = $("#cnClearSel", el); if (clrBtn) clrBtn.addEventListener("click", function () { state.sel = {}; paint(); });
+      var helpSel = $("#cnHelpSel", el); if (helpSel) helpSel.addEventListener("click", openCandidatesHelp);
 
       Array.prototype.forEach.call(body.querySelectorAll(".pr-exp-toggle"), function (t) {
         t.addEventListener("click", function () {
@@ -11206,20 +11221,36 @@
       var doPhone = $("#cnEnrPhone", el) ? $("#cnEnrPhone", el).checked : true;
       if (!doEmail && !doPhone) { toast("Check Email and/or Phone first."); return; }
       var field = (doEmail && doPhone) ? null : (doEmail ? "email" : "phone");
-      var total = ids.length, found = 0;
+      // Batch control: only the chosen number run now. People still MISSING the
+      // checked info run first; rows that already have it are only re-enriched
+      // when the whole selection is complete (an explicit re-check intent).
+      var batchSel = $("#cnEnrBatch", el);
+      var batch = (batchSel && batchSel.value !== "all") ? (parseInt(batchSel.value, 10) || 25) : ids.length;
+      var missing = ids.filter(function (id) {
+        var r = byId[id];
+        return r && ((doEmail && !r.email) || (doPhone && !r.phone));
+      });
+      var pool = missing.length ? missing : ids;
+      var worklist = pool.slice(0, batch);
+      var total = worklist.length, found = 0;
       btn.disabled = true;
       (function next(i) {
         if (i >= total) {
           btn.disabled = false; btn.textContent = "Run";
-          toast("Enriched " + found + " of " + total + (field ? " (" + field + ")" : ""));
+          // The processed rows leave the selection, so the untouched remainder
+          // stays selected and the next Run continues exactly where this stopped.
+          worklist.forEach(function (id) { delete state.sel[id]; });
+          var remaining = pool.length - total;
+          toast("Enriched " + found + " of " + total + " run" + (field ? " (" + field + ")" : "") +
+            (remaining > 0 ? ". " + remaining + " selected still need info: press Run again for the next batch." : ""));
           load();
           return;
         }
         btn.textContent = (i + 1) + "/" + total + "…";
-        var r = byId[ids[i]];
+        var r = byId[worklist[i]];
         var payload = r && r.kind === "data"
-          ? { action: "enrich", id: ids[i] }
-          : { action: "enrich", prospectId: ids[i] };
+          ? { action: "enrich", id: worklist[i] }
+          : { action: "enrich", prospectId: worklist[i] };
         if (field) payload.field = field;
         send(r && r.kind === "data" ? "/data" : "/prospects", "POST", payload)
           .then(function (res) { var f = res.ok && res.data && res.data.found; if (f && (f.email || f.phone || f.name)) found++; next(i + 1); })
@@ -11757,6 +11788,36 @@
       });
     }
 
+    /* ---- the "?" explainer: what every button on this screen actually does ---- */
+    function openCandidatesHelp() {
+      function row(name, def) { return '<div class="row"><b>' + esc(name) + "</b><span>" + esc(def) + "</span></div>"; }
+      var html = '<div class="cn-helpdl">' +
+        "<h4>Add and sync people</h4>" +
+        row("+ Add people (CSV)", "Upload a spreadsheet of people. They land in this table only; nobody is contacted.") +
+        row("Sync Loxo", "Pulls people from your connected ATS into the People database side of this table. A read-only pull; no outreach happens.") +
+        row("Enrich LinkedIn searches", "Turns imported LinkedIn search results into rows with contact info.") +
+        "<h4>Find contact info (enrichment)</h4>" +
+        row("Enrich pipeline contacts", "Sweeps your whole pipeline and fills missing emails and phones, cheapest source first. Paid lookups only run when the free sources miss. Finds info; never sends anything.") +
+        row("Enrich (bulk bar)", "Same lookups, but only for the people you selected, and only the batch size you pick (10, 25, 50, 100, or all). People missing the checked info run first. Rows that get processed are unchecked automatically, so pressing Run again continues with the next batch of your selection.") +
+        row("Enrich (row button)", "Looks up that one person. The lightning icon means info is missing; the circle arrow means re-check what is already there.") +
+        "<h4>Reach out</h4>" +
+        row("Email…", "Writes one personalized email per selected person from the subject and body you provide, and sends through your connected sending path with all the usual safety checks (opt-outs, bounces, cooldowns).") +
+        row("Request resume", "Emails each selected person a personal ask for their current resume. Replies land in the resume inbox and file themselves.") +
+        row("Push to OS Text", "Puts the selected people into an OS Text texting campaign. Numbers are cell-checked first, and nothing texts until a send date and time is set in OS Text.") +
+        row("Market a job", "Paste a job description and AI writes 50+ short, distinct emails promoting that job (every person gets their own wording). Sends go out paced through the recruiter you pick, from their warmed inboxes with their signature, only during business hours, and only after you press start. Pause any time under Job blasts.") +
+        row("Job blasts", "The scoreboard for Market a job: what is sending, sent, queued, or held, with pause, resume, and delete.") +
+        "<h4>Organize</h4>" +
+        row("Qualified column", "The 1 to 100 fit score OS Text computed for this person against a role. 80+ green is a strong fit, 60 to 79 amber is possible, under 60 red is weak. A dash means OS Text has not scored them yet. Hover the score for the reason.") +
+        row("Set status…", "Moves the selected people to a pipeline status or ATS job stage. Bookkeeping only; no messages are sent.") +
+        row("Assign sequence", "Attaches a sequence to selected pipeline candidates. Sends then follow that sequence's own schedule and approval rules.") +
+        row("+ Add to campaign", "Files the selected people into a campaign you pick. ATS people join the pipeline; pipeline rows move into that campaign.") +
+        row("Save as list", "Saves the current selection as a named list you can reopen or push later.") +
+        row("Export CSV", "Downloads whatever is currently in view as a spreadsheet.") +
+        row("Delete", "Removes the selected rows from this table. It does not touch your ATS records at the source.") +
+        "</div>";
+      openModal("What each button does", "Press with confidence: nothing here sends messages unless it says so", html);
+    }
+
     /* ---- data load: both stores in parallel ---- */
     function load() {
       var pDone = api("/prospects").catch(function () { return null; });
@@ -11803,6 +11864,7 @@
     $("#cnLists", el).addEventListener("click", openListsModal);
     $("#cnBlasts", el).addEventListener("click", openBlastsPanel);
     $("#cnExport", el).addEventListener("click", exportCsv);
+    $("#cnHelpTop", el).addEventListener("click", openCandidatesHelp);
     var cnSaved = $("#cnSavedSelect", el);
     if (cnSaved) cnSaved.addEventListener("change", function () { selectSavedList(cnSaved.value); });
     var cnLoxo = $("#cnLoxo", el);
