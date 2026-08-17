@@ -312,6 +312,23 @@ async function tickInner(workspaceId: string, opts: { max?: number }): Promise<T
     }
   }
 
+  // Converge funnel status: anyone this blast actually emailed must not sit in
+  // the "Queued" tile forever (covers sends made before status-flipping shipped
+  // and any send whose flip was lost). Cheap: the core store is in memory.
+  for (const b of active) {
+    for (const r of b.recipients) {
+      if (r.status !== "sent") continue;
+      try {
+        const fresh = await core.getProspect(r.prospectId);
+        if (fresh && fresh.status === "queued") {
+          fresh.status = "in_sequence";
+          if (!fresh.sequenceStartedAt) fresh.sequenceStartedAt = r.at || nowIso();
+          await core.saveProspect(fresh);
+        }
+      } catch { /* best-effort; never blocks the tick */ }
+    }
+  }
+
   for (const b of active) {
     report.blasts++;
     const day = todayUtc();
