@@ -225,6 +225,45 @@ function todayUtc(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Sent-audit + reply-watch feed: every job-blast email lands in
+ * `job_blast_sent_v1` with its full rendered text and the pool inbox it left
+ * from. /api/mpc-sent merges it into the portal's Sent page (Operate > Sent),
+ * and the mailbox reply monitor (tools/monitor.mjs) reads it to match
+ * candidate replies back into the response inbox. Newest first, capped.
+ */
+const SENT_FEED_KEY = "job_blast_sent_v1";
+const SENT_FEED_MAX = 2000;
+async function appendSentFeed(
+  ws: string,
+  b: JobBlast,
+  p: Prospect,
+  rendered: { subject: string; body: string; templateId: string },
+  senderEmail: string | undefined,
+  at: string,
+): Promise<void> {
+  try {
+    const rows = (await loadSnapshot<Record<string, unknown>[]>(SENT_FEED_KEY)) || [];
+    rows.unshift({
+      at,
+      ws,
+      to_email: (p.email || "").toLowerCase(),
+      to_name: p.fullName || "",
+      company: p.company || "",
+      role: p.title || "",
+      from: (senderEmail || "").toLowerCase(),
+      from_owner: b.recruiterName || "",
+      variant: "job blast",
+      touch: 1,
+      subject: rendered.subject,
+      body: rendered.body,
+      blastId: b.id,
+      campaignId: b.campaignId,
+    });
+    await saveSnapshot(SENT_FEED_KEY, rows.slice(0, SENT_FEED_MAX));
+  } catch { /* the audit feed is best-effort; never fail a completed send */ }
+}
+
 /** Per-workspace tick coalescing: overlapping clocks share one pass. */
 const inFlight = new Map<string, Promise<TickReport>>();
 
@@ -309,11 +348,25 @@ async function tickInner(workspaceId: string, opts: { max?: number }): Promise<T
       budget--;
       dirty = true;
       if (res.ok && !res.dryRun) {
+        const sentAt = nowIso();
         r.status = "sent";
-        r.at = nowIso();
+        r.at = sentAt;
         b.dayClock.count++;
-        b.lastSendAt = r.at;
+        b.lastSendAt = sentAt;
         report.sent++;
+        // Funnel truth: an emailed candidate is no longer "Queued". Flip the
+        // REAL prospect (the routed copy above never persists) so the
+        // Candidates tiles and the Communication facet reflect the send; a
+        // reply flips them to "replied" via the response inbox.
+        try {
+          const fresh = await core.getProspect(r.prospectId);
+          if (fresh && fresh.status === "queued") {
+            fresh.status = "in_sequence";
+            if (!fresh.sequenceStartedAt) fresh.sequenceStartedAt = sentAt;
+            await core.saveProspect(fresh);
+          }
+        } catch { /* tile truth is best-effort; the send already happened */ }
+        await appendSentFeed(workspaceId, b, p, rendered, res.senderEmail, sentAt);
       } else {
         const reason = res.error || "send_failed";
         // Transient pool exhaustion is NOT a per-person failure: leave the rest

@@ -28,6 +28,8 @@ interface MpcReplyRow {
   receivedAt?: string;
   box?: string;      // the lume box that received the reply (= our sending box)
   subject?: string;
+  /** Real campaign id when the monitor knows it (job blasts); MPC rows omit it. */
+  campaignId?: string;
 }
 
 export async function runMpcReplyIngest(): Promise<{ ingested: number; total: number }> {
@@ -42,7 +44,7 @@ export async function runMpcReplyIngest(): Promise<{ ingested: number; total: nu
         fromName: r.fromName,
         text: r.text,
         receivedAt: r.receivedAt,
-        campaignId: "mpc-finance", // identity-verified real reply (never warm-up)
+        campaignId: r.campaignId || "mpc-finance", // identity-verified real reply (never warm-up)
         toMailbox: r.box,
         subject: r.subject,
       });

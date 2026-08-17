@@ -29,6 +29,9 @@ export interface SendResult {
   providerMessageId?: string;
   dryRun?: boolean;
   error?: string;
+  /** The pool inbox address the email left from (sender-pool sends only) — lets
+   *  callers register the send for mailbox reply-watching. */
+  senderEmail?: string;
 }
 
 export interface SendTouch {
@@ -397,7 +400,7 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
       } catch { /* best-effort stamp */ }
       t.prospect.senderInboxId = inbox.id;
     }
-    return { ok: true, channel: "email", provider: "smtp:" + inbox.provider, providerMessageId: res.messageId };
+    return { ok: true, channel: "email", provider: "smtp:" + inbox.provider, providerMessageId: res.messageId, senderEmail: inbox.email };
   } catch {
     return null; // any error -> fall through to existing providers
   }
