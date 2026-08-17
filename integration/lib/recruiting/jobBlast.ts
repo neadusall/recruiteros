@@ -259,6 +259,20 @@ async function tickInner(workspaceId: string, opts: { max?: number }): Promise<T
   const core = getCore();
   let dirty = false;
 
+  // Self-heal: holds caused by template copy defects (doubled spin braces held
+  // as unresolved tokens, dash guardrail) are curable — the renderer now
+  // normalizes both — so requeue them for another render instead of stranding
+  // those people forever. Data holds (no email, missing first name) stay held.
+  for (const b of active) {
+    for (const r of b.recipients) {
+      if (r.status === "held" && r.reason && /^(unresolved_token: |guardrail: no dashes)/.test(r.reason)) {
+        r.status = "queued";
+        r.reason = undefined;
+        dirty = true;
+      }
+    }
+  }
+
   for (const b of active) {
     report.blasts++;
     const day = todayUtc();

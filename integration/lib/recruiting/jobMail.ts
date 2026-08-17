@@ -18,6 +18,7 @@
 
 import { expandSpintax } from "../copy/spintax";
 import { guardRenderedTouch } from "../copy/renderGuard";
+import { stripDashes } from "../text/dashes";
 
 const MODEL = process.env.RECRUITEROS_EMAIL_MODEL ?? "claude-haiku-4-5";
 
@@ -154,6 +155,17 @@ function digitRuns(s: string): string[] {
   return s.match(/\d[\d,.]*/g) || [];
 }
 
+/**
+ * The model sometimes writes a spin group with doubled braces ("{{a|b|c}}").
+ * The spintax expander protects ANY double-braced run as a merge field, so the
+ * group never expands and the render guard holds the send as an unresolved
+ * token. A real merge token can never contain a pipe, so any double-braced
+ * group with one is spintax: fold it to single braces.
+ */
+export function normalizeSpinBraces(s: string): string {
+  return String(s || "").replace(/\{\{([^{}]*\|[^{}]*)\}\}/g, "{$1}");
+}
+
 /** Why a generated template is unusable; empty array = keep it. */
 export function templateViolations(t: { subject: string; body: string }, facts: JobFacts): string[] {
   const out: string[] = [];
@@ -167,11 +179,13 @@ export function templateViolations(t: { subject: string; body: string }, facts: 
     if (/[—–]/.test(text)) out.push("em/en dash");
     if (/https?:\/\//i.test(text)) out.push("contains URL");
   }
-  // Every token must be from the allowed set.
-  const tokenRe = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g;
+  // Every double-braced run must be an allowed merge token. Matching ANY
+  // content (not just word-shaped names) is what catches "{{a|b}}" spintax
+  // written with doubled braces, which the expander would protect verbatim.
+  const tokenRe = /\{\{([^{}]*)\}\}/g;
   let tm: RegExpExecArray | null;
   while ((tm = tokenRe.exec(subject + " " + body))) {
-    if (!ALLOWED_TOKENS.has(tm[1].toLowerCase())) out.push("unknown token " + tm[1]);
+    if (!ALLOWED_TOKENS.has(tm[1].trim().toLowerCase())) out.push("unknown token " + tm[1].trim().slice(0, 40));
   }
   // Spintax must expand cleanly (no stray braces/pipes once groups resolve).
   const expanded = expandSpintax(body, "probe").replace(/\{\{[^}]+\}\}/g, "x");
@@ -277,8 +291,10 @@ export async function generateJobMailBank(facts: JobFacts): Promise<JobMailBank>
       continue; // one bad batch never sinks the bank; the loop retries
     }
     for (const t of parsed.templates || []) {
-      const subject = String(t.subject || "").trim();
-      const body = String(t.body || "").replace(/\r/g, "").trim();
+      // Repair the two model slips we can fix mechanically (doubled spin braces,
+      // dashes) instead of rejecting the template and shrinking the bank.
+      const subject = stripDashes(normalizeSpinBraces(String(t.subject || "").trim())).trim();
+      const body = stripDashes(normalizeSpinBraces(String(t.body || "").replace(/\r/g, "").trim())).trim();
       const v = templateViolations({ subject, body }, facts);
       if (v.length) { rejected++; continue; }
       // No near-duplicate openings: the first 40 chars of the expanded body
@@ -328,10 +344,15 @@ export function renderJobMail(
   const first = (candidate.firstName || (candidate.fullName || "").trim().split(/\s+/)[0] || "").trim();
   const seed = candidate.id + ":jobmail";
   const t = templates[Math.abs(fnv(seed)) % templates.length];
+  // normalizeSpinBraces + stripDashes also run here (not just at generation)
+  // so banks already stored with doubled spin braces or dashes render clean
+  // instead of holding forever. stripDashes leaves URLs untouched.
   const fill = (s: string) =>
-    expandSpintax(s, seed)
-      .replace(/\{\{\s*First_Name\s*\}\}/gi, first)
-      .replace(/\{\{\s*Your_Name\s*\}\}/gi, recruiterName);
+    stripDashes(
+      expandSpintax(normalizeSpinBraces(s), seed)
+        .replace(/\{\{\s*First_Name\s*\}\}/gi, first)
+        .replace(/\{\{\s*Your_Name\s*\}\}/gi, recruiterName),
+    );
   const subject = fill(t.subject);
   const body = fill(t.body);
   const holds: string[] = [];
