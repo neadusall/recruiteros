@@ -419,7 +419,10 @@ async function main() {
     const r = box.kind === "smtp"
       ? await sendViaSmtp(box, rec.name, d.to_email, d.subject, body)
       : await sendViaMailboxApi(box.email, d.to_email, d.subject, body);
-    appendFileSync(logFile, JSON.stringify({ at: new Date().toISOString(), from: box.email, from_owner: rec.name, lane: box.kind || "api", ...d, body, result: r }) + "\n");
+    // motion: BD vs Recruiting share the same box fleet, so every ledger row carries its
+    // side. This engine is the BD lane; a recruiting lane through the same tools sets
+    // MPC_MOTION=recruiting. mpc-stats splits the cockpit on this field.
+    appendFileSync(logFile, JSON.stringify({ at: new Date().toISOString(), motion: process.env.MPC_MOTION || "bd", from: box.email, from_owner: rec.name, lane: box.kind || "api", ...d, body, result: r }) + "\n");
     boxCounts.set(box.email, (boxCounts.get(box.email) || 0) + 1);
     if ((boxCounts.get(box.email) || 0) >= capFor(box)) avail.splice(pos, 1); else idx++;
     if (r.ok) { sent++; console.log(`  sent ${d.to_email} (as ${box.email} / ${rec.name})${r.note ? " [" + r.note + "]" : ""}`); }

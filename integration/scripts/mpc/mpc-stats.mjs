@@ -49,7 +49,9 @@ function inboxReplies() {
     const items = s.items || (Array.isArray(s) ? s : []);
     for (const x of items) {
       const i = x.inbound || x;
-      if (i.workspaceId !== WS || i.campaignId !== "mpc-finance") continue;
+      // Any MPC-bridged campaign counts (mpc-finance = the BD lane; a recruiting lane
+      // bridges under its own mpc-* id). The send ledger's motion decides the side.
+      if (i.workspaceId !== WS || !/^mpc-/.test(String(i.campaignId || ""))) continue;
       const email = String(i.fromHandle || "").toLowerCase().trim();
       if (email) map.set(email, (x.classification && x.classification.class) || "unclassified");
     }
@@ -76,40 +78,84 @@ try {
 const CANON_OWNER = { ryan: "Ryan Nead" };
 const canonOwner = (o) => { const t = String(o || "").trim(); return CANON_OWNER[t.toLowerCase()] || t; };
 
-// Per-variant sent + replied + sentiment, keyed off the send log (variant lives there).
-const variants = new Map();
-const bump = (v) => { const s = variants.get(v) || { variant: v, sent: 0, replied: 0 }; variants.set(v, s); return s; };
-// Per-recruiter attribution: every send row belongs to the recruiter whose mailbox carried it.
-const recruiters = new Map();
-const recFor = (name) => { const s = recruiters.get(name) || { name, sentToday: 0, sentTotal: 0, replies: 0 }; recruiters.set(name, s); return s; };
-const lastSenderByLead = new Map(); // lead email -> recruiter who last emailed them (gets the reply credit)
-let sentToday = 0;
+// BD vs Recruiting split: both motions ride the SAME mailbox fleet, so the only truth
+// about which side a send belongs to is the `motion` stamped on its ledger row (batch.mjs /
+// followup.mjs). Rows that predate the stamp are all BD (this engine was BD-only then).
+// Every stat below accumulates per side; the legacy top-level fields stay as the combined
+// totals so nothing that reads the old shape breaks.
+const motionOf = (r) => (r.motion === "recruiting" ? "recruiting" : "bd");
+function newSide() {
+  return {
+    variants: new Map(), recruiters: new Map(), bySentiment: {},
+    lastSenderByLead: new Map(), // lead email -> recruiter who last emailed them (gets the reply credit)
+    sentToday: 0, sentTotal: 0,
+  };
+}
+const sides = { bd: newSide(), recruiting: newSide() };
+const bump = (side, v) => { const s = side.variants.get(v) || { variant: v, sent: 0, replied: 0 }; side.variants.set(v, s); return s; };
+const recFor = (side, name) => { const s = side.recruiters.get(name) || { name, sentToday: 0, sentTotal: 0, replies: 0 }; side.recruiters.set(name, s); return s; };
+const lastMotionByLead = new Map(); // lead email -> side of the last touch (a reply belongs to that side)
 const contacted = new Set();
 for (const r of sent) {
-  const v = r.variant || "unknown";
-  const s = bump(v); s.sent++;
+  const side = sides[motionOf(r)];
+  const s = bump(side, r.variant || "unknown"); s.sent++;
+  side.sentTotal++;
   const email = String(r.to_email || "").toLowerCase().trim();
   contacted.add(email);
   const isToday = (r.at || "").slice(0, 10) === today;
-  if (isToday) sentToday++;
+  if (isToday) side.sentToday++;
   if (replies.has(email)) s.replied++;
   const owner = canonOwner(r.from_owner || ownerByBox.get(String(r.from || "").toLowerCase().trim()) || "Unattributed");
-  const rec = recFor(owner);
+  const rec = recFor(side, owner);
   rec.sentTotal++;
   if (isToday) rec.sentToday++;
-  lastSenderByLead.set(email, owner);
+  side.lastSenderByLead.set(email, owner);
+  lastMotionByLead.set(email, motionOf(r));
 }
-for (const email of replies.keys()) {
-  const owner = lastSenderByLead.get(email);
-  if (owner) recFor(owner).replies++;
+for (const [email, cls] of replies) {
+  const side = sides[lastMotionByLead.get(email) || "bd"];
+  side.bySentiment[cls] = (side.bySentiment[cls] || 0) + 1;
+  const owner = side.lastSenderByLead.get(email);
+  if (owner) recFor(side, owner).replies++;
+}
+function sideRollup(side) {
+  const variantRows = [...side.variants.values()]
+    .map((s) => ({ ...s, rate: s.sent ? Math.round((s.replied / s.sent) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.rate - a.rate || b.replied - a.replied);
+  const recruiterRows = [...side.recruiters.values()]
+    .map((s) => ({ ...s, replyRate: s.sentTotal ? Math.round((s.replies / s.sentTotal) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.sentToday - a.sentToday || b.sentTotal - a.sentTotal);
+  const repliesTotal = variantRows.reduce((n, v) => n + v.replied, 0);
+  return {
+    sentToday: side.sentToday, sentTotal: side.sentTotal, repliesTotal,
+    replyRate: side.sentTotal ? Math.round((repliesTotal / side.sentTotal) * 1000) / 10 : 0,
+    repliesBySentiment: side.bySentiment, variants: variantRows, recruiters: recruiterRows,
+  };
+}
+const bdSlice = sideRollup(sides.bd);
+const recruitingSlice = sideRollup(sides.recruiting);
+const sentToday = sides.bd.sentToday + sides.recruiting.sentToday;
+
+// Combined legacy views (both motions), same shapes as before the split.
+const bySentiment = {};
+for (const cls of replies.values()) bySentiment[cls] = (bySentiment[cls] || 0) + 1;
+const variants = new Map();
+for (const side of [sides.bd, sides.recruiting]) {
+  for (const [k, v] of side.variants) {
+    const s = variants.get(k) || { variant: k, sent: 0, replied: 0 };
+    s.sent += v.sent; s.replied += v.replied; variants.set(k, s);
+  }
+}
+const recruiters = new Map();
+for (const side of [sides.bd, sides.recruiting]) {
+  for (const [k, v] of side.recruiters) {
+    const s = recruiters.get(k) || { name: k, sentToday: 0, sentTotal: 0, replies: 0 };
+    s.sentToday += v.sentToday; s.sentTotal += v.sentTotal; s.replies += v.replies; recruiters.set(k, s);
+  }
 }
 const recruiterRows = [...recruiters.values()]
   .map((s) => ({ ...s, replyRate: s.sentTotal ? Math.round((s.replies / s.sentTotal) * 1000) / 10 : 0 }))
   .sort((a, b) => b.sentToday - a.sentToday || b.sentTotal - a.sentTotal);
-
-// Replies by sentiment (positive / timing / not_interested / ...), across the campaign.
-const bySentiment = {};
-for (const cls of replies.values()) bySentiment[cls] = (bySentiment[cls] || 0) + 1;
 
 // Clean supply: finance-era, passes every gate, not yet contacted = ready to send.
 const curated = loadArray(CURATION).filter((r) => String((r.lead || r).curatedAt || "") >= SINCE);
@@ -142,11 +188,16 @@ const stats = {
   recruiters: recruiterRows,      // who sent it: per-recruiter sends + reply credit
   supplyReady: sendableNow,
   freeBoards: boards,
+  // The BD/Recruiting split of THIS engine's ledger. The app's /mpc-stats route folds the
+  // portal-native recruiting sends (job blasts, campaign cadences) into motions.recruiting,
+  // so the Dashboard's Recruiting tab covers both paths.
+  motions: { bd: bdSlice, recruiting: recruitingSlice },
 };
 
 const tmp = STATS_FILE + ".tmp";
 writeFileSync(tmp, JSON.stringify(stats, null, 2));
 renameSync(tmp, STATS_FILE);
 console.log(`mpc-stats -> sent ${totalSent} (today ${sentToday}), replies ${totalReplied} (${stats.replyRate}%), supplyReady ${sendableNow}, boards ${boards}`);
+console.log(`by motion: BD today ${bdSlice.sentToday} / total ${bdSlice.sentTotal} / replies ${bdSlice.repliesTotal} | Recruiting today ${recruitingSlice.sentToday} / total ${recruitingSlice.sentTotal} / replies ${recruitingSlice.repliesTotal}`);
 console.log("by variant:", variantRows.map((v) => `${v.variant} ${v.replied}/${v.sent} (${v.rate}%)`).join(" | "));
 console.log("by recruiter:", recruiterRows.map((r) => `${r.name} today ${r.sentToday} / total ${r.sentTotal} / replies ${r.replies}`).join(" | "));
