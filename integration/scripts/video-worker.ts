@@ -98,6 +98,9 @@ interface Composed {
   browserDead: boolean;
   /** A job blew the watchdog: the box is dirty (orphaned ffmpeg/Chromium), so restart. */
   wedged: boolean;
+  /** The clip the main handed us cannot be fetched (re-recorded/deleted). Config-level, not a
+   *  crash and not the roles' fault: sleep instead of restart-looping or benching good roles. */
+  clipMissing: boolean;
 }
 
 /** Compose a batch of videos concurrently with THIS box's CPU. Per-job errors are skipped, never fatal. */
@@ -106,13 +109,14 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
   const failures: Array<{ company: string; role: string; reason: string }> = [];
   let browserDead = false;
   let wedged = false;
+  let clipMissing = false;
   let suspects = 0;
   let cursor = 0;
   async function w(): Promise<void> {
     while (cursor < jobs.length) {
       const j = jobs[cursor++];
       if (!j?.company || !j?.role) continue;
-      if (browserDead || wedged) continue;   // the box is unhealthy; stop burning the batch
+      if (browserDead || wedged || clipMissing) continue;   // the box is unhealthy; stop burning the batch
       const t0 = Date.now();
       try {
         const res = await withTimeout(composeRoleVideo(
@@ -142,7 +146,10 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
         else {
           const reason = res.reason || res.status;
           console.error(`[video-worker] ${ts()} ${j.company} / ${j.role}: ${res.status}${res.reason ? ` (${res.reason})` : ""}`);
-          if (BROWSER_DEAD_RE.test(reason)) browserDead = true;
+          // no_clip fast-fails in <2s, so without this branch it trips the sub-2s crash
+          // heuristic and the unit restart-loops (6,667 restarts before this was caught).
+          if (res.status === "no_clip") clipMissing = true;
+          else if (BROWSER_DEAD_RE.test(reason)) browserDead = true;
           else if (Date.now() - t0 < SUSPECT_FAST_MS && ++suspects >= 2) browserDead = true;
           else failures.push({ company: j.company, role: j.role, reason });
         }
@@ -156,7 +163,7 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, w));
   // A dead browser or a wedge invalidates the batch's failures: they were never real attempts.
-  return { results: out, failures: browserDead || wedged ? [] : failures, browserDead, wedged };
+  return { results: out, failures: browserDead || wedged || clipMissing ? [] : failures, browserDead, wedged, clipMissing };
 }
 
 async function loop(): Promise<void> {
@@ -190,11 +197,15 @@ async function loop(): Promise<void> {
         await primeClipCache(claim.clip as Parameters<typeof primeClipCache>[0]).catch(() => {});
       }
 
-      const { results, failures, browserDead, wedged } = await compose(jobs, clipId, durationSec);
+      const { results, failures, browserDead, wedged, clipMissing } = await compose(jobs, clipId, durationSec);
       // Always report BOTH. A failure the main never hears about is re-handed to a worker every
       // cycle forever, which is exactly how the fleet came to spend all its CPU on dead roles.
       if (results.length || failures.length) await callMain("submit_video", { results, failures });
       console.log(`[video-worker] ${ts()} claimed ${jobs.length} -> composed ${results.length}, failed ${failures.length}`);
+      if (clipMissing) {
+        console.error(`[video-worker] ${ts()} clip ${clipId} is not fetchable from main (re-recorded or deleted?) — sleeping; main should fall back to the latest workspace clip`);
+        await sleep(120_000); continue;
+      }
       if (browserDead || wedged) {
         // Either Chromium is gone (every further job would fast-fail and, four strikes in, bench
         // a good posting for good) or a job never returned and left orphaned processes behind.

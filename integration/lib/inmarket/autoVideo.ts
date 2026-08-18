@@ -419,7 +419,15 @@ export async function autoVideoStatus(): Promise<{ enabled: boolean; workspace: 
 /** Resolve the clip to overlay: the explicit env id, else the latest clip in the workspace. */
 async function resolveClipId(): Promise<string | null> {
   const explicit = (process.env.INMARKET_AUTOVIDEO_CLIP_ID || "").trim();
-  if (explicit) return explicit;
+  if (explicit) {
+    // A pinned clip can be re-recorded/deleted out from under the pin (Aug 13: the pinned clip
+    // vanished and every worker job failed no_clip for 5 days). A pin that no longer resolves
+    // must fall through to the latest workspace clip, never stall the fleet.
+    try {
+      const { getClip } = await import("./roleVideo");
+      if (await getClip(explicit)) return explicit;
+    } catch { /* fall through to latest */ }
+  }
   const ws = workspaceId();
   if (!ws) return null;
   try {
