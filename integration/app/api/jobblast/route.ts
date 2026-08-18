@@ -35,9 +35,21 @@ export async function GET(req: Request) {
   if (url.searchParams.get("peek") !== "1") void runJobBlastTick(ws).catch(() => {});
 
   const blasts = await listJobBlasts(ws);
+  // Each member carries their resolved signature entry so the create modal can
+  // preview EXACTLY what the sender will append - same resolver, same env, so
+  // the preview and the real email cannot disagree (the 2026-08-18 pause was a
+  // recruiter reading the bare-body preview as "my signature is missing").
+  let entryFor: ((s: { inboxEmail?: string; ownerId?: string; ownerName?: string }) => unknown) | null = null;
+  try {
+    const sigMod = await import("../../../lib/sending/signature");
+    entryFor = (s) => sigMod.signatureEntryFor(s);
+  } catch { /* preview simply omits the block */ }
   const members = listMembers(ws)
     .filter((m) => m.role === "member" || m.role === "admin" || m.role === "owner")
-    .map((m) => ({ userId: m.userId, name: m.name, email: m.email, role: m.role }));
+    .map((m) => ({
+      userId: m.userId, name: m.name, email: m.email, role: m.role,
+      sig: entryFor ? entryFor({ inboxEmail: m.email, ownerId: m.userId, ownerName: m.name }) ?? null : null,
+    }));
 
   let capacity: unknown = null;
   try {

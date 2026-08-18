@@ -11725,8 +11725,31 @@
             paintCapacity();
           }).catch(function () {});
         }
+        function jbFmtPhone(p) {
+          var m2 = String(p || "").match(/^\+1(\d{3})(\d{3})(\d{4})$/);
+          return m2 ? "(" + m2[1] + ") " + m2[2] + "-" + m2[3] : String(p || "");
+        }
+        // What the recipient actually gets under the sign-off. Uses the sig entry
+        // the SERVER resolved with the real sender resolver, so this preview and
+        // the sent email cannot disagree.
+        function paintSigPreview() {
+          var host = card.querySelector("#jbSigPrev"); if (!host) return;
+          var m = null;
+          for (var i = 0; i < (members || []).length; i++) if (members[i].userId === recSel.value) m = members[i];
+          if (!m) { host.innerHTML = ""; return; }
+          var sig = m.sig;
+          if (!sig || !sig.name) {
+            host.innerHTML = '<div style="font-size:12.5px;color:#8a6100;background:#fdf6e3;border:1px solid #f0e0b0;border-radius:8px;padding:6px 10px">' + esc(m.name || "This recruiter") + " has no email signature configured, so sends end at the sign-off. The owner can add one in sending settings.</div>";
+            return;
+          }
+          var lines = [sig.name].concat(sig.lines || []);
+          if (sig.phone) lines.push(jbFmtPhone(sig.phone));
+          host.innerHTML = '<div style="border:1px dashed var(--line,var(--border));border-radius:8px;padding:8px 10px;font-size:12.5px">' +
+            '<div style="color:var(--muted,var(--text-dim));margin-bottom:4px">The examples above show the body only. Every send automatically adds this signature after the sign-off, then the compliance footer:</div>' +
+            '<div style="font-size:13px;line-height:1.5"><b>' + esc(lines[0]) + "</b>" + lines.slice(1).map(function (l) { return "<br>" + esc(l); }).join("") + "</div></div>";
+        }
         fetchMeta("");
-        recSel.addEventListener("change", function () { if (recSel.value) fetchMeta(recSel.value); });
+        recSel.addEventListener("change", function () { if (recSel.value) fetchMeta(recSel.value); paintSigPreview(); });
         card.querySelector("#jbGen").addEventListener("click", function () {
           var jd = card.querySelector("#jbJd").value.trim();
           if (jd.length < 40) { toast("Paste the job description first."); return; }
@@ -11762,8 +11785,10 @@
                     "<summary style=\"cursor:pointer;font-size:12.5px;font-weight:600\">Example " + (i + 1) + ": " + esc(s.subject) + "</summary>" +
                     '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;margin:8px 0 0">' + esc(s.body) + "</pre></details>";
                 }).join("") +
+                '<div id="jbSigPrev"></div>' +
               "</div>";
             card.querySelector("#jbCreateRow").style.display = "block";
+            paintSigPreview();
             var sBtn = card.querySelector("#jbStart"), hBtn = card.querySelector("#jbHold");
             if (sBtn) { sBtn.disabled = !canCreate; sBtn.title = canCreate ? "" : "Needs at least 8 approved angles; generate again"; }
             if (hBtn) { hBtn.disabled = !canCreate; hBtn.title = canCreate ? "" : "Needs at least 8 approved angles; generate again"; }
