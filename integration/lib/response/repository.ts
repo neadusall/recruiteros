@@ -19,19 +19,36 @@ class InboxStore {
   seen = new Set<string>();
   outbound: OutboundNote[] = [];
 
-  private persist = debouncedSaver("inbox", () => ({
+  private saver = debouncedSaver("inbox", () => ({
     items: this.items,
     seen: [...this.seen],
     outbound: this.outbound,
   }));
+  /** Never let a save run before hydration: a mutation on a not-yet-hydrated
+   *  store would snapshot the near-empty boot state over the durable file,
+   *  wiping history and every delete ever made. */
+  private persist = (): void => {
+    void this.ready().then(() => this.saver());
+  };
   private hydrated: Promise<void> | null = null;
   ready(): Promise<void> {
     if (!this.hydrated) {
       this.hydrated = dbEnabled()
         ? loadSnapshot<any>("inbox").then((s) => {
             if (!s) return;
-            this.items = s.items || [];
             this.seen = new Set(s.seen || []);
+            // Deleted rows do not ride along: drop them from the store for good,
+            // keeping only their provider message ids claimed so the sync ticks
+            // (which re-read their queue files every pass) can never re-ingest them.
+            const items: ProcessedResponse[] = [];
+            for (const p of (s.items || []) as ProcessedResponse[]) {
+              if (p?.deletedAt) {
+                if (p.inbound?.providerMessageId) this.seen.add(p.inbound.providerMessageId);
+                continue;
+              }
+              items.push(p);
+            }
+            this.items = items;
             this.outbound = s.outbound || [];
           }).catch(() => {})
         : Promise.resolve();
@@ -103,12 +120,16 @@ class InboxStore {
       ((keys.prospectId && n.prospectId === keys.prospectId) || rids.has(n.responseId)));
   }
 
-  /** Delete a response from the inbox (soft: kept in the snapshot, never listed). */
+  /** Delete a response from the inbox. Deleting is forever: the row leaves the
+   *  store entirely and its provider message id stays claimed, so the sync
+   *  ticks that re-read their queue files can never bring it back. */
   async remove(workspaceId: string, id: string): Promise<boolean> {
     await this.ready();
-    const p = this.items.find((x) => x.inbound.id === id && x.inbound.workspaceId === workspaceId);
-    if (!p) return false;
-    p.deletedAt = new Date().toISOString();
+    const i = this.items.findIndex((x) => x.inbound.id === id && x.inbound.workspaceId === workspaceId);
+    if (i < 0) return false;
+    const pm = this.items[i].inbound.providerMessageId;
+    if (pm) this.seen.add(pm);
+    this.items.splice(i, 1);
     this.persist();
     return true;
   }

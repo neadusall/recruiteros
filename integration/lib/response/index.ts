@@ -29,6 +29,11 @@ export async function processInbound(
   hints?: import("./classify").ClassifyHints,
 ): Promise<ProcessedResponse | null> {
   const inbox = getInbox();
+  // The store hydrates lazily from the durable snapshot. Ingest MUST wait for
+  // it: on a fresh boot the seen-set is empty until hydration lands, so the
+  // first sync tick after a deploy would re-claim every message still in its
+  // queue file — resurrecting rows the recruiter already deleted.
+  await inbox.ready();
 
   let inbound = normalize(source, workspaceId, payload);
   if (!inbound) return null;                        // not a reply event we handle
