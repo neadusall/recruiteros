@@ -1016,7 +1016,11 @@ export async function koldInfoExportRows(opts: { limit?: number; mode?: "seed" |
   const rows = await load();
   const pool = rows
     .filter((r) => r.domain && !r.emailValidated && !r.emailCatchAll
-      && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed")
+      && r.status !== "enrolled" && r.status !== "queued"
+      // suppressed rows come back in ONLY when suppression meant "the guessed address failed" and
+      // the person was never contacted (same guard as findEmailsByPaid) - KoldInfo is the residual
+      // finder the operator actually has credentials for, so it must see the rejected pile too.
+      && (r.status !== "suppressed" || rescuableInvalid(r)))
     .sort((a, b) => b.score - a.score);
 
   let picked: CuratedProspect[];
@@ -1110,7 +1114,8 @@ export async function applyKoldInfoResults(
 
       if (status === "valid") {
         row.emailValidated = true; row.emailInvalid = false; row.emailCatchAll = false; row.validatedAt = nowIso;
-        if (row.status === "sourced" || row.status === "named") row.status = "contactable";
+        if (row.status === "sourced" || row.status === "named"
+          || (row.status === "suppressed" && !row.sentAt && !row.bouncedAt && !row.repliedAt)) row.status = "contactable";
         summary.found++;
         await learnFromConfirmedEmail(row.managerName, link.email, "koldinfo").catch(() => {});
       } else if (status === "risky" && v?.reason === "catch_all") {

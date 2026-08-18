@@ -150,6 +150,11 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
           // heuristic and the unit restart-loops (6,667 restarts before this was caught).
           if (res.status === "no_clip") clipMissing = true;
           else if (BROWSER_DEAD_RE.test(reason)) browserDead = true;
+          // no_shot is a per-role CONTENT outcome (role not on the careers site) and repeat
+          // probes answer from cache in <2s, so it must never feed the crash heuristic:
+          // counting it restart-looped worker-2 on 8/18 (crash-exit discarded the failure
+          // reports, main re-served the same jobs, nothing ever got benched). Report it.
+          else if (res.status === "no_shot") failures.push({ company: j.company, role: j.role, reason });
           else if (Date.now() - t0 < SUSPECT_FAST_MS && ++suspects >= 2) browserDead = true;
           else failures.push({ company: j.company, role: j.role, reason });
         }
