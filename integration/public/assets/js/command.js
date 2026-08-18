@@ -11740,6 +11740,11 @@
             var nameInput = card.querySelector("#jbName");
             if (nameInput && !nameInput.value.trim()) nameInput.value = (facts.roleTitle || "Job blast") + (facts.location ? " · " + facts.location : "");
             var enough = bank.distinctEmails >= 50 && bank.templates.length >= 10;
+            // The server rejects create below 8 angles (bank_too_small 422), so
+            // inviting a press with "You can still send" below that line was a
+            // lie that looked like "nothing happened". Under 8: say why, block
+            // the buttons, point at regenerate.
+            var canCreate = bank.templates.length >= 8;
             var factBits = [facts.roleTitle, facts.company, facts.location, facts.workModel, facts.comp].filter(Boolean).map(esc).join(" · ");
             var samples = (r.data.samples || []).filter(function (s) { return s && s.body; });
             card.querySelector("#jbResult").innerHTML =
@@ -11749,7 +11754,9 @@
                   '<b>' + bank.templates.length + "</b> approved email angles · <b>" + (bank.distinctEmails >= 1000 ? "1000+" : bank.distinctEmails) + "</b> distinct emails after wording spins" +
                   (bank.rejected ? ' · <span style="color:var(--muted,var(--text-dim))">' + bank.rejected + " drafts rejected by the quality gate</span>" : "") +
                 "</div>" +
-                (enough ? "" : '<div style="font-size:12.5px;color:#8a6100;background:#fdf6e3;border:1px solid #f0e0b0;border-radius:8px;padding:6px 10px">Fewer than 50 distinct emails came through the quality gate. You can still send, or generate again for more variety.</div>') +
+                (!canCreate
+                  ? '<div style="font-size:12.5px;color:#8f2b1f;background:#fdeceb;border:1px solid #f2c4bd;border-radius:8px;padding:6px 10px">Only ' + bank.templates.length + ' angle(s) passed the quality gate and creating a blast needs at least 8. Press "Write the emails" again; a fresh generation usually passes more.</div>'
+                  : (enough ? "" : '<div style="font-size:12.5px;color:#8a6100;background:#fdf6e3;border:1px solid #f0e0b0;border-radius:8px;padding:6px 10px">Fewer than 50 distinct emails came through the quality gate. You can still send, or generate again for more variety.</div>')) +
                 samples.map(function (s, i) {
                   return '<details' + (i === 0 ? " open" : "") + ' style="border:1px solid var(--line,var(--border));border-radius:8px;padding:8px 10px">' +
                     "<summary style=\"cursor:pointer;font-size:12.5px;font-weight:600\">Example " + (i + 1) + ": " + esc(s.subject) + "</summary>" +
@@ -11757,6 +11764,9 @@
                 }).join("") +
               "</div>";
             card.querySelector("#jbCreateRow").style.display = "block";
+            var sBtn = card.querySelector("#jbStart"), hBtn = card.querySelector("#jbHold");
+            if (sBtn) { sBtn.disabled = !canCreate; sBtn.title = canCreate ? "" : "Needs at least 8 approved angles; generate again"; }
+            if (hBtn) { hBtn.disabled = !canCreate; hBtn.title = canCreate ? "" : "Needs at least 8 approved angles; generate again"; }
           }).catch(function () { btn.disabled = false; msg.textContent = ""; toast("Could not reach the server."); });
         });
         function createBlast(start) {
