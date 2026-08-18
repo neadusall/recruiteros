@@ -240,6 +240,7 @@ async function appendSentFeed(
   p: Prospect,
   rendered: { subject: string; body: string; templateId: string },
   senderEmail: string | undefined,
+  senderOwner: string | undefined,
   at: string,
 ): Promise<void> {
   try {
@@ -252,7 +253,9 @@ async function appendSentFeed(
       company: p.company || "",
       role: p.title || "",
       from: (senderEmail || "").toLowerCase(),
-      from_owner: b.recruiterName || "",
+      // The box's display name ("Ryan Nead"), not the campaign's short first
+      // name ("Ryan"): keeps ONE recruiter chip per person on the Sent page.
+      from_owner: senderOwner || b.recruiterName || "",
       variant: "job blast",
       touch: 1,
       subject: rendered.subject,
@@ -288,6 +291,32 @@ async function tickInner(workspaceId: string, opts: { max?: number }): Promise<T
   await hydrate();
   const report: TickReport = { workspaceId, blasts: 0, sent: 0, failed: 0, held: 0 };
   const active = store.filter((b) => b.workspaceId === workspaceId && b.status === "sending");
+
+  // Converge funnel status BEFORE the active/window gates: anyone a blast
+  // actually emailed must not sit in the "Queued" tile forever, including
+  // recipients of blasts that already finished (this also runs on every
+  // Job-blasts panel open via the GET self-heal tick). Not a send, so it is
+  // deliberately not gated by the send window.
+  {
+    const core = getCore();
+    const touched = store.filter(
+      (b) => b.workspaceId === workspaceId && (b.status === "sending" || b.status === "done"),
+    );
+    for (const b of touched) {
+      for (const r of b.recipients) {
+        if (r.status !== "sent") continue;
+        try {
+          const fresh = await core.getProspect(r.prospectId);
+          if (fresh && fresh.status === "queued") {
+            fresh.status = "in_sequence";
+            if (!fresh.sequenceStartedAt) fresh.sequenceStartedAt = r.at || nowIso();
+            await core.saveProspect(fresh);
+          }
+        } catch { /* best-effort; never blocks the tick */ }
+      }
+    }
+  }
+
   if (!active.length) return report;
 
   const { emailSendWindow } = await import("../sending/sendWindow");
@@ -366,7 +395,7 @@ async function tickInner(workspaceId: string, opts: { max?: number }): Promise<T
             await core.saveProspect(fresh);
           }
         } catch { /* tile truth is best-effort; the send already happened */ }
-        await appendSentFeed(workspaceId, b, p, rendered, res.senderEmail, sentAt);
+        await appendSentFeed(workspaceId, b, p, rendered, res.senderEmail, res.senderOwner, sentAt);
       } else {
         const reason = res.error || "send_failed";
         // Transient pool exhaustion is NOT a per-person failure: leave the rest

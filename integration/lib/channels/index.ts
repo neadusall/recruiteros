@@ -32,6 +32,8 @@ export interface SendResult {
   /** The pool inbox address the email left from (sender-pool sends only) — lets
    *  callers register the send for mailbox reply-watching. */
   senderEmail?: string;
+  /** The sending box's display name ("Ryan Nead") for audit-feed labeling. */
+  senderOwner?: string;
 }
 
 export interface SendTouch {
@@ -400,7 +402,7 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
       } catch { /* best-effort stamp */ }
       t.prospect.senderInboxId = inbox.id;
     }
-    return { ok: true, channel: "email", provider: "smtp:" + inbox.provider, providerMessageId: res.messageId, senderEmail: inbox.email };
+    return { ok: true, channel: "email", provider: "smtp:" + inbox.provider, providerMessageId: res.messageId, senderEmail: inbox.email, senderOwner: inbox.displayName || inbox.ownerName || undefined };
   } catch {
     return null; // any error -> fall through to existing providers
   }

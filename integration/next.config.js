@@ -69,6 +69,24 @@ module.exports = {
     return pageRewrites;
   },
 
+  // STALE-UI GUARD. Next sends no Cache-Control for public/ files, so browsers
+  // heuristically cached the 1.7MB command.js for DAYS and recruiters kept
+  // working in an old portal (2026-08-18: a day-old Candidates tab with no
+  // "Market a job"). no-cache does NOT mean "don't cache": the browser keeps
+  // the file but revalidates its ETag per load, so an unchanged file costs a
+  // 304 and a changed one shows up on the very next paint. /_next/static keeps
+  // Next's own immutable headers; API routes manage their own caching.
+  async headers() {
+    const noCache = [{ key: "Cache-Control", value: "no-cache" }];
+    return [
+      { source: "/assets/:path*", headers: noCache },
+      { source: "/home", headers: noCache },
+      { source: "/admin", headers: noCache },
+      { source: "/recruiter", headers: noCache },
+      ...PAGES.filter((p) => p !== "index").map((p) => ({ source: `/${p}`, headers: noCache })),
+    ];
+  },
+
   // Bounce the old .html URLs (and bare root) to the clean path, so links that
   // still say /login.html land on /login. 301 so search engines learn the clean URL.
   async redirects() {
