@@ -125,6 +125,14 @@ export async function POST(req: Request) {
           failure_redirect_url: `${base}/command?linkedin=failed#jdsourcing`,
         };
         if (mode === "reconnect") payload.reconnect_account = seat!.accountId;
+        // LinkedIn Recruiter allows only ONE active session, so a hosted seat
+        // that also holds a Recruiter session keeps booting the recruiter out
+        // of Recruiter itself (LinkedIn's "multiple sign-ins" screen), and the
+        // provider's automatic re-login then boots them again. Nothing in
+        // RecruitersOS calls Recruiter APIs, so fresh connections never take
+        // that session. Create-mode only: reconnect keeps existing settings,
+        // and the hosted link API rejects the flag there.
+        if (mode === "create") payload.disabled_features = ["linkedin_recruiter"];
 
         try {
           const out = await unipileRequest<{ url?: string }>("/hosted/accounts/link", {
@@ -140,6 +148,7 @@ export async function POST(req: Request) {
             const freshToken = await beginConnect(ws, userId, "create");
             const retry = { ...payload, type: "create", name: freshToken };
             delete (retry as any).reconnect_account;
+            (retry as any).disabled_features = ["linkedin_recruiter"];
             const out = await unipileRequest<{ url?: string }>("/hosted/accounts/link", {
               method: "POST",
               body: JSON.stringify(retry),
