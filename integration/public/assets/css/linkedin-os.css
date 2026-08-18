@@ -108,6 +108,8 @@ a.lio-row:hover { background: var(--surface-2); border-radius: var(--radius-sm);
 .lio-radio:hover { border-color: var(--border-strong); }
 .lio-radio input { margin-top: 3px; }
 .lio-toggle { display: flex; gap: 8px; align-items: center; font-size: 12.5px; margin: 7px 0; cursor: pointer; }
+.lio-days { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: flex-end; }
+.lio-days .lio-toggle { gap: 5px; margin: 0; }
 .lio-rv { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; padding: 4px 0; }
 .lio-rv b { font-variant-numeric: tabular-nums; text-align: right; }
 .lio-note {

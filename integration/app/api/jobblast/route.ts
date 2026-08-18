@@ -28,8 +28,11 @@ export async function GET(req: Request) {
   const recruiterId = url.searchParams.get("recruiterId") || "";
 
   const { listJobBlasts, runJobBlastTick } = await import("../../../lib/recruiting/jobBlast");
-  // Self-heal clock: never blocks the panel paint.
-  void runJobBlastTick(ws).catch(() => {});
+  // Self-heal clock: never blocks the panel paint. ?peek=1 skips it - the
+  // board's auto-refresh polls every 30s, and each tick can send up to a wave,
+  // so a ticking refresh would quietly burn the daily cap far faster than the
+  // "paced across the day" promise. Peek reads state without advancing it.
+  if (url.searchParams.get("peek") !== "1") void runJobBlastTick(ws).catch(() => {});
 
   const blasts = await listJobBlasts(ws);
   const members = listMembers(ws)
@@ -42,7 +45,13 @@ export async function GET(req: Request) {
     capacity = await poolCapacity(ws, recruiterId || undefined);
   } catch { /* pool not set up yet: the UI says so */ }
 
-  return ok({ blasts, members, capacity });
+  let window: unknown = null;
+  try {
+    const { sendWindowInfo } = await import("../../../lib/sending/sendWindow");
+    window = sendWindowInfo();
+  } catch { /* board falls back to counts-only */ }
+
+  return ok({ blasts, members, capacity, window });
 }
 
 export async function POST(req: Request) {
@@ -99,7 +108,12 @@ export async function POST(req: Request) {
     });
     // First wave immediately (window permitting) so "start" visibly does something.
     if (blast.status === "sending") void runJobBlastTick(ws).catch(() => {});
-    return ok({ blast });
+    let window: unknown = null;
+    try {
+      const { sendWindowInfo } = await import("../../../lib/sending/sendWindow");
+      window = sendWindowInfo();
+    } catch { /* toast falls back to the generic line */ }
+    return ok({ blast, window });
   }
 
   if (action === "pause" || action === "resume") {

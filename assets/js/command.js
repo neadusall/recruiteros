@@ -11700,7 +11700,7 @@
           '<div id="jbCreateRow" style="display:none;gap:8px" >' +
             '<button class="btn btn-primary" id="jbStart">Create and start sending</button> ' +
             '<button class="btn btn-ghost" id="jbHold">Create paused</button>' +
-            '<div style="font-size:12px;color:var(--muted,var(--text-dim));margin-top:6px">Sending starts inside business hours and paces itself across the day. You can pause any time under Job blasts.</div>' +
+            '<div style="font-size:12px;color:var(--muted,var(--text-dim));margin-top:6px">Sending starts inside business hours and paces itself across the day. After you press start, the Job blasts board opens with a live sent-today counter and hourly rate; you can pause any time there.</div>' +
           '</div>' +
         '</div>';
       openModal("Market a job to candidates", "One job, one recruiter, 50+ unique emails", bodyHtml, function (card, close) {
@@ -11775,8 +11775,11 @@
             if (!r.ok) { b1.disabled = b2.disabled = false; toast((r.data && r.data.detail) || "Could not create the blast."); return; }
             close();
             var c = r.data.blast.counts;
+            var w = r.data.window;
             toast(start
-              ? "Blast created: " + c.total + " candidates queued. Sending starts now, paced through the recruiter's inboxes."
+              ? (w && w.open === false
+                  ? "Blast created: " + c.total + " candidates queued. The send window is closed right now (" + ((w.reason || "outside business hours")) + "), so sending starts automatically when it opens."
+                  : "Blast created: " + c.total + " candidates queued. Sending is live now; the board shows the rate.")
               : "Blast created paused: " + c.total + " candidates queued. Start it under Job blasts.");
             openBlastsPanel();
           }).catch(function () { b1.disabled = b2.disabled = false; toast("Could not reach the server."); });
@@ -11789,18 +11792,44 @@
     function openBlastsPanel() {
       var bodyHtml = '<div id="jbList" style="min-width:0;max-width:100%">' + loading() + "</div>";
       openModal("Job blasts", "Candidate job marketing: what is sending, what went out, what is held", bodyHtml, function (card) {
-        function paintBlasts() {
+        function paintBlasts(peek) {
           var host = card.querySelector("#jbList"); if (!host) return;
-          api("/jobblast").then(function (d) {
+          api("/jobblast" + (peek ? "?peek=1" : "")).then(function (d) {
             var blasts = (d && d.blasts) || [];
+            var win = (d && d.window) || null;
             if (!blasts.length) { host.innerHTML = '<div class="empty">No job blasts yet. Select candidates and hit Market a job.</div>'; return; }
             host.innerHTML = blasts.map(function (b) {
               var c = b.counts || {};
               var pct = c.total ? Math.round(((c.sent || 0) / c.total) * 100) : 0;
+              // The live line: is this blast actually sending right now, and how fast.
+              var todayKey = new Date().toISOString().slice(0, 10);
+              var todaySent = (b.dayClock && b.dayClock.day === todayKey) ? (b.dayClock.count || 0) : 0;
+              var cap = b.dailyCap || 0;
+              var liveLine = "";
+              if (b.status === "sending") {
+                if (win && win.open === false) {
+                  liveLine = '<div style="font-size:12.5px;color:#8a6100">Send window closed (' + esc(win.reason || "outside business hours") + "): " + todaySent + " of " + cap + " sent today. Sending resumes automatically when the window opens.</div>";
+                } else {
+                  var left = Math.max(0, cap - todaySent);
+                  var pace = (win && win.hoursLeft && left > 0) ? Math.max(1, Math.ceil(left / win.hoursLeft)) : 0;
+                  var ago = "";
+                  if (b.lastSendAt) {
+                    var mins = Math.max(0, Math.round((Date.now() - Date.parse(b.lastSendAt)) / 60000));
+                    ago = mins < 1 ? "moments ago" : mins < 60 ? mins + " min ago" : Math.round(mins / 60) + "h ago";
+                  }
+                  liveLine = '<div style="font-size:12.5px;color:var(--ok,#1a7f37)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok,#1a7f37);margin-right:6px;vertical-align:middle"></span>' +
+                    "Sending live: " + todaySent + " of " + cap + " today" +
+                    (ago ? " · last send " + ago : " · first sends within the hour") +
+                    (left === 0 ? " · daily cap reached, resumes tomorrow" : (pace ? " · pacing about " + pace + " an hour until " + win.endHour + ":00" : "")) + "</div>";
+                }
+              } else if (todaySent > 0) {
+                liveLine = '<div style="font-size:12.5px;color:var(--muted,var(--text-dim))">' + todaySent + " of " + cap + " sent today before " + (b.status === "paused" ? "the pause" : "finishing") + "</div>";
+              }
               return '<div class="card" style="padding:12px 14px;margin-bottom:10px;display:flex;flex-direction:column;gap:7px">' +
                 '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:13.5px">' + esc(b.name) + "</b>" + jbStatusPill(b.status) +
                   '<span style="font-size:12px;color:var(--muted,var(--text-dim))">sends as ' + esc(b.recruiterName || "?") + " · " + (b.templates || 0) + " angles · " + (b.distinctEmails >= 1000 ? "1000+" : b.distinctEmails || 0) + " distinct emails</span></div>" +
                 '<div style="height:6px;border-radius:4px;background:var(--bg-soft,var(--surface-2));overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--accent,var(--brand))"></div></div>' +
+                liveLine +
                 '<div style="font-size:12.5px;color:var(--muted,var(--text-dim))">' + (c.sent || 0) + " sent · " + (c.queued || 0) + " queued · " + (c.failed || 0) + " failed · " + (c.held || 0) + " held" +
                   (b.lastError ? ' · <span style="color:#8a6100">waiting: ' + esc(b.lastError === "no_tenant_inbox" ? "no inbox with capacity right now, retries automatically" : b.lastError) + "</span>" : "") + "</div>" +
                 '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
@@ -11826,6 +11855,13 @@
           }).catch(function () { host.innerHTML = '<div class="empty">Could not load blasts.</div>'; });
         }
         paintBlasts();
+        // Live board: repaint every 30s while open so "sent today" visibly moves.
+        // peek=1 keeps the refresh read-only - a plain GET runs a send tick, and
+        // a ticking 30s poll would race through the daily cap instead of pacing.
+        var jbLive = setInterval(function () {
+          if (!document.body.contains(card)) { clearInterval(jbLive); return; }
+          paintBlasts(true);
+        }, 30000);
       });
     }
 

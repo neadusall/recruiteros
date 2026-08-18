@@ -87,3 +87,32 @@ export function emailSendWindow(now: Date = new Date()): SendWindow {
   }
   return { open: true };
 }
+
+/**
+ * Window state plus how many send-hours remain today, for UIs that show live
+ * pacing (the Job Blasts board renders "X of CAP today, about R an hour until
+ * H:00" from this). Reuses emailSendWindow for the open/closed verdict so the
+ * two can never disagree.
+ */
+export interface SendWindowInfo extends SendWindow {
+  startHour: number;
+  endHour: number;
+  tz: string;
+  /** Whole send-hours left today (>= 1 while open, 0 while closed). */
+  hoursLeft: number;
+}
+
+export function sendWindowInfo(now: Date = new Date()): SendWindowInfo {
+  const tz = process.env.OUTREACH_TIMEZONE || process.env.APP_TIMEZONE || "America/New_York";
+  const [rawStart, rawEnd] = (process.env.OUTREACH_SEND_WINDOW || "8-17").split("-");
+  const startHour = intOr(rawStart, 8);
+  const endHour = intOr(rawEnd, 17);
+  const win = emailSendWindow(now);
+  let hour = now.getUTCHours();
+  try {
+    const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hourCycle: "h23" }).format(now));
+    if (Number.isFinite(h)) hour = h;
+  } catch { /* bad zone name: UTC hour stands */ }
+  const hoursLeft = win.open ? Math.max(1, endHour - hour) : 0;
+  return { ...win, startHour, endHour, tz, hoursLeft };
+}
