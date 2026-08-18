@@ -4243,8 +4243,12 @@
     // Who is on your site: first-party visitor intelligence for the marketing site.
     // A company we emailed shows with the exact people we emailed there (recruiter +
     // LinkedIn), the LinkedIn-connect shortlist. Hides cleanly when nothing is there.
-    api("/site-visitors").then(function (v) {
+    Promise.all([api("/site-visitors"), api("/mpc-connect").catch(function () { return null; })]).then(function (resv) {
+      var v = resv[0];
       var host = $("#ovVisitors"); if (!host || !v || !v.present) return;
+      // Connects log: email -> status, so each person shows a Send-request button or their pill.
+      var cmap = {};
+      (((resv[1] || {}).items) || []).forEach(function (c) { if (c && c.email) cmap[c.email] = c.status; });
       var comps = v.companies || [], corp = v.corporate || [];
       if (!comps.length && !corp.length) return;
       var rows = comps.map(function (c) {
@@ -4253,7 +4257,8 @@
         var people = (c.people || []).map(function (p) {
           var li = p.linkedin ? ' &middot; <a href="' + esc(p.linkedin) + '" target="_blank" rel="noopener">LinkedIn</a>' : "";
           var by = p.recruiter ? " &middot; emailed by " + esc(p.recruiter) : "";
-          return '<div class="lr-sub" style="margin-top:2px">' + esc(p.name || p.email) + (p.title ? ", " + esc(p.title) : "") + by + li + "</div>";
+          var act = ' &middot; <span class="rp-connect-cell">' + liConnectHtml(p.email, p.linkedin, cmap[p.email]) + "</span>";
+          return '<div class="lr-sub" style="margin-top:2px">' + esc(p.name || p.email) + (p.title ? ", " + esc(p.title) : "") + by + li + act + "</div>";
         }).join("");
         return '<div class="list-row" style="align-items:flex-start;justify-content:space-between;gap:10px"><div>' +
           '<div class="lr-main">' + esc(c.company) + conf + "</div>" + people + "</div>" +
@@ -4271,6 +4276,24 @@
           '<div class="note" style="margin:6px 0 8px">A company here visited the site AFTER we emailed them. The people listed are exactly who we contacted there, ready for a LinkedIn connect from the recruiter who emailed them.</div>' +
           rows + corpNote +
         "</div>";
+      // Wire the Send-request buttons: fire the real connection request, reflect status inline.
+      host.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-connect]"); if (!b) return;
+        b.disabled = true; b.textContent = "Sending...";
+        send("/mpc-connect", "POST", { email: b.getAttribute("data-connect") }).then(function (r) {
+          var cell = b.closest(".rp-connect-cell");
+          if (r.ok && r.data && (r.data.status === "sent" || r.data.status === "queued")) {
+            if (cell) cell.innerHTML = liConnectHtml("", "", r.data.status);
+            toast("Connection request sent from the recruiter who emailed them.");
+          } else if (r.ok && r.data && r.data.status === "suppressed") {
+            if (cell) cell.innerHTML = liConnectHtml("", "", "suppressed");
+            toast(r.data.reason || "Skipped, this person is on the do-not-contact list.");
+          } else {
+            b.disabled = false; b.textContent = "Send request";
+            toast("Could not send the request. The team can retry from BD Reports.");
+          }
+        }).catch(function () { b.disabled = false; b.textContent = "Send request"; toast("Could not reach the server."); });
+      });
     }).catch(function () { /* visitor card is best-effort; the Dashboard still loads */ });
 
     // Outreach cockpit: real activity from the MPC engine (sends via Sending.ac + free
@@ -12929,9 +12952,13 @@
       api("/mpc-stats").catch(function () { return null; }),
       api("/site-visitors").catch(function () { return null; }),
       api("/linkedin/os?view=watch_connect").catch(function () { return null; }),
-      api("/mpc-watchers").catch(function () { return null; })
+      api("/mpc-watchers").catch(function () { return null; }),
+      api("/mpc-connect").catch(function () { return null; })
     ]).then(function (res) {
       var m = res[0] || {}, v = res[1] || {}, w = res[2] || {};
+      // Connects log: email -> status, so visitor rows show their pill after an action.
+      var cmap = {};
+      (((res[4] || {}).items) || []).forEach(function (c) { if (c && c.email) cmap[c.email] = c.status; });
       // BD Reports is BD-motion by charter: with the ledger now split by side, read the BD
       // slice so recruiting sends never inflate this funnel.
       if (m.motions && m.motions.bd) m = Object.assign({}, m, m.motions.bd);
@@ -12975,10 +13002,10 @@
       // ---- Who we're connecting with: identified visitors + the connect funnel. ----
       var connectRows = comps.map(function (c) {
         return (c.people || []).map(function (p) {
-          var li = p.linkedin ? '<a href="' + esc(p.linkedin) + '" target="_blank" rel="noopener">LinkedIn</a>' : '<span class="note">no profile yet</span>';
+          var li = p.linkedin ? ' &middot; <a href="' + esc(p.linkedin) + '" target="_blank" rel="noopener">profile</a>' : "";
           var when = (c.lastVisit || "").slice(0, 10);
           return "<tr><td><b>" + esc(p.name || p.email) + "</b>" + (p.title ? '<div class="lr-sub">' + esc(p.title) + "</div>" : "") + "</td>" +
-            "<td>" + esc(c.company) + "</td><td>" + esc(p.recruiter || "-") + "</td><td>" + esc(when) + "</td><td>" + li + "</td></tr>";
+            "<td>" + esc(c.company) + "</td><td>" + esc(p.recruiter || "-") + li + "</td><td>" + esc(when) + '</td><td class="rp-connect-cell">' + liConnectHtml(p.email, p.linkedin, cmap[p.email]) + "</td></tr>";
         }).join("");
       }).join("");
       var connectTable = connectRows
@@ -12992,14 +13019,7 @@
       // real connection request through LinkedIn OS from the recruiter who emailed them.
       var evLabel = { complete: "Watched to end", play: "Played", open: "Opened" };
       var evCls = { complete: "good", play: "good", open: "amber" };
-      function connectBtn(r) {
-        var st = String(r.connectStatus || "");
-        if (st === "accepted") return '<span class="sv good" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">ACCEPTED</span>';
-        if (st === "sent" || st === "queued") return '<span class="sv" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">REQUEST ' + esc(st.toUpperCase()) + "</span>";
-        if (st === "suppressed") return '<span class="sv bad" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor">SUPPRESSED</span>';
-        if (!r.linkedin) return '<span class="note">no profile yet</span>';
-        return '<button class="resp-btn" data-connect="' + esc(r.email) + '">Send request</button>';
-      }
+      function connectBtn(r) { return liConnectHtml(r.email, r.linkedin, r.connectStatus); }
       var watchers = wt.watchers || [];
       var watcherRows = watchers.map(function (r) {
         var li = r.linkedin ? ' &middot; <a href="' + esc(r.linkedin) + '" target="_blank" rel="noopener">profile</a>' : "";
@@ -13053,6 +13073,19 @@
     }).catch(function () {
       var body = $("#rpBody"); if (body) body.innerHTML = needsSetup();
     });
+  }
+
+  // One-click LinkedIn connect state for an emailed person (video watcher or identified site
+  // visitor): status pill once actioned, Send-request button when we have their profile, quiet
+  // note when we don't. The button POSTs /mpc-connect and the request goes out from the
+  // recruiter who emailed them, through LinkedIn OS pacing.
+  function liConnectHtml(email, linkedin, status) {
+    var st = String(status || "");
+    if (st === "accepted") return '<span class="sv good" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor;white-space:nowrap">ACCEPTED</span>';
+    if (st === "sent" || st === "queued") return '<span class="sv" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor;white-space:nowrap">REQUEST ' + esc(st.toUpperCase()) + "</span>";
+    if (st === "suppressed") return '<span class="sv bad" style="font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor;white-space:nowrap">SUPPRESSED</span>';
+    if (!linkedin) return '<span class="note">no profile yet</span>';
+    return '<button class="resp-btn" data-connect="' + esc(email) + '">Send request</button>';
   }
 
   function renderAutopilot(el) {

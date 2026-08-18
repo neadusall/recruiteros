@@ -47,7 +47,7 @@ async function saveConnect(ws: string, rec: ConnectRec): Promise<void> {
 export async function connectWatcher(
   ws: string,
   w: Watcher,
-  opts: { approvedBy?: string; auto?: boolean } = {},
+  opts: { approvedBy?: string; auto?: boolean; note?: string } = {},
 ): Promise<ConnectRec> {
   const now = new Date().toISOString();
   if (!w.linkedin) {
@@ -81,7 +81,7 @@ export async function connectWatcher(
     accountId,
     person: { email: w.email, linkedinUrl: w.linkedin, fullName: w.name, company: w.company, title: w.title },
     actionType: "connect_note",
-    payload: { text: noteFor((w.name || "there").split(/\s+/)[0], w.role) },
+    payload: { text: opts.note || noteFor((w.name || "there").split(/\s+/)[0], w.role) },
     businessUnit: "bd",
     sourceType: opts.auto ? "multichannel_workflow" : "manual",
     approvedBy: opts.approvedBy,
@@ -105,6 +105,27 @@ export async function connectWatcherByEmail(ws: string, email: string, approvedB
   if (!w) return { error: "not_a_watcher", code: 404 };
   if (!w.linkedin) return { error: "no_linkedin_profile", code: 422 };
   return connectWatcher(ws, w, { approvedBy });
+}
+
+/**
+ * Manual single connect for an identified SITE VISITOR ("Who is on your site"). Same engine and
+ * same connects log as watchers, so statuses show on both surfaces and the shared idempotency key
+ * means a person who both watched and visited can never get two invites. The note skips the video
+ * reference: these people came back to the site off the email, they may not have watched anything.
+ */
+export async function connectVisitorByEmail(ws: string, email: string, approvedBy?: string): Promise<ConnectRec | { error: string; code: number }> {
+  interface VisitorPerson { email?: string; name?: string; title?: string; recruiter?: string; linkedin?: string }
+  const snap = await loadSnapshot<{ workspaceId?: string; companies?: { company?: string; people?: VisitorPerson[] }[] }>("site_visitors_v1");
+  if (!snap || snap.workspaceId !== ws) return { error: "no_visitors", code: 404 };
+  for (const c of snap.companies || []) {
+    const p = (c.people || []).find((x) => (x.email || "").toLowerCase() === email);
+    if (!p) continue;
+    if (!p.linkedin) return { error: "no_linkedin_profile", code: 422 };
+    const first = (p.name || "there").split(/\s+/)[0];
+    const note = `Hi ${first}, I emailed you recently about the roles you're hiring for. Wanted to put a real name to the note. Open to connecting?`.slice(0, 280);
+    return connectWatcher(ws, { email, name: p.name, title: p.title, company: c.company, recruiter: p.recruiter, linkedin: p.linkedin }, { approvedBy, note });
+  }
+  return { error: "not_a_visitor", code: 404 };
 }
 
 /**
