@@ -4273,26 +4273,34 @@
         "</div>";
     }).catch(function () { /* visitor card is best-effort; the Dashboard still loads */ });
 
-    // Finance BD Campaign cockpit: real activity from the MPC engine (sends via Sending.ac + free
+    // Outreach cockpit: real activity from the MPC engine (sends via Sending.ac + free
     // ATS sourcing + reply bridge) that the app's native /overview can't see. Hides if not present.
+    // MOTION-SCOPED: BD and Recruiting share one mailbox fleet, but every send and reply carries
+    // its side (m.motions.bd / m.motions.recruiting). The Business dev tab shows ONLY BD sends and
+    // the replies they earned; the Recruiting tab shows ONLY recruiting sends and their replies,
+    // each with its own per-recruiter table. Older snapshots (no motions field) read as all-BD.
     api("/mpc-stats").then(function (m) {
       var host = $("#ovMpc"); if (!host || !m || !m.present) return;
+      var isBd = motion === "bd";
+      var EMPTY_SLICE = { sentToday: 0, sentTotal: 0, repliesTotal: 0, replyRate: 0, repliesBySentiment: {}, variants: [], recruiters: [] };
+      var mo = (m.motions && m.motions[isBd ? "bd" : "recruiting"]) || (isBd ? m : EMPTY_SLICE);
       function kpi(v, l, sub) { return '<div class="stat"><div class="sv">' + esc(String(v)) + '</div><div class="sl">' + esc(l) + (sub ? ' &middot; <span class="note">' + esc(sub) + "</span>" : "") + "</div></div>"; }
-      var sent = m.repliesBySentiment || {};
+      var sent = mo.repliesBySentiment || {};
       var pills = Object.keys(sent).map(function (k) { return '<span class="cls cls-' + k + '" style="margin-right:6px">' + esc(clsLabel(k)) + ": " + sent[k] + "</span>"; }).join("") || '<span class="note">No replies in yet</span>';
-      var maxR = Math.max.apply(null, (m.variants || []).map(function (v) { return v.rate; }).concat([0.1]));
-      var vrows = (m.variants || []).map(function (v) {
+      var maxR = Math.max.apply(null, (mo.variants || []).map(function (v) { return v.rate; }).concat([0.1]));
+      var vrows = (mo.variants || []).map(function (v) {
         return '<div class="bar-row"><div>' + esc(v.variant) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(2, (v.rate / maxR) * 100) + '%"></div></div><div class="num">' + v.replied + "/" + v.sent + " (" + v.rate + "%)</div></div>";
       }).join("") || '<div class="empty">No sends yet.</div>';
-      var adv = (m.advisor && m.advisor.recommendations) || [];
+      // Advisor + Growth analyze the BD engine; they stay off the Recruiting tab.
+      var adv = isBd ? ((m.advisor && m.advisor.recommendations) || []) : [];
       var advHtml = adv.length ? ('<h4 style="margin:16px 0 6px">Advisor &middot; how to move the needle</h4>' +
         adv.map(function (r) {
           var pc = r.priority === "high" ? "bad" : r.priority === "medium" ? "amber" : "good";
           return '<div class="list-row" style="align-items:flex-start"><span class="sv ' + pc + '" style="font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-right:10px;flex:none;align-self:center">' + esc(String(r.priority || "").toUpperCase()) + '</span><div><div class="lr-main">' + esc(r.title) + '</div><div class="lr-sub">' + esc(r.detail) + "</div></div></div>";
         }).join("") +
         '<div class="note" style="margin-top:6px">AI read, based on ' + ((m.advisor.basedOn && m.advisor.basedOn.sent) || 0) + " sent &middot; updated " + esc((m.advisor.generatedAt || "").slice(0, 10)) + "</div>") : "";
-      // Growth Engine: idle demand + campaign proposals that push more outbound.
-      var g = m.growth || null, grHtml = "";
+      // Growth Engine: idle demand + campaign proposals that push more outbound. BD-only.
+      var g = isBd ? (m.growth || null) : null, grHtml = "";
       if (g) {
         var gap = g.growthGap || {};
         var cc = (gap.constraint === "capacity" || gap.constraint === "supply") ? "amber" : "good";
@@ -4313,7 +4321,9 @@
       // hard-fail, bounce, complaint are directly measured from send logs + our inboxes; inbox
       // placement is live Smartlead warm-up reputation (mail landing in inbox vs spam across the
       // warm-up seed network), a real signal, stated honestly, never a guess.
-      var d = m.deliverability || null, dlHtml = "";
+      // Shared-fleet infra health belongs to the BD ops cockpit; the Recruiting card stays
+      // focused on recruiting sends + replies.
+      var d = isBd ? (m.deliverability || null) : null, dlHtml = "";
       if (d && d.overall) {
         var ov = d.overall;
         function dk(v, l, cls) { return '<div class="stat"><div class="sv ' + (cls || "") + '">' + esc(String(v)) + '</div><div class="sl">' + esc(l) + "</div></div>"; }
@@ -4356,10 +4366,10 @@
           '<div class="note" style="margin-bottom:8px">' + ov.domainsWarmed + "/" + ov.domainsTotal + " domains warmed &middot; " + (ov.complaints || 0) + " spam complaints &middot; authentication = real SPF/DKIM/DMARC/MX DNS checks (the hard signal). Inbox placement = live Smartlead warm-up reputation, a measured proxy for the prospect inbox, not the inbox itself &middot; updated " + esc(fmtCentral(d.generatedAt)) + "</div>" +
           drows;
       }
-      // Who sent it: per-recruiter attribution. Every send goes out on a mailbox owned by one
-      // recruiter, so the engine's activity splits cleanly by person: sends today, total, and
-      // the replies their sends earned.
-      var recs = m.recruiters || [], recHtml = "";
+      // Who sent it: per-recruiter attribution, scoped to THIS side only. Every send goes out
+      // on a mailbox owned by one recruiter, so each motion's activity splits cleanly by
+      // person: sends today, total, and the replies their sends earned.
+      var recs = mo.recruiters || [], recHtml = "";
       if (recs.length) {
         recHtml = '<h4 style="margin:16px 0 6px">Who sent it &middot; by recruiter' +
           ' <a href="#response" style="font-weight:400;font-size:12px;margin-left:8px" title="Every reply lands in the Reply center, where you answer from the same recruiter mailbox that received it">Read + answer replies</a></h4>' +
@@ -4373,19 +4383,27 @@
             return "<tr><td><b>" + esc(r.name) + "</b></td><td>" + (r.sentToday || 0) + "</td><td>" + (r.sentTotal || 0) + "</td><td>" + repl + "</td><td>" + (r.replyRate || 0) + "%</td></tr>";
           }).join("") + "</tbody></table></div>";
       }
+      // The KPI row is the side's own numbers. Supply/boards are BD-engine sourcing, so the
+      // Recruiting card swaps them for who's actively sending on the recruiting side today.
+      var kpis = kpi(mo.sentToday || 0, "Sent today", "of " + (mo.sentTotal || 0) + " total") +
+        kpi((mo.replyRate || 0) + "%", "Reply rate", (mo.repliesTotal || 0) + " real replies") +
+        (isBd
+          ? kpi(m.supplyReady, "Supply ready", "clean, to send") +
+            kpi((m.freeBoards || 0).toLocaleString(), "Free boards", "$0 sourcing")
+          : kpi(recs.filter(function (r) { return (r.sentToday || 0) > 0; }).length, "Recruiters sending", "today"));
+      // Variant bars only make sense once this side has sends; the BD tab always shows them.
+      var varHtml = (isBd || (mo.variants || []).length)
+        ? '<h4 style="margin:16px 0 6px">What is working &middot; reply rate by angle</h4>' + '<div class="bars">' + vrows + "</div>"
+        : "";
+      var emptyNote = (!isBd && !(mo.sentTotal > 0))
+        ? '<div class="empty" style="margin-top:10px">No recruiting cold emails tracked yet. Recruiting sends (job blasts, campaign sequences) are tagged separately from BD and appear here the moment they go out.</div>'
+        : "";
       host.innerHTML =
         '<div class="card" style="margin-bottom:16px">' +
-          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">Finance BD Campaign</h3><span class="note">live &middot; updated ' + esc(fmtCentral(m.generatedAt, true)) + "</span></div>" +
-          '<div class="stat-grid" style="margin-top:12px">' +
-            kpi(m.sentToday, "Sent today", "of " + (m.sentTotal || 0) + " total") +
-            kpi((m.replyRate || 0) + "%", "Reply rate", (m.repliesTotal || 0) + " real replies") +
-            kpi(m.supplyReady, "Supply ready", "clean, to send") +
-            kpi((m.freeBoards || 0).toLocaleString(), "Free boards", "$0 sourcing") +
-          "</div>" +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h3 style="margin:0">' + (isBd ? "Finance BD Campaign" : "Recruiting Outreach") + '</h3><span class="note">' + (isBd ? "BD sends only" : "recruiting sends only") + ' &middot; live &middot; updated ' + esc(fmtCentral(m.generatedAt, true)) + "</span></div>" +
+          '<div class="stat-grid" style="margin-top:12px">' + kpis + "</div>" +
           '<div style="margin-top:10px">' + pills + "</div>" +
-          recHtml +
-          '<h4 style="margin:16px 0 6px">What is working &middot; reply rate by angle</h4>' +
-          '<div class="bars">' + vrows + "</div>" + dlHtml + advHtml + grHtml +
+          emptyNote + recHtml + varHtml + dlHtml + advHtml + grHtml +
         "</div>";
       // Real buttons: Launch (greenlight the cohort so the always-on sender ships it),
       // Snooze (7d), Suppress (never send this cohort). The sender obeys these next cycle.
@@ -12914,6 +12932,9 @@
       api("/mpc-watchers").catch(function () { return null; })
     ]).then(function (res) {
       var m = res[0] || {}, v = res[1] || {}, w = res[2] || {};
+      // BD Reports is BD-motion by charter: with the ledger now split by side, read the BD
+      // slice so recruiting sends never inflate this funnel.
+      if (m.motions && m.motions.bd) m = Object.assign({}, m, m.motions.bd);
       var wt = (res[3] && res[3].present) ? res[3] : { summary: {}, watchers: [] };
       var wsum = wt.summary || {};
       var body = $("#rpBody"); if (!body) return;

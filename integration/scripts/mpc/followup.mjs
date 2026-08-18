@@ -214,7 +214,8 @@ async function main() {
     }
     const res = await sendViaMailboxApi(r.from, t.email, fu.subject, fullBody);
     // Log as a normal send row so the touch count increments for the NEXT run.
-    appendFileSync(`${OUT}/sent-followup-${stamp}.jsonl`, JSON.stringify({ at: new Date().toISOString(), from: r.from, to_email: t.email, to_name: r.to_name, company: r.company, role: r.role, variant: r.variant, subject: fu.subject, body: fullBody, touch: nextTouch, result: res }) + "\n");
+    // A follow-up stays on the side (BD/Recruiting) of the thread it continues.
+    appendFileSync(`${OUT}/sent-followup-${stamp}.jsonl`, JSON.stringify({ at: new Date().toISOString(), motion: r.motion || "bd", from: r.from, to_email: t.email, to_name: r.to_name, company: r.company, role: r.role, variant: r.variant, subject: fu.subject, body: fullBody, touch: nextTouch, result: res }) + "\n");
     if (res.ok) { sent++; console.log(`  sent follow-up ${nextTouch} -> ${t.email} (as ${r.from})`); }
     else console.log(`  FAIL ${t.email}: ${res.error}`);
     await new Promise((res2) => setTimeout(res2, 1200));
