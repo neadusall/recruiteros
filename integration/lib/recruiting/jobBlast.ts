@@ -56,6 +56,9 @@ export interface JobBlast {
 const KEY = "job_blasts_v1";
 /** Per-tick ceiling so one cron pass never runs for many minutes. */
 const MAX_PER_TICK = 25;
+/** How many upcoming queued recipients get their email verified per tick - bounds
+ *  Reoon spend and tick duration while staying comfortably ahead of MAX_PER_TICK. */
+const VERIFY_LOOKAHEAD = 50;
 const DEFAULT_DAILY_CAP = 150;
 
 let store: JobBlast[] = [];
@@ -347,12 +350,52 @@ async function tickInner(workspaceId: string, opts: { max?: number }): Promise<T
     if (!b.dayClock || b.dayClock.day !== day) b.dayClock = { day, count: 0 };
     let budget = Math.min(opts.max ?? MAX_PER_TICK, Math.max(0, b.dailyCap - b.dayClock.count));
 
+    // EMAIL VERIFICATION GATE (2026-08-18): a blast audience arrives from CSV
+    // uploads and enrichment with addresses nobody has ever checked - the
+    // "Head of Sales Operations" blast shipped 46 emails to never-verified
+    // addresses before this gate existed. Verify the upcoming wave's addresses
+    // (bounded lookahead, Reoon-backed via verifyProspectEmails, verdicts are
+    // stamped so each address is only ever paid for once), then send ONLY
+    // valid/deliverable. invalid/risky are held with the verdict visible on
+    // the board; a missing verdict (verifier down) leaves the row queued -
+    // sending pauses rather than sending blind, and lastError says why.
+    {
+      const needVerify: string[] = [];
+      let scanned = 0;
+      for (const r of b.recipients) {
+        if (r.status !== "queued") continue;
+        if (scanned++ >= VERIFY_LOOKAHEAD) break;
+        const p = await core.getProspect(r.prospectId);
+        // "unknown" is a transient verdict - re-check it each wave until it
+        // resolves, else those rows would sit stamped-but-undecided forever.
+        if (p && p.email && (!p.emailVerification || p.emailVerification.status === "unknown")) needVerify.push(p.id);
+      }
+      if (needVerify.length) {
+        try {
+          const { verifyProspectEmails } = await import("../prospects");
+          await verifyProspectEmails(workspaceId, needVerify);
+        } catch { /* verdictless rows stay queued; the gate below reports it */ }
+      }
+    }
+    let unverifiedSkips = 0;
+    const sentBefore = report.sent;
+
     for (const r of b.recipients) {
       if (budget <= 0) break;
       if (r.status !== "queued") continue;
       const p = await core.getProspect(r.prospectId);
       if (!p) { r.status = "held"; r.reason = "prospect_missing"; report.held++; dirty = true; continue; }
       if (!p.email) { r.status = "held"; r.reason = "no_email"; report.held++; dirty = true; continue; }
+      const ev = p.emailVerification;
+      if (!ev) { unverifiedSkips++; continue; }   // verifier unavailable: stays queued, retried next tick
+      if (ev.status === "invalid") {
+        r.status = "held"; r.reason = ("email failed verification" + (ev.reason ? ": " + ev.reason : "")).slice(0, 120);
+        report.held++; dirty = true; continue;
+      }
+      if (ev.status === "risky") {
+        r.status = "held"; r.reason = ("email is risky" + (ev.reason ? ": " + ev.reason : " (catch-all or role account)")).slice(0, 120);
+        report.held++; dirty = true; continue;
+      }
       const rendered = renderJobMail(b.templates, { id: p.id, firstName: p.firstName, fullName: p.fullName }, b.recruiterName);
       if (rendered.holds.length) {
         r.status = "held";
@@ -412,6 +455,16 @@ async function tickInner(workspaceId: string, opts: { max?: number }): Promise<T
       b.updatedAt = nowIso();
       // Human pacing between sends; the per-inbox 20-min rest + caps still rule.
       await sleep(800 + Math.floor(Math.random() * 1700));
+    }
+
+    // A wave that sent nothing because verdicts were unavailable is a held
+    // pipeline, not quiet success - say so where the board shows "waiting:".
+    if (report.sent === sentBefore && unverifiedSkips > 0) {
+      b.lastError = "email_verification_unavailable";
+      dirty = true;
+    } else if (b.lastError === "email_verification_unavailable") {
+      b.lastError = undefined;
+      dirty = true;
     }
 
     if (!b.recipients.some((x) => x.status === "queued")) {

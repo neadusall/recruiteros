@@ -11866,7 +11866,7 @@
                 '<div style="height:6px;border-radius:4px;background:var(--bg-soft,var(--surface-2));overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--accent,var(--brand))"></div></div>' +
                 liveLine +
                 '<div style="font-size:12.5px;color:var(--muted,var(--text-dim))">' + (c.sent || 0) + " sent · " + (c.queued || 0) + " queued · " + (c.failed || 0) + " failed · " + (c.held || 0) + " held" +
-                  (b.lastError ? ' · <span style="color:#8a6100">waiting: ' + esc(b.lastError === "no_tenant_inbox" ? "no inbox with capacity right now, retries automatically" : b.lastError) + "</span>" : "") + "</div>" +
+                  (b.lastError ? ' · <span style="color:#8a6100">waiting: ' + esc(b.lastError === "no_tenant_inbox" ? "no inbox with capacity right now, retries automatically" : b.lastError === "email_verification_unavailable" ? "email verification is briefly unavailable, sends hold until it recovers" : b.lastError) + "</span>" : "") + "</div>" +
                 '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
                   (b.status === "sending" ? '<button class="btn btn-ghost btn-sm" data-jb="pause" data-id="' + esc(b.id) + '">Pause</button>' : "") +
                   (b.status === "paused" ? '<button class="btn btn-primary btn-sm" data-jb="resume" data-id="' + esc(b.id) + '">Start sending</button>' : "") +
