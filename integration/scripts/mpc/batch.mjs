@@ -89,6 +89,11 @@ function bouncedStopList() {
 // Pools are interleaved by owner so volume splits evenly.
 const OWNER_PATTERN = /ryan|josh|noah|sam|ariel/i;
 const SMTP_LANE = process.env.MPC_SMTP_LANE === "1";
+// Google lane (owner order 2026-08-19): warm-ready Zapmail Gmail boxes the operator has set
+// ACTIVE join cold rotation at the same flat per-box cap as Sending.ac. Only boxes that are
+// active + hold working smtp.gmail.com credentials qualify, so warming boxes stay out until
+// they graduate. MPC_GOOGLE_LANE=0 parks the lane.
+const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE !== "0";
 function recruiterBoxes() {
   const s = JSON.parse(readFileSync(SENDERS, "utf8"));
   const rows = s.inboxes || (s.state && s.state.inboxes) || [];
@@ -100,6 +105,10 @@ function recruiterBoxes() {
       add(String(m.ownerName).toLowerCase(), { kind: "api", email: m.email, owner: m.ownerName });
     } else if (SMTP_LANE && m.provider === "own-smtp" && m.smtpPassEnc && /ariel/i.test(m.ownerName || m.email.split("@")[0])) {
       add("ariel", { kind: "smtp", email: m.email, owner: "Ariel Grosser", host: m.smtpHost, port: m.smtpPort || 587, secure: !!m.smtpSecure, user: m.smtpUser || m.email, passEnc: m.smtpPassEnc, dailyCap: m.dailyCap || 2 });
+    } else if (GOOGLE_LANE && m.status === "active" && m.smtpPassEnc && /^smtp\.gmail\.com$/i.test(m.smtpHost || "") && OWNER_PATTERN.test(m.email.split("@")[0] || "")) {
+      const local = String(m.email.split("@")[0] || "");
+      const key = (local.match(OWNER_PATTERN) || ["ryan"])[0].toLowerCase();
+      add(key, { kind: "smtp", email: m.email, owner: m.ownerName || local, host: m.smtpHost, port: m.smtpPort || 587, secure: !!m.smtpSecure, user: m.smtpUser || m.email, passEnc: m.smtpPassEnc, dailyCap: m.dailyCap || 2 });
     }
   }
   const pools = [...byOwner.values()];
@@ -423,7 +432,8 @@ async function main() {
   if (!fleet.length) { console.log("every sending box belongs to a resting domain; nothing sends until a domain revives"); return; }
   const boxCounts = sentTodayByBox();
   const avail = fleet.filter(b => (boxCounts.get(b.email) || 0) < capFor(b));
-  console.log(`\n[SEND] fleet ${fleet.length} boxes (Sending.ac only${SMTP_LANE ? " + own-SMTP lane" : "; own-SMTP lane parked until warmed"}) | under per-box cap (${PER_BOX}/day): ${avail.length}`);
+  const apiBoxes = fleet.filter(b => b.kind !== "smtp").length;
+  console.log(`\n[SEND] fleet ${fleet.length} boxes (api ${apiBoxes} + smtp ${fleet.length - apiBoxes}${SMTP_LANE ? "" : "; own-SMTP lane parked"}${GOOGLE_LANE ? "" : "; google lane parked"}) | under per-box cap (${PER_BOX}/day): ${avail.length}`);
   const logFile = `${OUT}/sent-${stamp}.jsonl`;
   let sent = 0, failed = 0, idx = 0;
   for (const d of drafts) {
