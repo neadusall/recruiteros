@@ -18,7 +18,8 @@
 
 import { requireSession, ok } from "../../../../lib/api";
 import { loadSnapshot } from "../../../../lib/db";
-import { sendCapacity, fleetOverview } from "../../../../lib/senders";
+import { fleetOverview } from "../../../../lib/senders";
+import type { FleetCard } from "../../../../lib/senders";
 
 interface MpcStats {
   workspaceId?: string; generatedAt?: string;
@@ -105,21 +106,29 @@ export async function GET(req: Request) {
   const nextRevival = resting.find((r) => r.until)?.until || null;
 
   // The REAL ceiling, not just the ramp's. The ramp says what reputation allows;
-  // the fleet says what the benched-vs-usable mailbox split allows. ONE source of
-  // truth: sendCapacity() in lib/senders/store.ts is the only place that sums
-  // per-box caps (rest-ledger aware); every surface reads it, none re-derives it —
+  // the fleets say what the benched-vs-usable mailbox split allows. ONE source of
+  // truth: fleetOverview() (which reuses the same rest-aware per-box math as
+  // sendCapacity) is where cold-lane capacity is summed; every surface reads it —
   // hand-rolled sums are how this card and the Senders tab told two different
-  // capacity stories on 2026-08-19. Cold lane is Sending.ac only (own-SMTP parked).
+  // capacity stories on 2026-08-19. coldToday covers EVERY fleet in the cold
+  // rotation (Sending.ac + the Google lane; internal stays 0 while parked): when
+  // Sending.ac went fully benched the evening of 8/19, a Sending.ac-only ceiling
+  // showed "cap 0" while the Google lane was live and sending.
   let fleetBoxes = 0, usableBoxes = 0, benchedBoxes = 0, fleetCeiling = 0, perBox = 2;
+  let fleetCards: FleetCard[] = [];
   try {
-    const sac = (await sendCapacity(g.ctx.workspace.id)).byProvider.find((p) => p.provider === "sending-ac");
-    if (sac) {
-      usableBoxes = sac.inboxes;
-      benchedBoxes = sac.benchedInboxes;
-      fleetBoxes = sac.inboxes + sac.benchedInboxes;
-      fleetCeiling = sac.coldCapacity;
-      perBox = sac.inboxes > 0 ? Math.round(sac.coldCapacity / sac.inboxes) : perBox;
+    fleetCards = await fleetOverview(g.ctx.workspace.id);
+    for (const f of fleetCards) fleetCeiling += f.coldToday;
+    for (const f of fleetCards) {
+      if (f.key !== "sendingac" && f.key !== "google") continue; // the cold rotation
+      const usable = Math.max(0, f.boxes.active + f.boxes.warming - f.boxes.benched);
+      usableBoxes += usable;
+      benchedBoxes += f.boxes.benched;
     }
+    fleetBoxes = usableBoxes + benchedBoxes;
+    const sac = fleetCards.find((f) => f.key === "sendingac");
+    const sacUsable = sac ? Math.max(0, sac.boxes.active + sac.boxes.warming - sac.boxes.benched) : 0;
+    if (sac && sacUsable > 0) perBox = Math.max(1, Math.round(sac.capacity.today / sacUsable));
   } catch { /* fleet math is best-effort; the ramp cap still renders */ }
   const capToday = fleetBoxes > 0 ? Math.min(ramp.cap, fleetCeiling) : ramp.cap;
   const remaining = Math.max(0, capToday - sentToday);
@@ -152,7 +161,7 @@ export async function GET(req: Request) {
   const narrative: string[] = [];
   narrative.push(
     fleetLimited
-      ? `Reputation allows ${ramp.cap.toLocaleString()} cold emails today (ramp: ${ramp.base}/day base, growing toward ${ramp.ceiling.toLocaleString()}), but ${benchedBoxes.toLocaleString()} of the fleet's ${fleetBoxes.toLocaleString()} mailboxes sit on resting domains, so the real ceiling right now is ${capToday.toLocaleString()} (${usableBoxes.toLocaleString()} usable boxes at ${perBox}/day each). ` +
+      ? `Reputation allows ${ramp.cap.toLocaleString()} cold emails today (ramp: ${ramp.base}/day base, growing toward ${ramp.ceiling.toLocaleString()}), but ${benchedBoxes.toLocaleString()} of the fleet's ${fleetBoxes.toLocaleString()} mailboxes sit on resting domains, so the real ceiling right now is ${capToday.toLocaleString()} across ${usableBoxes.toLocaleString()} usable mailboxes. ` +
         `${sentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
       : `The fleet can send up to ${capToday.toLocaleString()} cold emails today (reputation ramp: ${ramp.base}/day base, growing toward ${ramp.ceiling.toLocaleString()}). ` +
         `${sentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
@@ -200,16 +209,15 @@ export async function GET(req: Request) {
       sentToday, remaining, fleetBoxes, usableBoxes, benchedBoxes, perBox,
     },
     // Per-infrastructure capacity for the Dashboard's real-time card: what each
-    // fleet can actually send today (rest-aware), what sits benched, and where
-    // warming boxes stand. Same math as the Senders tab monitor (fleetOverview).
-    fleets: await fleetOverview(g.ctx.workspace.id)
-      .then((fs) => fs.map((f) => ({
-        key: f.key, name: f.name,
-        today: f.capacity.today, benched: f.capacity.benched, atFullRamp: f.capacity.atFullRamp,
-        activeBoxes: f.boxes.active, warmingBoxes: f.boxes.warming, benchedBoxes: f.boxes.benched,
-        graduationAt: f.graduation?.eligibleAt || null,
-      })))
-      .catch(() => []),
+    // fleet can feed the COLD lane today (rest-aware; the same coldToday summed
+    // into capToday above, so rows and headline can never disagree), plus the
+    // app-lane figure and where warming boxes stand.
+    fleets: fleetCards.map((f) => ({
+      key: f.key, name: f.name,
+      today: f.coldToday, appToday: f.capacity.today, benched: f.capacity.benched, atFullRamp: f.capacity.atFullRamp,
+      activeBoxes: f.boxes.active, warmingBoxes: f.boxes.warming, benchedBoxes: f.boxes.benched,
+      graduationAt: f.graduation?.eligibleAt || null,
+    })),
     supply: { ready: supplyReady, message: gap.message || null, engineOk, engineLastRunAt: engine?.lastCurationAt || null },
     fleet: {
       domainsSending: deliv?.overall?.domainsSending || 0,

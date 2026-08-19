@@ -4274,8 +4274,11 @@
         };
         var pill = pillMap[d.verdict] || ["Status", "#6b7280"];
         var frows = fleets.map(function (f) {
+          // f.today is the COLD-lane figure (these rows sum to the headline cap);
+          // a fleet that only serves app sends (cold lane parked) says so.
           var extra = f.benched ? ' <span style="color:#b26a00">(+' + fmt(f.benched) + ' benched)</span>'
             : (f.warmingBoxes && f.graduationAt ? ' <span class="muted">(' + f.warmingBoxes + ' warming, live ~' + esc(String(f.graduationAt).slice(5, 10)).replace("-", "/") + ')</span>' : '');
+          if (!f.today && f.appToday) extra += ' <span class="muted">(app sends only; cold lane parked)</span>';
           return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:2px 0">' +
             '<span class="muted">' + esc(f.name) + '</span><span><b>' + fmt(f.today) + '</b><span class="muted">/day</span>' + extra + '</span></div>';
         }).join("");
@@ -9768,6 +9771,10 @@
         : ' · ' + f.domains.total + ' domain' + (f.domains.total === 1 ? '' : 's');
       var ramp = f.capacity.atFullRamp > f.capacity.today + f.capacity.benched
         ? ' <span class="muted">(ramps to ' + fmt(f.capacity.atFullRamp) + '/day)</span>' : '';
+      // Cold-lane figure leads (it is what the outreach engine can draw); the
+      // app-lane ramp figure shows alongside when it differs.
+      var coldVal = typeof f.coldToday === "number" ? f.coldToday : f.capacity.today;
+      var appNote = f.capacity.today > coldVal ? ' <span class="muted">(app lane ' + fmt(f.capacity.today) + '/day)</span>' : '';
       var notes = (f.notes || []).map(function (t) {
         return '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(t) + '</div>';
       }).join("");
@@ -9775,7 +9782,7 @@
         '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
           '<b>' + esc(f.name) + '</b>' +
           '<span class="snd-story-pill" style="border:1px solid ' + pill[1] + ';color:' + pill[1] + ';border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:600">' + pill[0] + '</span>' +
-          '<span style="margin-left:auto"><b>' + fmt(f.capacity.today) + '</b><span class="muted">/day usable now</span>' + ramp + '</span>' +
+          '<span style="margin-left:auto"><b>' + fmt(coldVal) + '</b><span class="muted">/day cold now</span>' + appNote + ramp + '</span>' +
         '</div>' +
         '<div class="muted" style="font-size:12.5px;margin-top:4px">' + fmt(f.boxes.active) + ' active' + grad + benched + resting +
           ' · bounces last sweep: ' + fmt(f.bounces7d) + (f.warmupBounces7d != null ? ' campaign / ' + fmt(f.warmupBounces7d) + ' on warm-up traffic' : '') +

@@ -22,6 +22,12 @@ export interface FleetCard {
   boxes: { total: number; active: number; warming: number; paused: number; error: number; benched: number };
   domains: { total: number; resting: number; nextRevival: string | null };
   capacity: { today: number; benched: number; atFullRamp: number };
+  /** What the COLD-OUTREACH lane can draw from this fleet today. Differs from
+   *  capacity.today (the app-lane ramp): Sending.ac is the same; the Google lane
+   *  runs batch.mjs's receiver-friendly ramp (MPC_GOOGLE_RAMP, week-1 floor
+   *  mirrored here); the internal server is 0 while its cold lane stays parked
+   *  (MPC_SMTP_LANE) even though app sends (job blasts, replies) may use it. */
+  coldToday: number;
   bounces7d: number;               // campaign NDRs on this fleet's domains (combined sweep window)
   warmupBounces7d: number | null;  // internal lane only: NDRs on warm-up traffic = provider-side rejection pressure
   graduation: { warming: number; eligibleAt: string | null } | null;
@@ -78,6 +84,7 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
         boxes: { total: 0, active: 0, warming: 0, paused: 0, error: 0, benched: 0 },
         domains: { total: 0, resting: 0, nextRevival: null },
         capacity: { today: 0, benched: 0, atFullRamp: 0 },
+        coldToday: 0,
         bounces7d: 0, warmupBounces7d: null, graduation: null, notes: [],
         _domains: new Set<string>(), _gradAts: [],
       };
@@ -128,10 +135,20 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
       const restingMine = [...c._domains].filter((d) => resting.has(d));
       const revivals = restingMine.map((d) => resting.get(d)).filter(Boolean).sort() as string[];
       const grad = c._gradAts.sort()[Math.floor(c._gradAts.length / 2)] || null; // median clock
+      // Cold-lane reality per fleet. Google's cold ramp is per-box-per-week from its
+      // FIRST COLD SEND (batch.mjs); the app can't see that ledger, so we mirror the
+      // conservative week-1 step - it understates in later weeks, never overstates.
+      const googleStep = Math.max(1, Number(String(process.env.MPC_GOOGLE_RAMP || "8").split(",")[0]) || 8);
+      const usableBoxes = c.boxes.active + c.boxes.warming - c.boxes.benched;
+      const coldToday =
+        c.key === "sendingac" ? c.capacity.today :
+        c.key === "google" ? Math.min(c.capacity.today, Math.max(0, usableBoxes) * googleStep) :
+        0; // internal + other: cold lane parked (MPC_SMTP_LANE); app sends only
       const out: FleetCard = {
         key: c.key, name: c.name, boxes: c.boxes,
         domains: { total: c._domains.size, resting: restingMine.length, nextRevival: revivals[0] || null },
         capacity: c.capacity,
+        coldToday,
         bounces7d: c.bounces7d,
         warmupBounces7d: c.key === "internal" ? (ndrImap?.warmupNdrs ?? null) : null,
         graduation: c.boxes.warming ? { warming: c.boxes.warming, eligibleAt: grad ? new Date(grad).toISOString() : null } : null,
