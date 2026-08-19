@@ -4231,7 +4231,7 @@
     // into any single recruiter's numbers via the selector bar.
     var showRecruiterBar = can("team:manage") && !IMP_TOKEN;
     var sub = (motion === "bd"
-      ? "Your BD sending engine, capacity, throughput and what's running right now. Pipeline outcomes live in Analytics."
+      ? "Your BD sending engine, capacity, throughput and what's running right now."
       : "Your recruiting sending engine, capacity, throughput and what's running right now.")
       + (showRecruiterBar ? " Pick a recruiter to scope it, or see every recruiter's stats below." : "");
     el.innerHTML = head("Dashboard", sub) +
@@ -4536,7 +4536,7 @@
     var recs = o.recruiters || [];
     var hd = '<div class="card" style="margin:0 0 18px"><div class="lr-sub" style="margin-bottom:8px">' +
       esc(motion === "bd" ? "Business Development" : "Recruiting") +
-      ', every recruiter’s sending activity. Click a recruiter to scope the dashboard to them; outcomes live under <a class="clickable" data-go="analytics">Analytics</a>.</div>';
+      ', every recruiter’s sending activity. Click a recruiter to scope the dashboard to them.</div>';
     if (!recs.length) return hd + '<div class="empty">No recruiters on this workspace yet. Invite recruiters under Team.</div></div>';
     var rows = recs.map(function (r) {
       return '<tr class="clickable" data-rec="' + esc(r.userId || "") + '">' +
