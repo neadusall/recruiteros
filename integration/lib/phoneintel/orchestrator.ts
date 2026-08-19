@@ -16,9 +16,9 @@ import { withWorkspaceCreds } from "../connected";
 import { telnyx, sendDtmf, startTranscription } from "./telnyxAdapter";
 import { ensureIntelInfra } from "./infra";
 import {
-  classifyAnswer, extractMenuOptions, parseDirectoryInstruction, matchName,
-  promptFingerprint,
+  classifyAnswer, extractMenuOptions, matchName, promptFingerprint,
 } from "./classify";
+import { planIvrMove } from "./navigation";
 import { directoryInput } from "./keypad";
 import {
   ensureIntelReady, companyKeyOf, upsertProfile, getProfile, patchProfile,
@@ -222,12 +222,22 @@ async function onTranscription(call: IntelCall, ev: any): Promise<string> {
       if (ext) { updateCall(call, { extension: ext }); addSuccess(call, "EXTENSION_DISCOVERED"); }
       return finishAndHangup(call, "GENERIC_VOICEMAIL", "generic mailbox");
     }
+    case "after_hours":
+      // The office is closed; no one and no directory to reach right now. Exit
+      // cleanly so the contact can be retried inside business hours.
+      return finishAndHangup(call, "NO_ANSWER", "office closed / after hours");
+    case "hold_queue":
+      // Parked in a hold queue — stay on the line; the next real event (a human,
+      // a menu, or the max-duration guardrail) drives the next decision.
+      logEvent(call, "HOLD", { detail: "in hold queue, waiting", source: "rule" });
+      return "hold";
     case "ivr":
+    case "security_gate": // robocall gate ("press 1 to continue") — let the planner try
     default: return navigateIvr(call, text, fp);
   }
 }
 
-/** IVR present: either replay the known route step or discover the next action. */
+/** IVR present: either replay the known route step or plan the next action. */
 async function navigateIvr(call: IntelCall, text: string, fp: string): Promise<string> {
   addSuccess(call, "IVR_DETECTED");
   patchProfile(call.workspaceId, call.companyKey, { systemType: "ivr", phoneSystemDetected: true });
@@ -249,35 +259,75 @@ async function navigateIvr(call: IntelCall, text: string, fp: string): Promise<s
     }
   }
 
-  // Discovery: directory instruction? (name-search prompt)
-  const dir = parseDirectoryInstruction(text);
-  if (dir) return enterDirectory(call, dir, fp);
-
-  // Otherwise a menu — extract options and choose by routing priority (spec §8).
+  // Store the menu node in the routing graph (for the debugger + future replay),
+  // then ask the navigator for ONE move, benchmarked on the target's name.
   const options = extractMenuOptions(text);
   if (options.length) {
     upsertNode(call.workspaceId, {
-      companyKey: call.companyKey, promptHash: fp, promptTranscript: text.slice(0, 400),
-      options,
+      companyKey: call.companyKey, promptHash: fp, promptTranscript: text.slice(0, 400), options,
     });
-    // Priority: extension-known < directory < operator (only if no directory).
-    const directory = options.find((o) => o.isDirectory);
-    const chosen = directory ?? options.find((o) => o.isOperator) ?? options[0];
-    recordStep(call, { waitFor: fp, action: { type: "dtmf", value: chosen.digit }, meaning: chosen.meaning });
-    logEvent(call, "SEND_DTMF", { detail: chosen.digit, reason: chosen.meaning, confidence: directory ? 0.95 : 0.6, source: "rule" });
-    await withWorkspaceCreds(call.workspaceId, () => sendDtmf(call.telnyxCallControlId!, chosen.digit).catch(() => {}));
-    if (directory) addSuccess(call, "DIRECTORY_FOUND");
-    return "menu_dtmf";
   }
+  // Digits already pressed at MENU nodes (single keys), so the planner never
+  // loops the same choice; multi-digit name entries are excluded.
+  const triedDigits = call.events
+    .filter((e) => e.type === "SEND_DTMF" && /^[0-9*#]$/.test(String(e.detail ?? "")))
+    .map((e) => String(e.detail));
 
-  // Unknown prompt — count toward the abort guardrail.
-  const unknown = call.unknownPrompts + 1;
-  updateCall(call, { unknownPrompts: unknown });
-  logEvent(call, "UNKNOWN_PROMPT", { detail: text.slice(0, 120), source: "rule" });
-  if (unknown >= GUARDRAILS.MAX_UNKNOWN_PROMPTS) {
-    return finishAndHangup(call, "IVR_ROUTE_FAILED", "too many unknown prompts");
+  const move = planIvrMove(
+    text,
+    { first: call.targetFirst, last: call.targetLast, full: call.targetFull, title: call.targetTitle },
+    { knownExtension: call.extension, triedDigits, directorySearches: call.directorySearches },
+    options,
+  );
+  logEvent(call, "PLAN", { detail: move.kind, reason: move.reason, confidence: move.confidence, source: "rule" });
+
+  switch (move.kind) {
+    case "directory_enter": {
+      // Cache the directory format on the profile so every future prospect at
+      // this company reuses it (no re-interpretation), then key/say the name.
+      patchProfile(call.workspaceId, call.companyKey, { directoryAvailable: true, directorySpec: move.spec });
+      updateCall(call, { state: "searching_directory", directorySearches: call.directorySearches + 1 });
+      if (call.directorySearches + 1 > GUARDRAILS.MAX_DIRECTORY_SEARCHES) {
+        return finishAndHangup(call, "DIRECTORY_NO_MATCH", "exceeded directory attempts");
+      }
+      addSuccess(call, "DIRECTORY_FOUND");
+      recordStep(call, {
+        waitFor: fp,
+        action: { type: move.spec.input === "speech" ? "speak_name" : "dynamic_name_search" },
+        meaning: "directory name search",
+      });
+      const inp = directoryInput(move.spec, { first: call.targetFirst, last: call.targetLast, full: call.targetFull });
+      return submitDirectory(call, inp);
+    }
+    case "extension": {
+      recordStep(call, { waitFor: fp, action: { type: "extension" }, meaning: "known extension" });
+      logEvent(call, "SEND_DTMF", { detail: move.digits, reason: "known extension", source: "rule" });
+      await withWorkspaceCreds(call.workspaceId, () => sendDtmf(call.telnyxCallControlId!, move.digits + "#").catch(() => {}));
+      addSuccess(call, "EXTENSION_DISCOVERED");
+      return "extension_dtmf";
+    }
+    case "dtmf": {
+      recordStep(call, { waitFor: fp, action: { type: "dtmf", value: move.digit }, meaning: move.reason });
+      logEvent(call, "SEND_DTMF", { detail: move.digit, reason: move.reason, confidence: move.confidence, source: "rule" });
+      await withWorkspaceCreds(call.workspaceId, () => sendDtmf(call.telnyxCallControlId!, move.digit).catch(() => {}));
+      if (move.isDirectoryNav) addSuccess(call, "DIRECTORY_FOUND");
+      return "menu_dtmf";
+    }
+    case "wait":
+      // A transfer is in progress ("connecting you to ...") — hold and let the
+      // next greeting/answer classify (target voicemail, human, etc.).
+      return "connecting_wait";
+    case "unknown":
+    default: {
+      const unknown = call.unknownPrompts + 1;
+      updateCall(call, { unknownPrompts: unknown });
+      logEvent(call, "UNKNOWN_PROMPT", { detail: text.slice(0, 120), reason: move.reason, source: "rule" });
+      if (unknown >= GUARDRAILS.MAX_UNKNOWN_PROMPTS) {
+        return finishAndHangup(call, "IVR_ROUTE_FAILED", "too many unknown prompts");
+      }
+      return "unknown_prompt";
+    }
   }
-  return "unknown_prompt";
 }
 
 /** Execute a cached deterministic route step. */
@@ -296,36 +346,6 @@ async function execStep(call: IntelCall, step: RouteStep): Promise<string> {
     }
   }
   return "route_step_noop";
-}
-
-/** A directory search prompt: parse spec, cache it, submit the target's name. */
-async function enterDirectory(
-  call: IntelCall,
-  dir: ReturnType<typeof parseDirectoryInstruction>,
-  fp: string,
-): Promise<string> {
-  addSuccess(call, "DIRECTORY_FOUND");
-  updateCall(call, { state: "searching_directory", directorySearches: call.directorySearches + 1 });
-  if (call.directorySearches > GUARDRAILS.MAX_DIRECTORY_SEARCHES) {
-    return finishAndHangup(call, "DIRECTORY_NO_MATCH", "exceeded directory attempts");
-  }
-  if (!dir) return "no_dir_spec";
-  if ("extension" in dir) {
-    if (call.extension) {
-      recordStep(call, { waitFor: fp, action: { type: "extension" }, meaning: "known extension" });
-      logEvent(call, "SEND_DTMF", { detail: call.extension, reason: "known extension", source: "rule" });
-      await withWorkspaceCreds(call.workspaceId, () => sendDtmf(call.telnyxCallControlId!, call.extension! + "#").catch(() => {}));
-      return "extension_dtmf";
-    }
-    return "extension_prompt_no_ext"; // wait for a directory option instead
-  }
-  // dir is a DirectorySpec here. Cache the directory format on the profile so
-  // every future prospect at this company reuses it (no re-interpretation).
-  const spec = dir;
-  patchProfile(call.workspaceId, call.companyKey, { directoryAvailable: true, directorySpec: spec });
-  recordStep(call, { waitFor: fp, action: { type: spec.input === "speech" ? "speak_name" : "dynamic_name_search" }, meaning: "directory name search" });
-  const inp = directoryInput(spec, { first: call.targetFirst, last: call.targetLast, full: call.targetFull });
-  return submitDirectory(call, inp);
 }
 
 async function submitDirectory(call: IntelCall, inp: { dtmf?: string; speak?: string }): Promise<string> {
