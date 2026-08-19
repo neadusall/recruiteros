@@ -9430,8 +9430,14 @@
           var cap = s.capacityPerDay
             ? '<b>≈' + Number(s.capacityPerDay).toLocaleString() + '</b><span class="muted" style="font-size:11px">/day</span>' + (s.capacityBasis ? '<div class="muted" style="font-size:11px" title="' + esc(s.capacityBasis) + '">' + esc(s.capacityBasis) + '</div>' : '')
             : '<span class="muted">n/a</span>';
+          // Sending.ac boxes are warmed by Sending.ac itself and send at their flat
+          // cap regardless of the stored warming/active flag; "0 active, 900 warming"
+          // read as a block when nothing was blocked. Say what the flag really means.
+          var warmingLabel = s.provider === "sending-ac"
+            ? s.warming + " externally warmed, sending"
+            : s.warming + " warming";
           var inb = s.inboxes
-            ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + s.warming + ' warming' + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
+            ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + warmingLabel + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
             : '<span class="muted">none imported yet</span>';
           var auth = s.error
             ? '<span style="color:#b3261e">' + s.error + ' failing</span>' + (s.staleAuth ? ' <span class="muted">· ' + s.staleAuth + ' due a re-check</span>' : '')
