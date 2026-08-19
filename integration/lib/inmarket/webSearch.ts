@@ -324,11 +324,40 @@ async function markDown(provider: WebSearchProvider, reason: string): Promise<vo
       body:
         `${reason}\n\n` +
         `${standing}\n\n` +
-        (provider === "serper" ? `Top up at https://serper.dev (credits expire 6 months after purchase — size the buy to the burn).\n` : "") +
-        (provider === "dataforseo" ? `Top up at https://app.dataforseo.com — and turn on auto-recharge (Billing → Auto recharge) so this never fires again.\n` : "") +
+        (provider === "serper" ? `Top up at https://serper.dev (credits expire 6 months after purchase, so size the buy to the burn).\n` : "") +
+        (provider === "dataforseo" ? `Top up at https://app.dataforseo.com and turn on auto-recharge (Billing -> Auto recharge) so this never fires again.\n` : "") +
         `This alert fires at most once per provider per day; the provider re-probes hourly and recovers on its own once funded.`,
     });
   } catch { /* same rule */ }
+}
+
+/* --- transient-slowness cooldown ----------------------------------- */
+
+/** Consecutive transient (non-quota) failures per provider before it is rested. Measured
+ *  2026-08-19: DataForSEO's live SERP endpoint spent an afternoon swinging between 5s
+ *  answers and 45s hangs while its balance endpoint stayed instant. The ladder failed
+ *  over correctly, but every single query still paid the full TIMEOUT_MS wait on the
+ *  flaky rung before the next one served it. */
+const SLOW_STREAK_TO_REST = 3;
+
+/** How long a repeatedly-timing-out provider sits out. Short and quiet on purpose: vendor
+ *  slowness self-heals, so this is pacing, not an outage. The quota path (markDown) keeps
+ *  its longer cooldown and its once-a-day alert; this one alerts nobody. */
+function slowCooldownMs(): number {
+  const n = Number(process.env.INMARKET_SEARCH_SLOW_COOLDOWN_MIN);
+  return (Number.isFinite(n) && n > 0 ? n : 10) * 60_000;
+}
+
+/** In-memory on purpose: a streak is only meaningful within one process's burst of
+ *  queries, and losing it on a deploy just means re-measuring three calls. */
+const slowStreak: Partial<Record<WebSearchProvider, number>> = {};
+
+/** Rest a provider that keeps timing out, without the break/email the quota path raises. */
+function markSlow(provider: WebSearchProvider, reason: string): void {
+  if (!budget) return;
+  budget.down = { ...budget.down, [provider]: { until: new Date(Date.now() + slowCooldownMs()).toISOString(), reason } };
+  scheduleBudgetSave();
+  console.warn(`[websearch] ${provider} resting ${Math.round(slowCooldownMs() / 60000)}min after ${SLOW_STREAK_TO_REST} transient failures: ${reason}`);
 }
 
 /** Reserve one paid query. False when the ceiling is reached (caller must fall back to free). */
@@ -693,6 +722,7 @@ export async function webSearchResults(query: string): Promise<WebResult[]> {
     if (!(await spendOne(provider))) return []; // ceiling reached — caller falls back to free
     const out = await attempt(provider, query);
     if (out.ok) {
+      slowStreak[provider] = 0;
       const results = out.results ?? [];
       if (results.length) clearMiss(query);
       else noteMiss(query);
@@ -700,11 +730,20 @@ export async function webSearchResults(query: string): Promise<WebResult[]> {
     }
     refundOne(); // a failed call returned nothing and billed nothing worth counting
     if (out.quota) {
+      slowStreak[provider] = 0; // the quota cooldown owns this failure now
       await markDown(provider, out.reason || `${provider} quota`);
       continue; // next rung serves this same query
     }
-    // Transient failure: still try the next rung — failover is the point — but leave the
-    // provider standing (one hiccup is not an outage).
+    // Transient failure: still try the next rung — failover is the point. One hiccup is
+    // not an outage, but a STREAK of them means the vendor is degraded and every query
+    // is paying the full timeout on this rung before the next one serves it. Rest it
+    // briefly (no alert; this self-heals) so the ladder skips straight to a live rung.
+    const streak = (slowStreak[provider] ?? 0) + 1;
+    slowStreak[provider] = streak;
+    if (streak >= SLOW_STREAK_TO_REST) {
+      slowStreak[provider] = 0;
+      markSlow(provider, out.reason || `${provider} transient failures x${streak}`);
+    }
   }
   return [];
 }

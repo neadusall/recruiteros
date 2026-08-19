@@ -1182,6 +1182,16 @@ export async function runDiscovery(
   // How many blank DataForSEO pages this run will pay to re-ask (see the retry below).
   const DFS_RETRY_BUDGET = 25;
   let dfsRetries = 0;
+  // TRANSIENT-FAILURE BREAKER for the two wide engines. Quota errors already stop an
+  // engine for the run, but a vendor whose endpoint is merely DEGRADED (measured
+  // 2026-08-19: DataForSEO answering in 5s, 21s, 33s and 45s-timeout within minutes,
+  // balance untouched) fails every call the slow way instead: each query waits out the
+  // full request timeout before its other passes run. Three consecutive failures means
+  // the vendor is down in practice, so trip it off for the run and hand its allowance
+  // to the other engine, exactly like the quota path. A success resets the streak.
+  const WIDE_TRANSIENT_TRIP = 3;
+  let dfsTransientStreak = 0;
+  let serperTransientStreak = 0;
   // People-search listing requests attempted this run (its monthly credits are the
   // scarce paid resource, so the count is stamped onto the saved list).
   let rapidUsed = 0;
@@ -1264,14 +1274,18 @@ export async function runDiscovery(
           dfsUsed++; // a retry is a real billed task; the budget stays an honest spend cap
           rows = await dfLimit(() => dataforseoXraySearch(query.xray));
         }
+        dfsTransientStreak = 0;
         if (rows.length) {
           collected += absorb(rows, query.group);
           if (byKey.size >= cap) capped = true;
         }
       } catch (err: any) {
         warnings.push(`dataforseo(${query.group}): ${err.message}`);
-        if (err && err.quota) {
-          useDfs = false; // balance gone / login bad, stop for the run
+        if ((err && err.quota) || ++dfsTransientStreak >= WIDE_TRANSIENT_TRIP) {
+          if (useDfs && !(err && err.quota)) {
+            warnings.push(`dataforseo: ${WIDE_TRANSIENT_TRIP} consecutive failures, engine off for the rest of the run`);
+          }
+          useDfs = false; // balance gone / login bad / vendor degraded, stop for the run
           // Hand its share to the other engine so one dead vendor cannot halve the reach.
           if (!SERPER_CAP_EXPLICIT()) serperBudget = Math.max(serperBudget, widePages * 2);
         }
@@ -1285,11 +1299,14 @@ export async function runDiscovery(
         if (serperUsed >= serperBudget) break;
         serperUsed++; // reserved before the await, same as the Google budget above
         let rows: CandidateRow[] = [];
-        try { rows = await spLimit(() => serperXraySearch(query.xray, page)); }
+        try { rows = await spLimit(() => serperXraySearch(query.xray, page)); serperTransientStreak = 0; }
         catch (err: any) {
           warnings.push(`serper(${query.group} p${page}): ${err.message}`);
-          if (err && err.quota) {
-            useSerper = false; // credits gone / key bad, stop for the run
+          if ((err && err.quota) || ++serperTransientStreak >= WIDE_TRANSIENT_TRIP) {
+            if (useSerper && !(err && err.quota)) {
+              warnings.push(`serper: ${WIDE_TRANSIENT_TRIP} consecutive failures, engine off for the rest of the run`);
+            }
+            useSerper = false; // credits gone / key bad / vendor degraded, stop for the run
             // Same hand-off in the other direction: a Serper bundle that empties halfway
             // through must not silently halve the run.
             if (!DFS_CAP_EXPLICIT()) dfsBudget = Math.max(dfsBudget, wideDefault * 2);
