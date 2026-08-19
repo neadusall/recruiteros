@@ -209,7 +209,17 @@ class InboxStore {
   }
 }
 
-const singleton = new InboxStore();
+// The Next.js server compiles this module into TWO webpack instances (the
+// instrumentation/scheduler layer and the API-route layer each get their own
+// module id). A plain module-level singleton therefore existed TWICE in one
+// process, each with its own items[] and its own debounced writer to the same
+// snap_inbox.json - whichever instance persisted last silently reverted the
+// other's mutations. Observed in prod: a recruiter's delete (route instance)
+// was resurrected minutes later by a scheduler-instance persist, and every
+// route-side OutboundNote was wiped the same way. Pinning the instance on
+// globalThis makes every compiled copy share ONE store and ONE writer.
+const g = globalThis as { __rosInboxStore?: InboxStore };
+const singleton = (g.__rosInboxStore ??= new InboxStore());
 export function getInbox(): InboxStore {
   return singleton;
 }
