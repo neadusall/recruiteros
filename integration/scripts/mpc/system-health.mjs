@@ -88,6 +88,38 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
     ndr ? `${(ndr.bounced || []).length} addresses on the permanent suppression list` : "NDR sweep has never produced a sidecar");
 }
 
+// Google cold lane (Zapmail Gmail boxes): active fleet + today's throughput + failure rate.
+{
+  const snd = readJson(`${VOL}/snap_senders_v1.json`);
+  const rows = snd?.inboxes || snd?.state?.inboxes || [];
+  const gmail = rows.filter((m) => m && m.status === "active" && m.smtpPassEnc && /^smtp\.gmail\.com$/i.test(m.smtpHost || ""));
+  const gset = new Set(gmail.map((m) => m.email));
+  let gSent = 0, gFail = 0;
+  for (const f of readdirSync(MPC_OUT).filter((n) => n.startsWith("sent-") && n.includes(today))) {
+    for (const line of readFileSync(`${MPC_OUT}/${f}`, "utf8").split("\n")) {
+      const s = line.trim(); if (!s) continue;
+      try { const r = JSON.parse(s); if (r.from && gset.has(r.from) && (r.at || "").slice(0, 10) === today) { if (r.result?.ok) gSent++; else gFail++; } } catch {}
+    }
+  }
+  const failPct = gSent + gFail ? Math.round((gFail / (gSent + gFail)) * 100) : 0;
+  const st = !gmail.length ? "amber" : gSent + gFail >= 5 && failPct > 20 ? "bad" : "good";
+  add(GROUP_SEND, "googlelane", "Google cold lane (Gmail boxes)", st,
+    gmail.length ? `${gmail.length} boxes active · ${gSent} sent today${gFail ? `, ${gFail} failed` : ""}` : "no active Gmail boxes",
+    !gmail.length ? "Lane is built but no Gmail box is active with working credentials" :
+    gSent + gFail >= 5 && failPct > 20 ? "High failure rate: check Gmail SMTP auth (534/454) and the ramp caps" :
+    "Per-box weekly ramp 8/14/20 with a 50/day per-domain ceiling; follow-ups share the caps");
+}
+
+// IMAP bounce sweep: the only bounce visibility for Gmail + internal-SMTP boxes.
+{
+  const im = readJson(`${VOL}/snap_mpc_ndr_imap_v1.json`);
+  const age = im ? ageMin(im.generatedAt) : null;
+  const st = !im ? "bad" : age <= 8 * 60 ? "good" : age <= 24 * 60 ? "amber" : "bad";
+  add(GROUP_SEND, "imapsweep", "IMAP bounce sweep (Gmail + internal)", st,
+    im ? `${im.boxesSwept ?? "?"} boxes swept ${fmtAge(age)}` : "never ran",
+    st === "good" ? "" : "Without this sweep, bounces landing in Gmail/Mailcow inboxes are invisible to the stop-list and the domain breaker");
+}
+
 // Auth + warm-up from the deliverability snapshot.
 const deliv = readJson(`${VOL}/snap_mpc_deliverability_v1.json`);
 {
@@ -242,6 +274,21 @@ for (const [unit, label, staleMin] of TIMERS) {
 // Snapshot freshness: the data the breaker and follow-ups act on.
 add(GROUP_WATCH, "ndr-fresh", "Bounce data freshness", !ndr ? "bad" : ageMin(ndr.generatedAt) <= 360 ? "good" : "bad",
   ndr ? `swept ${fmtAge(ageMin(ndr.generatedAt))}` : "never", "Stale bounce data means the circuit breaker is flying blind");
+
+// Health guard + warm graduation heartbeat: the layer that auto-activates ready inboxes
+// and benches sick ones. Runs from the hourly sending cron.
+{
+  const g = readJson(`${VOL}/snap_sender_health_guard_v1.json`);
+  const rep = g?.lastReport;
+  const age = rep ? ageMin(rep.at) : null;
+  const hasGrad = !!rep && Object.prototype.hasOwnProperty.call(rep, "graduated");
+  const st = !rep ? "bad" : age > 12 * 60 ? "bad" : age > 3 * 60 ? "amber" : "good";
+  add(GROUP_WATCH, "graduation", "Health guard + warm graduation", st,
+    rep ? `last run ${fmtAge(age)} · ${rep.holding ?? 0} on hold · ${(rep.graduated || []).length} graduated last run` : "never ran",
+    !rep ? "Guard has never persisted a report" :
+    !hasGrad ? "App predates the graduation feature: redeploy the app" :
+    "Warming boxes auto-activate at 14d (provider) / 30d (internal) once reputation holds 95%+");
+}
 
 // Daily fleet verification results (the Fleet tab's data).
 {
