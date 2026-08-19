@@ -49,14 +49,18 @@ function acceptCatchAll(): boolean { return (process.env.REOON_ACCEPT_CATCHALL ?
 function taskMaxAgeMs(): number { return (Number(process.env.REOON_TASK_MAX_AGE_SEC) || 1800) * 1000; }
 
 /**
- * Map ONE Reoon per-email result to our tri-state verdict:
- *   true  -> deliverable, mark emailValidated (enrollable)
- *   false -> undeliverable/unsafe, suppress (never send)
- *   null  -> inconclusive, leave pending so a later task can retry
+ * Map ONE Reoon per-email result to our verdict:
+ *   valid true  -> deliverable, mark emailValidated (enrollable)
+ *   valid false -> undeliverable/unsafe, suppress (never send)
+ *   valid null  -> inconclusive, leave pending so a later task can retry
+ * catchAll marks a domain-level acceptance: the mail won't bounce but the SPECIFIC mailbox is
+ * unproven — the curation store keeps that distinction (its own tier) instead of calling it
+ * "validated"; collapsing it used to stamp unprovable pattern-guesses as confirmed contacts.
+ * status is Reoon's own word, persisted on the row so a bounced address can be diagnosed later.
  * Defensive across Reoon's field names (status string + the boolean flags it returns in power mode).
  */
-function interpret(r: any): boolean | null {
-  if (!r || typeof r !== "object") return null;
+function interpret(r: any): { valid: boolean | null; catchAll: boolean; status: string } {
+  if (!r || typeof r !== "object") return { valid: null, catchAll: false, status: "" };
   const status = String(r.status ?? r.result ?? r.state ?? "").toLowerCase().replace(/[\s-]+/g, "_");
   const disposable = r.is_disposable === true || r.disposable === true;
   const roleAcct = r.is_role_account === true || r.is_role === true;
@@ -64,22 +68,23 @@ function interpret(r: any): boolean | null {
   const catchAll = r.is_catchall === true || r.is_catch_all === true || status.includes("catch") || status.includes("accept_all");
 
   // Hard negatives first.
-  if (disposable) return false;
-  if (["invalid", "undeliverable", "disabled", "spamtrap", "spam_trap", "rejected", "bounce"].some((s) => status.includes(s))) return false;
-  if (r.is_deliverable === false || r.deliverable === false) return false;
+  if (disposable) return { valid: false, catchAll, status };
+  if (["invalid", "undeliverable", "disabled", "spamtrap", "spam_trap", "rejected", "bounce"].some((s) => status.includes(s))) return { valid: false, catchAll, status };
+  if (r.is_deliverable === false || r.deliverable === false) return { valid: false, catchAll, status };
+
+  // Catch-all / accept-all domains BEFORE the positive flags: on these domains "safe to send"
+  // means only "will not bounce", never "this person's mailbox exists", so the catch-all verdict
+  // is the truthful one. Accepted (by default) into the catch-all tier, not as validated.
+  if (catchAll) return { valid: acceptCatchAll() ? (roleAcct ? false : true) : null, catchAll: true, status };
 
   // Clear positives.
   if (status === "valid" || status === "safe" || status === "deliverable" || status === "ok" || safe) {
     // a confirmed-valid role mailbox is still not a PERSON for 1:1 BD — exclude it.
-    return roleAcct ? false : true;
+    return { valid: roleAcct ? false : true, catchAll: false, status };
   }
 
-  // Catch-all / accept-all domains: the domain accepts mail but the mailbox can't be individually
-  // proven. For BD these are usually real companies with low bounce risk — accept by default.
-  if (catchAll) return acceptCatchAll() ? (roleAcct ? false : true) : null;
-
   // "unknown" / unrecognised → inconclusive; leave pending for a later retry.
-  return null;
+  return { valid: null, catchAll: false, status };
 }
 
 /** Create a bulk verification task; returns its id, or null on failure. */
@@ -101,7 +106,7 @@ async function createBulkTask(emails: string[]): Promise<string | null> {
 }
 
 /** Poll a bulk task. Returns {done, verdicts} — verdicts only when the task has completed. */
-async function pollBulkTask(taskId: string): Promise<{ done: boolean; verdicts: Array<{ email: string; valid: boolean }> }> {
+async function pollBulkTask(taskId: string): Promise<{ done: boolean; verdicts: Array<{ email: string; valid: boolean; catchAll?: boolean; status?: string }> }> {
   try {
     const res = await fetch(`${BASE}/get-result-bulk-verification-task/?key=${encodeURIComponent(apiKey())}&task_id=${encodeURIComponent(taskId)}`, {
       signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
@@ -118,12 +123,12 @@ async function pollBulkTask(taskId: string): Promise<{ done: boolean; verdicts: 
       ? raw.map((r: any) => ({ email: String(r?.email ?? "").toLowerCase(), r }))
       : Object.entries(raw).map(([email, r]) => ({ email: String(email).toLowerCase(), r }));
 
-    const verdicts: Array<{ email: string; valid: boolean }> = [];
+    const verdicts: Array<{ email: string; valid: boolean; catchAll?: boolean; status?: string }> = [];
     for (const { email, r } of entries) {
       if (!email) continue;
       const v = interpret(r);
-      if (v === null) continue; // inconclusive → leave pending
-      verdicts.push({ email, valid: v });
+      if (v.valid === null) continue; // inconclusive → leave pending
+      verdicts.push({ email, valid: v.valid, catchAll: v.catchAll, status: v.status });
     }
     return { done: true, verdicts };
   } catch {

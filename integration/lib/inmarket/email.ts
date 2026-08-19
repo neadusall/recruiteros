@@ -28,9 +28,26 @@ import { domainRoot } from "../signals/hiring/normalize";
 /* ------------------------------------------------------------------ */
 
 /** Fold accents, lowercase, strip everything but a-z0-9. "José-Pérez" → "joseperez". */
+/** Words that are page furniture or job-listing labels, never a human's first or last name.
+ *  Kept tight and unambiguous: a token here means the "name" came from scraping artifacts. */
+const NON_NAME_TOKENS = new Set([
+  "by", "role", "team", "dept", "department", "division", "group",
+  "info", "contact", "contacts", "careers", "career", "jobs", "job", "hiring", "apply",
+  "hr", "humanresources", "recruiting", "recruitment", "talentacquisition",
+  "admin", "office", "staff", "sales", "support", "help", "press", "media", "marketing",
+  "null", "undefined", "unknown", "test", "user", "name", "firstname", "lastname",
+  "linkedin", "profile", "company", "corporate", "hq", "headquarters",
+]);
+
 export function normalizeNamePart(s: string | undefined | null): string {
   if (!s) return "";
   return String(s)
+    // Scraped names sometimes arrive with LITERAL escape sequences still in them
+    // ("O\x27Donovan", "Muñoz"). Decode them first: the generic collapse below
+    // would otherwise keep the alphanumerics of the escape ("ox27donovan") and mint
+    // a junk local-part that validates on catch-all domains and then hard-bounces.
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
     .normalize("NFD").replace(/[̀-ͯ]/g, "") // strip diacritics
     .toLowerCase()
     .replace(/['’`.]/g, "")        // O'Brien → obrien, J.R. → jr
@@ -156,6 +173,12 @@ export function guessEmail(
   const lastFull = normalizeNamePart(lastName);
   const empty: EmailGuess = { email: "", pattern: "", alternates: [], confidence: 0, verified: false, domain };
   if (!domain || !first) return empty;
+  // Never mint an address from something that is not a person's name. Scraped page furniture
+  // ("By Role", "Hiring Team") occasionally survives DM extraction; guessing from it produces
+  // locals like by.role@ that pass catch-all validation and then hard-bounce in the campaign.
+  // A junk name returning NO guess is the good failure: the row stays unnamed/pending and the
+  // residual finders (KoldInfo) get a shot at the real person instead.
+  if (NON_NAME_TOKENS.has(first) || NON_NAME_TOKENS.has(lastFull) || NON_NAME_TOKENS.has(last)) return empty;
 
   const parts: Parts = { first, last, lastFull, f: first[0] ?? "", l: last[0] ?? "" };
   const seen = new Set<string>();

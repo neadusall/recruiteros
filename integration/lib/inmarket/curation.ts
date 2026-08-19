@@ -87,6 +87,8 @@ export interface CuratedProspect {
   emailInvalid?: boolean;       // true when the validator says it's undeliverable (do not send)
   emailCatchAll?: boolean;      // domain accepts all mail: best-pattern guess will deliver but the
                                 // specific person is UNCONFIRMED — a tier of its own, NOT "valid"
+  emailVerifyStatus?: string;   // the validator's own status word (e.g. "safe", "catch_all") — kept
+                                // so a bounced address can be traced back to what the verifier said
   validatedAt?: string;
   /* ---- post-send tracking (filled from the sending engine by email) ---- */
   sentAt?: string;
@@ -968,25 +970,39 @@ export async function enrollToBulk(
  * stream results. Returns how many rows were updated.
  */
 export async function applyEmailValidation(
-  results: Array<{ email: string; valid: boolean }>,
+  results: Array<{ email: string; valid: boolean; catchAll?: boolean; status?: string }>,
   nowIso: string,
 ): Promise<number> {
   if (!results.length) return 0;
-  const verdict = new Map<string, boolean>();
-  for (const r of results) { const e = (r.email || "").toLowerCase().trim(); if (e) verdict.set(e, r.valid); }
+  const verdict = new Map<string, { valid: boolean; catchAll?: boolean; status?: string }>();
+  for (const r of results) { const e = (r.email || "").toLowerCase().trim(); if (e) verdict.set(e, r); }
   return withCurationLock(async () => {
     const rows = await load();
     let n = 0;
     for (const r of rows) {
       const e = (r.likelyEmail ?? "").toLowerCase();
       if (!e || !verdict.has(e)) continue;
-      const valid = verdict.get(e)!;
-      r.emailValidated = valid;
-      r.emailInvalid = !valid;
+      const v = verdict.get(e)!;
       r.validatedAt = nowIso;
-      if (valid) { if (!r.emailSource || r.emailSource === "guess") r.emailSource = "validated_external"; }
+      if (v.status) r.emailVerifyStatus = v.status; // the validator's own word, kept for bounce forensics
+      if (v.valid && v.catchAll) {
+        // Domain-level acceptance only: the specific mailbox is unproven. This is the catch-all
+        // TIER, never "validated" — stamping these emailValidated is how hard-bouncing pattern
+        // guesses used to reach the send queue as confirmed contacts. Whether the tier is worked
+        // is the operator's call (INMARKET_CATCHALL_CONTACTABLE), same as every other catch-all.
+        r.emailCatchAll = true; r.emailValidated = false; r.emailInvalid = false;
+        if (!r.emailSource || r.emailSource === "guess") r.emailSource = "catch_all";
+        if (catchAllContactableEnabled() && (r.status === "named" || r.status === "sourced") && r.managerName) {
+          r.status = "contactable";
+        }
+        n++;
+        continue;
+      }
+      r.emailValidated = v.valid;
+      r.emailInvalid = !v.valid;
+      if (v.valid) { if (!r.emailSource || r.emailSource === "guess") r.emailSource = "validated_external"; }
       // A validated address is a confirmed contactable; an invalid one drops out of the send queue.
-      if (!valid && (r.status === "contactable" || r.status === "queued")) r.status = "suppressed";
+      if (!v.valid && (r.status === "contactable" || r.status === "queued")) r.status = "suppressed";
       n++;
     }
     if (n) await save(rows);
