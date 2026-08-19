@@ -552,6 +552,24 @@ const HIDE_CSS = `
 interface Browser { browser: import("playwright").Browser; idle: ReturnType<typeof setTimeout> | null }
 let shared: Browser | null = null;
 let launching: Promise<import("playwright").Browser> | null = null;
+let inUse = 0;
+
+/** Run `fn` with the shared browser held BUSY so the idle reaper cannot close it mid-job.
+ *  "Idle" used to mean "no getBrowser() call in 60s", but one capture legitimately holds the
+ *  browser longer than that: careers-site resolution alone can burn the whole minute before the
+ *  first newContext. The reaper then closed Chromium out from under the job, the worker read
+ *  "browser has been closed" as a crash and exited, main re-served the same job first, and the
+ *  entire render fleet livelocked on a single slow posting (2026-08-19). */
+async function withBrowser<T>(fn: (browser: import("playwright").Browser) => Promise<T>): Promise<T> {
+  const browser = await getBrowser();
+  inUse++;
+  try {
+    return await fn(browser);
+  } finally {
+    inUse--;
+    bumpIdle();
+  }
+}
 
 /** One reused Chromium, auto-closed after a minute idle to free memory. */
 async function getBrowser(): Promise<import("playwright").Browser> {
@@ -593,6 +611,8 @@ function bumpIdle() {
   if (!shared) return;
   if (shared.idle) clearTimeout(shared.idle);
   shared.idle = setTimeout(() => {
+    // A job still holds the browser (withBrowser): not idle, check back later.
+    if (inUse > 0) { bumpIdle(); return; }
     const b = shared?.browser;
     shared = null;
     b?.close().catch(() => {});
@@ -1417,23 +1437,24 @@ function roleCardHtml(req: ShotRequest): string {
  * with status "role_card" so callers can tell a typeset card from a real page capture.
  */
 async function captureRoleCard(req: ShotRequest, key: string, reason: string): Promise<ShotResult> {
-  const browser = await getBrowser();
-  const ctx = await browser.newContext({ viewport: { width: FRAME_W, height: FRAME_H }, deviceScaleFactor: 1 });
-  try {
-    const page = await ctx.newPage();
-    await page.setContent(roleCardHtml(req), { waitUntil: "load" });
-    const h = await page.evaluate(() => document.body.scrollHeight);
-    const capH = Math.max(FRAME_H, Math.min(Math.ceil(h), MAX_CAPTURE_H));
-    await page.setViewportSize({ width: FRAME_W, height: capH });
-    const tall = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: FRAME_W, height: capH } });
-    await mkdir(shotsDir(), { recursive: true });
-    await writeFile(assetPath(key, "png"), tall);
-    const files = await buildShotAssets(key, tall, req);
-    if (!files) return { ok: false, status: "error", key, reason: "role card rendered empty", at: new Date().toISOString() };
-    return { ok: true, status: "role_card", key, files, reason, at: new Date().toISOString() };
-  } finally {
-    await ctx.close().catch(() => {});
-  }
+  return withBrowser(async (browser) => {
+    const ctx = await browser.newContext({ viewport: { width: FRAME_W, height: FRAME_H }, deviceScaleFactor: 1 });
+    try {
+      const page = await ctx.newPage();
+      await page.setContent(roleCardHtml(req), { waitUntil: "load" });
+      const h = await page.evaluate(() => document.body.scrollHeight);
+      const capH = Math.max(FRAME_H, Math.min(Math.ceil(h), MAX_CAPTURE_H));
+      await page.setViewportSize({ width: FRAME_W, height: capH });
+      const tall = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: FRAME_W, height: capH } });
+      await mkdir(shotsDir(), { recursive: true });
+      await writeFile(assetPath(key, "png"), tall);
+      const files = await buildShotAssets(key, tall, req);
+      if (!files) return { ok: false, status: "error", key, reason: "role card rendered empty", at: new Date().toISOString() };
+      return { ok: true, status: "role_card", key, files, reason, at: new Date().toISOString() };
+    } finally {
+      await ctx.close().catch(() => {});
+    }
+  });
 }
 
 /**
@@ -1513,13 +1534,13 @@ export async function captureRoleShot(req: ShotRequest, opts?: { force?: boolean
     result = cachedNegative;
   } else {
     try {
-      const browser = await getBrowser();
-      const target = await resolveTarget(req, browser);
-      if ("status" in target) {
-        result = { ok: false, status: target.status, key, reason: target.reason, at: new Date().toISOString() };
-      } else {
-        result = await doCapture(browser, key, target, req);
-      }
+      result = await withBrowser(async (browser): Promise<ShotResult> => {
+        const target = await resolveTarget(req, browser);
+        if ("status" in target) {
+          return { ok: false, status: target.status, key, reason: target.reason, at: new Date().toISOString() };
+        }
+        return doCapture(browser, key, target, req);
+      });
     } catch (e) {
       result = { ok: false, status: "error", key, reason: (e as Error).message, at: new Date().toISOString() };
     }
