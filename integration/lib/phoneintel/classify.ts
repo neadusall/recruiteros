@@ -517,6 +517,64 @@ export function matchDepartmentOption(options: MenuOption[], dept?: string): str
   return undefined;
 }
 
+/* --------------------------- directory no-match --------------------------- */
+
+/**
+ * The directory failed to find the name we keyed: "no match found", "not a valid
+ * entry", "no one by that name", "please try again". Signals the orchestrator to
+ * RETRY with a different name encoding (e.g. first name instead of last) rather
+ * than give up — the #1 reason a first attempt misses is the wrong name field.
+ */
+export function detectNoMatch(transcript: string): boolean {
+  const t = norm(transcript);
+  return /no match|not a valid entry|did(?:n'?t| not) recognize|no one by that name|no listing|invalid entry|could ?n'?t find|not found|unable to (?:find|locate)|try again|no such (?:name|person|extension)/.test(t);
+}
+
+/* --------------------------- vendor fingerprinting -------------------------- */
+
+export interface SystemFingerprint {
+  /** Recognized platform, if a strong signature is present. */
+  system?: string;
+  /** Human note passed to the AI fallback as a prior. */
+  note?: string;
+  /** Directory-format prior when the platform has a well-known convention. */
+  directoryPrior?: { field: DirectorySpec["field"]; input: DirectorySpec["input"] };
+}
+
+/**
+ * Best-effort recognition of the phone-system PLATFORM from its characteristic
+ * prompting. This is NOT how navigation works — the deterministic reader handles
+ * any vendor by pattern — it is an OPTIONAL prior that (a) enriches the AI
+ * fallback's context and (b) supplies a directory-order default for the handful
+ * of platforms with a fixed convention (e.g. Cisco Unity keys last-then-first).
+ * Vendors rarely name themselves on a greeting, so we key on distinctive phrasing
+ * and stay conservative: no signature -> empty, and navigation is unaffected.
+ */
+export function fingerprintSystem(transcript: string): SystemFingerprint {
+  const t = norm(transcript);
+  // Cisco Unity Connection: the classic "spell the last name then the first name"
+  // dial-by-name and its "not a valid entry" rejection.
+  if (/spell\s+(?:the\s+(?:person'?s\s+)?)?last name\s+(?:then|followed by|and(?:\s+then)?)\s+(?:the\s+)?first name/.test(t) ||
+      /not a valid entry/.test(t)) {
+    return { system: "Cisco Unity", note: "dial-by-name is last name then first, keypad", directoryPrior: { field: "lastfirst", input: "dtmf" } };
+  }
+  // RingCentral / cloud PBX: dial-by-name usually on 8/9, extension anytime.
+  if (/dial by name directory,? press (?:eight|nine|8|9)/.test(t) || /ring ?central/.test(t)) {
+    return { system: "RingCentral / cloud PBX", note: "dial-by-name on 8 or 9; extension can be dialed anytime" };
+  }
+  // Avaya / traditional auto-attendant.
+  if (/avaya|automated attendant|auto attendant/.test(t)) {
+    return { system: "Avaya / auto-attendant", note: "menu-driven; directory keys on last name" };
+  }
+  // Mitel.
+  if (/mitel/.test(t)) return { system: "Mitel", note: "menu-driven auto-attendant" };
+  // Speech-first natural-language front ends (Genesys/Nuance-style).
+  if (/who would you like to reach|say the name of the (?:person|department)|you can say/.test(t)) {
+    return { system: "speech front-end", note: "speech directory — say the full name", directoryPrior: { field: "firstlast", input: "speech" } };
+  }
+  return {};
+}
+
 /* ------------------------------ name matching ------------------------------ */
 
 export interface NameMatch {

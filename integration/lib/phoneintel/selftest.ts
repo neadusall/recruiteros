@@ -7,8 +7,10 @@ import {
   classifyAnswer, extractMenuOptions, parseDirectoryInstruction, matchName, soundex,
   matchNamedOptions, parseConfirmation, detectConnecting, detectExtensionInvite,
   detectContinueGate, departmentForTitle, matchDepartmentOption,
+  detectNoMatch, fingerprintSystem,
 } from "./classify";
-import { planIvrMove } from "./navigation";
+import { planIvrMove, alternateDirectorySpec } from "./navigation";
+import { mapAiAction } from "./aiNavigator";
 
 let pass = 0, fail = 0;
 function eq(label: string, got: unknown, want: unknown) {
@@ -169,6 +171,41 @@ console.log("· planIvrMove end-to-end (the decision engine)");
 {
   const mv = planIvrMove("For the company directory press 3, or stay on the line.", TARGET, { triedDigits: ["3"] });
   ok("does not repeat digit 3", !(mv.kind === "dtmf" && (mv as any).digit === "3"), JSON.stringify(mv));
+}
+
+console.log("· directory no-match retry (rotate name field)");
+ok("no match detected", detectNoMatch("I'm sorry, that is not a valid entry. Please try again."));
+ok("no listing detected", detectNoMatch("There is no one by that name in the directory."));
+ok("normal prompt not a no-match", !detectNoMatch("For sales press 1, for the directory press 3."));
+eq("rotate last -> first", alternateDirectorySpec({ field: "last", length: 3, input: "dtmf" }).field, "first");
+eq("rotate first -> lastfirst", alternateDirectorySpec({ field: "first", length: "full", input: "dtmf" }).field, "lastfirst");
+eq("rotate undefined -> first", alternateDirectorySpec(undefined).field, "first");
+
+console.log("· vendor fingerprint priors");
+eq("Cisco Unity last-then-first", fingerprintSystem("Please spell the last name then the first name of the person.").directoryPrior?.field, "lastfirst");
+eq("speech front-end prior", fingerprintSystem("Who would you like to reach?").directoryPrior?.input, "speech");
+eq("no signature is empty", fingerprintSystem("Thank you for calling, please hold.").system, undefined);
+
+console.log("· AI fallback action mapping (constrained + safe)");
+{
+  const opts = extractMenuOptions("For sales press 1, for support press 2.");
+  // Valid press of an offered digit.
+  ok("maps valid press", mapAiAction({ action: "press", digit: "2", reason: "x" }, opts, {})?.kind === "dtmf");
+  // A digit NOT offered (and not 0/*/#) is rejected -> null (never press junk).
+  eq("rejects off-menu digit", mapAiAction({ action: "press", digit: "7", reason: "x" }, opts, {}), null);
+  // 0 is always allowed (operator).
+  ok("allows zero-out", mapAiAction({ action: "press", digit: "0", reason: "op" }, opts, {})?.kind === "dtmf");
+  // Never repeats a tried digit.
+  eq("blocks tried digit", mapAiAction({ action: "press", digit: "1", reason: "x" }, opts, { triedDigits: ["1"] }), null);
+  // enter_name -> directory_enter with a keypad spec.
+  {
+    const mv = mapAiAction({ action: "enter_name", field: "lastfirst", length: "full", input: "dtmf", reason: "x" }, opts, {});
+    ok("maps enter_name", mv?.kind === "directory_enter");
+  }
+  // extension only when we actually have one.
+  eq("extension needs a known ext", mapAiAction({ action: "extension", reason: "x" }, opts, {}), null);
+  ok("extension with known ext", mapAiAction({ action: "extension", reason: "x" }, opts, { knownExtension: "4482" })?.kind === "extension");
+  eq("none -> null", mapAiAction({ action: "none", reason: "x" }, opts, {}), null);
 }
 
 console.log("· fuzzy name matching");

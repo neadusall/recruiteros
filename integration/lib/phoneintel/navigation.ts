@@ -66,6 +66,20 @@ export type IvrMove =
 const tried = (ctx: NavContext, d: string) => (ctx.triedDigits ?? []).includes(d);
 
 /**
+ * When a dial-by-name search returns "no match", the most likely cause is the
+ * wrong name FIELD (we keyed the last name; this directory wants the first, or
+ * last-then-first). Rotate to the next field to try on the retry, so one bad
+ * guess doesn't lose the person. Cycles last -> first -> last+first -> first+last.
+ */
+export function alternateDirectorySpec(prev?: DirectorySpec): DirectorySpec {
+  const nextField: DirectorySpec["field"] =
+    !prev || prev.field === "last" ? "first" :
+    prev.field === "first" ? "lastfirst" :
+    prev.field === "lastfirst" ? "firstlast" : "last";
+  return { field: nextField, length: "full", input: prev?.input ?? "dtmf" };
+}
+
+/**
  * Decide the single next move for an IVR prompt. `options` may be passed in
  * (when the caller already parsed them) or is derived from the transcript.
  */

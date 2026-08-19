@@ -12,7 +12,8 @@
 export { startCall, handleIntelEvent } from "./orchestrator";
 export { runBatch, groupByCompany } from "./batch";
 export { startQueueRun, stopQueueRun, queueRunState } from "./runner";
-export { planIvrMove, type IvrMove, type NavTarget } from "./navigation";
+export { planIvrMove, alternateDirectorySpec, type IvrMove, type NavTarget } from "./navigation";
+export { aiPlanMove, mapAiAction } from "./aiNavigator";
 export { preCallCheck, mayRecordHuman, VELOCITY } from "./compliance";
 export {
   ensureIntelReady, companyKeyOf, listProfiles, getProfile, activeRoute,

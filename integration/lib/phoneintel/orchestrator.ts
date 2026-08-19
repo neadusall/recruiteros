@@ -16,9 +16,10 @@ import { withWorkspaceCreds } from "../connected";
 import { telnyx, sendDtmf, startTranscription } from "./telnyxAdapter";
 import { ensureIntelInfra } from "./infra";
 import {
-  classifyAnswer, extractMenuOptions, matchName, promptFingerprint,
+  classifyAnswer, extractMenuOptions, matchName, promptFingerprint, detectNoMatch,
 } from "./classify";
-import { planIvrMove } from "./navigation";
+import { planIvrMove, alternateDirectorySpec, type IvrMove } from "./navigation";
+import { aiPlanMove } from "./aiNavigator";
 import { directoryInput } from "./keypad";
 import {
   ensureIntelReady, companyKeyOf, upsertProfile, getProfile, patchProfile,
@@ -208,6 +209,23 @@ async function onTranscription(call: IntelCall, ev: any): Promise<string> {
   }
   updateCall(call, { promptHistory: [...call.promptHistory.slice(-20), fp] });
 
+  // Right after a dial-by-name entry, a "no match" almost always means we keyed
+  // the wrong name FIELD (last vs first vs last+first). Retry with the next field
+  // rather than give up — the single biggest lift to first-call success. Gated on
+  // the searching_directory state so the broad no-match phrasing can't misfire.
+  if (call.state === "searching_directory" && detectNoMatch(text)) {
+    if (call.directorySearches > GUARDRAILS.MAX_DIRECTORY_SEARCHES) {
+      return finishAndHangup(call, "DIRECTORY_NO_MATCH", "no directory match after retries");
+    }
+    const prev = getProfile(call.workspaceId, call.companyKey)?.directorySpec;
+    const alt = alternateDirectorySpec(prev);
+    patchProfile(call.workspaceId, call.companyKey, { directorySpec: alt });
+    updateCall(call, { directorySearches: call.directorySearches + 1 });
+    logEvent(call, "DIRECTORY_RETRY", { detail: `no match; retry as ${alt.field}`, source: "rule" });
+    const inp = directoryInput(alt, { first: call.targetFirst, last: call.targetLast, full: call.targetFull });
+    return submitDirectory(call, inp);
+  }
+
   const isMachine = (call as any)._amdMachine as boolean | undefined;
   const cls = classifyAnswer(text, isMachine);
   logEvent(call, "PROMPT", { detail: text.slice(0, 160), reason: cls.class, confidence: cls.confidence, source: "rule" });
@@ -273,14 +291,49 @@ async function navigateIvr(call: IntelCall, text: string, fp: string): Promise<s
     .filter((e) => e.type === "SEND_DTMF" && /^[0-9*#]$/.test(String(e.detail ?? "")))
     .map((e) => String(e.detail));
 
+  const target = { first: call.targetFirst, last: call.targetLast, full: call.targetFull, title: call.targetTitle };
   const move = planIvrMove(
-    text,
-    { first: call.targetFirst, last: call.targetLast, full: call.targetFull, title: call.targetTitle },
+    text, target,
     { knownExtension: call.extension, triedDigits, directorySearches: call.directorySearches },
     options,
   );
-  logEvent(call, "PLAN", { detail: move.kind, reason: move.reason, confidence: move.confidence, source: "rule" });
 
+  // The deterministic planner handles the known primitives across every vendor.
+  if (move.kind !== "unknown") {
+    logEvent(call, "PLAN", { detail: move.kind, reason: move.reason, confidence: move.confidence, source: "rule" });
+    return executeMove(call, move, fp, "rule");
+  }
+
+  // Long tail: a prompt phrased in a way the rules don't recognize. Rather than
+  // abort, hand the model what we heard + who we're after + the offered digits,
+  // and let it pick ONE constrained move (this is how we stay effective on an IVR
+  // variation we've never seen). Dry-run/no-key -> null, so we keep our guard.
+  const ai = await withWorkspaceCreds(call.workspaceId, () =>
+    aiPlanMove(text, target, options, {
+      knownExtension: call.extension, triedDigits,
+      directorySearches: call.directorySearches, companyName: call.companyName,
+    }),
+  ).catch(() => null);
+  if (ai) {
+    logEvent(call, "PLAN", { detail: ai.kind, reason: ai.reason, confidence: ai.confidence, source: "llm" });
+    return executeMove(call, ai, fp, "llm");
+  }
+
+  const unknown = call.unknownPrompts + 1;
+  updateCall(call, { unknownPrompts: unknown });
+  logEvent(call, "UNKNOWN_PROMPT", { detail: text.slice(0, 120), reason: move.reason, source: "rule" });
+  if (unknown >= GUARDRAILS.MAX_UNKNOWN_PROMPTS) {
+    return finishAndHangup(call, "IVR_ROUTE_FAILED", "too many unknown prompts");
+  }
+  return "unknown_prompt";
+}
+
+/**
+ * Carry out one planned move — shared by the deterministic planner and the AI
+ * fallback so both take the exact same, audited execution path. `source` tags
+ * the events ("rule" vs "llm") for the call timeline / debugger.
+ */
+async function executeMove(call: IntelCall, move: IvrMove, fp: string, source: "rule" | "llm"): Promise<string> {
   switch (move.kind) {
     case "directory_enter": {
       // Cache the directory format on the profile so every future prospect at
@@ -301,14 +354,14 @@ async function navigateIvr(call: IntelCall, text: string, fp: string): Promise<s
     }
     case "extension": {
       recordStep(call, { waitFor: fp, action: { type: "extension" }, meaning: "known extension" });
-      logEvent(call, "SEND_DTMF", { detail: move.digits, reason: "known extension", source: "rule" });
+      logEvent(call, "SEND_DTMF", { detail: move.digits, reason: "known extension", source });
       await withWorkspaceCreds(call.workspaceId, () => sendDtmf(call.telnyxCallControlId!, move.digits + "#").catch(() => {}));
       addSuccess(call, "EXTENSION_DISCOVERED");
       return "extension_dtmf";
     }
     case "dtmf": {
       recordStep(call, { waitFor: fp, action: { type: "dtmf", value: move.digit }, meaning: move.reason });
-      logEvent(call, "SEND_DTMF", { detail: move.digit, reason: move.reason, confidence: move.confidence, source: "rule" });
+      logEvent(call, "SEND_DTMF", { detail: move.digit, reason: move.reason, confidence: move.confidence, source });
       await withWorkspaceCreds(call.workspaceId, () => sendDtmf(call.telnyxCallControlId!, move.digit).catch(() => {}));
       if (move.isDirectoryNav) addSuccess(call, "DIRECTORY_FOUND");
       return "menu_dtmf";
@@ -317,16 +370,8 @@ async function navigateIvr(call: IntelCall, text: string, fp: string): Promise<s
       // A transfer is in progress ("connecting you to ...") — hold and let the
       // next greeting/answer classify (target voicemail, human, etc.).
       return "connecting_wait";
-    case "unknown":
-    default: {
-      const unknown = call.unknownPrompts + 1;
-      updateCall(call, { unknownPrompts: unknown });
-      logEvent(call, "UNKNOWN_PROMPT", { detail: text.slice(0, 120), reason: move.reason, source: "rule" });
-      if (unknown >= GUARDRAILS.MAX_UNKNOWN_PROMPTS) {
-        return finishAndHangup(call, "IVR_ROUTE_FAILED", "too many unknown prompts");
-      }
-      return "unknown_prompt";
-    }
+    default:
+      return "noop";
   }
 }
 
