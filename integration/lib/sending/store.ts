@@ -316,6 +316,26 @@ export async function isSuppressed(email: string): Promise<boolean> {
   const e = email.toLowerCase().trim();
   return state.suppression.some((s) => s.email === e && suppressionLive(s));
 }
+/**
+ * STAFF-MAILBOX FAIL-SAFE (owner mandate 2026-08-19). A workspace member's own
+ * login mailbox bouncing is an infrastructure incident, not a dead prospect:
+ * the 2026-08-05 event silently suppressed all five Lume recruiters for 30
+ * days while their boxes recovered within hours, and nobody was told. Staff
+ * entries therefore rest at most STAFF_SUPPRESS_HOURS, never go permanent, and
+ * page the owner the moment they appear; the hourly sending cron sweep
+ * (sweepStaffSuppressions) re-opens them the moment the rest lapses.
+ */
+const STAFF_SUPPRESS_HOURS = 48;
+
+async function isStaffEmail(email: string): Promise<boolean> {
+  try {
+    const { isMemberLoginEmail } = await import("../auth");
+    return await isMemberLoginEmail(email);
+  } catch {
+    return false; // the fail-safe itself failing never blocks suppression
+  }
+}
+
 export async function suppress(
   email: string,
   reason: SuppressionEntry["reason"],
@@ -325,14 +345,15 @@ export async function suppress(
   await hydrate();
   const e = email.toLowerCase().trim();
   if (!e) return;
+  const staff = await isStaffEmail(e);
   const existing = state.suppression.find((s) => s.email === e);
-  const soft = opts.kind === "soft";
-  const expiresAt = soft
-    ? new Date(Date.now() + SOFT_BOUNCE_SUPPRESS_DAYS * 86_400_000).toISOString()
-    : undefined;
+  const soft = opts.kind === "soft" || staff; // staff mail never goes permanent
+  const ttlMs = staff ? STAFF_SUPPRESS_HOURS * 3_600_000 : SOFT_BOUNCE_SUPPRESS_DAYS * 86_400_000;
+  const expiresAt = soft ? new Date(Date.now() + ttlMs).toISOString() : undefined;
   if (existing) {
     // A soft entry can be upgraded to permanent (hard bounce / complaint /
-    // unsubscribe later); a permanent entry is never downgraded.
+    // unsubscribe later); a permanent entry is never downgraded, and a staff
+    // entry never upgrades at all.
     if (existing.expiresAt && !soft) {
       existing.reason = reason;
       existing.kind = "hard";
@@ -344,6 +365,45 @@ export async function suppress(
   }
   state.suppression.push({ email: e, reason, source, at: nowIso(), kind: soft ? "soft" : "hard", expiresAt });
   save();
+  if (staff) {
+    try {
+      const { notifyOwner } = await import("../owner/ownerNotice");
+      notifyOwner({
+        subject: `Staff mailbox bouncing: ${e}`,
+        body: `A ${reason} notice (source: ${source || "unknown"}) just came back for ${e}, which is a workspace member's own login mailbox. Platform mail to them rests for ${STAFF_SUPPRESS_HOURS}h and resumes automatically. If the mailbox is really down it needs attention at its provider; the platform cannot repair it from here.`,
+      }).catch(() => { /* alert failure never blocks the suppression */ });
+    } catch { /* ditto */ }
+  }
+}
+
+/**
+ * Hourly (sending cron): re-open staff mailboxes still resting under the old
+ * 30-day policy or whose 48h rest has lapsed, and clamp any live staff entry
+ * to the 48h ceiling. Counts surface in the heartbeat JSON so the sweep is
+ * visible in ops output.
+ */
+export async function sweepStaffSuppressions(): Promise<{ staff: number; cleared: number; clamped: number }> {
+  await hydrate();
+  let staffCount = 0, cleared = 0, clamped = 0;
+  const keep: SuppressionEntry[] = [];
+  for (const s of state.suppression) {
+    if (!suppressionLive(s)) { keep.push(s); continue; }
+    if (!(await isStaffEmail(s.email))) { keep.push(s); continue; }
+    staffCount++;
+    const cap = Date.parse(s.at) + STAFF_SUPPRESS_HOURS * 3_600_000;
+    if (Number.isFinite(cap) && Date.now() >= cap) { cleared++; continue; } // rest served: drop the entry
+    if (Number.isFinite(cap) && (!s.expiresAt || Date.parse(s.expiresAt) > cap)) {
+      s.expiresAt = new Date(cap).toISOString();
+      s.kind = "soft";
+      clamped++;
+    }
+    keep.push(s);
+  }
+  if (cleared || clamped) {
+    state.suppression = keep;
+    save();
+  }
+  return { staff: staffCount, cleared, clamped };
 }
 export async function listSuppression(): Promise<SuppressionEntry[]> {
   await hydrate();

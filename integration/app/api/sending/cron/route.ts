@@ -123,6 +123,17 @@ async function run(req: Request) {
     }
   } catch (e: any) { bounceFeedback = { error: e?.message ?? "bounce_feedback_failed" }; }
 
+  // Staff-mailbox fail-safe sweep (owner mandate 2026-08-19): suppression
+  // entries for workspace members' own login mailboxes rest 48h max. The Aug 5
+  // incident hid five bouncing recruiter boxes behind a silent 30-day
+  // suppression; this re-opens staff mail automatically once the rest is
+  // served, and suppress() pages the owner the moment a new one appears.
+  let staffSuppression: unknown = null;
+  try {
+    const { sweepStaffSuppressions } = await import("../../../../lib/sending/store");
+    staffSuppression = await sweepStaffSuppressions();
+  } catch (e: any) { staffSuppression = { error: e?.message ?? "staff_suppression_sweep_failed" }; }
+
   // Reply + bounce sync over the pool's own inboxes (IMAP). The hourly server
   // timer drives this in prod even when the in-process scheduler is off, so
   // replies to pool/MTA cold sends always stop sequences and reach a human.

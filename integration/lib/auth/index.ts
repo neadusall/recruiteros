@@ -587,6 +587,17 @@ export function workspaceMemberEmails(workspaceId: string): string[] {
   return out;
 }
 
+/** Whether this address is some workspace member's own login mailbox, i.e.
+ *  tenant STAFF rather than a prospect. Feeds the staff-mailbox suppression
+ *  fail-safe (lib/sending/store): staff boxes bouncing is an infrastructure
+ *  incident to page about, never a quiet 30-day suppression. */
+export async function isMemberLoginEmail(email: string): Promise<boolean> {
+  await ensureAuthReady();
+  const id = store.usersByEmail.get(email.trim().toLowerCase());
+  if (!id) return false;
+  return store.memberships.some((m) => m.userId === id);
+}
+
 /** Validate a session token -> the authed context, or null. */
 export function sessionContext(token?: string | null): AuthResult | null {
   if (!token) return null;
