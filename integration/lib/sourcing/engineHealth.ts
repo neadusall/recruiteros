@@ -31,7 +31,7 @@ import { pushNotification } from "../outbound/notify";
 import {
   verifySerperSearch, serperSearchConfigured, rapidApiSearchConfigured,
   dataforseoSearchConfigured, dataforseoAccountBalance, verifyDataForSeoSearch,
-  verifySourcingSearch, peopleSearchHost, widePrimary,
+  verifySourcingSearch, peopleSearchHost, peopleSearchServing, widePrimary,
 } from "./discovery";
 import { getRapidQuotaFor } from "./rapidQuota";
 
@@ -257,9 +257,15 @@ async function checkRapidApi(workspaceId: string): Promise<EngineStatus> {
         : `The people search is not answering on ${host}: ${probe.error || "search request failed"}`,
     };
   }
-  const proof = probe && probe.at === checkedAt
+  // Serving through the fallback listing means searches work but Setup is wrong: say
+  // both, so the working search never buries the stale config it is covering for.
+  const serving = peopleSearchServing();
+  const fallbackNote = serving.viaFallback
+    ? ` NOTE: the configured listing (${serving.configured}) has no people-search endpoint; searches are being served by ${serving.serving} instead. Update the search host/path under Setup -> JD Sourcing.`
+    : "";
+  const proof = (probe && probe.at === checkedAt
     ? `Live: search answered with ${probe.found ?? 0} result(s).`
-    : `Search answered at ${probe?.at}.`;
+    : `Search answered at ${probe?.at}.`) + fallbackNote;
 
   // 2) How much plan is left on THIS listing?
   const row = await getRapidQuotaFor(host);

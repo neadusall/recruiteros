@@ -120,9 +120,10 @@ export function rapidApiSearchConfigured(): boolean {
   return Boolean(RAPIDAPI_KEY() && PS_HOST());
 }
 
-/** The listing host the people search is pointed at, for health/quota reporting. */
+/** The listing host the people search is actually served from (the configured one,
+ *  or the fallback listing when the configured one is dead), for health/quota reporting. */
 export function peopleSearchHost(): string {
-  return PS_HOST();
+  return peopleSearchServing().serving;
 }
 
 /**
@@ -240,6 +241,30 @@ const PS_PATH_VARIANTS = [
 let healedPath: { host: string; path: string } | null = null;
 
 /**
+ * The portal's known-good people-search listing — the same one the Setup placeholder
+ * names. Path healing above only helps when the listing renamed its ENDPOINT; when the
+ * configured HOST itself has no people search (a workspace missed a listing migration,
+ * or the listing dropped the endpoint), every variant 404s and the rung used to die for
+ * the whole run. Found live 2026-08-19: one workspace still pointed at a listing whose
+ * people-search never existed, and sat dead behind a yellow Setup pill for weeks.
+ * Falling through to this listing with the same key keeps the paid rung alive; the
+ * health check names the stale config out loud so Setup still gets fixed.
+ */
+const PS_FALLBACK = {
+  host: "fresh-linkedin-scraper-api.p.rapidapi.com",
+  path: "/api/v1/search/people?name={query}&page={page}&limit=10",
+  method: "GET",
+};
+
+/** Listing hosts proven to have NO people-search endpoint (every path variant 404'd)
+ *  this process. Host-keyed, not workspace-keyed, on purpose: whether a listing has a
+ *  people search is a fact about the listing. */
+const psDeadHosts = new Set<string>();
+
+/** One people-search transport target: which listing, which path shape, which verb. */
+interface PsConfig { host: string; path: string; method: string }
+
+/**
  * Ride out per-second/minute burst limits: the breadth dial fans out many queries and
  * marketplace listings 429 the burst even with plenty of monthly credits left - each
  * 429'd query used to be dropped outright (reported as "rate-limited N of the queries").
@@ -257,21 +282,60 @@ async function fetchRetry429(doFetch: () => Promise<Response>): Promise<Response
   return res;
 }
 
-/** The effective GET path: the healed one for this host when a 404 was repaired. */
-function effectivePsPath(host: string): string {
-  if (healedPath && healedPath.host === host) return healedPath.path;
-  return PS_PATH();
+/** The effective path: the healed one for this host when a 404 was repaired. */
+function effectivePsPath(cfg: PsConfig): string {
+  if (healedPath && healedPath.host === cfg.host) return healedPath.path;
+  return cfg.path;
+}
+
+/**
+ * The configured listing, or PS_FALLBACK once the configured host is proven to have no
+ * people-search endpoint. Exported shape (see peopleSearchServing) lets the health
+ * check say "serving, but fix Setup" instead of either lying green or going dark.
+ */
+function activePsConfig(): { cfg: PsConfig; viaFallback: boolean } {
+  const configured: PsConfig = { host: PS_HOST(), path: PS_PATH(), method: PS_METHOD() };
+  if (psDeadHosts.has(configured.host)) return { cfg: PS_FALLBACK, viaFallback: true };
+  return { cfg: configured, viaFallback: false };
+}
+
+/** Configured vs actually-serving people-search listing, for health/Setup copy. */
+export function peopleSearchServing(): { configured: string; serving: string; viaFallback: boolean } {
+  const configured = PS_HOST();
+  const viaFallback = psDeadHosts.has(configured);
+  return { configured, serving: viaFallback ? PS_FALLBACK.host : configured, viaFallback };
 }
 
 export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRow[]> {
-  const host = PS_HOST();
+  const { cfg } = activePsConfig();
+  try {
+    return await peopleSearchOn(cfg, p);
+  } catch (e: any) {
+    // The configured listing has no people-search endpoint at all (every path variant
+    // 404'd). Before declaring the engine dead for the run, serve this and every later
+    // query through the portal's known-good listing with the same key: a stale Setup
+    // value must degrade to the default listing, not to darkness.
+    if (e?.allPaths404 && cfg.host !== PS_FALLBACK.host) {
+      psDeadHosts.add(cfg.host);
+      console.warn(
+        `[sourcing] people-search listing ${cfg.host} answered 404 on every known path; ` +
+        `serving via ${PS_FALLBACK.host} instead. Update RAPIDAPI_PEOPLE_SEARCH_HOST/PATH in Setup.`,
+      );
+      return await peopleSearchOn(PS_FALLBACK, p);
+    }
+    throw e;
+  }
+}
+
+async function peopleSearchOn(cfg: PsConfig, p: SearchParams): Promise<CandidateRow[]> {
+  const host = cfg.host;
   const headers: Record<string, string> = {
     "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host,
     Accept: "application/json", "Content-Type": "application/json",
   };
 
   let res: Response;
-  if (PS_METHOD() === "POST") {
+  if (cfg.method === "POST") {
     // Body-based listing: the path is literal (no interpolation); search rides in the body.
     const bodyObj: Record<string, unknown> = { keywords: p.name, count: p.limit };
     if (p.currentCompany) bodyObj.current_company = p.currentCompany;
@@ -281,7 +345,7 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
     const body = JSON.stringify(bodyObj);
     const postTo = (path: string) => fetch(`https://${host}${path}`, { method: "POST", headers, body });
 
-    const raw = effectivePsPath(host);
+    const raw = effectivePsPath(cfg);
     res = await fetchRetry429(() => postTo(raw));
 
     // SELF-HEAL, same as the GET branch below. This used to be GET-only, so a POST
@@ -298,10 +362,10 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
         }
       }
       if (!(healedPath && healedPath.host === host)) {
-        throw new PeopleSearchFatal(
+        throw Object.assign(new PeopleSearchFatal(
           `rapidapi ${host} 404 (no people-search endpoint answered on this listing; tried the configured path "${raw}" and ${PS_PATH_VARIANTS.join(", ")}. ` +
           `Fix RAPIDAPI_PEOPLE_SEARCH_HOST/PATH in Setup, or subscribe to a listing that has a people search)`
-        );
+        ), { allPaths404: true });
       }
     }
   } else {
@@ -331,7 +395,7 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
       return path;
     };
 
-    const raw = effectivePsPath(host);
+    const raw = effectivePsPath(cfg);
     res = await fetchRetry429(() => fetch(`https://${host}${buildPath(raw)}`, { headers }));
 
     // SELF-HEAL: a 404 on the configured path usually means the listing renamed its
@@ -348,10 +412,10 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
         }
       }
       if (!(healedPath && healedPath.host === host)) {
-        throw new PeopleSearchFatal(
+        throw Object.assign(new PeopleSearchFatal(
           `rapidapi ${host} 404 (no people-search endpoint answered on this listing; tried the configured path and ${PS_PATH_VARIANTS.join(", ")}. ` +
           `Fix RAPIDAPI_PEOPLE_SEARCH_HOST/PATH in Setup, or subscribe to a listing with a people search)`
-        );
+        ), { allPaths404: true });
       }
     }
   }
