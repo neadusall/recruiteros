@@ -33,3 +33,20 @@
 In-memory stores backed by `/data/snap_*.json` are re-saved by the running app. Never
 edit a snapshot file while the app runs and expect it to stick: write the file, then
 rebuild/restart the app so a fresh boot hydrates it (or do the change through an API).
+
+## Sending capacity (single source of truth)
+
+Owner mandate 2026-08-19, after two portal surfaces showed 2,150/day and ~100/day for
+the same fleet on the same afternoon:
+
+6. **Every number that claims to be sending capacity comes from
+   `lib/senders/store.ts sendCapacity()` (or `stats()` beside it).** Never sum per-box
+   caps in a route, tool, or UI yourself. If a surface needs a new slice of capacity,
+   extend sendCapacity() and read the new field.
+
+7. **Capacity math is domain-rest aware.** A mailbox whose domain is resting in
+   `snap_mpc_domain_rest_v1` contributes ZERO to today's capacity; it is reported
+   separately as benched (benchedInboxes / benchedCapacity), shown, never blended in.
+
+8. **Status surfaces must degrade honestly.** A panel that cannot reach its data says
+   so; it never falls back to a theoretical ceiling that reads like live capacity.

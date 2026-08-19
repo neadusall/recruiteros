@@ -18,7 +18,7 @@
 
 import { requireSession, ok } from "../../../../lib/api";
 import { loadSnapshot } from "../../../../lib/db";
-import { listInboxes } from "../../../../lib/senders";
+import { sendCapacity } from "../../../../lib/senders";
 
 interface MpcStats {
   workspaceId?: string; generatedAt?: string;
@@ -99,23 +99,22 @@ export async function GET(req: Request) {
   const nextRevival = resting.find((r) => r.until)?.until || null;
 
   // The REAL ceiling, not just the ramp's. The ramp says what reputation allows;
-  // the fleet says what the benched-vs-usable mailbox split allows (batch.mjs
-  // sends only from boxes whose domain is not resting, at most perBox each).
-  // A bench that idles most of the fleet must show up in "cap today", or the
-  // card reads 534 while the machine can physically send 100.
-  const perBox = Math.max(1, Number(process.env.MPC_PER_BOX_DAILY || 2));
-  let fleetBoxes = 0, usableBoxes = 0, benchedBoxes = 0;
+  // the fleet says what the benched-vs-usable mailbox split allows. ONE source of
+  // truth: sendCapacity() in lib/senders/store.ts is the only place that sums
+  // per-box caps (rest-ledger aware); every surface reads it, none re-derives it —
+  // hand-rolled sums are how this card and the Senders tab told two different
+  // capacity stories on 2026-08-19. Cold lane is Sending.ac only (own-SMTP parked).
+  let fleetBoxes = 0, usableBoxes = 0, benchedBoxes = 0, fleetCeiling = 0, perBox = 2;
   try {
-    const restingSet = new Set(resting.map((r) => r.domain.toLowerCase()));
-    for (const b of await listInboxes(g.ctx.workspace.id)) {
-      if (b.provider !== "sending-ac") continue; // cold lane is Sending.ac only (own-SMTP parked until warmed)
-      if (b.status === "paused" || b.status === "error") continue;
-      fleetBoxes++;
-      if (restingSet.has((b.email.split("@")[1] || "").toLowerCase())) benchedBoxes++;
-      else usableBoxes++;
+    const sac = (await sendCapacity(g.ctx.workspace.id)).byProvider.find((p) => p.provider === "sending-ac");
+    if (sac) {
+      usableBoxes = sac.inboxes;
+      benchedBoxes = sac.benchedInboxes;
+      fleetBoxes = sac.inboxes + sac.benchedInboxes;
+      fleetCeiling = sac.coldCapacity;
+      perBox = sac.inboxes > 0 ? Math.round(sac.coldCapacity / sac.inboxes) : perBox;
     }
   } catch { /* fleet math is best-effort; the ramp cap still renders */ }
-  const fleetCeiling = usableBoxes * perBox;
   const capToday = fleetBoxes > 0 ? Math.min(ramp.cap, fleetCeiling) : ramp.cap;
   const remaining = Math.max(0, capToday - sentToday);
   const fleetLimited = fleetBoxes > 0 && fleetCeiling < ramp.cap;
