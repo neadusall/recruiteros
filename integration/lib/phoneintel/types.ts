@@ -93,6 +93,7 @@ export type AnswerClass =
 
 /** Final disposition (spec §24). */
 export type Disposition =
+  | "TARGET_VOICEMAIL_LEFT"
   | "TARGET_VERIFIED_VOICEMAIL" | "TARGET_PROBABLE_HUMAN"
   | "DIRECTORY_MATCH" | "DIRECTORY_NO_MATCH" | "RECEPTIONIST"
   | "GENERIC_VOICEMAIL" | "GENERIC_HUMAN"
@@ -104,7 +105,7 @@ export type Disposition =
 export type SuccessType =
   | "COMPANY_PHONE_VERIFIED" | "IVR_DETECTED" | "DIRECTORY_FOUND"
   | "DIRECTORY_SEARCH_SUCCESS" | "EXTENSION_DISCOVERED" | "EXTENSION_VERIFIED"
-  | "TARGET_VOICEMAIL_VERIFIED" | "TARGET_HUMAN_PROBABLE" | "TARGET_HUMAN_VERIFIED"
+  | "TARGET_VOICEMAIL_VERIFIED" | "TARGET_VOICEMAIL_LEFT" | "TARGET_HUMAN_PROBABLE" | "TARGET_HUMAN_VERIFIED"
   | "LIVE_RECEPTIONIST" | "GENERIC_HUMAN" | "TRANSFER_SUCCESS" | "ROUTE_VERIFIED";
 
 /** One timeline entry (spec §26) — every decision is auditable (spec §52). */
@@ -165,6 +166,16 @@ export interface IntelCall {
   /** Evidence pointers (spec §25). */
   recordingId?: string;
   recordingUrl?: string;
+
+  /** PHASE 2 — the message to LEAVE once we reach the target's own voicemail: a
+   *  pre-assembled Voice Drops audio URL (usually a single spliced file about the
+   *  role we emailed them about). When set, reaching the verified named voicemail
+   *  plays this and records the drop, instead of just verifying and hanging up. */
+  voicemailUrl?: string;
+  /** The open role this voicemail is about (from the pipeline / the email). */
+  voicemailRole?: string;
+  /** True while the message is playing onto the mailbox (drives the webhook). */
+  leavingVoicemail?: boolean;
 
   createdAt: string;
   updatedAt: string;

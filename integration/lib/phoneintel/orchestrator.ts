@@ -58,6 +58,10 @@ interface StartOpts {
   /** Callee location ("Austin, TX") for calling-hours + recording jurisdiction. */
   location?: string;
   stateCode?: string;
+  /** PHASE 2: the message to leave once we reach the target's voicemail (a
+   *  pre-assembled Voice Drops audio URL) + the role it's about. */
+  voicemailUrl?: string;
+  voicemailRole?: string;
 }
 
 /** Create the call record and place the outbound leg. Returns the IntelCall. */
@@ -113,6 +117,8 @@ export async function startCall(opts: StartOpts): Promise<IntelCall> {
     unknownPrompts: 0,
     promptHistory: [],
     events: [],
+    voicemailUrl: opts.voicemailUrl,
+    voicemailRole: opts.voicemailRole,
     startedAt: new Date().toISOString(),
   });
   logEvent(call, "QUEUED", { detail: `${mode} mode`, source: mode === "known_route" ? "known_route" : "rule" });
@@ -160,9 +166,18 @@ export async function handleIntelEvent(type: string, ev: any): Promise<string> {
     case "call.answered": return onAnswered(call);
     case "call.machine.detection.ended": return onAmd(call, ev);
     case "call.transcription": return onTranscription(call, ev);
+    case "call.playback.ended": return onPlaybackEnded(call);
     case "call.hangup": return onHangup(call, ev);
     default: return "ignored";
   }
+}
+
+/** PHASE 2: the staged role voicemail finished playing onto the mailbox — record
+ *  the drop and hang up. Only fires while we're leaving a voicemail. */
+async function onPlaybackEnded(call: IntelCall): Promise<string> {
+  if (!call.leavingVoicemail || call.state === "completed") return "ignored";
+  addSuccess(call, "TARGET_VOICEMAIL_LEFT");
+  return finishAndHangup(call, "TARGET_VOICEMAIL_LEFT", `role voicemail left${call.voicemailRole ? ` re: ${call.voicemailRole}` : ""}`);
 }
 
 async function onAnswered(call: IntelCall): Promise<string> {
@@ -435,10 +450,29 @@ function verifyVoicemail(call: IntelCall, detectedName: string, transcript: stri
       evidence: { transcript: transcript.slice(0, 240) },
     });
     promoteRoute(call, true);
+    // PHASE 2: we are on the RIGHT person's voicemail. If a message was staged
+    // (the role voicemail we assembled from the pipeline), play it now and record
+    // the drop when playback ends; otherwise just verify + exit (Phase 1).
+    if (call.voicemailUrl) return leaveVoicemail(call);
     return finishAndHangup(call, "TARGET_VERIFIED_VOICEMAIL", `name match ${m.score}`);
   }
   // Probable / no-match: record the extension as evidence but don't over-claim.
   return finishAndHangup(call, m.verdict === "probable" ? "DIRECTORY_MATCH" : "DIRECTORY_NO_MATCH", `name ${m.verdict} ${m.score}`);
+}
+
+/**
+ * PHASE 2: we're on the target's own voicemail — play the staged, pre-assembled
+ * message (the role voicemail we built from the pipeline) onto the mailbox. The
+ * drop is recorded on call.playback.ended (or on hangup as a fallback). The
+ * message is a single spliced file, so this is one playback with no dead air.
+ */
+async function leaveVoicemail(call: IntelCall): Promise<string> {
+  updateCall(call, { state: "exiting", leavingVoicemail: true });
+  logEvent(call, "VOICEMAIL_DROP", { detail: call.voicemailRole ? `re: ${call.voicemailRole}` : "message", reason: "target voicemail reached", source: "rule" });
+  await withWorkspaceCreds(call.workspaceId, () =>
+    telnyx.playAudio(call.telnyxCallControlId!, call.voicemailUrl!).catch(() => {}),
+  );
+  return "leaving_voicemail";
 }
 
 /**
@@ -513,9 +547,13 @@ function onHangup(call: IntelCall, _ev: any): string {
   if (call.state === "completed") return "dup_hangup";
   const ended = new Date().toISOString();
   const dur = call.answeredAt ? Math.round((Date.parse(ended) - Date.parse(call.answeredAt)) / 1000) : 0;
-  // No disposition yet → the far end hung up before we classified.
+  // No disposition yet → the far end hung up before we classified. If we were
+  // mid-drop (playback.ended never arrived), still credit the voicemail we played.
   const disposition: Disposition = call.disposition ??
-    (call.answeredAt ? "UNKNOWN" : "NO_ANSWER");
+    (call.leavingVoicemail ? "TARGET_VOICEMAIL_LEFT" : call.answeredAt ? "UNKNOWN" : "NO_ANSWER");
+  if (call.leavingVoicemail && !call.successTypes.includes("TARGET_VOICEMAIL_LEFT")) {
+    addSuccess(call, "TARGET_VOICEMAIL_LEFT");
+  }
   updateCall(call, { state: "completed", endedAt: ended, durationSec: dur, disposition });
   logEvent(call, "HANGUP", { detail: `${dur}s`, reason: disposition, source: "rule" });
   return "hangup";

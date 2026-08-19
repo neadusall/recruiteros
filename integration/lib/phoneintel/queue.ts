@@ -30,6 +30,13 @@ export interface QueueItem {
   callId?: string;
   skipReason?: string;
   addedByUserId?: string;
+  /** PHASE 2: the pre-assembled role voicemail to leave once we reach this
+   *  person's mailbox (a Voice Drops audio URL) + the role it's about. Set by the
+   *  pipeline bridge so the call navigates the switchboard AND drops the message. */
+  voicemailUrl?: string;
+  voicemailRole?: string;
+  /** Links back to the pipeline Prospect this row came from (dedupe + attribution). */
+  prospectId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -77,6 +84,19 @@ export function listQueue(workspaceId: string, status?: QueueItem["status"]): Qu
   return store.items
     .filter((i) => i.workspaceId === workspaceId && (!status || i.status === status))
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+
+/** Is this contact/prospect (or number) already staged? Dedupe guard for the
+ *  pipeline bridge so an emailed prospect is never enqueued twice. */
+export function hasQueued(workspaceId: string, match: { prospectId?: string; contactId?: string; phone?: string }): boolean {
+  const digits = (p?: string) => (p ?? "").replace(/\D/g, "");
+  const wantPhone = digits(match.phone);
+  return store.items.some((i) =>
+    i.workspaceId === workspaceId &&
+    ((match.prospectId && i.prospectId === match.prospectId) ||
+     (match.contactId && i.contactId === match.contactId) ||
+     (wantPhone && digits(i.mainPhone) === wantPhone)),
+  );
 }
 
 export function patchItem(workspaceId: string, id: string, patch: Partial<QueueItem>): QueueItem | undefined {

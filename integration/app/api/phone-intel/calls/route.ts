@@ -26,6 +26,7 @@ export async function GET(req: Request) {
     toNumber: c.toNumber, fromNumber: c.fromNumber,
     answerClass: c.answerClass, disposition: c.disposition, successTypes: c.successTypes,
     extension: c.extension, detectedName: c.detectedName, nameMatchScore: c.nameMatchScore,
+    voicemailRole: c.voicemailRole,
     startedAt: c.startedAt, endedAt: c.endedAt, durationSec: c.durationSec,
     eventCount: c.events.length,
   }));

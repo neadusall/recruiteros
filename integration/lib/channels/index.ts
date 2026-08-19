@@ -87,15 +87,33 @@ export async function sendTouch(workspaceId: string, t: SendTouch): Promise<Send
   return result;
 }
 
-/** Enqueue the emailed prospect into its voice campaign (opt-in; dynamic import
- *  so the voice engine is only loaded when the trigger is actually used). */
+/** Enqueue the emailed prospect for a voice follow-up (opt-in; dynamic import so
+ *  the voice/phone engines only load when the trigger is actually used).
+ *
+ *  Two independent, opt-in lanes:
+ *   - VoiceDrops AMD (RECRUITEROS_VOICE_ON_SEND): the prospect's DIRECT line gets
+ *     an AMD voicemail drop.
+ *   - Role voicemail via Phone Intel (RECRUITEROS_ROLE_VM_ON_SEND): the CORPORATE
+ *     switchboard number is navigated to reach the person, and a voicemail about
+ *     the SAME open role we just emailed them about is left on their mailbox.
+ *  Both stay off by default so turning email on never silently starts calling. */
 async function triggerVoiceOnEmailSent(workspaceId: string, t: SendTouch): Promise<void> {
-  const { voiceOnSendEnabled, voiceOnEmailSent } = await import("../voice/onEmailSent");
-  if (!voiceOnSendEnabled()) return;
-  await voiceOnEmailSent(workspaceId, t.prospect, {
-    motion: t.prospect.motion,
-    voiceCampaignId: t.voiceCampaignId,
-  });
+  const [{ voiceOnSendEnabled, voiceOnEmailSent }, phoneIntel] = await Promise.all([
+    import("../voice/onEmailSent"),
+    import("../phoneintel"),
+  ]);
+  if (voiceOnSendEnabled()) {
+    await voiceOnEmailSent(workspaceId, t.prospect, {
+      motion: t.prospect.motion,
+      voiceCampaignId: t.voiceCampaignId,
+    }).catch(() => {});
+  }
+  if (phoneIntel.roleVoicemailOnSendEnabled()) {
+    // Reach the person behind their corporate line and drop a voicemail about the
+    // very role this email was about. Fire-and-forget; nothing dials until an
+    // admin starts the Phone Intel queue.
+    await phoneIntel.enqueueRoleVoicemail(workspaceId, t.prospect).catch(() => {});
+  }
 }
 
 /**

@@ -12,6 +12,11 @@
 export { startCall, handleIntelEvent } from "./orchestrator";
 export { runBatch, groupByCompany } from "./batch";
 export { startQueueRun, stopQueueRun, queueRunState } from "./runner";
+export {
+  pullRoleVoicemailsFromPipeline, enqueueRoleVoicemail, assembleRoleVoicemail,
+  roleForProspect, wasEmailed, corporateNumber, roleVoicemailOnSendEnabled,
+  DEFAULT_ROLE_VM_TEMPLATE, type PullSummary,
+} from "./roleVoicemail";
 export { planIvrMove, alternateDirectorySpec, type IvrMove, type NavTarget } from "./navigation";
 export { aiPlanMove, mapAiAction } from "./aiNavigator";
 export { preCallCheck, mayRecordHuman, VELOCITY } from "./compliance";

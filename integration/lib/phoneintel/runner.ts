@@ -125,6 +125,9 @@ async function runLoop(opts: StartQueueOptions, items: QueueItem[], st: QueueRun
         targetFirst: it.first, targetLast: it.last, targetFull: it.full, targetTitle: it.title,
         targetContactId: it.contactId, fromNumber: pick.number,
         location: it.location, stateCode: it.stateCode,
+        // Phase 2: carry the staged role voicemail so the call navigates to the
+        // person AND leaves the message about the role we emailed them about.
+        voicemailUrl: it.voicemailUrl, voicemailRole: it.voicemailRole,
       });
       // A compliance-blocked call comes back already failed; surface why on the item.
       const blocked = call.state === "failed" && call.events.some((e) => e.type === "BLOCKED");
