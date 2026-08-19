@@ -574,6 +574,19 @@ export async function workspaceTenantDomain(workspaceId: string): Promise<string
   return owner?.email.split("@")[1]?.trim().toLowerCase() || null;
 }
 
+/** Login emails of every member of a workspace. Feeds the corporate-identity
+ *  send guard (lib/senders/corpGuard): the domains recruiters log in with are
+ *  the tenant's real corporate domains and never carry fleet volume. */
+export function workspaceMemberEmails(workspaceId: string): string[] {
+  const out: string[] = [];
+  for (const m of store.memberships) {
+    if (m.workspaceId !== workspaceId) continue;
+    const u = store.users.get(m.userId);
+    if (u?.email) out.push(u.email);
+  }
+  return out;
+}
+
 /** Validate a session token -> the authed context, or null. */
 export function sessionContext(token?: string | null): AuthResult | null {
   if (!token) return null;
@@ -921,6 +934,41 @@ function smtpHostFor(imapHost: string, user: string): string {
  * password works for SMTP on Gmail/Outlook). Failures are logged and the mail
  * is dropped; a white-label send is never downgraded to the house sender.
  */
+/**
+ * MASS-SEND FUSE for the brand relay (owner mandate 2026-08-19). The white-label
+ * transport sends AS the tenant's own corporate address (e.g. ryan@lumesp.com),
+ * so it exists for 1:1 transactional mail only — booking invites, resume
+ * requests, auth mail. This hard daily cap makes it impossible for any code
+ * path, present or future, to push bulk volume through that account: past the
+ * cap the mail is dropped and logged loudly, and the fleet senders are the only
+ * road left. Counts persist per UTC day in the data volume so restarts don't
+ * reopen the fuse.
+ */
+async function brandMailFuseAllows(workspaceId: string): Promise<boolean> {
+  const cap = (() => {
+    const n = Number(process.env.BRAND_MAIL_DAILY_CAP);
+    return Number.isFinite(n) && n > 0 ? n : 100;
+  })();
+  const day = new Date().toISOString().slice(0, 10);
+  const file = `${process.env.ROS_DATA_DIR || "/data"}/brand-mail-fuse.json`;
+  let state: { day?: string; counts?: Record<string, number> } = {};
+  try {
+    const fs = await import("node:fs");
+    try { state = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* first send of the install */ }
+    if (state.day !== day) state = { day, counts: {} };
+    const counts = (state.counts = state.counts || {});
+    const used = counts[workspaceId] || 0;
+    if (used >= cap) return false;
+    counts[workspaceId] = used + 1;
+    fs.writeFileSync(file, JSON.stringify(state));
+    return true;
+  } catch {
+    // No writable data dir (dev): the fuse cannot persist, so it stays open
+    // rather than silently eating transactional mail.
+    return true;
+  }
+}
+
 async function sendBrandedEmail(
   workspaceId: string,
   brandName: string,
@@ -942,6 +990,12 @@ async function sendBrandedEmail(
   if (!c.user || !c.pass) {
     console.error(
       `[email] BLOCKED off-brand send -> ${to} :: "${subject}": white-label workspace ${workspaceId} has no mailbox creds (set BRAND_SMTP_USER/PASS or RESUME_INBOX_USER/PASS in Setup). The house sender is never used for white-label mail.`,
+    );
+    return;
+  }
+  if (!(await brandMailFuseAllows(workspaceId))) {
+    console.error(
+      `[email] BRAND-MAIL FUSE TRIPPED -> dropped "${subject}" to ${to}: workspace ${workspaceId} hit its daily cap for mail sent as ${c.from || c.user}. This relay is 1:1 transactional only; whatever is pushing volume through it belongs on the sender fleet. Raise BRAND_MAIL_DAILY_CAP only if the transactional volume is real.`,
     );
     return;
   }

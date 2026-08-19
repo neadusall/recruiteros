@@ -139,13 +139,38 @@ const AVOID = {
   sendingac: blockedProviders("sendingac"),
   google: blockedProviders("google"),
 };
+// CORPORATE-IDENTITY GUARD (owner mandate 2026-08-19): the tenant's REAL corporate
+// domain (the one recruiters log in with, e.g. lumesp.com) never carries cold volume.
+// Cold mail lives on the lookalike fleet; the corporate domain is for the recruiters'
+// own 1:1 mail and nothing else. Domains are derived live from the auth snapshot's
+// member logins (minus public providers), so no hardcoded list to drift. Fail-open:
+// an unreadable auth snapshot protects nothing rather than stopping the engine.
+const AUTH_FILE = process.env.MPC_AUTH_FILE || "/data/snap_auth.json";
+const PUBLIC_MAIL = new Set(["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "icloud.com", "me.com", "aol.com", "proton.me", "protonmail.com"]);
+function corpIdentityDomains() {
+  try {
+    const s = JSON.parse(readFileSync(AUTH_FILE, "utf8"));
+    const users = new Map(s.users || []);
+    const out = new Set();
+    for (const m of s.memberships || []) {
+      if (m.workspaceId !== LUME_WS) continue;
+      const u = users.get(m.userId);
+      const d = (((u && u.email) || "").split("@")[1] || "").toLowerCase();
+      if (d && !PUBLIC_MAIL.has(d)) out.add(d);
+    }
+    return out;
+  } catch { return new Set(); }
+}
 function recruiterBoxes() {
   const s = JSON.parse(readFileSync(SENDERS, "utf8"));
   const rows = s.inboxes || (s.state && s.state.inboxes) || [];
   const byOwner = new Map();
   const add = (key, box) => { if (!byOwner.has(key)) byOwner.set(key, []); byOwner.get(key).push(box); };
+  const corp = corpIdentityDomains();
+  let corpSkipped = 0;
   for (const m of rows) {
     if (!m || m.workspaceId !== LUME_WS) continue;
+    if (corp.has((String(m.email || "").split("@")[1] || "").toLowerCase())) { corpSkipped++; continue; }
     if (m.provider === "sending-ac" && !m.smtpPassEnc && OWNER_PATTERN.test(m.ownerName || "")) {
       add(String(m.ownerName).toLowerCase(), { kind: "api", fleet: "sendingac", email: m.email, owner: m.ownerName });
     } else if (SMTP_LANE && m.provider === "own-smtp" && m.smtpPassEnc && /ariel/i.test(m.ownerName || m.email.split("@")[0])) {
@@ -159,6 +184,7 @@ function recruiterBoxes() {
       add(key, { kind: "smtp", google: true, fleet: "google", email: m.email, owner: m.ownerName || local, host: m.smtpHost, port: m.smtpPort || 587, secure: !!m.smtpSecure, user: m.smtpUser || m.email, passEnc: m.smtpPassEnc, dailyCap: m.dailyCap || 2 });
     }
   }
+  if (corpSkipped) console.log(`corp-identity guard: excluded ${corpSkipped} box(es) on ${[...corp].join(", ")} (the corporate domain never carries cold volume)`);
   const pools = [...byOwner.values()];
   const out = [];
   for (let i = 0; pools.some(p => i < p.length); i++) for (const p of pools) if (i < p.length) out.push(p[i]);

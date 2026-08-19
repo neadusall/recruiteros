@@ -44,8 +44,14 @@ export interface PickOpts { recruiterId?: string; excludeIds?: string[]; }
 export async function pickSender(workspaceId: string, opts: PickOpts = {}): Promise<SenderInbox | null> {
   await resetDailyIfNewDay(); // date-guarded no-op except on the first pick of a new UTC day
   const exclude = new Set(opts.excludeIds || []);
+  // Corporate-identity guard (owner mandate 2026-08-19): rotation never picks a
+  // box on the tenant's real corporate domain (e.g. lumesp.com). Cold volume
+  // lives on the lookalike fleet only; sendViaInbox enforces the same wall.
+  const { corpIdentityDomains } = await import("./corpGuard");
+  const corp = await corpIdentityDomains(workspaceId);
+  const offCorp = (m: SenderInbox) => !corp.has((m.email.split("@")[1] || "").toLowerCase());
   const pool = (await listInboxes(workspaceId, { ownerId: opts.recruiterId }))
-    .filter((m) => sendable(m) && !exclude.has(m.id))
+    .filter((m) => sendable(m) && offCorp(m) && !exclude.has(m.id))
     .sort((a, b) => (coldCapFor(b) - b.sentToday) - (coldCapFor(a) - a.sentToday));
   return pool[0] || null;
 }

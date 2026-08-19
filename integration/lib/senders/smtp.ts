@@ -65,6 +65,19 @@ export async function sendViaInbox(m: SenderInbox, msg: SmtpMessage): Promise<Sm
     const gate = await preflightOutbound({ fromEmail: m.email, fromStatus: m.status, to: msg.to, threadReply: !!msg.inReplyTo });
     if (gate.ok === false) return { ok: false, error: `preflight_${gate.reason}` };
   } catch { /* the gate itself failing never blocks mail */ }
+  // Corporate-identity guard (owner mandate 2026-08-19): the tenant's real
+  // corporate domain never carries fleet volume, whichever transport this hop
+  // takes. 1:1 white-label mail has its own path (sendBrandedEmail) and is not
+  // affected; this refusal only exists so a corporate mailbox that ends up in
+  // the sender fleet can never be mass-sent through.
+  try {
+    const { corpSendRefusal } = await import("./corpGuard");
+    const refusal = await corpSendRefusal(m);
+    if (refusal) {
+      console.error(`[senders] BLOCKED: ${refusal}`);
+      return { ok: false, error: "preflight_corp_identity_domain" };
+    }
+  } catch { /* the guard itself failing never blocks mail */ }
   const { canSendViaMailboxApi, sendViaMailboxApi } = await import("./mailboxApi");
   if (canSendViaMailboxApi(m)) return sendViaMailboxApi(m, msg);
   try {
