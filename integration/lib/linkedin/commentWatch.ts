@@ -589,6 +589,10 @@ interface WatchState {
    *  COMMENT_COPY_EPOCH when the public-comment rules change materially and
    *  every workspace's pending queue is rewritten once on its next scan. */
   redraftEpoch: Record<string, number>;
+  /** ws -> the env-carried owner mandate to enable comment auto-posting has
+   *  been applied once. The stamp, not the setting, is what makes it one-shot:
+   *  an owner who later flips the switch off in the UI stays off. */
+  autopostMandate: Record<string, boolean>;
 }
 
 /** Bumped 2026-08-19: drafts must close with a call to action (owner ask).
@@ -606,7 +610,7 @@ interface WatchState {
 const COMMENT_COPY_EPOCH = 4;
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -686,6 +690,7 @@ async function hydrate(): Promise<void> {
           autoMode: snap.autoMode ?? {},
           lastScan: snap.lastScan ?? {},
           redraftEpoch: snap.redraftEpoch ?? {},
+          autopostMandate: snap.autopostMandate ?? {},
         };
       }
       hydrated = true;
@@ -1509,6 +1514,20 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     } catch (e) {
       console.log(`[comment-radar] ${workspaceId}: epoch redraft error (${e instanceof Error ? e.message : e})`);
     }
+  }
+
+  // Owner mandate 2026-08-19 ("approve these automatically and send them
+  // yourself"): comment auto-posting switches ON for the workspaces named in
+  // RECRUITEROS_COMMENT_AUTOPOST_WS (comma-separated ids; env-carried so no
+  // tenant id lives in code). One-shot by stamp, not by setting: an owner who
+  // later flips the switch off in the UI stays off. Everything downstream is
+  // unchanged - the engine's caps, the recruiter wall, the US gate, and the
+  // day/week/spacing throttle still gate every autopilot post.
+  const mandateWs = (process.env.RECRUITEROS_COMMENT_AUTOPOST_WS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (mandateWs.includes(workspaceId) && !state.autopostMandate[workspaceId]) {
+    state.autopostMandate[workspaceId] = true;
+    await setCommentLimits(workspaceId, { autoPost: true });
+    console.log(`[comment-radar] ${workspaceId}: comment auto-posting enabled (owner mandate via env)`);
   }
 
   const scanned = 0;
