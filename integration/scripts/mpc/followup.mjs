@@ -205,6 +205,30 @@ function foot() { return "\n\nLume Search Partners · 148 Doughty Blvd, Inwood, 
 async function main() {
   mkdirSync(OUT, { recursive: true });
   const rows = loadSentRows();
+
+  // Google-lane guardrails (owner "make it strong" 8/19): follow-ups honor the SAME per-box
+  // weekly ramp and per-domain daily ceiling as cold sends, so a box can never be pushed past
+  // its receiver-friendly curve by touch-2s stacking on top of the morning's cold volume.
+  // A capped follow-up simply stays due and goes out on a later run.
+  const GOOGLE_RAMP = String(process.env.MPC_GOOGLE_RAMP || "8,14,20")
+    .split(",").map((n) => Math.max(1, Number(n) || 0)).filter(Boolean);
+  const GOOGLE_DOMAIN_CAP = Number(process.env.MPC_GOOGLE_DOMAIN_DAILY || 50);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const boxToday = new Map(); const domToday = new Map(); const boxFirst = new Map();
+  for (const r0 of rows) {
+    if (!r0.from) continue;
+    if (!boxFirst.has(r0.from) || (r0.at || "") < boxFirst.get(r0.from)) boxFirst.set(r0.from, r0.at || "");
+    if ((r0.at || "").slice(0, 10) === todayStr) {
+      boxToday.set(r0.from, (boxToday.get(r0.from) || 0) + 1);
+      const d0 = String(r0.from.split("@")[1] || "").toLowerCase();
+      if (d0) domToday.set(d0, (domToday.get(d0) || 0) + 1);
+    }
+  }
+  const googleRampCap = (from) => {
+    const at = boxFirst.get(from);
+    const week = at ? Math.floor(Math.max(0, Date.now() - Date.parse(at)) / (7 * 86_400_000)) : 0;
+    return GOOGLE_RAMP[Math.min(week, GOOGLE_RAMP.length - 1)];
+  };
   const stop = repliedOrStopped();
   const now = Date.now();
 
@@ -260,6 +284,7 @@ async function main() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const logFile = `${OUT}/followups-${stamp}.jsonl`;
   let sent = 0;
+  let gCapHeld = 0;
   for (const t of batch) {
     const r = t.last;
     const nextTouch = t.touches + 1;
@@ -274,9 +299,18 @@ async function main() {
       sent++; continue;
     }
     const gbox = GOOGLE_LANE ? gmailBoxFor(r.from) : null;
+    if (gbox) {
+      const gd = String(r.from.split("@")[1] || "").toLowerCase();
+      if ((boxToday.get(r.from) || 0) >= googleRampCap(r.from) || (domToday.get(gd) || 0) >= GOOGLE_DOMAIN_CAP) { gCapHeld++; continue; }
+    }
     const res = gbox
       ? await sendViaSmtp(gbox, (rec && rec.name) || "Ryan Nead", t.email, fu.subject, fullBody)
       : await sendViaMailboxApi(r.from, t.email, fu.subject, fullBody);
+    if (gbox && res.ok) {
+      boxToday.set(r.from, (boxToday.get(r.from) || 0) + 1);
+      const gd2 = String(r.from.split("@")[1] || "").toLowerCase();
+      if (gd2) domToday.set(gd2, (domToday.get(gd2) || 0) + 1);
+    }
     // Log as a normal send row so the touch count increments for the NEXT run.
     // A follow-up stays on the side (BD/Recruiting) of the thread it continues.
     appendFileSync(`${OUT}/sent-followup-${stamp}.jsonl`, JSON.stringify({ at: new Date().toISOString(), motion: r.motion || "bd", from: r.from, to_email: t.email, to_name: r.to_name, company: r.company, role: r.role, variant: r.variant, subject: fu.subject, body: fullBody, touch: nextTouch, result: res }) + "\n");
@@ -284,6 +318,7 @@ async function main() {
     else console.log(`  FAIL ${t.email}: ${res.error}`);
     await new Promise((res2) => setTimeout(res2, 1200));
   }
+  if (gCapHeld) console.log(`  google ramp guard: ${gCapHeld} follow-up(s) held for a later run (box or domain at today's ceiling)`);
   console.log(`\n${SEND ? `[SEND] ${sent} follow-ups sent. Log: ${logFile}` : `[DRY-RUN] ${sent} would send. Re-run with --send.`}`);
 }
 

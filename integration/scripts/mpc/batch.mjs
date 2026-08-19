@@ -460,6 +460,11 @@ async function main() {
     return GOOGLE_RAMP[Math.min(week, GOOGLE_RAMP.length - 1)];
   };
   const capFor = (b) => (b.google ? googleCapFor(b) : b.kind === "smtp" ? Math.min(PER_BOX, b.dailyCap || PER_BOX) : PER_BOX);
+  // Per-DOMAIN ceiling for the Google lane (research: keep a domain's total cold volume
+  // under ~50-60/day once 2-3 boxes share it; every box on a domain shares its reputation).
+  const GOOGLE_DOMAIN_CAP = Number(process.env.MPC_GOOGLE_DOMAIN_DAILY || 50);
+  const domCounts = new Map();
+  const domOf = (email) => String(String(email).split("@")[1] || "").toLowerCase();
   const allBoxes = recruiterBoxes();
   if (!allBoxes.length) { console.log("no recruiter sending boxes found; aborting send"); return; }
   const resting = restingDomains();
@@ -467,7 +472,8 @@ async function main() {
   if (allBoxes.length > fleet.length) console.log(`  domain rest: ${allBoxes.length - fleet.length} box(es) benched (resting: ${[...resting].join(", ")})`);
   if (!fleet.length) { console.log("every sending box belongs to a resting domain; nothing sends until a domain revives"); return; }
   const boxCounts = sentTodayByBox();
-  const avail = fleet.filter(b => (boxCounts.get(b.email) || 0) < capFor(b));
+  for (const [from, n] of boxCounts) { const d = domOf(from); if (d) domCounts.set(d, (domCounts.get(d) || 0) + n); }
+  const avail = fleet.filter(b => (boxCounts.get(b.email) || 0) < capFor(b) && !(b.google && (domCounts.get(domOf(b.email)) || 0) >= GOOGLE_DOMAIN_CAP));
   const apiBoxes = fleet.filter(b => b.kind !== "smtp").length;
   console.log(`\n[SEND] fleet ${fleet.length} boxes (api ${apiBoxes} + smtp ${fleet.length - apiBoxes}${SMTP_LANE ? "" : "; own-SMTP lane parked"}${GOOGLE_LANE ? "" : "; google lane parked"}) | under per-box cap (${PER_BOX}/day): ${avail.length}`);
   const logFile = `${OUT}/sent-${stamp}.jsonl`;
@@ -478,7 +484,13 @@ async function main() {
   const isGoogleRcpt = (to) => (clsSend.get(String(to || "").toLowerCase().trim()) || {}).family === "google";
   let sent = 0, failed = 0, idx = 0, googleRouted = 0, googleDeferred = 0;
   for (const d of drafts) {
-    if (!avail.length) { console.log("  every box is at its per-box daily cap; stopping (deliverability guard)"); break; }
+    // Google-lane domain ceiling: evict boxes whose domain hit today's cap before picking
+    // (the draft is then tried against the remaining boxes, never dropped).
+    for (let i = avail.length - 1; i >= 0; i--) {
+      const c = avail[i];
+      if (c.google && (domCounts.get(domOf(c.email)) || 0) >= GOOGLE_DOMAIN_CAP) avail.splice(i, 1);
+    }
+    if (!avail.length) { console.log("  every box is at its per-box or per-domain daily cap; stopping (deliverability guard)"); break; }
     let pos = idx % avail.length;
     if (isGoogleRcpt(d.to_email)) {
       let hops = 0;
@@ -497,6 +509,7 @@ async function main() {
     // MPC_MOTION=recruiting. mpc-stats splits the cockpit on this field.
     appendFileSync(logFile, JSON.stringify({ at: new Date().toISOString(), motion: process.env.MPC_MOTION || "bd", from: box.email, from_owner: rec.name, lane: box.kind || "api", ...d, body, result: r }) + "\n");
     boxCounts.set(box.email, (boxCounts.get(box.email) || 0) + 1);
+    if (box.google) { const bd = domOf(box.email); domCounts.set(bd, (domCounts.get(bd) || 0) + 1); }
     if ((boxCounts.get(box.email) || 0) >= capFor(box)) avail.splice(pos, 1); else idx++;
     if (r.ok) { sent++; console.log(`  sent ${d.to_email} (as ${box.email} / ${rec.name})${r.note ? " [" + r.note + "]" : ""}`); }
     else { failed++; console.log(`  FAIL ${d.to_email}: ${r.error}`); }
