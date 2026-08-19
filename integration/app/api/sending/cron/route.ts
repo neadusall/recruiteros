@@ -152,7 +152,7 @@ async function run(req: Request) {
     jobBlasts = await runJobBlastTickAll();
   } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, variants, bounceFeedback, replies, jobBlasts });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, variants, bounceFeedback, staffSuppression, replies, jobBlasts });
 }
 
 export const GET = run;
