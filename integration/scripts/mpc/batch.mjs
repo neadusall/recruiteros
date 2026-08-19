@@ -68,6 +68,19 @@ function alreadyEmailed() {
   return seen;
 }
 
+// Addresses the fleet NDR sweep has seen hard-bounce (snap_mpc_ndr_v1.json, refreshed by
+// mpc-ndr-sweep.timer). Consulted at the send gate so a known-dead address can never cold-send
+// again, even when the curation row still carries emailValidated:true from before the 8/19
+// validation-rung fix. Same stop-list followup.mjs already uses; fail-open if the file is absent.
+function bouncedStopList() {
+  const stop = new Set();
+  try {
+    const n = JSON.parse(readFileSync(process.env.MPC_NDR_FILE || "/data/snap_mpc_ndr_v1.json", "utf8"));
+    for (const e of n.bounced || []) stop.add(String(e).toLowerCase());
+  } catch { /* no sweep yet; nothing to suppress */ }
+  return stop;
+}
+
 // The sending fleet. OWNER CALL 2026-08-11: cold sends go through Sending.ac boxes ONLY
 // (Ryan/Josh/Noah/Sam via the Mailbox API, credential-less). The own-SMTP lookalike boxes
 // (ariel@lumerecruity.com etc., mail.lumesp.com) stay OUT of rotation until that fleet is
@@ -251,10 +264,12 @@ async function main() {
   // AND dedupe within this run so a duplicate curated row can't double-send in one batch.
   const seen = alreadyEmailed();
   const blocked = loadBlockedCohorts();
+  const ndrStop = bouncedStopList();
   const runSeen = new Set();
   const fresh = [];
   let skippedBlocked = 0;
   let skippedUnvalidated = 0;
+  let skippedBounced = 0;
   // VALIDATION BELT (2026-08-12 deliverability audit). The app-side enroll gate requires a
   // Reoon-validated address, but curated rows reach this lane directly, so the same rule holds
   // here: a known-invalid address never sends, and an unvalidated one waits for the nightly
@@ -264,12 +279,13 @@ async function main() {
   for (const p of preferred) {
     const e = String(p.likelyEmail || "").toLowerCase().trim();
     if (!e || seen.has(e) || runSeen.has(e)) continue;
+    if (ndrStop.has(e)) { skippedBounced++; continue; } // receiver already told us this address is dead
     if (blocked.size && blocked.has(cohortKeyOf(p))) { skippedBlocked++; continue; } // recruiter said "no" to this cohort
     if (p.emailInvalid || (REQUIRE_VALIDATED && p.emailValidated !== true)) { skippedUnvalidated++; continue; }
     runSeen.add(e);
     fresh.push(p);
   }
-  console.log(`already emailed: ${seen.size} | blocked-cohort skipped: ${skippedBlocked} | unvalidated/invalid held: ${skippedUnvalidated} | fresh & ready: ${fresh.length}`);
+  console.log(`already emailed: ${seen.size} | known-bounced suppressed: ${skippedBounced} | blocked-cohort skipped: ${skippedBlocked} | unvalidated/invalid held: ${skippedUnvalidated} | fresh & ready: ${fresh.length}`);
 
   // PROVIDER-AWARE ORDERING + SEG PHASE (the enterprise-deliverability layer, mxclass.mjs).
   // All MPC volume leaves Azure/Outlook infrastructure, so Outlook-hosted recipients are our
