@@ -21,6 +21,7 @@ import { getInbox } from "./repository";
 import { ruleFor } from "./rules";
 import { timingToDate } from "./timing";
 import { needsEscalation } from "./watchdog";
+import { operatorPingAllowed } from "./router";
 import type { ProcessedResponse, ResponseClass } from "./types";
 
 const WS = "ws_test";
@@ -100,6 +101,12 @@ async function main() {
   ok(!needsEscalation(fresh), "inside the window does not escalate");
   const unverified = row({ cls: "positive", prospectId: null, receivedAt: hoursAgo(3) });
   ok(!needsEscalation(unverified), "warm-up traffic never escalates");
+
+  // 6b. The instant operator ping obeys the same identity wall as escalation:
+  //     warm-up chatter never emails the operator, however it gets classified.
+  ok(!operatorPingAllowed({ prospectId: null, campaignId: undefined }), "warm-up traffic never pings the operator");
+  ok(operatorPingAllowed({ prospectId: "pp9", campaignId: undefined }), "a matched prospect pings");
+  ok(operatorPingAllowed({ prospectId: null, campaignId: "mpc-finance" }), "a campaign-attributed reply pings");
   await inbox.setHandled(WS, hot.inbound.id, true);
   ok(!needsEscalation((await inbox.getById(WS, hot.inbound.id))!), "handled rows never escalate");
 

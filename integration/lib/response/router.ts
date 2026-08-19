@@ -49,6 +49,20 @@ async function isBdMotion(
   return c?.motion === "bd";
 }
 
+/**
+ * Whether an inbound reply may page the operator (the instant email ping).
+ * Same identity test as the SLA watchdog (needsEscalation): a sender with no
+ * matched prospect and no campaign attribution is warm-up network chatter,
+ * which arrives hundreds a day on the fleet boxes. It may sit in the review
+ * queue, but it must never page the operator (each ping also burns a send from
+ * a real pool inbox). Pure so the behavior suite can pin it down.
+ */
+export function operatorPingAllowed(
+  inbound: Pick<InboundResponse, "prospectId" | "campaignId">,
+): boolean {
+  return !!(inbound.prospectId || inbound.campaignId);
+}
+
 export async function route(
   inbound: InboundResponse,
   cls: Classification,
@@ -85,6 +99,10 @@ export async function route(
   for (const action of rule.actions) {
     switch (action.kind) {
       case "push_notification": {
+        if (!operatorPingAllowed(inbound)) {
+          taken.push("notify skipped: unverified sender");
+          break;
+        }
         taken.push(`notify: ${action.detail ?? "recruiter pinged"}`);
         // Email the operator right now (RECRUITEROS_NOTIFY_EMAIL; no-op until set).
         // Fire-and-forget: a notification failure must never affect reply processing.
