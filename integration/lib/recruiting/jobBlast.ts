@@ -230,7 +230,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Sent-audit + reply-watch feed: every job-blast email lands in
- * `job_blast_sent_v1` with its full rendered text and the pool inbox it left
+ * `job_blast_sent_v1` with its rendered text (`body`, pre-signature), the
+ * signature block the sender appended (`sig`), and the pool inbox it left
  * from. /api/mpc-sent merges it into the portal's Sent page (Operate > Sent),
  * and the mailbox reply monitor (tools/monitor.mjs) reads it to match
  * candidate replies back into the response inbox. Newest first, capped.
@@ -244,6 +245,7 @@ async function appendSentFeed(
   rendered: { subject: string; body: string; templateId: string },
   senderEmail: string | undefined,
   senderOwner: string | undefined,
+  signature: string | undefined,
   at: string,
 ): Promise<void> {
   try {
@@ -263,6 +265,11 @@ async function appendSentFeed(
       touch: 1,
       subject: rendered.subject,
       body: rendered.body,
+      // The signature block the pooled sender actually appended ("" when the
+      // sending box resolved none). The Sent page shows body + sig so the feed
+      // reads exactly as the candidate received it; rows predating this field
+      // get a display-time resolve in /api/mpc-sent instead.
+      sig: signature ?? "",
       blastId: b.id,
       campaignId: b.campaignId,
     });
@@ -438,7 +445,7 @@ async function tickInner(workspaceId: string, opts: { max?: number }): Promise<T
             await core.saveProspect(fresh);
           }
         } catch { /* tile truth is best-effort; the send already happened */ }
-        await appendSentFeed(workspaceId, b, p, rendered, res.senderEmail, res.senderOwner, sentAt);
+        await appendSentFeed(workspaceId, b, p, rendered, res.senderEmail, res.senderOwner, res.sentSignature, sentAt);
       } else {
         const reason = res.error || "send_failed";
         // Transient pool exhaustion is NOT a per-person failure: leave the rest

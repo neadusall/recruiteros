@@ -34,6 +34,10 @@ export interface SendResult {
   senderEmail?: string;
   /** The sending box's display name ("Ryan Nead") for audit-feed labeling. */
   senderOwner?: string;
+  /** The plain-text signature block actually appended to this send (pooled email
+   *  only, "" when the sender resolved no signature) — lets the sent-audit feed
+   *  store the message exactly as it left, not the pre-signature draft. */
+  sentSignature?: string;
 }
 
 export interface SendTouch {
@@ -402,7 +406,7 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
       } catch { /* best-effort stamp */ }
       t.prospect.senderInboxId = inbox.id;
     }
-    return { ok: true, channel: "email", provider: "smtp:" + inbox.provider, providerMessageId: res.messageId, senderEmail: inbox.email, senderOwner: inbox.displayName || inbox.ownerName || undefined };
+    return { ok: true, channel: "email", provider: "smtp:" + inbox.provider, providerMessageId: res.messageId, senderEmail: inbox.email, senderOwner: inbox.displayName || inbox.ownerName || undefined, sentSignature: sig.text };
   } catch {
     return null; // any error -> fall through to existing providers
   }
