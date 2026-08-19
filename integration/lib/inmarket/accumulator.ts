@@ -219,7 +219,7 @@ const hydrated: Promise<void> = (async () => {
     if (!saved) return;
     for (const k of CARRY_FIELDS) {
       if (health[k] === undefined && saved[k] !== undefined) {
-        (health as Record<string, unknown>)[k] = saved[k];
+        (health as unknown as Record<string, unknown>)[k] = saved[k];
       }
     }
   } catch { /* best-effort */ }
