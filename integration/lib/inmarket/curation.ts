@@ -1158,18 +1158,30 @@ export interface AutopilotSendPlan {
   ledgersVisible: boolean;     // false when the /mpc-out mount is absent (numbers are store-only)
   namingConnected: boolean;    // RAPID_NAMING_KEY present
   finderConnected: boolean;    // a paid residual email finder is keyed (beyond KoldInfo)
+  /** Measured trailing-7-day rates and the runway math they imply — the "will we run out" story. */
+  forecast: {
+    sendsPerDay: number;       // ledger rows per day, 7-day average
+    validatedPerDay: number;   // rows turning validated per day (all sources), 7-day average
+    rescuePerDay: number;      // KoldInfo-rescue share of that (uses today's pace when hotter)
+    curatedPerDay: number;     // brand-new rows entering the store per day
+    runwayDays: number | null;      // ready pool at today's send pace
+    netPerDay: number;              // validated in minus sent out
+    poolEmptyDays: number | null;   // null = pool is growing
+    rescueDaysLeft: number | null;  // rescue pile at the current rescue pace
+  };
 }
 
-let sentLedgerCache: { at: number; day: string; contacted: Set<string>; sentToday: number; visible: boolean } | null = null;
+let sentLedgerCache: { at: number; day: string; contacted: Set<string>; sentToday: number; sent7: number; visible: boolean } | null = null;
 
-/** Distinct recipients + today's row count across the MPC engine's sent-*.jsonl ledgers.
- *  The engine tracks its own sends outside this store, so "ready" is honest only after
- *  subtracting these. Cached 5 minutes; absent mount degrades to store-only numbers. */
-async function readSentLedgers(): Promise<{ contacted: Set<string>; sentToday: number; visible: boolean }> {
+/** Distinct recipients + today's and trailing-7-day row counts across the MPC engine's
+ *  sent-*.jsonl ledgers. The engine tracks its own sends outside this store, so "ready" is
+ *  honest only after subtracting these. Cached 5 minutes; absent mount degrades gracefully. */
+async function readSentLedgers(): Promise<{ contacted: Set<string>; sentToday: number; sent7: number; visible: boolean }> {
   const day = new Date().toISOString().slice(0, 10);
   if (sentLedgerCache && sentLedgerCache.day === day && Date.now() - sentLedgerCache.at < 5 * 60_000) return sentLedgerCache;
   const contacted = new Set<string>();
-  let sentToday = 0;
+  const since7 = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  let sentToday = 0, sent7 = 0;
   let visible = false;
   try {
     const fs = await import("node:fs");
@@ -1186,25 +1198,36 @@ async function readSentLedgers(): Promise<{ contacted: Set<string>; sentToday: n
           const r = JSON.parse(line) as { to_email?: string; at?: string };
           const em = String(r.to_email || "").toLowerCase();
           if (em) contacted.add(em);
-          if (String(r.at || "").slice(0, 10) === day) sentToday++;
+          const at = String(r.at || "");
+          if (at.slice(0, 10) === day) sentToday++;
+          if (at >= since7) sent7++;
         } catch { /* skip a torn line */ }
       }
     }
   } catch { /* mount absent (dev box) */ }
-  sentLedgerCache = { at: Date.now(), day, contacted, sentToday, visible };
+  sentLedgerCache = { at: Date.now(), day, contacted, sentToday, sent7, visible };
   return sentLedgerCache;
 }
 
 export async function autopilotSendPlan(): Promise<AutopilotSendPlan> {
   const rows = await load();
-  const { contacted, sentToday, visible } = await readSentLedgers();
+  const { contacted, sentToday, sent7, visible } = await readSentLedgers();
   const cutoff = process.env.MPC_CURATED_SINCE || "2026-08-11";
   const today = new Date().toISOString().slice(0, 10);
+  const since7 = new Date(Date.now() - 7 * 86_400_000).toISOString();
 
   let readyNow = 0, alreadyContacted = 0, heldByCutoff = 0, pendingValidation = 0,
-    catchAll = 0, unnamed = 0, rescueQueue = 0, rescuedToday = 0;
+    catchAll = 0, unnamed = 0, rescueQueue = 0, rescuedToday = 0,
+    validated7 = 0, rescued7 = 0, curated7 = 0;
   for (const r of rows) {
-    if (r.emailSource === "koldinfo" && r.emailValidated && (r.validatedAt || "").slice(0, 10) === today) rescuedToday++;
+    if ((r.curatedAt || "") >= since7 && r.emailSource !== "koldinfo") curated7++;
+    if (r.emailValidated && (r.validatedAt || "") >= since7) {
+      validated7++;
+      if (r.emailSource === "koldinfo") {
+        rescued7++;
+        if ((r.validatedAt || "").slice(0, 10) === today) rescuedToday++;
+      }
+    }
     if (r.status === "suppressed") { if (rescuableInvalid(r)) rescueQueue++; continue; }
     if (r.status === "enrolled" || r.status === "queued") continue;
     if (!r.managerName) { if (r.domain) unnamed++; continue; }
@@ -1217,6 +1240,21 @@ export async function autopilotSendPlan(): Promise<AutopilotSendPlan> {
     if (r.emailCatchAll) { catchAll++; continue; }
     if (email && !r.emailValidated && !r.emailInvalid) pendingValidation++;
   }
+
+  // The runway story, from measured trailing-7-day rates. The rescue rung just launched, so its
+  // pace uses TODAY's count when that runs hotter than the 7-day average (else a fresh engine
+  // projects at 1/7th of its real speed). Rounded to whole people/day for the reader.
+  const sendsPerDay = Math.round(sent7 / 7);
+  const validatedPerDay = Math.round(validated7 / 7);
+  const rescuePerDay = Math.max(rescuedToday, Math.round(rescued7 / 7));
+  const curatedPerDay = Math.round(curated7 / 7);
+  const netPerDay = validatedPerDay - sendsPerDay;
+  const forecast = {
+    sendsPerDay, validatedPerDay, rescuePerDay, curatedPerDay, netPerDay,
+    runwayDays: sendsPerDay > 0 ? Math.round((readyNow / sendsPerDay) * 10) / 10 : null,
+    poolEmptyDays: netPerDay < 0 && sendsPerDay > 0 ? Math.round((readyNow / -netPerDay) * 10) / 10 : null,
+    rescueDaysLeft: rescuePerDay > 0 ? Math.round((rescueQueue / rescuePerDay) * 10) / 10 : null,
+  };
 
   // The mpc-daily window: weekdays 15:00 UTC.
   const now = new Date();
@@ -1231,6 +1269,7 @@ export async function autopilotSendPlan(): Promise<AutopilotSendPlan> {
     ledgersVisible: visible,
     namingConnected: Boolean(process.env.RAPID_NAMING_KEY),
     finderConnected: Boolean(process.env.INMARKET_FINDER_URL || process.env.ICYPEAS_API_KEY),
+    forecast,
   };
 }
 

@@ -7054,6 +7054,50 @@
       '<span class="sqap-d">' + note + (href ? ' <a href="' + href + '">' + hrefLabel + "</a>" : "") + "</span>" +
       '<span class="sqap-pill ' + pillCls + '">' + pillText + "</span></div>";
   }
+  // 📈 Supply forecast: measured people-per-day in vs out, the runway they imply, and where
+  // tomorrow's leads come from, so running dry is visible days ahead instead of the morning of.
+  function sqApForecastHtml(a, tu) {
+    var f = a && a.forecast;
+    if (!f) return "";
+    var verdict;
+    if (!f.sendsPerDay && !f.validatedPerDay) {
+      verdict = '<div class="sqap-row"><span class="sqap-n">–</span><span class="sqap-l">Forecast warming up</span>' +
+        '<span class="sqap-d">No send history measured yet. This fills in after the first daily runs.</span></div>';
+    } else if (f.poolEmptyDays == null) {
+      verdict = '<div class="sqap-row"><span class="sqap-n">+' + sqFmt(Math.max(0, f.netPerDay)) + '/day</span><span class="sqap-l">Pool is growing</span>' +
+        '<span class="sqap-d">Adding ~' + sqFmt(f.validatedPerDay) + ' validated people/day against ~' + sqFmt(f.sendsPerDay) + ' emails sent/day.' +
+        (f.runwayDays != null ? " " + sqFmt(a.readyNow) + " ready = ~" + f.runwayDays + " days of sends already staged." : "") + "</span>" +
+        '<span class="sqap-pill auto">healthy</span></div>';
+    } else {
+      var cls = f.poolEmptyDays < 5 ? "you" : "hold";
+      verdict = '<div class="sqap-row"><span class="sqap-n">~' + f.poolEmptyDays + 'd</span><span class="sqap-l">Ready pool empties</span>' +
+        '<span class="sqap-d">Sending ~' + sqFmt(f.sendsPerDay) + '/day but only adding ~' + sqFmt(f.validatedPerDay) + '/day. The unlocks below close the gap.</span>' +
+        '<span class="sqap-pill ' + cls + '">watch this</span></div>';
+    }
+    var jsearch = null, people = null;
+    ((tu && tu.tools) || []).forEach(function (t) {
+      if (/jsearch/i.test(t.label || "")) jsearch = t;
+      if (/decision-maker/i.test(t.label || "")) people = t;
+    });
+    var srcRows = "";
+    srcRows += '<div class="sqap-row"><span class="sqap-n">~' + sqFmt(f.rescuePerDay) + '/day</span><span class="sqap-l">KoldInfo rescue</span>' +
+      '<span class="sqap-d">Recovering rejected-address people.' +
+      (f.rescueDaysLeft != null ? " Pile lasts ~" + f.rescueDaysLeft + " more day" + (f.rescueDaysLeft === 1 ? "" : "s") + " (" + sqFmt(a.rescueQueue) + " left); after that the naming lookup becomes the main tap." : " " + sqFmt(a.rescueQueue) + " left in the pile.") +
+      '</span><span class="sqap-pill auto">runs itself</span></div>';
+    srcRows += a.namingConnected
+      ? '<div class="sqap-row"><span class="sqap-n">≤660/day</span><span class="sqap-l">Naming lookup</span>' +
+        '<span class="sqap-d">Package ceiling. ' + sqFmt(a.unnamed) + ' companies wait on a name' + (people && people.daysToEmpty != null ? "; credits last ~" + people.daysToEmpty + "d at current burn" : "") + '. Upgrade the package to raise the ceiling. <a href="#tools">Tools and Credits</a></span>' +
+        '<span class="sqap-pill auto">runs itself</span></div>'
+      : '<div class="sqap-row"><span class="sqap-n">0/day</span><span class="sqap-l">Naming lookup</span>' +
+        '<span class="sqap-d">OFF. Connecting the Decision-Maker Lookup key opens the ' + sqFmt(a.unnamed) + '-person unnamed pile and up to 660 new names/day ongoing. <a href="#tools">Open Tools and Credits</a></span>' +
+        '<span class="sqap-pill you">needs you</span></div>';
+    srcRows += '<div class="sqap-row"><span class="sqap-n">~' + sqFmt(f.curatedPerDay) + '/day</span><span class="sqap-l">Fresh companies</span>' +
+      '<span class="sqap-d">New hiring companies entering from job scraping.' +
+      (jsearch && jsearch.daysToEmpty != null ? " JSearch credits last ~" + jsearch.daysToEmpty + "d at current burn." : "") +
+      '</span><span class="sqap-pill auto">runs itself</span></div>';
+    return '<div class="sqap-h2">Supply forecast: will we run out?</div>' + verdict +
+      '<div class="sqap-h2">Where tomorrow’s leads come from</div>' + srcRows;
+  }
   function sqApHtml(a, tu) {
     if (!a) return "";
     var w = sqApWhen(a.nextSendAt);
@@ -7089,6 +7133,7 @@
     return sqApCss() + '<div class="sqap">' +
       '<div class="sqap-head"><h3>Cold email autopilot</h3><span class="sub">what sends next, and what unlocks more</span></div>' +
       tiles +
+      sqApForecastHtml(a, tu) +
       (rows ? '<div class="sqap-h2">Waiting upstream</div>' + rows : "") +
       credits +
       "</div>";
