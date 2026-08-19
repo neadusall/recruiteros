@@ -136,19 +136,49 @@ function reasonOf(text) {
   return "other";
 }
 
+// PROVIDER-BLOCK RADAR (see ndr-sweep-imap.mjs for the twin on the internal/Gmail lanes).
+// Receiver-side "your server is not welcome" signatures, scanned across EVERY notice
+// INCLUDING warm-up traffic: a burned server shows there first, and the 2026-08 Gmail
+// block sat invisible for weeks because campaign-only counters never saw the warm-up
+// rejections. Detection here; policy in the consumers (app rotation + batch.mjs).
+const BLOCK_RE = /unsolicited ?message ?error|banned sending ip|poor (ip|domain) reputation|low reputation|reputation of \d+\.\d+\.\d+\.\d+|blocked using|listed (at|on|in) [a-z0-9 .-]*(spamhaus|barracuda|spamcop|sorbs|psbl)|5\.7\.606|\bs3140\b|likely unsolicited|message (?:is |was |has been )?(?:likely )?blocked|sending ip [^.]{0,40}(blocked|denied|banned)/i;
+const RECEIVER_PATTERNS = [
+  ["google", /gmail|google/i],
+  ["microsoft", /outlook|office ?365|\.protection\.|microsoft|5\.7\.606|\bs3140\b/i],
+  ["mailspamprotection", /mailspamprotection/i],
+  ["proofpoint", /proofpoint|pphosted/i],
+  ["mimecast", /mimecast/i],
+  ["barracuda", /barracuda/i],
+];
+function receiverOf(text) { for (const [k, re] of RECEIVER_PATTERNS) if (re.test(text)) return k; return null; }
+const providerBlocks = {};
+function noteBlock(fleet, text, at) {
+  if (!BLOCK_RE.test(text)) return;
+  const rcv = receiverOf(text);
+  if (!rcv) return;
+  const key = `${fleet}|${rcv}`;
+  const b = providerBlocks[key] || (providerBlocks[key] = { fleet, provider: rcv, count: 0, lastSeen: null, sample: null });
+  b.count++;
+  const seen = at || new Date().toISOString();
+  if (!b.lastSeen || seen > b.lastSeen) b.lastSeen = seen;
+  if (!b.sample) b.sample = text.slice(0, 220);
+}
+
 const bounced = new Set();
 const perDomain = {};
 const perBox = {};
 const perBoxInfra = {};
 const byReason = {};
 const reasonExamples = {};
+const warmupPerBox = {};
 let warmupNdrs = 0, staleSkipped = 0, infraNdrs = 0;
 for (const n of ndrs) {
   const rcpt = String(n.rcpt || "").toLowerCase();
   const subjLower = n.subj.replace(/^undeliverable:\s*/i, "");
   const looksCampaign = subjLower === subjLower.toLowerCase() && /[a-z]/.test(subjLower);
   const isCampaign = (rcpt && sentTo.has(rcpt)) || looksCampaign;
-  if (!isCampaign) { warmupNdrs++; continue; }
+  noteBlock("sendingac", n.subj + " :: " + (n.preview || ""), n.at);
+  if (!isCampaign) { warmupNdrs++; warmupPerBox[n.box] = (warmupPerBox[n.box] || 0) + 1; continue; }
   const d = n.box.split("@")[1];
   const benchStart = restSince.get(d);
   if (benchStart && Date.parse(n.at || 0) < benchStart) { staleSkipped++; continue; }
@@ -196,6 +226,14 @@ try {
       }
       for (const [b, n] of Object.entries(im.perBox || {})) perBox[b] = (perBox[b] || 0) + n;
       for (const [b, n] of Object.entries(im.perBoxInfra || {})) perBoxInfra[b] = (perBoxInfra[b] || 0) + n;
+      for (const [b, n] of Object.entries(im.warmupPerBox || {})) warmupPerBox[b] = (warmupPerBox[b] || 0) + n;
+      for (const [key, b] of Object.entries(im.providerBlocks || {})) {
+        const dst = providerBlocks[key];
+        if (!dst) { providerBlocks[key] = b; continue; }
+        dst.count += b.count || 0;
+        if (b.lastSeen && (!dst.lastSeen || b.lastSeen > dst.lastSeen)) dst.lastSeen = b.lastSeen;
+        if (!dst.sample) dst.sample = b.sample;
+      }
       infraNdrs += im.infraNdrs || 0;
       for (const [k, n] of Object.entries(im.byReason || {})) byReason[k] = (byReason[k] || 0) + n;
       for (const [k, ex] of Object.entries(im.reasonExamples || {})) {
@@ -213,6 +251,7 @@ const out = {
   source: "mailbox-api-ndr-sweep",
   boxesSwept: swept,
   warmupNdrs,
+  warmupPerBox,    // per-box warm-up bounce counts (both lanes): the graduation gate reads this
   bounced: [...bounced].sort(),
   perDomain,
   perBox,
@@ -225,3 +264,30 @@ const tmp = SIDECAR + ".tmp";
 writeFileSync(tmp, JSON.stringify(out, null, 1));
 renameSync(tmp, SIDECAR);
 console.log(`sidecar: ${out.bounced.length} bounced recipients, ${Object.keys(perDomain).length} domains with bounces`);
+
+// PROVIDER-BLOCK LEDGER: the one file every router reads to keep a rejecting receiver
+// away from the fleet it is rejecting (app sender rotation via recipientGuard, MPC lane
+// via batch.mjs). Merge rule: a pair seen this window replaces its own numbers but keeps
+// firstSeen; a pair NOT seen keeps its record untouched so consumers age it out by
+// lastSeen (freshness + count thresholds are THEIRS, not this file's); pairs silent for
+// 30 days drop off the file. Nothing here blocks traffic by itself: detection is data,
+// policy lives in the consumers, and a healed provider releases automatically.
+const BLOCKS_FILE = process.env.MPC_BLOCKS_FILE
+  || "/var/lib/docker/volumes/recruiteros_app_data/_data/snap_provider_blocks_v1.json";
+try {
+  let prev = {};
+  try { prev = JSON.parse(readFileSync(BLOCKS_FILE, "utf8")).blocks || {}; } catch { /* first run */ }
+  const mergedBlocks = { ...prev };
+  for (const [key, b] of Object.entries(providerBlocks)) {
+    mergedBlocks[key] = { ...b, firstSeen: prev[key]?.firstSeen || b.lastSeen || new Date().toISOString() };
+  }
+  for (const [key, b] of Object.entries(mergedBlocks)) {
+    if (b.lastSeen && Date.now() - Date.parse(b.lastSeen) > 30 * 86_400_000) delete mergedBlocks[key];
+  }
+  const ledgerOut = { generatedAt: new Date().toISOString(), source: "ndr-sweep provider-block radar", blocks: mergedBlocks };
+  const ltmp = BLOCKS_FILE + ".tmp";
+  writeFileSync(ltmp, JSON.stringify(ledgerOut, null, 1));
+  renameSync(ltmp, BLOCKS_FILE);
+  const active = Object.values(mergedBlocks).filter((b) => b.lastSeen && Date.now() - Date.parse(b.lastSeen) < 7 * 86_400_000);
+  console.log(`provider-block ledger: ${Object.keys(mergedBlocks).length} pair(s) on file, ${active.length} fresh: ${active.map((b) => `${b.fleet}x${b.provider}(${b.count})`).join(", ") || "none"}`);
+} catch (e) { console.log(`provider-block ledger write skipped: ${e.message}`); }

@@ -112,6 +112,11 @@ try {
 }
 console.log(`imap ndr sweep: ${inboxes.length} boxes (own-smtp + active gmail), NDRs since ${SINCE.toISOString().slice(0, 10)}`);
 
+// Which fleet each swept box belongs to, for the provider-block radar below: a
+// rejection pressure signature is only actionable per SENDING fleet (the internal
+// server's IP being blocked says nothing about the Gmail-lane boxes, and vice versa).
+const fleetByBox = new Map(inboxes.map((m) => [m.email, m.provider === "own-smtp" ? "internal" : "google"]));
+
 const NDR_FROM = /postmaster@|mailer-daemon@/i;
 const NDR_SUBJ = /^(undeliverable|delivery has failed|mail delivery failed|delivery status notification|message not delivered|failure notice|delivery failure|returned mail|mail delivery system)/i;
 
@@ -160,19 +165,50 @@ async function worker() {
 await Promise.all(Array.from({ length: 5 }, worker));
 console.log(`swept ${swept}/${inboxes.length} boxes (${errors} errors), ${ndrs.length} NDR notices`);
 
+// PROVIDER-BLOCK RADAR. Receiver-side "your server is not welcome" signatures, scanned
+// across EVERY notice INCLUDING warm-up traffic: a burned IP shows there first, and the
+// 2026-08 Gmail block sat invisible for weeks because campaign-only counters never saw
+// the warm-up rejections. Detection lives here; POLICY lives in the consumers (the app's
+// sender rotation and batch.mjs read the merged ledger and steer traffic away while a
+// pair stays fresh). A pair heals by silence: no matches for a week and routers release it.
+const BLOCK_RE = /unsolicited ?message ?error|banned sending ip|poor (ip|domain) reputation|low reputation|reputation of \d+\.\d+\.\d+\.\d+|blocked using|listed (at|on|in) [a-z0-9 .-]*(spamhaus|barracuda|spamcop|sorbs|psbl)|5\.7\.606|\bs3140\b|likely unsolicited|message (?:is |was |has been )?(?:likely )?blocked|sending ip [^.]{0,40}(blocked|denied|banned)/i;
+const RECEIVER_PATTERNS = [
+  ["google", /gmail|google/i],
+  ["microsoft", /outlook|office ?365|\.protection\.|microsoft|5\.7\.606|\bs3140\b/i],
+  ["mailspamprotection", /mailspamprotection/i],
+  ["proofpoint", /proofpoint|pphosted/i],
+  ["mimecast", /mimecast/i],
+  ["barracuda", /barracuda/i],
+];
+function receiverOf(text) { for (const [k, re] of RECEIVER_PATTERNS) if (re.test(text)) return k; return null; }
+const providerBlocks = {};
+function noteBlock(fleet, text, at) {
+  if (!BLOCK_RE.test(text)) return;
+  const rcv = receiverOf(text);
+  if (!rcv) return;
+  const key = `${fleet}|${rcv}`;
+  const b = providerBlocks[key] || (providerBlocks[key] = { fleet, provider: rcv, count: 0, lastSeen: null, sample: null });
+  b.count++;
+  const seen = at || new Date().toISOString();
+  if (!b.lastSeen || seen > b.lastSeen) b.lastSeen = seen;
+  if (!b.sample) b.sample = text.slice(0, 220);
+}
+
 const bounced = new Set();
 const perDomain = {};
 const perBox = {};
 const byReason = {};
 const reasonExamples = {};
 const perBoxInfra = {};
+const warmupPerBox = {};
 let warmupNdrs = 0, staleSkipped = 0, infraNdrs = 0;
 for (const n of ndrs) {
   const rcpt = String(n.rcpt || "").toLowerCase();
   const subjLower = n.subj.replace(/^undeliverable:\s*/i, "");
   const looksCampaign = subjLower === subjLower.toLowerCase() && /[a-z]/.test(subjLower);
   const isCampaign = (rcpt && sentTo.has(rcpt)) || looksCampaign;
-  if (!isCampaign) { warmupNdrs++; continue; }
+  noteBlock(fleetByBox.get(n.box) || "internal", n.subj + " :: " + (n.preview || ""), n.at);
+  if (!isCampaign) { warmupNdrs++; warmupPerBox[n.box] = (warmupPerBox[n.box] || 0) + 1; continue; }
   const d = n.box.split("@")[1];
   const benchStart = restSince.get(d);
   if (benchStart && Date.parse(n.at || 0) < benchStart) { staleSkipped++; continue; }
@@ -203,6 +239,8 @@ const out = {
   boxesSwept: swept,
   sweepErrors: errors,
   warmupNdrs,
+  warmupPerBox,     // per-box warm-up bounce counts: the graduation gate holds boxes under rejection pressure
+  providerBlocks,   // fleet x receiving-provider block signatures seen this window (merged into the ledger by ndr-sweep.mjs)
   infraNdrs,
   perBoxInfra,
   bounced: [...bounced].sort(),
