@@ -105,7 +105,10 @@ const COMMENT_QUEUE_MULTIPLE = 2;      // draft at most 2 days of allowance
 const COMMENT_LOG_KEEP_DAYS = 21;      // send log kept for the weekly window
 const COMMENT_DUP_WINDOW = 25;         // recent comments checked for overlap
 const COMMENT_DUP_RATIO = 0.6;         // >60% shared words = too similar
-const MAX_COMMENT_CHARS = 400;         // well under LinkedIn's 1,250 ceiling
+// Well under LinkedIn's 1,250 ceiling. 400 until 2026-08-19; raised so a
+// full-length observation plus its closing invitation fits without either
+// getting truncated (the CTA is appended, not folded in, on redrafts).
+const MAX_COMMENT_CHARS = 520;
 // Outcome tracking (owner ask 2026-08-19): how long a posted comment's thread
 // is watched for the poster writing back, and how many threads each 15-min
 // tick re-reads (round-robin, stalest first; at the lane's volume every live
@@ -594,8 +597,11 @@ interface WatchState {
  *  drop the invitation entirely (13 of 18 shipped observation-only) and one
  *  greeting post drew a meta-refusal; the invitation is now enforced with a
  *  corrective retry, contentless posts SKIP out of the queue, and used
- *  closings are banned by wording. */
-const COMMENT_COPY_EPOCH = 3;
+ *  closings are banned by wording. Epoch 4: epoch 3's full rewrites lost to
+ *  their own guards (3 of 18 landed); the pass is now surgical - append the
+ *  missing invitation to a sound observation, full-rewrite only meta text,
+ *  leave drafts that already close with an ask untouched. */
+const COMMENT_COPY_EPOCH = 4;
 
 const KEY = "linkedin_comment_watch_v1";
 let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {} };
@@ -2784,6 +2790,21 @@ export async function editPostComment(workspaceId: string, id: string, text: str
   return item;
 }
 
+/** Model output that is ABOUT the task instead of being the comment: the
+ *  epoch-2 rewrite queued "This post is a Independence Day greeting with no
+ *  substantive professional content... at the level these rules require" as
+ *  if it were a draft. Text like this must never wait for approval. */
+const META_DRAFT_RE = /\b(these rules|this post (?:is|offers|contains|has)|no substantive|nothing (?:here )?to (?:react|engage|comment)|as an? (?:ai|assistant)|cannot (?:meaningfully )?(?:comment|engage))\b/i;
+
+const INVITE_ONLY_RULES = `You write ONE closing sentence to append to an existing public LinkedIn comment left by a recruiting agency owner. The sentence is a short, low-pressure invitation to engage if the poster wants help, and it must read like the same person wrote it.
+Rules:
+- 8 to 16 words. One sentence. No emoji, no exclamation marks, no long dashes, no links, no contact details, no numbers.
+- An offer they can take or leave, never a demand: no "DM me", no calendar, no fees, never name a firm.
+- On a hiring post the invitation offers help with that search. Otherwise it offers to trade notes on the problem they wrote about, never mentioning hiring or candidates.
+- Its wording must not match any invitation in the banned list, and it must not begin with the same two words as any of them.
+- Never mention AI.
+Return ONLY the sentence, nothing else.`;
+
 /**
  * Rewrite every OPEN public-comment draft under the current copy rules.
  *
@@ -2791,51 +2812,86 @@ export async function editPostComment(workspaceId: string, id: string, text: str
  * invitation to engage): drafting happens once at capture, so a queue built
  * under the old rules would otherwise sit there reading exactly like the
  * copy the owner just rejected. Only "suggested" items are touched; anything
- * approved, skipped, or blocked keeps its history. A failed or leaky redraft
- * keeps the existing text rather than losing the lead.
+ * approved, skipped, or blocked keeps its history.
+ *
+ * Shape (learned across epochs 1-3): full rewrites of a whole queue lose to
+ * their own guards and churn good text, so the pass is surgical. A draft
+ * that already closes with an invitation is only scrub-normalized. A sound
+ * observation missing the invitation gets ONE generated closing sentence
+ * appended, validated by the same belt. Meta/refusal text gets one full
+ * rewrite attempt and otherwise leaves the queue as skipped, because broken
+ * text must never sit one tap from public.
  */
 export async function redraftOpenComments(workspaceId: string): Promise<{ redrafted: number; kept: number; skipped: number }> {
   await hydrate();
   const open = state.items.filter((i) =>
     i.workspaceId === workspaceId && i.kind === "poster" && i.commentStatus === "suggested" && i.commentDraft);
   let redrafted = 0, kept = 0, skipped = 0;
+
+  const bannedClosings = (): string => {
+    const closings = [...new Set(priorComments(workspaceId)
+      .map((t) => t.trim().split(/(?<=[.?!])\s+/).pop() ?? "")
+      .filter((s) => s.length >= 15 && INVITE_RE.test(s)))].slice(-10);
+    return closings.length ? `\n\nBANNED INVITATIONS (already in use):\n${closings.map((s) => `- ${s}`).join("\n")}` : "";
+  };
+
   for (const item of open) {
-    const author = [item.authorName, item.title, item.company ? `at ${item.company}` : undefined].filter(Boolean).join(", ");
-    const role = item.matchedRole ?? "candidate";
-    const city = cityFromPost(item.postExcerpt ?? "") ?? cityFromLocation(item.posterLocation);
-    // The scenario that captured the item is not stored on it, so hiring vs
-    // industry framing is re-read from the post itself, same regex as capture.
-    const brief = HIRING_INTENT_RE.test(item.postExcerpt ?? "")
-      ? `The role they are hiring for is ${role}${city ? ` in ${city}` : ""}.`
-      : `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`;
-    const userMsg = `THEIR POST (by ${author}):\n${(item.postExcerpt ?? "").slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId, item.commentDraft)}`;
-    const drafted = await draft(POST_COMMENT_RULES, userMsg);
-    if (!drafted) { kept++; continue; }
-    // SKIP means the post itself has nothing to engage with (epoch 2 caught a
-    // holiday greeting whose "draft" was the model describing these rules).
-    // The item leaves the queue honestly instead of holding a forced comment.
-    if (/^\s*SKIP\b/i.test(drafted)) {
-      item.commentStatus = "skipped";
-      item.updatedAt = nowIso();
-      skipped++;
+    const post = item.postExcerpt ?? "";
+    const hiring = HIRING_INTENT_RE.test(post);
+    const cur = scrub(item.commentDraft ?? "");
+
+    // Broken text: one full-rewrite attempt under the current rules; if the
+    // model cannot produce a clean comment (or answers SKIP), the item leaves
+    // the queue rather than holding text that must never post.
+    if (META_DRAFT_RE.test(cur)) {
+      const author = [item.authorName, item.title, item.company ? `at ${item.company}` : undefined].filter(Boolean).join(", ");
+      const role = item.matchedRole ?? "candidate";
+      const city = cityFromPost(post) ?? cityFromLocation(item.posterLocation);
+      const brief = hiring
+        ? `The role they are hiring for is ${role}${city ? ` in ${city}` : ""}.`
+        : `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`;
+      const drafted = await draft(POST_COMMENT_RULES,
+        `THEIR POST (by ${author}):\n${post.slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId, item.commentDraft)}`);
+      const candidate = drafted && !/^\s*SKIP\b/i.test(drafted) ? fitComment(scrub(drafted)) : null;
+      const priors = priorComments(workspaceId).filter((t) => t !== item.commentDraft);
+      if (candidate && hasClosingInvite(candidate) && !pitchLeakReason(candidate, post) && !tooSimilar(candidate, priors)) {
+        item.commentDraft = candidate;
+        item.updatedAt = nowIso();
+        redrafted++;
+      } else {
+        item.commentStatus = "skipped";
+        item.updatedAt = nowIso();
+        skipped++;
+      }
       continue;
     }
-    let candidate = fitComment(scrub(drafted));
-    if (candidate && !hasClosingInvite(candidate)) {
-      const retry = await draft(POST_COMMENT_RULES,
-        `${userMsg}\n\nYour previous attempt:\n${candidate}\n\nIt is missing the closing invitation. Keep the observation, and END with one short, low-pressure invitation to engage.`);
-      candidate = retry && !/^\s*SKIP\b/i.test(retry) ? fitComment(scrub(retry)) : null;
-      if (candidate && !hasClosingInvite(candidate)) candidate = null;
+
+    // Sound observation, no ask: append one generated closing sentence. The
+    // observation already cleared every wall once; keeping it and adding the
+    // invitation cannot lose the lead the way a rejected full rewrite can.
+    if (!hasClosingInvite(cur)) {
+      const invite = await draft(INVITE_ONLY_RULES,
+        `THEIR POST:\n${post.slice(0, 700)}\n\nTHE COMMENT SO FAR:\n${cur}\n\n${hiring ? "This reacts to a hiring post." : "This is NOT a hiring post; peer framing only."}${bannedClosings()} Write the sentence.`);
+      const s = invite ? scrub(invite) : "";
+      if (s && s.length <= 200 && INVITE_RE.test(s) && !pitchLeakReason(s, post)) {
+        const joined = /[.?!]$/.test(cur) ? `${cur} ${s}` : `${cur}. ${s}`;
+        if (joined.length <= MAX_COMMENT_CHARS) {
+          item.commentDraft = joined;
+          item.updatedAt = nowIso();
+          redrafted++;
+          continue;
+        }
+      }
+      kept++;
+      continue;
     }
-    // The dup check excludes the item's OWN current draft: a rewrite of the
-    // same post legitimately shares most of its content words with the text
-    // it is replacing, and comparing against it would freeze every draft in
-    // whatever state (including a truncated one) it already has.
-    const priors = priorComments(workspaceId).filter((t) => t !== item.commentDraft);
-    if (!candidate || pitchLeakReason(candidate, item.postExcerpt ?? "") || tooSimilar(candidate, priors)) { kept++; continue; }
-    item.commentDraft = candidate;
-    item.updatedAt = nowIso();
-    redrafted++;
+
+    // Already closes with an invitation: normalize only (scrub folds "--").
+    if (cur !== item.commentDraft) {
+      item.commentDraft = cur;
+      item.updatedAt = nowIso();
+    }
+    kept++;
   }
   if (redrafted || skipped) save();
   return { redrafted, kept, skipped };
