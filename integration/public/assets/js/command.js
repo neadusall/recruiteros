@@ -3916,7 +3916,7 @@
         var held = th.blockedReason
           ? '<div class="lie-post muted">Throttle: ' + esc(th.blockedReason) + " Approving now will be held, not lost.</div>"
           : "";
-        return '<div class="lie-post muted">Closed profile: no direct message is possible, so this goes on their post as a public comment. Anyone can see it, including their team and other recruiters, so it never asks for anything: it proves you work this desk and leaves the click as the only next step.</div>' +
+        return '<div class="lie-post muted">Closed profile: no direct message is possible, so this goes on their post as a public comment. It leads with proof you work this desk, then closes with a low-pressure invitation to reach out if they want help with the search. Anyone can see it, so it offers without selling: no links, no fees, no hard ask.</div>' +
           held +
           '<textarea class="lie-text" data-lic-comment rows="2">' + esc(t.commentDraft || "") + "</textarea>" +
           '<div class="lie-actions">' +
@@ -3998,14 +3998,25 @@
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Messages to approve</b>' +
-            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a draft. Approve, edit, or skip; approved and skipped items leave this list. Open profiles and existing connections get a private direct message. Closed profiles get a public comment on their own hiring post instead, throttled, US posters only, and written to earn a profile click rather than ask for one.</div></div>' +
+            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a draft. Approve, edit, or skip; approved and skipped items leave this list. Open profiles and existing connections get a private direct message that ends with a clear ask. Closed profiles get a public comment on their own hiring post instead, throttled, US posters only: proof you run these searches first, then an invitation to engage if they want help.</div></div>' +
             (open ? '<span class="liops-progress">' + open + " to review</span>" : "") +
           "</div>" +
+          (items.some(function (t) { return t.commentStatus === "suggested"; })
+            ? '<div class="lie-actions"><button class="btn btn-sm btn-ghost" data-lic-redraft>Rewrite open comment drafts</button> <span class="muted">Regenerates every unapproved public comment under the current copy rules.</span></div>'
+            : "") +
           receiptsBlock() +
           (items.length
             ? items.map(function (t) { return row(t, throttle); }).join("")
             : '<div class="lie-post muted">Nothing to review right now. The Role Hunter above fills this list as it finds people posting roles they need filled.</div>') +
         "</div>";
+      var redraftBtn = mount.querySelector("[data-lic-redraft]");
+      if (redraftBtn) redraftBtn.addEventListener("click", function () {
+        redraftBtn.disabled = true; redraftBtn.textContent = "Rewriting...";
+        send("/linkedin/comments", "POST", { action: "comment_redraft" }).then(function (r) {
+          if (r.ok && r.data && r.data.view) paint(r.data.view);
+          if (r.ok && typeof r.data.redrafted === "number") toast(r.data.redrafted + " draft" + (r.data.redrafted === 1 ? "" : "s") + " rewritten" + (r.data.kept ? ", " + r.data.kept + " kept as-is" : "") + ".");
+        });
+      });
       Array.prototype.forEach.call(mount.querySelectorAll("[data-lic]"), function (btn) {
         btn.addEventListener("click", function () {
           var rowEl = btn.closest(".lie-row");

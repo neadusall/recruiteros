@@ -20,6 +20,8 @@
  *                                    refusal leaves the draft open
  *   comment_skip    { id }
  *   comment_edit    { id, text }
+ *   comment_redraft {}          -> rewrite all OPEN comment drafts under the
+ *                                  current copy rules (used after rule changes)
  *   comment_limits_set { enabled?, perDay?, perWeek?, autoPost? }
  *                               -> the public-comment lane's throttle, and
  *                                  whether autopilot may post without approval
@@ -37,6 +39,7 @@ import {
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
   setCommentWatchAuto, setMarketKeywords, setScenarios, expandRoleFamily, aiHunt,
   setAutoIndustries, approvePostComment, skipPostComment, editPostComment, setCommentLimits,
+  redraftOpenComments,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -136,6 +139,10 @@ export async function POST(req: Request): Promise<Response> {
   if (b.action === "comment_approve") {
     const r = await approvePostComment(ws, g.ctx.user.id, g.ctx.user.email, String(b.id), b.text);
     return ok({ accepted: r.accepted, reason: r.reason, view: await commentWatchView(ws) });
+  }
+  if (b.action === "comment_redraft") {
+    const r = await redraftOpenComments(ws);
+    return ok({ ...r, view: await commentWatchView(ws) });
   }
   if (b.action === "comment_skip") {
     await skipPostComment(ws, String(b.id));

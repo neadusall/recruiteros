@@ -1006,18 +1006,22 @@ function tooSimilar(text: string, recent: string[]): boolean {
   return false;
 }
 
-/** Belt on top of the prompt (owner ask 2026-08-15). The public-comment rules
- *  now permit an implied pitch, which means the model is being asked to walk a
- *  line, and a prompt alone is not a control. Anything that crosses into an
- *  actual advertisement, or into a number nobody can stand behind, is dropped
- *  rather than queued: a bad public comment cannot be recalled after approval.
- *  The post's own text is passed in because a figure the POSTER stated is fair
- *  to react to, while the same figure invented by us is not. */
-const CTA_LEAK_RE = /\b(dm me|dm us|message me|drop me|shoot me|send me|let'?s connect|happy to help|glad to help|reach out|get in touch|send (?:you |over |across )|(?:a few|some|couple of) (?:profiles|candidates|names|resumes)|book a|quick call|hop on a|calendly|we can help|we'?d be happy|we specialize|we place|our (candidates|bench|clients|team can))\b/i;
+/** Belt on top of the prompt (owner ask 2026-08-15, loosened 2026-08-19).
+ *  The original belt dropped ANY draft that made an offer or an ask, which
+ *  produced comments so passive they gave the poster nothing to act on. Owner
+ *  direction 2026-08-19: every draft should invite the poster to engage if
+ *  they need help with the search, so offers and soft asks are now the POINT,
+ *  not a leak. What still gets a draft dropped rather than queued (a bad
+ *  public comment cannot be recalled after approval): hard-sell spam tells
+ *  (scheduling links, guarantees, discount language), contact details, and
+ *  any number nobody can stand behind. The post's own text is passed in
+ *  because a figure the POSTER stated is fair to react to, while the same
+ *  figure invented by us is not. */
+const CTA_LEAK_RE = /\b(calendly|book (?:a|my|your) (?:call|meeting|demo|slot)|schedule a (?:call|meeting|demo)|guaranteed?|risk[- ]free|no[- ]obligation|free (?:trial|consultation|audit)|limited time|act now|special offer|discount|no placement,? no fee)\b/i;
 const CONTACT_LEAK_RE = /(https?:\/\/|www\.|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b|\b\d{3}[-.\s)]\s?\d{3}[-.\s]\d{4}\b)/i;
 
 export function pitchLeakReason(text: string, postText: string): string | null {
-  if (CTA_LEAK_RE.test(text)) return "reads as a pitch";
+  if (CTA_LEAK_RE.test(text)) return "reads as hard-sell spam";
   if (CONTACT_LEAK_RE.test(text)) return "carries a link or contact detail";
   // Every multi-digit number in the draft has to have come from their post.
   // Digit runs are compared rather than phrases, because the fabrication
@@ -1060,24 +1064,26 @@ Rules:
 - Address them by first name only when it reads naturally; skipping the name is fine.
 - Banned openers: "Thanks for", "Great point", "Love this", "So true", "Appreciate you", "Couldn't agree more", "Spot on".
 - Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align".
-- Never mention AI, never pitch services, never link, never suggest connecting or a call. The only goal is one more genuine exchange in the thread.
+- If their comment touches hiring, an open role, or a search they are running, close with a short standing invitation to take it to messages: "happy to trade notes if you want a second set of eyes, just message me". An offer, never a demand.
+- Otherwise never pitch services, never link, never suggest a call. The goal is one more genuine exchange in the thread. Never mention AI.
 Return ONLY the reply text, nothing else.`;
 
 const CONNECT_RULES = `You write short LinkedIn connection notes for a recruiting agency owner. The recipient just commented on one of the owner's posts; this note is the FIRST direct touch and arrives while their comment is still fresh. The reader must never suspect a machine wrote it.
 Rules:
 - Max 270 characters. Two sentences at most.
 - Reference their comment naturally (their take under the post), not their profile or their company.
-- No pitch, no links, no "synergies", no emoji, no long dashes, no mention of hiring, roles, or services. Connecting to keep talking is the whole message.
-- Never mention AI.
+- One short clause noting the owner runs searches in their world and is glad to help if a search ever needs another set of eyes is allowed. Keep it an offer, not a pitch.
+- No links, no "synergies", no emoji, no long dashes. Never mention AI.
 Return ONLY the note text, nothing else.`;
 
 const DM_RULES = `You write direct LinkedIn messages for a recruiting agency owner. The recipient is a hiring decision-maker who just published a LinkedIn post about a role they need to fill or talent they are looking for; this message goes straight to their inbox while the post is fresh. The reader must never suspect a machine wrote it.
 Rules:
 - Anchor the message in the SPECIFIC need from their post: the exact role, team, or hiring challenge they described, in their own framing. Never summarize their post back, never flatter.
-- One low-key line that this exact kind of search is what the owner does all day; offering to send over a couple of strong profiles is allowed. No hard pitch, no links, no calendar ask, no "quick call".
-- 40 to 80 words. Short paragraphs. No exclamation marks, no emoji, no hashtags, no long dashes.
+- One low-key line that this exact kind of search is what the owner does all day.
+- End with ONE clear, easy-to-answer call to action: offer to send over two or three strong profiles this week and ask if they want them, or ask if a ten-minute call about the search is worth their time. Make the ask direct enough that "yes" is a one-word reply. No links, no calendar links.
+- 40 to 90 words. Short paragraphs. No exclamation marks, no emoji, no hashtags, no long dashes.
 - Banned openers: "Great post", "Love this", "Hope you're well", "I came across", "I saw your post". Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies".
-- End with one genuine question about the search (the bar, the sticking point, the timeline). Never mention AI.
+- Never mention AI.
 Return ONLY the message text, nothing else.`;
 
 /**
@@ -1085,17 +1091,17 @@ Return ONLY the message text, nothing else.`;
  * the poster's whole network, their own team, and every competing recruiter
  * watching that post.
  *
- * The pitch (owner ask 2026-08-15). A public comment that asks for anything is
- * dead on arrival: it gets hidden, it tells every competitor on the thread who
- * is working the account, and it makes the poster defensive before the first
- * conversation. So the pitch here is STRUCTURAL, not verbal. The comment says
- * one true, non-obvious thing about how that exact search actually behaves,
- * says it in the first person plural so the reader registers there is a desk
- * behind it, and then stops one beat early. No offer is made, so there is
- * nothing to refuse; the only way to get the rest of what this person knows is
- * to click the name. That click is the conversion, and it is the reason this
- * lane exists for CLOSED profiles: the profile is the landing page, the
- * comment is the ad that never looks like one.
+ * The pitch (owner ask 2026-08-15, strengthened 2026-08-19). The first cut of
+ * this lane made no offer at all and left the profile click as the only next
+ * step; the owner reviewed a queue of those drafts and called them too weak,
+ * with nothing for a poster who actually needs help to act on. So the comment
+ * now does two jobs in order: first it EARNS the right to offer by saying one
+ * true, non-obvious thing about how that exact search actually behaves, in the
+ * first person plural so the reader registers there is a desk behind it; then
+ * it closes with one short, low-pressure invitation to engage if they want
+ * help with the search. The invitation is a standing offer, never a demand,
+ * because everyone on the thread can see it: a hard sell in public gets the
+ * comment hidden and tells every competitor who is working the account.
  *
  * The failure mode to guard hardest is a fabricated statistic. A made-up comp
  * band or time-to-fill number, in public, under a hiring manager's post, is a
@@ -1104,15 +1110,15 @@ Return ONLY the message text, nothing else.`;
  */
 const POST_COMMENT_RULES = `You write PUBLIC comments that a recruiting agency owner leaves on a stranger's LinkedIn post. Everyone can see this comment: the poster, their team, their network, and every competing recruiter watching the post. The reader must never suspect a machine wrote it, and must never read it as an advertisement.
 
-Your goal is NOT to win a reply. It is to make one hiring decision-maker think "this person actually runs these searches" and click the name. Everything below serves that.
+Your goal is to make one hiring decision-maker think "this person actually runs these searches" and then give them one easy way to engage if they want help with the search: a reply, a message, a profile click. Everything below serves that.
 
 Rules:
 - Say ONE true, non-obvious thing about how their specific situation actually plays out, at the level of mechanism: where that talent is really sitting right now, which adjacent title converts and which one never does, what makes this search stall at the offer, what the counteroffer risk looks like, what the market reads into how the role is scoped. On a post about the work rather than a role, it is the same move applied to the problem they described. Never restate their post, never compliment it, never give generic hiring advice ("hiring is hard", "culture matters"). The line must be specific enough that it could be wrong.
-- Write it as "we", exactly once, as the quiet tell that a desk sits behind the observation: "we keep seeing", "the ones we watch close", "we stopped sourcing those from". Never name the firm, never say "my agency", "my clients", "our candidates", "our bench", or any placement you have made.
+- Write the observation as "we", once, as the quiet tell that a desk sits behind it: "we keep seeing", "the ones we watch close", "we stopped sourcing those from". The closing invitation may speak as "I" ("happy to", "my inbox is open") or use "we" one more time, never beyond that. Never name the firm, never say "my agency", "my clients", "our candidates", "our bench", or any placement you have made.
 - NEVER invent a number. No comp bands, no time-to-fill, no counts, no percentages, unless the post itself stated them, in which case you may react to their number. If you have no specific fact, describe the pattern in words instead.
-- Stop one beat early. Name the pattern; do not hand over the whole playbook. The incompleteness must be SILENT: never point at it, never say "more where that came from", "happy to share", "the full picture", or anything that acknowledges you are holding something back.
-- Make no offer and no ask. No "DM me", no "let's connect", no "happy to help", no offering to send profiles, no question that functions as a hook. No links, no phone numbers, no email, no calendar. Never describe a service, never say "we can help", "we specialize", "we place".
-- 14 to 38 words. One or two sentences.
+- Close with ONE short, low-pressure invitation to engage if they want help with this search. It is a standing offer they can take or leave: "happy to compare notes on where those candidates are actually sitting if useful", "if you want a candid read on who is movable at that level, my inbox is open", "glad to share what we are seeing on this exact search, just ask". Vary the phrasing; never copy these examples verbatim. On a post about the work rather than a role, the invitation is peer-to-peer instead, to trade notes on the problem they wrote about, with no mention of hiring or candidates.
+- The invitation must never beg, pressure, or sell: no fees, no availability talk, no "before someone else does", no links, no phone numbers, no email, no calendar, no naming the firm.
+- 20 to 55 words. Two or three sentences: the observation first, the invitation last.
 - No emoji, no hashtags, no exclamation marks, no long dashes, no all-caps.
 - Banned openers: "Great post", "Love this", "So true", "This is spot on", "Couldn't agree more", "Thanks for sharing", "Commenting for reach".
 - Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies", "reach out".
@@ -2060,7 +2066,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       // produces a comment that visibly misreads the post.
       const author = [authorName, title, company ? `at ${company}` : undefined].filter(Boolean).join(", ");
       const brief = combo.id === "industry_conversation"
-        ? `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would.`
+        ? `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`
         : `The role they are hiring for is ${jobTitle}${city ? ` in ${city}` : ""}.`;
       const drafted = await draft(POST_COMMENT_RULES,
         `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.`);
@@ -2377,6 +2383,43 @@ export async function editPostComment(workspaceId: string, id: string, text: str
   item.updatedAt = nowIso();
   save();
   return item;
+}
+
+/**
+ * Rewrite every OPEN public-comment draft under the current copy rules.
+ *
+ * Exists for rule changes (owner ask 2026-08-19: drafts now close with an
+ * invitation to engage): drafting happens once at capture, so a queue built
+ * under the old rules would otherwise sit there reading exactly like the
+ * copy the owner just rejected. Only "suggested" items are touched; anything
+ * approved, skipped, or blocked keeps its history. A failed or leaky redraft
+ * keeps the existing text rather than losing the lead.
+ */
+export async function redraftOpenComments(workspaceId: string): Promise<{ redrafted: number; kept: number }> {
+  await hydrate();
+  const open = state.items.filter((i) =>
+    i.workspaceId === workspaceId && i.kind === "poster" && i.commentStatus === "suggested" && i.commentDraft);
+  let redrafted = 0, kept = 0;
+  for (const item of open) {
+    const author = [item.authorName, item.title, item.company ? `at ${item.company}` : undefined].filter(Boolean).join(", ");
+    const role = item.matchedRole ?? "candidate";
+    const city = cityFromPost(item.postExcerpt ?? "") ?? cityFromLocation(item.posterLocation);
+    // The scenario that captured the item is not stored on it, so hiring vs
+    // industry framing is re-read from the post itself, same regex as capture.
+    const brief = HIRING_INTENT_RE.test(item.postExcerpt ?? "")
+      ? `The role they are hiring for is ${role}${city ? ` in ${city}` : ""}.`
+      : `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`;
+    const drafted = await draft(POST_COMMENT_RULES,
+      `THEIR POST (by ${author}):\n${(item.postExcerpt ?? "").slice(0, 900)}\n\n${brief} Write the comment.`);
+    if (!drafted) { kept++; continue; }
+    const candidate = scrub(drafted).slice(0, MAX_COMMENT_CHARS);
+    if (pitchLeakReason(candidate, item.postExcerpt ?? "") || tooSimilar(candidate, priorComments(workspaceId))) { kept++; continue; }
+    item.commentDraft = candidate;
+    item.updatedAt = nowIso();
+    redrafted++;
+  }
+  if (redrafted) save();
+  return { redrafted, kept };
 }
 
 export async function skipPostComment(workspaceId: string, id: string): Promise<CommentLeadItem | null> {
