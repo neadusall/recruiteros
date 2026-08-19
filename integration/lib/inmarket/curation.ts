@@ -1116,7 +1116,12 @@ export async function applyKoldInfoResults(
       if (status === "valid") {
         row.emailValidated = true; row.emailInvalid = false; row.emailCatchAll = false; row.validatedAt = nowIso;
         if (row.status === "sourced" || row.status === "named"
-          || (row.status === "suppressed" && !row.sentAt && !row.bouncedAt && !row.repliedAt)) row.status = "contactable";
+          || (row.status === "suppressed" && !row.sentAt && !row.bouncedAt && !row.repliedAt)) {
+          row.status = "contactable";
+          // Re-stamp: the row is effectively curated NOW (new, just-verified address). Without this
+          // a rescue from before the MPC start-fresh cutoff stays invisible to the send engine.
+          row.curatedAt = nowIso;
+        }
         summary.found++;
         await learnFromConfirmedEmail(row.managerName, link.email, "koldinfo").catch(() => {});
       } else if (status === "risky" && v?.reason === "catch_all") {
@@ -1435,7 +1440,10 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
         r.emailSource = hit.source; r.emailValidated = true; r.emailInvalid = false; r.emailCatchAll = false; r.validatedAt = nowIso;
         // A rescued row rejoins the sendable pool: the address that got it suppressed has been
         // replaced by a confirmed one, so leaving it suppressed would discard the rescue.
-        if (r.status === "sourced" || r.status === "named" || r.status === "suppressed") r.status = "contactable";
+        if (r.status === "sourced" || r.status === "named" || r.status === "suppressed") {
+          r.status = "contactable";
+          r.curatedAt = nowIso; // re-curated now — clears the MPC start-fresh cutoff (see applyKoldInfoResults)
+        }
         found++;
         await learnFromConfirmedEmail(r.managerName, hit.email, hit.source).catch(() => {});
       } else { missed++; }
