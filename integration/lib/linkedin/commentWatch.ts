@@ -493,7 +493,9 @@ export interface CommentLeadItem {
   responseCommentId?: string;
   /** Round-robin cursor so each tick polls the stalest threads first. */
   responseCheckedAt?: string;
-  /** The staged in-thread follow-up once they respond. */
+  /** The owner's OWN in-thread reply once the poster responds. Never
+   *  machine-drafted (owner ask 2026-08-19); "suggested" only survives on
+   *  legacy items staged before that decision and is ignored by the UI. */
   followUpText?: string;
   followUpStatus?: "suggested" | "approved" | "skipped" | "blocked";
   /** The commenter. */
@@ -1230,19 +1232,9 @@ Rules:
 - Never mention AI.
 Return ONLY the comment text, nothing else.`;
 
-/** The in-thread follow-up after a poster REPLIES to our public comment.
- *  This is the warmest moment the lane produces: they engaged in public, on
- *  their own hiring post, so the reply may move toward the search directly,
- *  but it is still visible to their whole network, so it stays classy. */
-const FOLLOWUP_RULES = `You write a threaded LinkedIn reply for a recruiting agency owner. Earlier the owner left a public comment on a hiring decision-maker's post; the decision-maker has now REPLIED to that comment. You are writing the owner's reply back, in the same public thread on THEIR post. The reader must never suspect a machine wrote it.
-Rules:
-- Respond to the SUBSTANCE of what they said back. Extend the point, answer their question, or concede a nuance; never restate, never flatter, never thank them for replying.
-- Close with ONE concrete, low-pressure step toward the search: offer to send over what you are seeing on this exact search, or invite them to connect or message you so you can share specifics privately. One clause, easy to take or leave.
-- 15 to 45 words. One or two sentences. No exclamation marks, no emoji, no hashtags, no long dashes.
-- NEVER invent a number; react only to figures they themselves stated. No links, no email addresses, no phone numbers, no calendar, no naming the firm, no fees.
-- Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies".
-- Never mention AI.
-Return ONLY the reply text, nothing else.`;
+// NOTE deliberately absent: there is no FOLLOWUP_RULES prompt. When a poster
+// replies to our comment, the owner reads their words and writes the answer
+// themselves (owner ask 2026-08-19); the machine never drafts that reply.
 
 async function draft(system: string, user: string): Promise<string | null> {
   try {
@@ -1702,16 +1694,11 @@ async function checkCommentResponses(workspaceId: string): Promise<number> {
       item.responseCommentId = reply.commentId;
       item.updatedAt = nowIso();
       found++;
+      // Deliberately NO drafting here (owner ask 2026-08-19): a poster
+      // writing back is a live conversation, and the owner wants to read
+      // their exact words and answer in their own. The tracker shows the
+      // reply with an empty compose box; nothing is written for them.
       console.log(`[comment-radar] ${workspaceId}: ${item.authorName} replied to our comment on their post`);
-      // Stage the follow-up now. A model failure just leaves the Draft
-      // button in the tracker; the response itself is already recorded.
-      try {
-        const text = await draft(FOLLOWUP_RULES, followUpBrief(item, reply.text));
-        if (text) {
-          item.followUpText = scrub(text).slice(0, MAX_COMMENT_CHARS);
-          item.followUpStatus = "suggested";
-        }
-      } catch { /* draft on demand instead */ }
     } catch (e) {
       console.log(`[comment-radar] ${workspaceId}: thread check failed for ${item.authorName} (${e instanceof Error ? e.message : e})`);
     }
@@ -1719,39 +1706,23 @@ async function checkCommentResponses(workspaceId: string): Promise<number> {
   return found;
 }
 
-function followUpBrief(item: CommentLeadItem, replyText: string): string {
-  return `THEIR ORIGINAL POST:\n${(item.postExcerpt ?? "").slice(0, 600)}\n\n` +
-    `OUR PUBLIC COMMENT:\n${item.commentDraft ?? ""}\n\n` +
-    `THEIR REPLY (by ${item.authorName}${item.title ? `, ${item.title}` : ""}${item.company ? ` at ${item.company}` : ""}):\n${replyText.slice(0, 600)}\n\n` +
-    `Write the owner's reply.`;
-}
-
-/** Draft (or re-draft) the in-thread follow-up for a responded tracker item. */
-export async function draftFollowUp(workspaceId: string, id: string): Promise<CommentLeadItem | null> {
-  await hydrate();
-  const item = findItem(workspaceId, id);
-  if (!item || item.responseStatus !== "responded" || item.followUpStatus === "approved") return null;
-  const text = await draft(FOLLOWUP_RULES, followUpBrief(item, item.responseText ?? ""));
-  if (!text) return null;
-  item.followUpText = scrub(text).slice(0, MAX_COMMENT_CHARS);
-  item.followUpStatus = "suggested";
-  item.updatedAt = nowIso();
-  save();
-  return item;
-}
-
-/** Post the follow-up as a threaded reply to THEIR response on THEIR post.
- *  This is a live conversation, not a cold touch, so it spends none of the
- *  cold-comment allowance; engine account caps still apply. */
+/** Post the owner's OWN reply as a threaded response to THEIR comment on
+ *  THEIR post. Nothing is machine-written on this path (owner ask
+ *  2026-08-19): the text is whatever the owner typed in the tracker. A live
+ *  conversation is not a cold touch, so it spends none of the cold-comment
+ *  allowance; engine account caps still apply. */
 export async function approveFollowUp(
   workspaceId: string, userId: string, userEmail: string, id: string, editedText?: string,
 ): Promise<{ item: CommentLeadItem | null; accepted: boolean; reason?: string }> {
   await hydrate();
   const item = findItem(workspaceId, id);
-  if (!item || item.followUpStatus !== "suggested" || !item.followUpText || !item.responseCommentId) {
+  if (!item || item.responseStatus !== "responded" || item.followUpStatus === "approved" || !item.responseCommentId) {
     return { item: item ?? null, accepted: false, reason: "not_open" };
   }
-  if (editedText && scrub(editedText).length >= 2) item.followUpText = scrub(editedText).slice(0, MAX_COMMENT_CHARS);
+  if (!editedText || scrub(editedText).length < 2) {
+    return { item, accepted: false, reason: "Write your reply first; nothing is drafted for you on this one." };
+  }
+  item.followUpText = scrub(editedText).slice(0, MAX_COMMENT_CHARS);
   const accounts = await connectedAccounts(workspaceId);
   const account = accounts.find((a) => a.accountId === item.accountId)
     ?? accounts.find((a) => a.ownerUserId === userId)
@@ -1797,7 +1768,7 @@ export async function approveFollowUp(
 export async function skipFollowUp(workspaceId: string, id: string): Promise<CommentLeadItem | null> {
   await hydrate();
   const item = findItem(workspaceId, id);
-  if (!item || item.followUpStatus !== "suggested") return null;
+  if (!item || item.responseStatus !== "responded" || item.followUpStatus === "approved") return null;
   item.followUpStatus = "skipped";
   item.updatedAt = nowIso();
   save();
@@ -2528,7 +2499,7 @@ export interface CommentWatchView {
     watching: number;
     /** Watch window expired with no reply (already on the email path). */
     noResponse: number;
-    /** Follow-up replies staged and waiting for approval. */
+    /** Poster replies still waiting for the owner's own answer. */
     followUpsOpen: number;
   };
 }
@@ -2547,8 +2518,10 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
   // The outcome tracker: posted comments, newest first, responded and
   // follow-up-ready threads pinned to the top.
+  const awaitingAnswer = (i: CommentLeadItem): boolean =>
+    i.responseStatus === "responded" && i.followUpStatus !== "approved" && i.followUpStatus !== "skipped";
   const trackRank = (i: CommentLeadItem): number =>
-    i.followUpStatus === "suggested" ? 0
+    awaitingAnswer(i) ? 0
     : i.responseStatus === "responded" ? 1
     : i.responseStatus === "pending" || i.responseStatus === "posted" ? 2
     : i.responseStatus === "failed" ? 3 : 4;
@@ -2582,7 +2555,7 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
       responded: tracked.filter((i) => i.responseStatus === "responded").length,
       watching: tracked.filter((i) => i.responseStatus === "pending" || i.responseStatus === "posted").length,
       noResponse: tracked.filter((i) => i.responseStatus === "no_response").length,
-      followUpsOpen: tracked.filter((i) => i.followUpStatus === "suggested").length,
+      followUpsOpen: tracked.filter(awaitingAnswer).length,
     },
   };
 }

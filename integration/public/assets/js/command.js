@@ -3967,7 +3967,10 @@
       return '<span class="lie-chip mut">Posted</span>';
     }
     function trackRow(t) {
-      var open = t.followUpStatus === "suggested";
+      // A reply you have not answered or dismissed stays "open": their words
+      // on top, an EMPTY box below. Nothing is drafted for you here; what you
+      // type is exactly what posts in the thread.
+      var open = t.responseStatus === "responded" && t.followUpStatus !== "approved" && t.followUpStatus !== "skipped";
       var who = esc(t.authorName) +
         (t.title || t.company ? ' <span class="muted">' + esc([t.title, t.company].filter(Boolean).join(" · ")) + "</span>" : "");
       var postLink = t.postUrl ? ' · <a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener">View the post</a>' : "";
@@ -3976,19 +3979,23 @@
         '<div class="lie-post muted">Commented ' + esc(trackDay(t.commentPostedAt || t.updatedAt)) + ': "' +
           esc((t.commentDraft || "").slice(0, 200)) + '"' + postLink + "</div>";
       if (t.responseStatus === "responded") {
-        out += '<div class="lie-post">Their reply: ' + esc((t.responseText || "").slice(0, 280)) + "</div>";
+        out += '<div class="lie-post"><b>' + esc((t.authorName || "").split(/\s+/)[0] || "They") + ' replied' +
+          (t.responseAt ? " " + esc(trackDay(t.responseAt)) : "") + ':</b> "' + esc((t.responseText || "").slice(0, 400)) + '"</div>';
         if (open) {
-          out += '<textarea class="lie-text" data-lic-followup rows="2">' + esc(t.followUpText || "") + "</textarea>" +
+          if (t.followUpStatus === "blocked") {
+            out += '<div><span class="lie-chip bad">' + esc(t.reason || "Reply blocked") + "</span></div>";
+          }
+          out += '<div class="lie-post muted">Write your reply in your own words; it posts in the thread under their comment exactly as typed.</div>' +
+            '<textarea class="lie-text" data-lic-followup rows="3" placeholder="Your reply..."></textarea>' +
             '<div class="lie-actions">' +
               '<button class="btn btn-sm btn-primary" data-lic="followup_approve">Reply in the thread</button> ' +
-              '<button class="btn btn-sm btn-ghost" data-lic="followup_skip">Skip</button>' +
+              '<button class="btn btn-sm btn-ghost" data-lic="followup_skip">Dismiss</button>' +
             "</div>";
         } else if (t.followUpStatus === "approved") {
-          out += '<div><span class="lie-chip ok">Follow-up reply approved, posting from your account</span></div>';
-        } else if (t.followUpStatus === "blocked") {
-          out += '<div><span class="lie-chip bad">' + esc(t.reason || "Follow-up blocked") + "</span></div>";
+          out += '<div class="lie-post">Your reply: "' + esc((t.followUpText || "").slice(0, 280)) + '"</div>' +
+            '<div><span class="lie-chip ok">Posting in the thread from your account</span></div>';
         } else {
-          out += '<div class="lie-actions"><button class="btn btn-sm" data-lic="followup_draft">Draft a reply</button></div>';
+          out += '<div><span class="lie-chip mut">Dismissed</span></div>';
         }
       } else if (t.responseStatus === "no_response") {
         out += '<div class="lie-post muted">No reply in two weeks. They ' + (t.prospectId ? "are already in" : "move to") +
@@ -4004,8 +4011,8 @@
       if (!tr.length && !(tally.postedTotal > 0)) return "";
       return '<div class="card liops-card">' +
         '<div class="liops-head"><div><b>Comments posted</b>' +
-          '<div class="muted liops-sub">Every comment that went out, tallied and watched. Each thread is re-checked around the clock; when the poster replies, a threaded response is drafted here for one tap. Quiet threads move to the email follow-up campaign automatically.</div></div>' +
-          (tally.followUpsOpen ? '<span class="liops-progress">' + tally.followUpsOpen + " to review</span>" : "") +
+          '<div class="muted liops-sub">Every comment that went out, tallied and watched. Each thread is re-checked around the clock; when the poster replies, their exact words land here with a space for you to answer in your own. Nothing is drafted for you. Quiet threads move to the email follow-up campaign automatically.</div></div>' +
+          (tally.followUpsOpen ? '<span class="liops-progress">' + tally.followUpsOpen + (tally.followUpsOpen === 1 ? " reply" : " replies") + " to answer</span>" : "") +
         "</div>" +
         '<div class="lie-actions">' +
           '<span class="lie-chip">' + (tally.posted7d || 0) + " posted this week (" + (tally.postedTotal || 0) + " total)</span> " +
@@ -4096,6 +4103,11 @@
             : act === "comment_approve" ? rowEl.querySelector("[data-lic-comment]")
             : act === "followup_approve" ? rowEl.querySelector("[data-lic-followup]") : null;
           if (ta) payload.text = ta.value;
+          // The threaded reply is the owner's own words: an empty box never posts.
+          if (act === "followup_approve" && (!payload.text || !payload.text.trim())) {
+            toast("Write your reply first; nothing is drafted for you on this one.");
+            return;
+          }
           var whoEl = rowEl.querySelector(".lie-who");
           var whoName = whoEl && whoEl.firstChild ? String(whoEl.firstChild.textContent || "").trim() : "";
           btn.disabled = true;
