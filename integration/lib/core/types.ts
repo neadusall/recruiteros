@@ -246,6 +246,14 @@ export interface Prospect {
   mobilePhone?: string;
   /** Landline / direct-dial number, enriched separately from mobile. */
   landlinePhone?: string;
+  /** Telnyx line-type verdict for `phone` (mobile/landline/voip/toll_free), cached
+   *  so we never re-pay for the same lookup. */
+  phoneLineType?: "mobile" | "landline" | "voip" | "toll_free" | "unknown";
+  /** True only when `phone` is confirmed an ACTUAL business landline/VoIP line
+   *  (CNAM = BUSINESS or a business/UCaaS VoIP carrier). The voicemail motions
+   *  dial ONLY these — never a personal or residential line. Cached from the
+   *  line-type + caller-name lookup so it's determined once. */
+  phoneBusinessLine?: boolean;
   company?: string;
   /** The prospect's company domain — pairs the person to their company so the
    *  enrichment waterfall can resolve a company email + phone for outreach. */

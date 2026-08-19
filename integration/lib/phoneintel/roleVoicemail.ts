@@ -25,6 +25,7 @@
 
 import { getCore } from "../core/repository";
 import { withWorkspaceCreds } from "../connected";
+import { classifyLine } from "../signals/phoneClassify";
 import { toE164 } from "../voice/phone";
 import {
   activeVoiceRef, spliceSegments, assembleSplicedDrop, DEFAULT_PERSONA,
@@ -91,14 +92,44 @@ export async function assembleRoleVoicemail(
 
 export interface EnqueueResult {
   queued: boolean;
-  reason?: "not_emailed" | "no_number" | "already_queued" | "no_role";
+  reason?: "not_emailed" | "no_number" | "already_queued" | "no_role" | "not_business_line";
   role?: string;
   itemId?: string;
 }
 
 /**
+ * Confirm `phone` is an ACTUAL business landline/VoIP line before we ever dial it
+ * (operator rule: business lines only, never a personal or residential number).
+ * Uses the cached verdict when we've checked before; otherwise runs the line-type
+ * + caller-name lookup once and persists the result onto the prospect so we never
+ * re-pay. Returns true only for a confirmed business landline/VoIP.
+ */
+async function ensureBusinessLine(workspaceId: string, p: Prospect, motion?: Motion): Promise<boolean> {
+  if (typeof p.phoneBusinessLine === "boolean") return p.phoneBusinessLine;
+  const cls = await classifyLine(corporateNumber(p) || p.phone || "", {
+    workspaceId, motion: motion ?? p.motion, business: true,
+  });
+  // Dry-run (Telnyx not configured) leaves it unknown — don't guess, don't dial.
+  const business = cls.businessLine === true;
+  try {
+    const fresh = await getCore().getProspect(p.id);
+    if (fresh) {
+      fresh.phoneLineType = cls.lineType;
+      fresh.phoneBusinessLine = cls.looked ? business : undefined;
+      if (cls.landlinePhone && !fresh.landlinePhone) fresh.landlinePhone = cls.landlinePhone;
+      if (cls.mobilePhone && !fresh.mobilePhone) fresh.mobilePhone = cls.mobilePhone;
+      await getCore().saveProspect(fresh);
+      p.phoneBusinessLine = fresh.phoneBusinessLine;
+      p.phoneLineType = fresh.phoneLineType;
+    }
+  } catch { /* best-effort persist */ }
+  return business;
+}
+
+/**
  * Enqueue ONE emailed prospect for a role voicemail via Phone Intel. Never throws
- * (the email path fires-and-forgets). Idempotent per prospect/number.
+ * (the email path fires-and-forgets). Idempotent per prospect/number. Dials ONLY
+ * confirmed business landline/VoIP lines.
  */
 export async function enqueueRoleVoicemail(workspaceId: string, p: Prospect): Promise<EnqueueResult> {
   await ensureQueueReady();
@@ -108,6 +139,8 @@ export async function enqueueRoleVoicemail(workspaceId: string, p: Prospect): Pr
   if (hasQueued(workspaceId, { prospectId: p.id, contactId: p.id, phone: mainPhone })) {
     return { queued: false, reason: "already_queued" };
   }
+  // Business-line gate: never dial a personal/residential/mobile number.
+  if (!(await ensureBusinessLine(workspaceId, p))) return { queued: false, reason: "not_business_line" };
   const { url, role } = await assembleRoleVoicemail(workspaceId, p);
   const full = (p.fullName || p.firstName || "").trim();
   const toks = full.split(/\s+/).filter(Boolean);
@@ -131,7 +164,7 @@ export async function enqueueRoleVoicemail(workspaceId: string, p: Prospect): Pr
 export interface PullSummary {
   scanned: number;
   queued: number;
-  skipped: { notEmailed: number; noNumber: number; alreadyQueued: number };
+  skipped: { notEmailed: number; noNumber: number; alreadyQueued: number; notBusinessLine: number };
   /** A few example rows for the UI ("queued Hector Alvarez re: VP of Sales"). */
   examples: Array<{ name: string; company?: string; role: string }>;
 }
@@ -149,7 +182,7 @@ export async function pullRoleVoicemailsFromPipeline(
   const prospects = opts.motion ? all.filter((p) => (p.motion ?? "bd") === opts.motion) : all;
   const cap = Math.max(1, opts.limit ?? 200);
 
-  const sum: PullSummary = { scanned: 0, queued: 0, skipped: { notEmailed: 0, noNumber: 0, alreadyQueued: 0 }, examples: [] };
+  const sum: PullSummary = { scanned: 0, queued: 0, skipped: { notEmailed: 0, noNumber: 0, alreadyQueued: 0, notBusinessLine: 0 }, examples: [] };
   for (const p of prospects) {
     if (sum.queued >= cap) break;
     sum.scanned++;
@@ -160,6 +193,7 @@ export async function pullRoleVoicemailsFromPipeline(
     } else if (res.reason === "not_emailed") sum.skipped.notEmailed++;
     else if (res.reason === "no_number") sum.skipped.noNumber++;
     else if (res.reason === "already_queued") sum.skipped.alreadyQueued++;
+    else if (res.reason === "not_business_line") sum.skipped.notBusinessLine++;
   }
   return sum;
 }

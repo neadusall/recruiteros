@@ -19,11 +19,23 @@ import { rateCost } from "../billing/rates";
 import type { Motion } from "../core/types";
 
 export type LineType = "mobile" | "landline" | "voip" | "toll_free" | "unknown";
+export type CallerType = "business" | "consumer" | "unknown";
 
 export interface ClassifyResult {
   number: string;
   lineType: LineType;
   carrier?: string;
+  /** CNAM caller name (e.g. "ACME LOGISTICS"), when a caller-name lookup ran. */
+  callerName?: string;
+  /** BUSINESS vs CONSUMER per the CNAM registry, when looked up. */
+  callerType?: CallerType;
+  /**
+   * True ONLY when we can confirm this is an ACTUAL BUSINESS landline/VoIP line:
+   * the CNAM says BUSINESS, or it's VoIP on a known business/UCaaS carrier. A
+   * residential landline, a consumer VoIP, or an unconfirmed line is false. This
+   * is the gate for the voicemail motions (business lines only, never personal).
+   */
+  businessLine?: boolean;
   /** The number, placed in the field its line type implies (the routing result). */
   mobilePhone?: string;
   landlinePhone?: string;
@@ -42,6 +54,53 @@ export interface ClassifyOptions {
   motion?: Motion;
   /** Set false to classify without writing a cost event (default true). */
   record?: boolean;
+  /**
+   * Also resolve BUSINESS vs CONSUMER (CNAM caller-name lookup) so we can keep
+   * ACTUAL business lines only. Costs a little more per query; used by the
+   * voicemail motions, off elsewhere.
+   */
+  business?: boolean;
+}
+
+/**
+ * Known business / UCaaS / CLEC carriers. A VoIP number on one of these is a
+ * business line with very high confidence (these carriers sell to companies, not
+ * households). Substring match, case-insensitive.
+ */
+const BUSINESS_CARRIERS = [
+  "ringcentral", "8x8", "eight by eight", "bandwidth", "twilio", "level 3", "level3",
+  "lumen", "vonage", "nextiva", "dialpad", "zoom", "sinch", "telnyx", "peerless",
+  "inteliquent", "intrado", "onvoy", "mitel", "avaya", "cisco", "microsoft", "google",
+  "ooma", "goto", "jive", "grasshopper", "broadvoice", "fuze", "five9", "genesys",
+  "nice", "talkdesk", "aircall", "3cx", "windstream", "west corp", "commio", "flowroute",
+  "voip", "communications", "telecom", "cloud", "hosted",
+];
+
+export function businessVoipCarrier(carrier?: string): boolean {
+  const c = (carrier ?? "").toLowerCase();
+  if (!c) return false;
+  return BUSINESS_CARRIERS.some((b) => c.includes(b));
+}
+
+/**
+ * Is this an ACTUAL business landline/VoIP line we may leave a voicemail on?
+ * Conservative by design (the operator asked for business lines ONLY): a
+ * mobile/toll-free/unknown line is never business; a CONSUMER CNAM is never
+ * business even on a landline; we say business only on a BUSINESS CNAM or a
+ * business/UCaaS VoIP carrier. An unconfirmed landline defaults to NOT business.
+ */
+export function isBusinessLine(input: { lineType: LineType; carrier?: string; callerType?: CallerType }): boolean {
+  if (input.lineType !== "landline" && input.lineType !== "voip") return false;
+  if (input.callerType === "consumer") return false;
+  if (input.callerType === "business") return true;
+  return businessVoipCarrier(input.carrier);
+}
+
+function mapCallerType(raw?: string): CallerType {
+  const t = (raw ?? "").toLowerCase();
+  if (t.includes("business")) return "business";
+  if (t.includes("consumer") || t.includes("residential")) return "consumer";
+  return "unknown";
 }
 
 /** Map Telnyx's carrier.type string onto our line-type buckets. */
@@ -67,13 +126,20 @@ export async function classifyLine(number: string, opts: ClassifyOptions = {}): 
   // Isolation: resolve Telnyx against the workspace's own key (a customer never
   // rides the operator's env). configured() must run inside the same context, so
   // the whole lookup runs in the workspace's credential scope and returns its result.
-  const lookup = async (): Promise<{ lineType: LineType; carrier?: string; looked: boolean }> => {
+  const lookup = async (): Promise<{ lineType: LineType; carrier?: string; callerName?: string; callerType?: CallerType; looked: boolean }> => {
     if (!telnyx.configured()) return { lineType: "unknown", looked: false };
     try {
-      const res: any = await telnyx.numberLookup(clean);
+      const res: any = await telnyx.numberLookup(clean, { callerName: opts.business === true });
       if (res && !res.dryRun) {
         const c = res?.data?.carrier ?? res?.carrier ?? {};
-        return { lineType: mapLineType(c.type ?? res?.data?.type), carrier: c.name ?? c.carrier_name, looked: true };
+        const cn = res?.data?.caller_name ?? res?.caller_name ?? {};
+        return {
+          lineType: mapLineType(c.type ?? res?.data?.type),
+          carrier: c.name ?? c.carrier_name,
+          callerName: cn.caller_name ?? cn.name,
+          callerType: opts.business ? mapCallerType(cn.caller_type ?? cn.type) : undefined,
+          looked: true,
+        };
       }
     } catch {
       /* lookup failed; leave unknown, charge nothing */
@@ -85,7 +151,10 @@ export async function classifyLine(number: string, opts: ClassifyOptions = {}): 
   const carrier = got.carrier;
   const looked = got.looked;
 
-  const result: ClassifyResult = { ...base, lineType, carrier, looked };
+  const result: ClassifyResult = { ...base, lineType, carrier, callerName: got.callerName, callerType: got.callerType, looked };
+  if (opts.business) {
+    result.businessLine = isBusinessLine({ lineType, carrier, callerType: got.callerType });
+  }
   if (lineType === "mobile") result.mobilePhone = clean;
   else if (lineType === "landline" || lineType === "voip") result.landlinePhone = clean;
 

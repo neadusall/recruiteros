@@ -30,12 +30,17 @@ export class TelnyxClient extends ProviderClient {
    * Telnyx Number Lookup. Returns the carrier object incl. `type`
    * (mobile / landline / voip / toll-free), the cheap + reliable way to split a
    * found number into the mobile vs landline field. ~$0.0025/query (line-type).
-   *   GET /number_lookup/{phone}?type=carrier
+   * With `callerName`, ALSO returns the CNAM caller_name + caller_type
+   * (BUSINESS / CONSUMER) — the definitive "is this an actual business line"
+   * signal (adds ~$0.004/query for the caller-name portion).
+   *   GET /number_lookup/{phone}?type=carrier[&type=caller-name]
    */
-  numberLookup(phoneNumber: string) {
+  numberLookup(phoneNumber: string, opts?: { callerName?: boolean }) {
+    // The shared query helper can't repeat a key, so the multi-type query goes in
+    // the path directly (Telnyx wants ?type=carrier&type=caller-name).
+    const types = opts?.callerName ? "type=carrier&type=caller-name" : "type=carrier";
     return this.request({
-      path: `/number_lookup/${encodeURIComponent(phoneNumber)}`,
-      query: { type: "carrier" },
+      path: `/number_lookup/${encodeURIComponent(phoneNumber)}?${types}`,
     });
   }
 

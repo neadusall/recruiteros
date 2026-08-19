@@ -18405,7 +18405,7 @@
 
           (isAdmin
             ? '<div class="card" style="margin-top:14px;border-color:var(--brand-2)"><h3>Pull from pipeline (voicemail on the role you emailed)</h3>' +
-              '<p class="muted" style="font-size:12.5px;margin:4px 0 10px">Take everyone in your pipeline we have already <b>emailed</b> about their open role and who has a <b>corporate phone number</b>, and stage a voicemail for each about that <b>same role</b>. The call navigates their switchboard to reach them and drops the message on their mailbox. Runs alongside your email, nothing dials until you press Start.</p>' +
+              '<p class="muted" style="font-size:12.5px;margin:4px 0 10px">Take everyone in your pipeline we have already <b>emailed</b> about their open role, check each number, and stage a voicemail about that <b>same role</b> only for <b>actual business landline / VoIP lines</b>. Mobiles, personal and residential lines are checked and skipped, never dialed. The call reaches the person and drops the message on their mailbox. Runs alongside your email; nothing dials until you press Start.</p>' +
               '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
               '<button class="btn btn-sm btn-primary" id="piPull">Pull emailed prospects</button>' +
               '<span class="muted" id="piPullOut" style="font-size:12px"></span></div></div>' +
@@ -18500,7 +18500,7 @@
             var ex = (s.examples || []).map(function (e) { return e.name + " (re: " + e.role + ")"; }).slice(0, 4).join(", ");
             if (out) out.innerHTML = "Staged <b>" + (s.queued || 0) + "</b> voicemail" + ((s.queued === 1) ? "" : "s") +
               " from " + (s.scanned || 0) + " scanned" +
-              " · skipped " + (sk.notEmailed || 0) + " not emailed, " + (sk.noNumber || 0) + " no corporate number, " + (sk.alreadyQueued || 0) + " already queued." +
+              " · skipped " + (sk.notEmailed || 0) + " not emailed, " + (sk.noNumber || 0) + " no number, " + (sk.notBusinessLine || 0) + " not a business line, " + (sk.alreadyQueued || 0) + " already queued." +
               (ex ? ' <span class="muted">e.g. ' + esc(ex) + "</span>" : "");
             paintIntel(body);
           }).catch(function () { pullB.disabled = false; if (out) out.textContent = "Could not reach the server."; });
