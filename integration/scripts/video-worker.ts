@@ -95,6 +95,13 @@ const SUSPECT_FAST_MS = 2_000;
 interface Composed {
   results: Array<{ company: string; role: string; videoKey: string }>;
   failures: Array<{ company: string; role: string; reason: string }>;
+  /** Jobs that were IN FLIGHT when the browser died or the watchdog fired. Reported separately
+   *  from failures: a crash invalidates the batch's failures (they were never real attempts),
+   *  but the job the crash happened DURING is evidence. One job that deterministically kills
+   *  Chromium otherwise livelocks the whole fleet: crash-exit discards all reports, main re-serves
+   *  the same job first, every box spins on it forever (2026-08-19, Truveta). Main counts these
+   *  as crash strikes with backoff, benching only when several distinct boxes agree. */
+  crashes: Array<{ company: string; role: string; reason: string }>;
   browserDead: boolean;
   /** A job blew the watchdog: the box is dirty (orphaned ffmpeg/Chromium), so restart. */
   wedged: boolean;
@@ -107,6 +114,7 @@ interface Composed {
 async function compose(jobs: Job[], clipId: string, durationSec: number): Promise<Composed> {
   const out: Array<{ company: string; role: string; videoKey: string }> = [];
   const failures: Array<{ company: string; role: string; reason: string }> = [];
+  const crashes: Array<{ company: string; role: string; reason: string }> = [];
   let browserDead = false;
   let wedged = false;
   let clipMissing = false;
@@ -130,6 +138,7 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
         if (res === WEDGED) {
           console.error(`[video-worker] ${ts()} ${j.company} / ${j.role}: no result after ${Math.round(JOB_TIMEOUT_MS / 1000)}s, treating this box as wedged`);
           wedged = true;
+          crashes.push({ company: j.company, role: j.role, reason: `job watchdog: no result after ${Math.round(JOB_TIMEOUT_MS / 1000)}s` });
         }
         else if (res.ok && res.status === "ready" && res.key) {
           // Rebuild jobs carry the OLD videoKey (what the emailed links point at): mirror the
@@ -149,7 +158,10 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
           // no_clip fast-fails in <2s, so without this branch it trips the sub-2s crash
           // heuristic and the unit restart-loops (6,667 restarts before this was caught).
           if (res.status === "no_clip") clipMissing = true;
-          else if (BROWSER_DEAD_RE.test(reason)) browserDead = true;
+          else if (BROWSER_DEAD_RE.test(reason)) {
+            browserDead = true;
+            crashes.push({ company: j.company, role: j.role, reason });
+          }
           // no_shot is a per-role CONTENT outcome (role not on the careers site) and repeat
           // probes answer from cache in <2s, so it must never feed the crash heuristic:
           // counting it restart-looped worker-2 on 8/18 (crash-exit discarded the failure
@@ -161,14 +173,18 @@ async function compose(jobs: Job[], clipId: string, durationSec: number): Promis
       } catch (e) {
         const msg = (e as Error).message;
         console.error(`[video-worker] ${ts()} compose ${j.company} / ${j.role}: ${msg}`);
-        if (BROWSER_DEAD_RE.test(msg)) browserDead = true;
+        if (BROWSER_DEAD_RE.test(msg)) {
+          browserDead = true;
+          crashes.push({ company: j.company, role: j.role, reason: msg });
+        }
         else failures.push({ company: j.company, role: j.role, reason: msg });
       }
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, w));
   // A dead browser or a wedge invalidates the batch's failures: they were never real attempts.
-  return { results: out, failures: browserDead || wedged || clipMissing ? [] : failures, browserDead, wedged, clipMissing };
+  // The crashes list survives on purpose — it names the jobs the box died ON.
+  return { results: out, failures: browserDead || wedged || clipMissing ? [] : failures, crashes, browserDead, wedged, clipMissing };
 }
 
 async function loop(): Promise<void> {
@@ -202,10 +218,11 @@ async function loop(): Promise<void> {
         await primeClipCache(claim.clip as Parameters<typeof primeClipCache>[0]).catch(() => {});
       }
 
-      const { results, failures, browserDead, wedged, clipMissing } = await compose(jobs, clipId, durationSec);
-      // Always report BOTH. A failure the main never hears about is re-handed to a worker every
-      // cycle forever, which is exactly how the fleet came to spend all its CPU on dead roles.
-      if (results.length || failures.length) await callMain("submit_video", { results, failures });
+      const { results, failures, crashes, browserDead, wedged, clipMissing } = await compose(jobs, clipId, durationSec);
+      // Always report ALL THREE. A failure the main never hears about is re-handed to a worker
+      // every cycle forever, which is exactly how the fleet came to spend all its CPU on dead
+      // roles — and an unreported crash suspect livelocks every box on one poison job.
+      if (results.length || failures.length || crashes.length) await callMain("submit_video", { results, failures, crashes });
       console.log(`[video-worker] ${ts()} claimed ${jobs.length} -> composed ${results.length}, failed ${failures.length}`);
       if (clipMissing) {
         console.error(`[video-worker] ${ts()} clip ${clipId} is not fetchable from main (re-recorded or deleted?) — sleeping; main should fall back to the latest workspace clip`);

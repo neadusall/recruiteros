@@ -59,10 +59,21 @@ async function loadMap(): Promise<VideoMap> { return (await loadSnapshot<VideoMa
  * permanently. Terminal reasons (an aggregator-only URL, a staffing intermediary) bench on the FIRST
  * failure — retrying those can never produce a different answer.
  */
-interface FailEntry { tries: number; at: string; reason?: string; benched?: boolean; company?: string; role?: string }
+interface FailEntry {
+  tries: number; at: string; reason?: string; benched?: boolean; company?: string; role?: string;
+  /** Crash strikes: this job was IN FLIGHT when a worker's browser died or its watchdog fired.
+   *  Kept apart from `tries` because a crash report is weaker evidence than a clean failure
+   *  (the box may have broken for its own reasons), but a job that keeps being the one the
+   *  browser dies on IS the browser-killer. */
+  crashTries?: number; crashAt?: string; crashReason?: string; crashWorkers?: string[];
+}
 type FailMap = Record<string, FailEntry>;
 
 const MAX_TRIES = Math.max(1, Number(process.env.INMARKET_VIDEO_MAX_TRIES) || 4);
+/** Crash strikes before a job is benched for good — and only when the strikes came from at
+ *  least CRASH_MIN_WORKERS distinct boxes, so one sick box can never bench a good posting. */
+const CRASH_MAX_TRIES = Math.max(2, Number(process.env.INMARKET_VIDEO_CRASH_TRIES) || 3);
+const CRASH_MIN_WORKERS = Math.max(1, Number(process.env.INMARKET_VIDEO_CRASH_MIN_WORKERS) || 2);
 const BASE_BACKOFF_MS = Math.max(60_000, (Number(process.env.INMARKET_VIDEO_BACKOFF_MIN) || 30) * 60_000);
 const MAX_BACKOFF_MS = 24 * 60 * 60 * 1000;
 
@@ -77,9 +88,24 @@ const WORKER_FAULT = /has been closed|has been disconnected|browserType\.launch|
 
 async function loadFails(): Promise<FailMap> { return (await loadSnapshot<FailMap>(FAIL_KEY).catch(() => null)) || {}; }
 
+/** A crash-benched job: repeatedly the one in flight when the browser died, confirmed by
+ *  several distinct boxes. Deterministic browser-killers must leave the queue for good —
+ *  every re-serve costs the whole fleet a restart cycle. */
+function crashBenched(f: FailEntry): boolean {
+  return (f.crashTries || 0) >= CRASH_MAX_TRIES && (f.crashWorkers?.length || 1) >= CRASH_MIN_WORKERS;
+}
+
 /** True when this key should be skipped right now (benched, or still inside its backoff window). */
 function isBenched(f: FailEntry | undefined, nowMs: number): boolean {
   if (!f) return false;
+  // Crash strikes are evaluated FIRST: their evidence lives in crash* fields, and the
+  // worker-fault self-heal below must never resurrect a job the fleet keeps dying on.
+  if (f.crashTries) {
+    if (crashBenched(f)) return true;
+    const crashWaited = nowMs - Date.parse(f.crashAt || "");
+    const crashBackoff = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** Math.max(0, f.crashTries - 1));
+    if (Number.isFinite(crashWaited) && crashWaited < crashBackoff) return true;
+  }
   // Self-heal: strikes recorded before the worker-fault guard shipped can be sitting on good
   // rows. A worker-fault reason never holds a row back, whatever its try count.
   if (WORKER_FAULT.test(f.reason || "")) return false;
@@ -117,6 +143,50 @@ export async function recordVideoFailures(
   return n;
 }
 
+/**
+ * A worker names the jobs that were in flight when its browser died or its watchdog fired.
+ * Crash reports were deliberately NOT failures (a dead browser fast-fails every job on the box,
+ * and four of those would bench a good posting), but discarding them entirely is how one job
+ * that deterministically kills Chromium livelocked all 4 boxes on 2026-08-19: crash-exit,
+ * restart, main re-serves the same job first, repeat forever. So the job a crash happened
+ * DURING takes a crash strike: backoff moves it off the head of the queue immediately, and
+ * once several distinct boxes have died on it, it is benched for good. A box-level problem
+ * (OOM, broken install) strikes whatever job it happens to hold, but a single box can never
+ * reach the bench threshold and random victims never accumulate strikes.
+ */
+export async function recordVideoCrashes(
+  crashes: Array<{ company: string; role: string; reason?: string }>,
+  workerId?: string,
+): Promise<number> {
+  if (!crashes.length) return 0;
+  const { shotKey } = await import("./roleShot");
+  const fails = await loadFails();
+  const nowIso = new Date().toISOString();
+  let n = 0;
+  for (const c of crashes) {
+    if (!c.company || !c.role) continue;
+    const key = shotKey(c.company, c.role);
+    const prev = fails[key];
+    const workers = new Set(prev?.crashWorkers || []);
+    if (workerId) workers.add(workerId.slice(0, 60));
+    fails[key] = {
+      tries: prev?.tries || 0,
+      at: prev?.at || nowIso,
+      reason: prev?.reason,
+      benched: prev?.benched,
+      company: c.company,
+      role: c.role,
+      crashTries: (prev?.crashTries || 0) + 1,
+      crashAt: nowIso,
+      crashReason: (c.reason || "").slice(0, 200),
+      crashWorkers: [...workers].slice(0, 12),
+    };
+    n++;
+  }
+  if (n) await saveSnapshot(FAIL_KEY, fails);
+  return n;
+}
+
 /** Counts for the diagnostics surface: how much of the book is permanently un-videoable. */
 export async function videoFailureStats(): Promise<{ tracked: number; benched: number; retrying: number; topReasons: Array<{ reason: string; n: number }> }> {
   const fails = await loadFails();
@@ -124,9 +194,9 @@ export async function videoFailureStats(): Promise<{ tracked: number; benched: n
   let benched = 0, retrying = 0;
   const reasons = new Map<string, number>();
   for (const f of Object.values(fails)) {
-    if (f.benched || f.tries >= MAX_TRIES) benched++;
+    if (f.benched || f.tries >= MAX_TRIES || crashBenched(f)) benched++;
     else if (isBenched(f, now)) retrying++;
-    const r = (f.reason || "unknown").slice(0, 60);
+    const r = (f.reason || (f.crashReason ? `crash: ${f.crashReason}` : "unknown")).slice(0, 60);
     reasons.set(r, (reasons.get(r) || 0) + 1);
   }
   const topReasons = [...reasons.entries()].map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n).slice(0, 8);
