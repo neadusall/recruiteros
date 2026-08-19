@@ -4,8 +4,10 @@
  * OTHER PEOPLE'S posts are the market (owner decision 2026-08-12: the radar
  * never scans the owner's own posts). Every tick (15 min by default):
  *
- *   1. one keyword search across ALL of LinkedIn's posts (rotating bank:
- *      "we are hiring", "looking to hire", ... - editable per workspace),
+ *   1. one keyword search over Google's INDEX of linkedin.com/posts (Serper,
+ *      then DataForSEO; rotating bank: "we are hiring", "looking to hire",
+ *      ... - editable per workspace). The connected seat never runs the
+ *      search (owner ask 2026-08-19); it only reads profiles and sends,
  *   2. every hit is gated: hiring intent in the text, a person (not a
  *      company page), decision-maker title, not a peer firm, DNC/cooldown,
  *   3. open-profile check picks the channel, and
@@ -1865,37 +1867,46 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   const roles = marketKeywordsFor(workspaceId);
   save();
 
-  const { unipile } = await import("../providers");
-  let source = "unipile";
+  // Discovery is INDEXED-FIRST (owner ask 2026-08-19): Google's index of
+  // linkedin.com/posts via Serper, then DataForSEO, so the connected seat
+  // never runs post searches against LinkedIn itself. The seat is still used
+  // where nothing else can do the job: profile reads on captured leads, and
+  // the DMs/comments that go out. ROLE_HUNTER_UNIPILE_SEARCH=1 restores the
+  // on-platform search as a LAST resort after both indexed engines come up
+  // dry (note before flipping it back on: the live seat's post search has
+  // returned zero items in every request shape since 2026-08-12).
+  let source = "serper";
   let candidates: MarketCandidate[] = [];
-  try {
-    candidates = candidatesFromUnipile(listOf(await unipile.searchPosts(providerIdOf(account)!, combo.unipileQ, MARKET_RESULTS_PER_SEARCH)));
-  } catch (e) {
-    console.log(`[comment-radar] unipile post search failed for "${keyword}" (${e instanceof Error ? e.message : e})`);
-  }
+  const r = await candidatesFromSerper(combo.serperQ);
+  candidates = r.items;
+  let engineError = r.error;
+  // Second engine: DataForSEO absorbs the volume when Serper is dry
+  // (out of credits, seen live 2026-08-13).
   if (!candidates.length) {
-    source = "serper";
-    const r = await candidatesFromSerper(combo.serperQ);
-    candidates = r.items;
-    let engineError = r.error;
-    // Second failover: DataForSEO absorbs the volume when Serper is dry
-    // (out of credits, seen live 2026-08-13).
-    if (!candidates.length) {
-      source = "dataforseo";
-      const d2 = await candidatesFromDataForSeo(combo.serperQ);
-      candidates = d2.items;
+    source = "dataforseo";
+    const d2 = await candidatesFromDataForSeo(combo.serperQ);
+    candidates = d2.items;
+    if (candidates.length) engineError = undefined;
+    else engineError = [engineError, d2.error].filter(Boolean).join(" | ") || undefined;
+  }
+  if (!candidates.length && process.env.ROLE_HUNTER_UNIPILE_SEARCH === "1") {
+    source = "unipile";
+    try {
+      const { unipile } = await import("../providers");
+      candidates = candidatesFromUnipile(listOf(await unipile.searchPosts(providerIdOf(account)!, combo.unipileQ, MARKET_RESULTS_PER_SEARCH)));
       if (candidates.length) engineError = undefined;
-      else engineError = [engineError, d2.error].filter(Boolean).join(" | ") || undefined;
+    } catch (e) {
+      console.log(`[comment-radar] unipile post search failed for "${keyword}" (${e instanceof Error ? e.message : e})`);
     }
-    // Break layer: engine failures surface on the card, not just in logs.
-    if (engineError && !candidates.length) {
-      state.lastError[workspaceId] = engineError;
-      save();
-      console.log(`[comment-radar] market "${keyword}": ${engineError}`);
-    } else if (state.lastError[workspaceId]) {
-      delete state.lastError[workspaceId];
-      save();
-    }
+  }
+  // Break layer: engine failures surface on the card, not just in logs.
+  if (engineError && !candidates.length) {
+    state.lastError[workspaceId] = engineError;
+    save();
+    console.log(`[comment-radar] market "${keyword}": ${engineError}`);
+  } else if (state.lastError[workspaceId]) {
+    delete state.lastError[workspaceId];
+    save();
   }
 
   let created = 0;
