@@ -1619,6 +1619,34 @@ export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
   return out;
 }
 
+/**
+ * Close the bounce loop: every address the NDR sweep has seen bounce becomes emailInvalid
+ * in the curation store, so a known-dead email can never be re-curated, re-written or
+ * re-sent (the 8/18 audit found hard-bounced addresses still stamped emailValidated:true).
+ * Runs on the hourly sending cron THROUGH the app - never as a snapshot edit from outside,
+ * which the running store would clobber (the 8/12 hydration trap). Idempotent: rows already
+ * invalid are skipped, so the cumulative bounced[] ledger costs one Set lookup per row.
+ */
+export async function invalidateBouncedEmails(addresses: string[], nowIso: string): Promise<{ flagged: number }> {
+  const dead = new Set(addresses.map((a) => String(a).toLowerCase().trim()).filter(Boolean));
+  if (!dead.size) return { flagged: 0 };
+  return withCurationLock(async () => {
+    const rows = await load();
+    let flagged = 0;
+    for (const r of rows) {
+      const em = (r.likelyEmail ?? "").toLowerCase();
+      if (em && dead.has(em) && r.emailInvalid !== true) {
+        r.emailInvalid = true;
+        r.emailValidated = false;
+        r.bouncedAt = r.bouncedAt ?? nowIso;
+        flagged++;
+      }
+    }
+    if (flagged) await save(rows);
+    return { flagged };
+  });
+}
+
 /** Tie a sending-engine delivery/engagement event back to its curated prospect by email. */
 export async function recordSendEvent(email: string, event: "sent" | "open" | "reply" | "bounce", nowIso: string): Promise<boolean> {
   const e = email.toLowerCase().trim();

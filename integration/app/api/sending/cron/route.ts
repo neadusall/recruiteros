@@ -104,6 +104,25 @@ async function run(req: Request) {
     variants = await refreshVariantBank();
   } catch (e: any) { variants = { error: e?.message ?? "variant_refresh_failed" }; }
 
+  // Bounce feedback loop: every address the fleet NDR sweep has recorded as bounced
+  // (snap_mpc_ndr_v1, cumulative) is marked emailInvalid in the curation store, so a
+  // known-dead email can never be re-curated or re-sent. This was a stopped-container
+  // manual repair (tools/invalidate-bounced.mjs, 8/18); hourly + through the app it
+  // needs no downtime and survives the hydration trap.
+  let bounceFeedback: unknown = null;
+  try {
+    const { loadSnapshot } = await import("../../../../lib/db");
+    const ndr = await loadSnapshot<{ bounced?: string[] }>("mpc_ndr_v1");
+    const addrs = ndr?.bounced ?? [];
+    if (addrs.length) {
+      const { invalidateBouncedEmails } = await import("../../../../lib/inmarket/curation");
+      const r = await invalidateBouncedEmails(addrs, new Date().toISOString());
+      bounceFeedback = { bounced: addrs.length, newlyInvalidated: r.flagged };
+    } else {
+      bounceFeedback = { bounced: 0, newlyInvalidated: 0 };
+    }
+  } catch (e: any) { bounceFeedback = { error: e?.message ?? "bounce_feedback_failed" }; }
+
   // Reply + bounce sync over the pool's own inboxes (IMAP). The hourly server
   // timer drives this in prod even when the in-process scheduler is off, so
   // replies to pool/MTA cold sends always stop sequences and reach a human.
@@ -122,7 +141,7 @@ async function run(req: Request) {
     jobBlasts = await runJobBlastTickAll();
   } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, variants, replies, jobBlasts });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, variants, bounceFeedback, replies, jobBlasts });
 }
 
 export const GET = run;
