@@ -555,8 +555,12 @@ interface WatchState {
   redraftEpoch: Record<string, number>;
 }
 
-/** Bumped 2026-08-19: drafts must close with a call to action (owner ask). */
-const COMMENT_COPY_EPOCH = 1;
+/** Bumped 2026-08-19: drafts must close with a call to action (owner ask).
+ *  Epoch 2 same day: the epoch-1 rewrite hard-sliced two overlong drafts
+ *  mid-word ("Happy to compare not") and let one closing formula repeat
+ *  across the queue; rewrite once more with the sentence-safe fit and the
+ *  variety brief in place. */
+const COMMENT_COPY_EPOCH = 2;
 
 const KEY = "linkedin_comment_watch_v1";
 let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {} };
@@ -988,6 +992,33 @@ function priorComments(workspaceId: string): string[] {
     .filter((i) => i.workspaceId === workspaceId && i.commentStatus === "suggested" && i.commentDraft)
     .map((i) => i.commentDraft as string);
   return sent.concat(queued);
+}
+
+/** Prompt-side variety steering. The dup guard rejects near-duplicates after
+ *  the fact, but it cannot stop every draft closing on the same invitation
+ *  ("Happy to compare notes...", seen 5 of 6 in the epoch-1 rewrite), because
+ *  the observation carries the word-set while the closing formula repeats
+ *  freely. Showing the model the most recent comments and telling it to shape
+ *  its own differently kills the formula at the source. */
+function varietyBrief(workspaceId: string, excluding?: string): string {
+  const recent = priorComments(workspaceId).filter((t) => t !== excluding).slice(-4);
+  if (!recent.length) return "";
+  return `\n\nRECENT COMMENTS THIS ACCOUNT ALREADY LEFT (yours must open differently, be shaped differently, and close on a DIFFERENT invitation wording than every one of these):\n${recent.map((t) => `- ${t}`).join("\n")}`;
+}
+
+/** Fit a draft inside MAX_COMMENT_CHARS without ever cutting mid-word. The
+ *  hard slice shipped "Happy to compare not" into the approval queue
+ *  (2026-08-19); a chopped public comment reads as machine output, which is
+ *  the one impression this lane must never give. Overlong drafts fall back to
+ *  the last complete sentence that fits; when no full sentence fits, null,
+ *  and the caller drops the draft rather than posting a fragment. */
+function fitComment(text: string): string | null {
+  if (text.length <= MAX_COMMENT_CHARS) return text;
+  const head = text.slice(0, MAX_COMMENT_CHARS);
+  const cut = Math.max(head.lastIndexOf(". "), head.lastIndexOf("? "), head.lastIndexOf("! "),
+    head.lastIndexOf(".\n"), head.lastIndexOf("?\n"), head.lastIndexOf("!\n"));
+  if (cut < 60) return null;
+  return head.slice(0, cut + 1).trim();
 }
 
 /** Content words only: the shape of the sentence, not its filler. */
@@ -2104,9 +2135,10 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
         ? `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`
         : `The role they are hiring for is ${jobTitle}${city ? ` in ${city}` : ""}.`;
       const drafted = await draft(POST_COMMENT_RULES,
-        `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.`);
+        `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId)}`);
       if (!drafted) { g.commentDraft++; continue; }
-      const candidate = scrub(drafted).slice(0, MAX_COMMENT_CHARS);
+      const candidate = fitComment(scrub(drafted));
+      if (!candidate) { g.commentDraft++; continue; }
       const leak = pitchLeakReason(candidate, c.text);
       if (leak) { g.commentLeak++; console.log(`[comment-radar] draft dropped, ${leak}: ${candidate}`); continue; }
       // Compared against what was already posted AND what is still sitting in
@@ -2445,10 +2477,15 @@ export async function redraftOpenComments(workspaceId: string): Promise<{ redraf
       ? `The role they are hiring for is ${role}${city ? ` in ${city}` : ""}.`
       : `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`;
     const drafted = await draft(POST_COMMENT_RULES,
-      `THEIR POST (by ${author}):\n${(item.postExcerpt ?? "").slice(0, 900)}\n\n${brief} Write the comment.`);
+      `THEIR POST (by ${author}):\n${(item.postExcerpt ?? "").slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId, item.commentDraft)}`);
     if (!drafted) { kept++; continue; }
-    const candidate = scrub(drafted).slice(0, MAX_COMMENT_CHARS);
-    if (pitchLeakReason(candidate, item.postExcerpt ?? "") || tooSimilar(candidate, priorComments(workspaceId))) { kept++; continue; }
+    const candidate = fitComment(scrub(drafted));
+    // The dup check excludes the item's OWN current draft: a rewrite of the
+    // same post legitimately shares most of its content words with the text
+    // it is replacing, and comparing against it would freeze every draft in
+    // whatever state (including a truncated one) it already has.
+    const priors = priorComments(workspaceId).filter((t) => t !== item.commentDraft);
+    if (!candidate || pitchLeakReason(candidate, item.postExcerpt ?? "") || tooSimilar(candidate, priors)) { kept++; continue; }
     item.commentDraft = candidate;
     item.updatedAt = nowIso();
     redrafted++;
