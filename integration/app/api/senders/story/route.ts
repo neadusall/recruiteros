@@ -18,6 +18,7 @@
 
 import { requireSession, ok } from "../../../../lib/api";
 import { loadSnapshot } from "../../../../lib/db";
+import { listInboxes } from "../../../../lib/senders";
 
 interface MpcStats {
   workspaceId?: string; generatedAt?: string;
@@ -88,7 +89,6 @@ export async function GET(req: Request) {
     (growth && growth.workspaceId === g.ctx.workspace.id && growth.growthGap) || {};
   const ramp = rampCap(placement);
   const sentToday = Math.max(stats.sentToday || 0, deliv?.overall?.sentToday || 0, gap.sentToday || 0);
-  const remaining = Math.max(0, ramp.cap - sentToday);
   const supplyReady = Math.max(stats.supplyReady || 0, gap.untouchedClean || 0);
 
   // Domain bench: who is resting right now, and when the next one comes back.
@@ -98,6 +98,28 @@ export async function GET(req: Request) {
     .sort((a, b) => String(a.until || "").localeCompare(String(b.until || "")));
   const nextRevival = resting.find((r) => r.until)?.until || null;
 
+  // The REAL ceiling, not just the ramp's. The ramp says what reputation allows;
+  // the fleet says what the benched-vs-usable mailbox split allows (batch.mjs
+  // sends only from boxes whose domain is not resting, at most perBox each).
+  // A bench that idles most of the fleet must show up in "cap today", or the
+  // card reads 534 while the machine can physically send 100.
+  const perBox = Math.max(1, Number(process.env.MPC_PER_BOX_DAILY || 2));
+  let fleetBoxes = 0, usableBoxes = 0, benchedBoxes = 0;
+  try {
+    const restingSet = new Set(resting.map((r) => r.domain.toLowerCase()));
+    for (const b of await listInboxes(g.ctx.workspace.id)) {
+      if (b.provider !== "sending-ac") continue; // cold lane is Sending.ac only (own-SMTP parked until warmed)
+      if (b.status === "paused" || b.status === "error") continue;
+      fleetBoxes++;
+      if (restingSet.has((b.email.split("@")[1] || "").toLowerCase())) benchedBoxes++;
+      else usableBoxes++;
+    }
+  } catch { /* fleet math is best-effort; the ramp cap still renders */ }
+  const fleetCeiling = usableBoxes * perBox;
+  const capToday = fleetBoxes > 0 ? Math.min(ramp.cap, fleetCeiling) : ramp.cap;
+  const remaining = Math.max(0, capToday - sentToday);
+  const fleetLimited = fleetBoxes > 0 && fleetCeiling < ramp.cap;
+
   const pl = placementStatus(placement);
 
   // Supply engine: the curation tick that validates and enriches prospects. If it has
@@ -106,25 +128,36 @@ export async function GET(req: Request) {
   const engineOk = engine?.lastCurationOk === true && Number.isFinite(lastRun) && Date.now() - lastRun <= 3 * 3_600_000;
 
   // The verdict: what is actually limiting volume today, in priority order.
-  let verdict: "engine" | "placement" | "supply" | "capacity" | "healthy";
+  let verdict: "engine" | "placement" | "fleet" | "supply" | "capacity" | "healthy";
   if (!engineOk) verdict = "engine";
   else if (pl.status === "fail") verdict = "placement";
+  else if (fleetLimited && fleetCeiling < ramp.cap / 2) verdict = "fleet";
   else if (supplyReady < remaining / 2) verdict = "supply";
-  else if (supplyReady > remaining && remaining < ramp.cap / 4) verdict = "capacity";
+  else if (supplyReady > remaining && remaining < capToday / 4) verdict = "capacity";
   else verdict = "healthy";
 
   const headline =
     verdict === "engine" ? "Supply engine needs attention" :
     verdict === "placement" ? "Gmail placement is failing, volume held down" :
+    verdict === "fleet" ? "Most mailboxes are resting; real capacity is reduced today" :
     verdict === "supply" ? "Senders are ready; clean prospect supply is the limiter" :
     verdict === "capacity" ? "Supply is full; mailbox capacity is the limiter" :
     "Sending is healthy and balanced";
 
   const narrative: string[] = [];
   narrative.push(
-    `The fleet can send up to ${ramp.cap.toLocaleString()} cold emails today (reputation ramp: ${ramp.base}/day base, growing toward ${ramp.ceiling.toLocaleString()}). ` +
-    `${sentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
+    fleetLimited
+      ? `Reputation allows ${ramp.cap.toLocaleString()} cold emails today (ramp: ${ramp.base}/day base, growing toward ${ramp.ceiling.toLocaleString()}), but ${benchedBoxes.toLocaleString()} of the fleet's ${fleetBoxes.toLocaleString()} mailboxes sit on resting domains, so the real ceiling right now is ${capToday.toLocaleString()} (${usableBoxes.toLocaleString()} usable boxes at ${perBox}/day each). ` +
+        `${sentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
+      : `The fleet can send up to ${capToday.toLocaleString()} cold emails today (reputation ramp: ${ramp.base}/day base, growing toward ${ramp.ceiling.toLocaleString()}). ` +
+        `${sentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
   );
+  if (verdict === "fleet") {
+    narrative.push(
+      `The resting domains hold most of the sending mailboxes, so today's volume is limited by the bench, not by supply or reputation. ` +
+      `The bench protects sender reputation after bounce trouble; domains rejoin automatically on their rest schedule${nextRevival ? ` (next revival ${nextRevival.slice(0, 10)})` : ""}.`
+    );
+  }
   if (verdict === "supply") {
     narrative.push(
       `Only ${supplyReady.toLocaleString()} clean, validated prospects are ready to email, so supply is what limits volume today, not your mailboxes. ` +
@@ -144,7 +177,9 @@ export async function GET(req: Request) {
   if (resting.length) {
     narrative.push(
       `${resting.length} sending domain${resting.length === 1 ? " is" : "s are"} resting after bounce trouble and will rejoin automatically` +
-      (nextRevival ? ` (next revival ${nextRevival.slice(0, 10)})` : "") + ". Healthy domains carry the volume meanwhile."
+      (nextRevival ? ` (next revival ${nextRevival.slice(0, 10)})` : "") +
+      // "Healthy domains carry the volume" is only true when they actually can.
+      (fleetLimited ? "." : ". Healthy domains carry the volume meanwhile.")
     );
   }
   if (pl.status === "pass") narrative.push(`Latest Gmail seed test: ${pl.inbox} of ${pl.inbox + pl.spam} landed in the inbox, ${pl.spam ? `${pl.spam} in spam` : "none in spam"}. Growth above the base rate is unlocked.`);
@@ -155,7 +190,10 @@ export async function GET(req: Request) {
     present: true,
     generatedAt: stats.generatedAt || null,
     verdict, headline, narrative: narrative.filter(Boolean),
-    capacity: { capToday: ramp.cap, base: ramp.base, ceiling: ramp.ceiling, growthUnlocked: ramp.growthUnlocked, sentToday, remaining },
+    capacity: {
+      capToday, rampCap: ramp.cap, base: ramp.base, ceiling: ramp.ceiling, growthUnlocked: ramp.growthUnlocked,
+      sentToday, remaining, fleetBoxes, usableBoxes, benchedBoxes, perBox,
+    },
     supply: { ready: supplyReady, message: gap.message || null, engineOk, engineLastRunAt: engine?.lastCurationAt || null },
     fleet: {
       domainsSending: deliv?.overall?.domainsSending || 0,

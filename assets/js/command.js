@@ -610,7 +610,7 @@
   function refreshSendingNotice() {
     api("/senders/story").then(function (d) {
       var bar = document.getElementById("sendNoticeBar");
-      var alerting = d && d.present && (d.verdict === "engine" || d.verdict === "placement");
+      var alerting = d && d.present && (d.verdict === "engine" || d.verdict === "placement" || d.verdict === "fleet");
       if (!alerting) { if (bar) bar.remove(); return; }
       if (!bar) {
         var view = document.getElementById("view");
@@ -9561,6 +9561,7 @@
         healthy: ["All clear", "#1a7f37"],
         supply: ["Supply-limited", "#b26a00"],
         capacity: ["Ramp-limited", "#2e5bd7"],
+        fleet: ["Fleet resting", "#b26a00"],
         placement: ["Placement hold", "#b42318"],
         engine: ["Engine stalled", "#b42318"],
       };
