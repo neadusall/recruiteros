@@ -310,7 +310,12 @@ export function queryCalls(
         if (!(c.status === "missed" || c.status === "declined")) return false;
       } else if (q.direction && c.direction !== q.direction) return false;
       if (q.status && c.status !== q.status) return false;
-      if (q.userId && c.userId !== q.userId) return false;
+      if (q.userId && c.userId !== q.userId) {
+        // Unanswered inbound calls carry no user; they still belong to the
+        // recruiter(s) whose line the caller dialed.
+        const line = !c.userId && c.lineId ? getLine(workspaceId, c.lineId) : undefined;
+        if (!line?.assignedUserIds.includes(q.userId)) return false;
+      }
       if (q.lineId && c.lineId !== q.lineId) return false;
       if (q.opportunity) {
         const opp = c.analysisOverrides?.opportunity?.value ?? asBdAnalysis(c.analysis)?.opportunity;

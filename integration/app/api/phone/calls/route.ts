@@ -9,8 +9,9 @@
  */
 
 import { requireCapability, ok } from "../../../../lib/api";
-import { queryCalls, ensurePhoneReady } from "../../../../lib/phone/store";
+import { queryCalls, getLine, ensurePhoneReady } from "../../../../lib/phone/store";
 import { sweepPipelines } from "../../../../lib/phone/calls";
+import { listMembers } from "../../../../lib/auth/team";
 import type { Motion } from "../../../../lib/core/types";
 import type { CallQuery } from "../../../../lib/phone/types";
 
@@ -35,5 +36,27 @@ export async function GET(req: Request) {
     limit: p("limit") ? Number(p("limit")) : undefined,
     offset: p("offset") ? Number(p("offset")) : undefined,
   };
-  return ok(queryCalls(g.ctx.workspace.id, motion, q));
+  const ws = g.ctx.workspace.id;
+  const r = queryCalls(ws, motion, q);
+
+  // Unanswered inbound calls have no user on the record, but the caller was
+  // still calling somebody: the recruiter(s) assigned to the line they dialed.
+  // Decorate those rows so history can show who the call was for.
+  let names: Map<string, string> | null = null;
+  const calls = r.calls.map((c) => {
+    if (c.userName || !c.lineId) return c;
+    const line = getLine(ws, c.lineId);
+    if (!line?.assignedUserIds.length) return c;
+    if (!names) {
+      names = new Map();
+      try {
+        for (const m of listMembers(ws)) names.set(m.userId, m.name || m.email);
+      } catch { /* roster unavailable: rows just stay undecorated */ }
+    }
+    const lineUserNames = line.assignedUserIds
+      .map((id) => names!.get(id))
+      .filter((n): n is string => Boolean(n));
+    return lineUserNames.length ? { ...c, lineUserNames } : c;
+  });
+  return ok({ calls, total: r.total });
 }

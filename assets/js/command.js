@@ -26870,6 +26870,14 @@
         var host = $("#bdpHistRows"); if (host) host.innerHTML = needsSetup();
       });
     }
+    // Our side of the call: the recruiter who placed or took it, or, when an
+    // inbound call went unanswered, the recruiter(s) whose line was dialed.
+    function bdpWhoCell(c) {
+      if (c.userName) return esc(c.userName);
+      var names = c.lineUserNames || [];
+      if (!names.length) return "";
+      return '<span style="color:var(--text-dim)">for</span> ' + esc(names.join(", "));
+    }
     function bdpHistRow(c) {
       var opp = bdpEff(c, "opportunity").value;
       var missed = c.status === "missed" || c.status === "declined";
@@ -26887,7 +26895,7 @@
           esc(c.contactName || "Unknown contact") + "</div>" +
           '<div style="font:400 11.5px var(--font);color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
           esc([bdpFmtNum(c.externalNumber), c.companyName].filter(Boolean).join(" · ")) + "</div></div>" +
-        '<div style="flex:1;font:400 12px var(--font);color:var(--text-muted);white-space:nowrap">' + esc(c.userName || "") + "</div>" +
+        '<div style="flex:1;font:400 12px var(--font);color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + bdpWhoCell(c) + "</div>" +
         '<div style="flex:none;width:130px;font:400 12px var(--font);color:var(--text-muted)">' + bdpFmtWhen(c.startedAt) + "</div>" +
         '<div style="flex:none;width:92px;font:500 12px var(--mono);color:' + (missed || c.status === "failed" ? "var(--danger)" : "var(--text-muted)") + ';text-align:right;white-space:nowrap">' + esc(statusTxt) + "</div>" +
         '<div style="flex:none;width:96px;text-align:right">' + (bdpOppPill(opp) || bdpPipeBadge(c) || "") + "</div>" +
