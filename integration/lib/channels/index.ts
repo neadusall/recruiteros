@@ -326,26 +326,31 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
     if (!recruiterId) return null;
     const { pickSender, getInbox, sendViaInbox, recordSend, coldCapFor } = await import("../senders");
     const { senderAllowedForBrand } = await import("../senders/brandGuard");
+    const { inboxAllowedForRecipient } = await import("../senders/recipientGuard");
     let inbox: any = null;
     // Sticky: keep a prospect on its already-chosen inbox across the sequence while
     // it still has capacity; otherwise rotate to the freshest inbox in the pool.
     if (t.prospect.senderInboxId) {
       const cur = await getInbox(workspaceId, t.prospect.senderInboxId);
       if (cur && cur.ownerId === recruiterId && cur.status !== "paused" && cur.status !== "error" && cur.sentToday < coldCapFor(cur)
-        && (await senderAllowedForBrand(brand, cur.email))) inbox = cur;
+        && (await senderAllowedForBrand(brand, cur.email))
+        && (await inboxAllowedForRecipient(cur, t.prospect.email))) inbox = cur;
     }
-    // Rotation honors the white-label domain guard: a misfiled inbox (wrong brand's
-    // domain in this pool) is skipped, never sent from. Bounded by the pool size.
+    // Rotation honors the white-label domain guard (a misfiled inbox, wrong brand's
+    // domain in this pool, is skipped) and the recipient guard (an internal-fleet
+    // inbox never draws a Google-hosted recipient while Gmail rejects that server's
+    // IP; the send reroutes to a fleet Gmail accepts). Bounded by the pool size.
     if (!inbox) {
       const excludeIds: string[] = [];
       for (let i = 0; i < 50; i++) {
         const cand = await pickSender(workspaceId, { recruiterId, excludeIds });
         if (!cand) break;
-        if (await senderAllowedForBrand(brand, cand.email)) { inbox = cand; break; }
+        if ((await senderAllowedForBrand(brand, cand.email))
+          && (await inboxAllowedForRecipient(cand, t.prospect.email))) { inbox = cand; break; }
         excludeIds.push(cand.id);
       }
     }
-    if (!inbox) return null; // pool empty / all capped / none brand-compliant
+    if (!inbox) return null; // pool empty / all capped / none brand- or recipient-compliant
     // From-domain / link-domain alignment: when OUTREACH_MEDIA_HOST_PATTERN is set (e.g.
     // "vid.{domain}"), video links ride the sending inbox's own domain instead of the shared
     // app origin (lib/sending/mediaHost). No-op until the DNS + proxy for those hosts exist.
