@@ -89,11 +89,11 @@ function bouncedStopList() {
 // Pools are interleaved by owner so volume splits evenly.
 const OWNER_PATTERN = /ryan|josh|noah|sam|ariel/i;
 const SMTP_LANE = process.env.MPC_SMTP_LANE === "1";
-// Google lane (owner order 2026-08-19): warm-ready Zapmail Gmail boxes the operator has set
-// ACTIVE join cold rotation at the same flat per-box cap as Sending.ac. Only boxes that are
-// active + hold working smtp.gmail.com credentials qualify, so warming boxes stay out until
-// they graduate. MPC_GOOGLE_LANE=0 parks the lane.
-const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE !== "0";
+// Google lane: warm-ready Zapmail Gmail boxes (active + working smtp.gmail.com credentials)
+// can join cold rotation at the same flat per-box cap as Sending.ac. OWNER HOLD 2026-08-19:
+// the lane is PARKED until the owner flips MPC_GOOGLE_LANE=1 (built same day, held before
+// any send left a Gmail box; the boxes stay active app-side and keep warming).
+const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE === "1";
 function recruiterBoxes() {
   const s = JSON.parse(readFileSync(SENDERS, "utf8"));
   const rows = s.inboxes || (s.state && s.state.inboxes) || [];
