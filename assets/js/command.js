@@ -9643,8 +9643,37 @@
           (restRows
             ? '<details class="snd-story-det"><summary>Resting domains (' + fl.resting.length + '): benched after bounces, auto-revive on schedule</summary>' + restRows + '</details>'
             : '') +
+          sndBounceReasons(fl) +
         '</div>';
     });
+  }
+
+  /** WHY mail bounced, from the NDR sweep's classification of the receivers' own
+   *  notices. A bounce count says "trouble"; this says what kind, so the fix is
+   *  obvious: dead addresses are a data problem, spam verdicts a content/reputation
+   *  problem, blocklists an infrastructure problem. */
+  function sndBounceReasons(fl) {
+    var reasons = fl.bounceReasons; if (!reasons) return "";
+    var LABELS = {
+      dead_address: "address does not exist (bad contact data; suppressed from future sends)",
+      spam_verdict: "the receiver's filter called it spam (content or reputation)",
+      blocklist: "sending IP or domain on a blocklist (infrastructure; needs delisting)",
+      auth_fail: "authentication failed (SPF/DKIM/DMARC; check DNS)",
+      gateway_hold: "held or rejected by a security gateway (Proofpoint/Mimecast tier)",
+      mailbox_full: "recipient mailbox full",
+      send_limit: "provider send-rate limit",
+      other: "receiver-side or technical failure (no stated reason)",
+    };
+    var keys = Object.keys(reasons).sort(function (a, b) { return reasons[b] - reasons[a]; });
+    var total = keys.reduce(function (t, k) { return t + reasons[k]; }, 0);
+    if (!total) return "";
+    var rows = keys.map(function (k) {
+      var ex = ((fl.bounceExamples || {})[k] || []).slice(0, 2).map(function (e) {
+        return '<div class="muted" style="font-size:11.5px;margin:2px 0 2px 14px">' + (e.rcpt ? '<b>' + esc(e.rcpt) + '</b>: ' : '') + esc(String(e.text || "").slice(0, 180)) + '</div>';
+      }).join("");
+      return '<div style="margin:6px 0"><b>' + reasons[k] + '</b> · ' + esc(LABELS[k] || k) + ex + '</div>';
+    }).join("");
+    return '<details class="snd-story-det"><summary>Why mail bounced (' + total + ' in the last sweep' + (fl.bounceSweepAt ? ', ' + esc(String(fl.bounceSweepAt).slice(0, 10)) : '') + '): the receivers’ own words</summary>' + rows + '</details>';
   }
 
   function loadSenders() {

@@ -35,6 +35,11 @@ interface DeliverabilitySnap {
   byDomain?: { domain?: string; verdict?: string }[];
 }
 interface RestSnap { updatedAt?: string; domains?: Record<string, { state?: string; reason?: string; until?: string }> }
+interface NdrSnap {
+  generatedAt?: string;
+  byReason?: Record<string, number>;
+  reasonExamples?: Record<string, Array<{ box?: string; rcpt?: string | null; text?: string; at?: string }>>;
+}
 interface PlacementSnap { checkedAt?: string; gmail?: { inbox?: number; spam?: number } }
 interface EngineHealth { lastCurationAt?: string; lastCurationOk?: boolean }
 
@@ -77,12 +82,13 @@ export async function GET(req: Request) {
   const stats = await loadSnapshot<MpcStats>("mpc_stats_v1");
   if (!stats || stats.workspaceId !== g.ctx.workspace.id) return ok({ present: false });
 
-  const [growth, deliv, rest, placement, engine] = await Promise.all([
+  const [growth, deliv, rest, placement, engine, ndr] = await Promise.all([
     loadSnapshot<GrowthSnap>("growth_proposals_v1"),
     loadSnapshot<DeliverabilitySnap>("mpc_deliverability_v1"),
     loadSnapshot<RestSnap>("mpc_domain_rest_v1"),
     loadSnapshot<PlacementSnap>("mpc_placement_v1"),
     loadSnapshot<EngineHealth>("inmarket_engine_health_v1"),
+    loadSnapshot<NdrSnap>("mpc_ndr_v1"),
   ]);
 
   const gap: NonNullable<GrowthSnap["growthGap"]> =
@@ -200,6 +206,11 @@ export async function GET(req: Request) {
       warmupReputationPct: deliv?.overall?.warmupReputationPct ?? null,
       bounces: deliv?.overall?.bounces || 0,
       resting, nextRevival,
+      // WHY mail bounced, in the receiving server's own words (classified by the
+      // NDR sweep). The count alone says "trouble"; the reason says what to fix.
+      bounceReasons: ndr?.byReason || null,
+      bounceExamples: ndr?.reasonExamples || null,
+      bounceSweepAt: ndr?.generatedAt || null,
     },
     placement: pl,
     outcomes: { sentTotal: stats.sentTotal || 0, replies: stats.repliesTotal || 0 },
