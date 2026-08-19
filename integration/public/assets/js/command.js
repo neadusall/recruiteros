@@ -1443,6 +1443,7 @@
 
         // Today's send capacity, spelled out from Email IDs x domains.
         body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> available today" + (cap.matureCapacity && cap.matureCapacity > cap.coldCapacity ? ' <span style="color:var(--text-dim)">(' + n(cap.matureCapacity) + "/day at full ramp, as warming mailboxes mature)</span>" : "") + " across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
+          (cap.benchedInboxes ? ', with <b style="color:#b26a00">' + n(cap.benchedInboxes) + ' Email IDs benched</b> on ' + n(cap.restingDomains || 0) + " resting domains (they rejoin automatically as the bounce bench lifts)" : "") +
           (cap.warmingPerDay ? ', plus about ' + n(cap.warmingPerDay) + " external warm-up sends/day that build reputation (not outreach)." : ".") + "</div>";
         var provRows = (cap.byProvider || []).map(function (p) {
           var nm = provName[p.provider] || p.provider;
@@ -9429,8 +9430,14 @@
           var cap = s.capacityPerDay
             ? '<b>≈' + Number(s.capacityPerDay).toLocaleString() + '</b><span class="muted" style="font-size:11px">/day</span>' + (s.capacityBasis ? '<div class="muted" style="font-size:11px" title="' + esc(s.capacityBasis) + '">' + esc(s.capacityBasis) + '</div>' : '')
             : '<span class="muted">n/a</span>';
+          // Sending.ac boxes are warmed by Sending.ac itself and send at their flat
+          // cap regardless of the stored warming/active flag; "0 active, 900 warming"
+          // read as a block when nothing was blocked. Say what the flag really means.
+          var warmingLabel = s.provider === "sending-ac"
+            ? s.warming + " externally warmed, sending"
+            : s.warming + " warming";
           var inb = s.inboxes
-            ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + s.warming + ' warming' + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
+            ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + warmingLabel + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
             : '<span class="muted">none imported yet</span>';
           var auth = s.error
             ? '<span style="color:#b3261e">' + s.error + ' failing</span>' + (s.staleAuth ? ' <span class="muted">· ' + s.staleAuth + ' due a re-check</span>' : '')
@@ -9636,8 +9643,37 @@
           (restRows
             ? '<details class="snd-story-det"><summary>Resting domains (' + fl.resting.length + '): benched after bounces, auto-revive on schedule</summary>' + restRows + '</details>'
             : '') +
+          sndBounceReasons(fl) +
         '</div>';
     });
+  }
+
+  /** WHY mail bounced, from the NDR sweep's classification of the receivers' own
+   *  notices. A bounce count says "trouble"; this says what kind, so the fix is
+   *  obvious: dead addresses are a data problem, spam verdicts a content/reputation
+   *  problem, blocklists an infrastructure problem. */
+  function sndBounceReasons(fl) {
+    var reasons = fl.bounceReasons; if (!reasons) return "";
+    var LABELS = {
+      dead_address: "address does not exist (bad contact data; suppressed from future sends)",
+      spam_verdict: "the receiver's filter called it spam (content or reputation)",
+      blocklist: "sending IP or domain on a blocklist (infrastructure; needs delisting)",
+      auth_fail: "authentication failed (SPF/DKIM/DMARC; check DNS)",
+      gateway_hold: "held or rejected by a security gateway (Proofpoint/Mimecast tier)",
+      mailbox_full: "recipient mailbox full",
+      send_limit: "provider send-rate limit",
+      other: "receiver-side or technical failure (no stated reason)",
+    };
+    var keys = Object.keys(reasons).sort(function (a, b) { return reasons[b] - reasons[a]; });
+    var total = keys.reduce(function (t, k) { return t + reasons[k]; }, 0);
+    if (!total) return "";
+    var rows = keys.map(function (k) {
+      var ex = ((fl.bounceExamples || {})[k] || []).slice(0, 2).map(function (e) {
+        return '<div class="muted" style="font-size:11.5px;margin:2px 0 2px 14px">' + (e.rcpt ? '<b>' + esc(e.rcpt) + '</b>: ' : '') + esc(String(e.text || "").slice(0, 180)) + '</div>';
+      }).join("");
+      return '<div style="margin:6px 0"><b>' + reasons[k] + '</b> · ' + esc(LABELS[k] || k) + ex + '</div>';
+    }).join("");
+    return '<details class="snd-story-det"><summary>Why mail bounced (' + total + ' in the last sweep' + (fl.bounceSweepAt ? ', ' + esc(String(fl.bounceSweepAt).slice(0, 10)) : '') + '): the receivers’ own words</summary>' + rows + '</details>';
   }
 
   function loadSenders() {
@@ -9664,7 +9700,9 @@
   function renderSenderStats() {
     var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
     function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
-    box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
+    box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") +
+      (s.benched ? c(s.benched, "Benched (resting domains)") : "") +
+      c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
     renderSenderProviders();
   }
 
@@ -9684,8 +9722,11 @@
         // Show today's warm-up-throttled figure, plus the full-ramp ceiling when the
         // provider ramps and isn't there yet, so the capacity never reads misleadingly low.
         var ramps = p.matureCapacity > p.coldCapacity;
+        // Benched boxes sit on domains resting after bounce trouble: real inventory,
+        // zero capacity today. Shown, never blended into the sends/day number.
+        var benched = p.benchedInboxes ? ' · <span style="color:#b26a00">' + fmt(p.benchedInboxes) + ' benched on resting domains</span>' : '';
         return '<div class="snd-split-row">' + sndProviderBadge(p.provider) +
-          '<span class="snd-split-meta">' + p.inboxes + ' Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + fmt(p.coldCapacity) + '</b> cold sends/day' + (ramps ? ' <span class="muted">(ramps to <b>' + fmt(p.matureCapacity) + '</b>/day at full ramp)</span>' : '') + ' · ' + fmt(p.coldRemaining) + ' left today</span>' +
+          '<span class="snd-split-meta">' + p.inboxes + ' sendable Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + fmt(p.coldCapacity) + '</b> cold sends/day' + (ramps ? ' <span class="muted">(ramps to <b>' + fmt(p.matureCapacity) + '</b>/day at full ramp)</span>' : '') + ' · ' + fmt(p.coldRemaining) + ' left today' + benched + '</span>' +
           (notes[p.provider] ? '<span class="snd-split-note">' + esc(notes[p.provider]) + '</span>' : '') +
         '</div>';
       }).join("") + '</div>';
@@ -17883,13 +17924,16 @@
       '<b>5 · What happens on the call</b>: voicemail gets your personalized message; a live human hears an honest "This is ' + '{your name} with {your firm}, is this {first name}?" so you find the right person without tricks. Every outcome lands on the campaign card.' +
       '</div>' +
       '<div class="muted" style="margin-top:8px">' +
+      'No direct number for someone? The <b>Find people</b> tab calls the company’s published main line, navigates the phone menu and dial-by-name directory, and verifies it reached that person’s voicemail, learning each switchboard once and reusing the route.' +
+      '</div>' +
+      '<div class="muted" style="margin-top:8px">' +
       'Guardrails, always on: landline/VoIP only (every number line-checked), each lead dialed inside a lawful 8 AM-9 PM local envelope, honest identification required, daily + re-dial caps, and the builder shows live cost before you launch.' +
       '</div></div>' +
       '<div class="vd-tabs" style="display:flex;flex-wrap:wrap"></div>' +
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
-      var tabs = [["campaigns", "Campaigns"], ["recordings", "Recordings"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
+      var tabs = [["campaigns", "Campaigns"], ["recordings", "Recordings"], ["intel", "Find people"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vd-tab' + (vd.tab === t[0] ? " active" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -17903,6 +17947,7 @@
       var body = $("#vdBody"); if (!body) return;
       if (vd.tab === "campaigns") return paintCampaigns(body);
       if (vd.tab === "recordings") return paintRecordings(body);
+      if (vd.tab === "intel") return paintIntel(body);
       if (vd.tab === "scripts") return paintScripts(body);
       if (vd.tab === "voice") return paintVoice(body);
       return paintTest(body);
@@ -18027,6 +18072,205 @@
           (d.withinWindow ? ", in window" : ", outside window") + (d.identifies ? "" : " · add your name/firm") + "</span>";
         if (typeof renderEstimate === "function") renderEstimate();
       }).catch(function () { if (out) out.textContent = "Could not reach the server."; });
+    }
+
+    /* ---- Find people tab: Phone Intelligence (IVR navigation) ----
+       Calls a company's PUBLISHED main number, navigates the phone tree
+       (transcription + DTMF), searches the dial-by-name directory, and verifies
+       it reached the target person's voicemail by matching the greeting name.
+       Learns each company's route once (the routing graph) and reuses it for
+       every future prospect there. If a live person answers it politely exits,
+       and that caller number is never used for that contact again. */
+    var piTimer = null;
+    function piStop() { if (piTimer) { clearInterval(piTimer); piTimer = null; } }
+    function piDispChip(d) {
+      d = d || "";
+      var good = { TARGET_VERIFIED_VOICEMAIL: 1, DIRECTORY_MATCH: 1, IVR_ROUTE_DISCOVERED: 1, TARGET_PROBABLE_HUMAN: 1 };
+      var warn = { RECEPTIONIST: 1, GENERIC_VOICEMAIL: 1, GENERIC_HUMAN: 1, DIRECTORY_NO_MATCH: 1 };
+      var col = good[d] ? "var(--ok)" : warn[d] ? "var(--warn)" : "var(--text-dim)";
+      var label = d ? d.toLowerCase().replace(/_/g, " ") : "in progress";
+      return '<span style="font-size:11px;font-weight:600;color:' + col + ';border:1px solid ' + col + ';border-radius:4px;padding:1px 6px;white-space:nowrap">' + esc(label) + "</span>";
+    }
+    function piParseRows(text) {
+      var lines = String(text || "").split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+      if (!lines.length) return [];
+      var start = /company|phone|first|name/.test(lines[0].toLowerCase()) && /,/.test(lines[0]) ? 1 : 0;
+      var out = [];
+      for (var i = start; i < lines.length; i++) {
+        var c = lines[i].split(",").map(function (x) { return x.trim(); });
+        if (c.length < 4) continue;
+        out.push({
+          companyName: c[0], mainPhone: c[1], first: c[2], last: c[3],
+          full: (c[2] + " " + c[3]).trim(), title: c[4] || "", location: c[5] || "", domain: c[6] || "",
+        });
+      }
+      return out;
+    }
+    function paintIntel(body) {
+      piStop();
+      body.innerHTML = loading();
+      var isAdmin = can("telnyx:manage");
+      Promise.all([
+        api("/phone-intel/calls?limit=40").catch(function () { return null; }),
+        isAdmin ? api("/phone-intel/queue").catch(function () { return null; }) : Promise.resolve(null),
+        api("/phone-intel/companies").catch(function () { return null; }),
+        isAdmin ? api("/phone-intel/queue/start").catch(function () { return null; }) : Promise.resolve(null),
+      ]).then(function (res) {
+        if (!document.body.contains(body)) return;
+        var callsD = res[0] || {}, queueD = res[1] || {}, compD = res[2] || {}, runD = res[3] || {};
+        var dash = callsD.dashboard || {}, out = callsD.outreach || {};
+        var calls = callsD.calls || [], queue = queueD.queue || [], companies = compD.companies || [];
+        var run = runD.run || { running: false };
+        var queued = queue.filter(function (q) { return q.status === "queued"; });
+
+        function kpi(n, label) {
+          return '<div style="min-width:120px"><div style="font-size:22px;font-weight:650;line-height:1.1">' + n + '</div><div class="muted" style="font-size:11.5px;margin-top:2px">' + label + "</div></div>";
+        }
+
+        body.innerHTML =
+          '<div class="card"><h3>Find specific people behind company switchboards</h3>' +
+          '<p class="muted" style="font-size:13px;line-height:1.6;margin:6px 0 0">Give it a company’s published main number and who you’re after. It calls, listens to the phone menu, presses the right keys, searches the dial-by-name directory, and confirms it reached <b>that person’s</b> voicemail by matching the name in the greeting. Each company’s route is learned once and reused for every future prospect there. If a live person answers, it politely excuses itself and hangs up, and that caller number is never used for that contact again; the number that reached their voicemail becomes the preferred line for follow-ups. Calls only inside lawful local hours, max 4 calls per company per day.</p>' +
+          '<div style="display:flex;gap:26px;flex-wrap:wrap;margin-top:14px">' +
+          kpi(dash.companiesMapped || 0, "companies mapped") +
+          kpi(dash.verifiedRoutes || 0, "verified routes") +
+          kpi(dash.targetVoicemailsVerified || 0, "people verified") +
+          kpi(out.voicemails || 0, "voicemails reached") +
+          kpi(out.liveAnswers || 0, "live answers (numbers rotated)") +
+          kpi(dash.totalCalls || 0, "calls total") +
+          "</div></div>" +
+
+          (isAdmin
+            ? '<div class="card" style="margin-top:14px"><h3>Call queue</h3>' +
+              '<p class="muted" style="font-size:12.5px;margin:4px 0 8px">Paste one row per person: <b>company, main phone, first, last, title, city/state, domain</b> (title onward optional). Nothing dials until you press Start.</p>' +
+              '<textarea id="piRows" rows="4" style="width:100%" placeholder="Jaggaer, +19195551234, Hector, Alvarez, VP Sales, Raleigh NC, jaggaer.com"></textarea>' +
+              '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">' +
+              '<button class="btn btn-sm" id="piAdd">Add to queue</button>' +
+              '<span style="flex:1"></span>' +
+              '<span class="muted" style="font-size:12px">' + queued.length + " queued</span>" +
+              (run.running
+                ? '<button class="btn btn-sm" id="piStopBtn" style="box-shadow:inset 0 0 0 1px var(--warn)">Stop after current call</button>'
+                : '<button class="btn btn-sm btn-primary" id="piStart"' + (queued.length ? "" : " disabled") + ">Start calling</button>") +
+              (queued.length ? '<button class="btn btn-ghost btn-sm" id="piClear">Clear queued</button>' : "") +
+              "</div>" +
+              '<div class="muted" id="piRunLine" style="font-size:12px;margin-top:8px">' +
+              (run.running
+                ? "Running: " + (run.placed || 0) + " placed, " + (run.skipped || 0) + " skipped" + (run.currentItem ? " · now: " + esc(run.currentItem) : "")
+                : (run.finishedAt ? "Last run: " + (run.placed || 0) + " placed, " + (run.skipped || 0) + " skipped" + (run.lastError ? " · " + esc(run.lastError) : "") : "")) +
+              "</div>" +
+              (queue.length
+                ? '<div style="margin-top:10px;overflow-x:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse">' +
+                  "<tr class='muted' style='text-align:left'><th style='padding:4px 8px'>Person</th><th style='padding:4px 8px'>Company</th><th style='padding:4px 8px'>Main line</th><th style='padding:4px 8px'>Status</th><th></th></tr>" +
+                  queue.slice(0, 40).map(function (q) {
+                    return "<tr style='border-top:1px solid var(--border)'>" +
+                      "<td style='padding:5px 8px'><b>" + esc(q.full) + "</b>" + (q.title ? " <span class='muted'>" + esc(q.title) + "</span>" : "") + "</td>" +
+                      "<td style='padding:5px 8px'>" + esc(q.companyName) + "</td>" +
+                      "<td style='padding:5px 8px'>" + esc(q.mainPhone) + "</td>" +
+                      "<td style='padding:5px 8px'>" + esc(q.status) + (q.skipReason ? " <span class='muted'>(" + esc(q.skipReason) + ")</span>" : "") + "</td>" +
+                      "<td style='padding:5px 8px;text-align:right'>" + (q.status === "queued" ? '<button class="btn btn-ghost btn-sm" data-piq-del="' + esc(q.id) + '">remove</button>' : "") + "</td></tr>";
+                  }).join("") + "</table></div>"
+                : "") +
+              "</div>"
+            : '<div class="card" style="margin-top:14px"><p class="muted" style="font-size:13px">Queueing and starting calls needs an admin (Telnyx access). You can still watch results below.</p></div>') +
+
+          '<div class="card" style="margin-top:14px"><h3>Company routing graph</h3>' +
+          '<p class="muted" style="font-size:12.5px;margin:4px 0 8px">Every switchboard learned so far. High-confidence routes are replayed instantly for the next person you look for at that company.</p>' +
+          (companies.length
+            ? '<div style="overflow-x:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse">' +
+              "<tr class='muted' style='text-align:left'><th style='padding:4px 8px'>Company</th><th style='padding:4px 8px'>Main line</th><th style='padding:4px 8px'>System</th><th style='padding:4px 8px'>Directory</th><th style='padding:4px 8px'>Route</th></tr>" +
+              companies.slice(0, 50).map(function (c2) {
+                var conf = Math.round((c2.routeConfidence || 0) * 100);
+                return "<tr style='border-top:1px solid var(--border)'>" +
+                  "<td style='padding:5px 8px'><b>" + esc(c2.companyName) + "</b></td>" +
+                  "<td style='padding:5px 8px'>" + esc(c2.mainPhone || "") + "</td>" +
+                  "<td style='padding:5px 8px'>" + esc(c2.systemType || "unknown") + "</td>" +
+                  "<td style='padding:5px 8px'>" + (c2.directoryAvailable ? "dial-by-name" : "-") + "</td>" +
+                  "<td style='padding:5px 8px'>" + (c2.route ? ("v" + c2.route.version + " · " + conf + "% · used " + (c2.route.timesUsed || 0) + "x") : "not learned yet") + "</td></tr>";
+              }).join("") + "</table></div>"
+            : '<p class="muted" style="font-size:13px">No companies mapped yet. The first call to each company teaches its route.</p>') +
+          "</div>" +
+
+          '<div class="card" style="margin-top:14px"><h3>Recent calls</h3>' +
+          (calls.length
+            ? calls.slice(0, 25).map(function (c3) {
+                var who = "<b>" + esc(c3.targetFull) + "</b>" + (c3.targetTitle ? ' <span class="muted">' + esc(c3.targetTitle) + "</span>" : "");
+                var facts = [];
+                if (c3.detectedName) facts.push('heard "' + esc(c3.detectedName) + '"' + (c3.nameMatchScore ? " (" + Math.round(c3.nameMatchScore * 100) + "% match)" : ""));
+                if (c3.extension) facts.push("ext " + esc(c3.extension));
+                if (c3.durationSec) facts.push(c3.durationSec + "s");
+                return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap">' +
+                  '<div style="font-size:13px">' + who + ' <span class="muted">· ' + esc(c3.companyName) + "</span>" +
+                  (facts.length ? '<div class="muted" style="font-size:11.5px;margin-top:2px">' + facts.join(" · ") + "</div>" : "") + "</div>" +
+                  '<div style="display:flex;gap:8px;align-items:center">' + piDispChip(c3.disposition) +
+                  '<button class="btn btn-ghost btn-sm" data-pi-call="' + esc(c3.id) + '">Timeline</button></div></div>';
+              }).join("")
+            : '<p class="muted" style="font-size:13px">No calls yet. Queue a few people above and press Start.</p>') +
+          '<div id="piDetail"></div></div>';
+
+        var addB = $("#piAdd");
+        if (addB) addB.addEventListener("click", function () {
+          var rows = piParseRows(($("#piRows") || {}).value);
+          if (!rows.length) { toast("No rows parsed. Format: company, main phone, first, last"); return; }
+          send("/phone-intel/queue", "POST", { items: rows }).then(function (r) {
+            if (!r.ok) { toast("Add failed"); return; }
+            toast("Queued " + ((r.data && r.data.added) || 0) + ((r.data && r.data.rejected && r.data.rejected.length) ? " · rejected " + r.data.rejected.length : ""));
+            paintIntel(body);
+          });
+        });
+        var startB = $("#piStart");
+        if (startB) startB.addEventListener("click", function () {
+          if (!confirm("Start calling the queued companies now? Calls only place inside each contact's lawful local calling hours; out-of-hours contacts are skipped with a reason.")) return;
+          startB.disabled = true;
+          send("/phone-intel/queue/start", "POST", {}).then(function (r) {
+            if (!r.ok) {
+              toast((r.data && r.data.detail) || (r.data && r.data.error) || "Could not start");
+              startB.disabled = false;
+              return;
+            }
+            toast("Calling started");
+            paintIntel(body);
+          });
+        });
+        var stopB = $("#piStopBtn");
+        if (stopB) stopB.addEventListener("click", function () {
+          send("/phone-intel/queue/start", "DELETE").then(function () { toast("Stopping after the current call"); paintIntel(body); });
+        });
+        var clearB = $("#piClear");
+        if (clearB) clearB.addEventListener("click", function () {
+          if (!confirm("Remove all queued (not yet dialed) people?")) return;
+          send("/phone-intel/queue?clear=queued", "DELETE").then(function () { paintIntel(body); });
+        });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-piq-del]"), function (b) {
+          b.addEventListener("click", function () {
+            send("/phone-intel/queue?id=" + encodeURIComponent(b.getAttribute("data-piq-del")), "DELETE").then(function () { paintIntel(body); });
+          });
+        });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-pi-call]"), function (b) {
+          b.addEventListener("click", function () {
+            var mount = $("#piDetail"); if (!mount) return;
+            mount.innerHTML = loading();
+            api("/phone-intel/calls/" + encodeURIComponent(b.getAttribute("data-pi-call"))).then(function (d) {
+              var call = (d && d.call) || {};
+              var evs = call.events || [];
+              mount.innerHTML = '<div style="margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--surface-2)">' +
+                '<b style="font-size:13px">' + esc(call.targetFull || "") + " · " + esc(call.companyName || "") + "</b> " + piDispChip(call.disposition) +
+                '<div style="font-size:12px;margin-top:8px;line-height:1.7">' +
+                (evs.length ? evs.map(function (e) {
+                  return '<div><span class="muted" style="display:inline-block;min-width:40px">' + (typeof e.t === "number" ? e.t + "s" : "") + "</span><b>" + esc(e.type) + "</b>" +
+                    (e.detail ? ' <span class="muted">' + esc(e.detail) + "</span>" : "") +
+                    (e.reason ? ' <span style="color:var(--text-dim)">(' + esc(e.reason) + ")</span>" : "") + "</div>";
+                }).join("") : '<span class="muted">No events recorded.</span>') + "</div></div>";
+            }).catch(function () { mount.innerHTML = '<span class="muted">Could not load the timeline.</span>'; });
+          });
+        });
+
+        // Live refresh while a run is active.
+        if (run.running) {
+          piTimer = setInterval(function () {
+            if (!document.body.contains(body) || vd.tab !== "intel") { piStop(); return; }
+            paintIntel(body);
+          }, 8000);
+        }
+      });
     }
 
     /* ---- Recordings tab: your pre-recorded pitch library ----
@@ -26649,7 +26893,7 @@
           // Voice Drops); people look for it here on the phone, so point at it.
           '<div class="card" style="padding:16px;margin-top:16px">' +
           '<h4 style="margin:0 0 8px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Voicemail campaigns (AMD)</h4>' +
-          '<div class="muted" style="font-size:12.5px;line-height:1.55">Want to dial a whole list hands-free? <b>Voice Drops</b> calls business direct lines, detects the answering machine, and leaves a message personalized with each prospect’s first name and job title, either your own recording with an AI intro, or a full AI-voiced script.</div>' +
+          '<div class="muted" style="font-size:12.5px;line-height:1.55">Want to dial a whole list hands-free? <b>Voice Drops</b> calls business direct lines, detects the answering machine, and leaves a message personalized with each prospect’s first name and job title, either your own recording with an AI intro, or a full AI-voiced script. Its <b>Find people</b> tab even navigates company phone menus and dial-by-name directories to verify specific people behind a switchboard.</div>' +
           '<a class="btn btn-sm btn-primary" href="#voicedrops" style="margin-top:10px;display:inline-flex">Open Voice Drops</a></div>' +
         "</div>" +
       "</div>";
