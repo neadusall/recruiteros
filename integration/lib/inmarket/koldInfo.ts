@@ -34,6 +34,8 @@ export interface KoldInfoExportRow {
   domain: string;
   title: string;
   linkedin?: string;
+  /** Where the role is based ("City, ST") — the KoldInfo DB flow corroborates matches by it. */
+  location?: string;
 }
 
 /** A single parsed row from KoldInfo's result CSV, re-linked to our prospect. */

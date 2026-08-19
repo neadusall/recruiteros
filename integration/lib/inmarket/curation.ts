@@ -1059,6 +1059,7 @@ export async function koldInfoExportRows(opts: { limit?: number; mode?: "seed" |
       domain: r.domain!,
       title: r.managerTitle || r.role || "",   // the target title so KoldInfo finds the right person
       linkedin: lk.managerLinkedin || lk.linkedinUrl || undefined,
+      location: r.jobLocation || undefined,
     };
   });
 }
