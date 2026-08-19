@@ -200,9 +200,34 @@ export interface EngineHealth {
 
 const health: EngineHealth = { bootAt: new Date().toISOString(), cycles: 0, curationTicks: 0 };
 
+/** Fields that describe the last completed run rather than this process's lifetime. */
+const CARRY_FIELDS = [
+  "lastCycleAt", "lastCycleMs", "lastCycleOk", "lastCycleError",
+  "lastCurationAt", "lastCurationMs", "lastCurationOk", "lastCurationError", "lastCurationPhases",
+] as const;
+
+/**
+ * Carry the last completed cycle/curation across restarts. Every deploy recreates the app
+ * container, and without this the first persist after boot erased lastCurationAt, so for
+ * the ~10 minutes until the first tick completed the status surfaces could not tell
+ * "just rebooted" from "genuinely stalled" and showed a false Engine stalled verdict.
+ * A tick that finishes before hydration resolves wins: never overwrite a set field.
+ */
+const hydrated: Promise<void> = (async () => {
+  try {
+    const saved = await loadSnapshot<EngineHealth>(HEALTH_KEY);
+    if (!saved) return;
+    for (const k of CARRY_FIELDS) {
+      if (health[k] === undefined && saved[k] !== undefined) {
+        (health as Record<string, unknown>)[k] = saved[k];
+      }
+    }
+  } catch { /* best-effort */ }
+})();
+
 /** Persist the heartbeat so the UI can show "last fed N ago" even right after a restart. */
 async function persistHealth(): Promise<void> {
-  try { await saveSnapshot(HEALTH_KEY, health); } catch { /* best-effort */ }
+  try { await hydrated; await saveSnapshot(HEALTH_KEY, health); } catch { /* best-effort */ }
 }
 
 /** Current engine liveness — prefers the in-memory heartbeat, falls back to the persisted one. */

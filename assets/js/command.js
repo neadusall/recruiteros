@@ -599,6 +599,42 @@
     reportBreak("ROS-APP", "", { detail: msg });
   });
 
+  /* ---------------- sending status: limits are shown, not discovered --------
+     The Senders tab tells the full sending story; this strip is the portal-wide
+     echo of the part nobody should have to go looking for. When cold email is
+     actually held back — the supply engine stopped producing, or mail is landing
+     in spam — every screen says so in one line and points at the Senders tab.
+     Quiet by design for the working states: ramp-limited and supply-limited are
+     the machine pacing itself, not the machine broken. Tenant-gated upstream:
+     workspaces without the sending engine get present:false and never see it. */
+  function refreshSendingNotice() {
+    api("/senders/story").then(function (d) {
+      var bar = document.getElementById("sendNoticeBar");
+      var alerting = d && d.present && (d.verdict === "engine" || d.verdict === "placement");
+      if (!alerting) { if (bar) bar.remove(); return; }
+      if (!bar) {
+        var view = document.getElementById("view");
+        if (!view || !view.parentNode) return;
+        bar = document.createElement("div");
+        bar.id = "sendNoticeBar";
+        // Styled inline: the break strip's stylesheet is injected lazily on the
+        // first real break, and this notice must not depend on one having happened.
+        bar.style.cssText =
+          "margin:0 0 14px;font-size:13.5px;line-height:1.5;color:var(--text);" +
+          "background:var(--bg-soft);border:1px solid var(--border-strong);" +
+          "border-left:3px solid #b26a00;border-radius:10px;padding:12px 14px";
+        view.parentNode.insertBefore(bar, view);
+      }
+      var line = (d.narrative && d.narrative[0]) || "";
+      bar.innerHTML =
+        '<b>' + esc(d.headline || "Sending is limited right now.") + '</b><br>' +
+        esc(line) +
+        '<div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">Details and live numbers: Admin &gt; Infrastructure &gt; Senders</div>';
+    });
+  }
+  setInterval(refreshSendingNotice, 300000);
+  setTimeout(refreshSendingNotice, 4000);
+
   /** What the person was doing, named the way the app names it on screen. */
   function screenLabel() {
     var hash = (location.hash || "").replace(/^#/, "").split("?")[0];

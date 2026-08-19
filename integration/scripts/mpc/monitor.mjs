@@ -43,11 +43,27 @@ async function inboxOf(boxEmail) {
   // mailFolders/Inbox path 404s). We match client-side: a real reply is FROM the person we emailed,
   // so sent-items (from us) never false-match, no need to scope to a folder.
   const url = `${MAILBOX_BASE}/users/${encodeURIComponent(boxEmail)}/messages?$top=200`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json" },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 160)}`);
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(url, {
+      headers: { Authorization: `Bearer ${KEY}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    // Throttled: the provider tells us how long to stand down. Honor it once
+    // (capped) instead of burning the wait as more rejected calls; a second 429
+    // throws so the sweep-level breaker can decide whether to keep going.
+    if (res.status === 429 && attempt === 0) {
+      const wait = Math.min(120, Number(res.headers.get("retry-after")) || 30);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      continue;
+    }
+    break;
+  }
+  if (!res.ok) {
+    const err = new Error(`${res.status}: ${(await res.text()).slice(0, 160)}`);
+    err.status = res.status;
+    throw err;
+  }
   const data = await res.json();
   return (data.value || []).map((m) => ({
     id: m.id || "",
@@ -66,11 +82,23 @@ async function main() {
   const boxes = [...new Set(sent.map((s) => s.from))];
   console.log(`monitoring ${sent.length} sends across ${boxes.length} boxes...\n`);
 
-  // Fetch each box's inbox once (paced under the 60/min limit).
+  // Fetch each box's inbox once (paced under the 60/min limit). If the provider
+  // starts throttling and keeps throttling even after we honor Retry-After, the
+  // whole sweep is rejected calls from here on: stop early, keep what we got,
+  // and let the next tick (which starts fresh) pick up the rest. Boxes not read
+  // this run simply aren't matched this run — replies are found next sweep.
   const inbox = new Map();
+  let consecutive429 = 0;
   for (const b of boxes) {
-    try { inbox.set(b, await inboxOf(b)); }
-    catch (e) { console.log(`  (could not read inbox ${b}: ${e.message})`); inbox.set(b, []); }
+    try { inbox.set(b, await inboxOf(b)); consecutive429 = 0; }
+    catch (e) {
+      console.log(`  (could not read inbox ${b}: ${e.message})`);
+      inbox.set(b, []);
+      if (e.status === 429 && ++consecutive429 >= 15) {
+        console.log(`throttled: ${consecutive429} boxes in a row rejected with 429 after honoring Retry-After. Stopping this sweep early (${inbox.size}/${boxes.length} read); the next run picks up the rest.`);
+        break;
+      }
+    }
     await new Promise((r) => setTimeout(r, 1100));
   }
 
