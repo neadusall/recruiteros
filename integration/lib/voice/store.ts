@@ -18,6 +18,7 @@ import type { Motion } from "../core/types";
 import {
   type VoiceCampaign, type VoiceCampaignInput, type VoiceLead,
   type VoiceConsent, type VoiceScript, type DropOutcome, type VoiceSettings,
+  type VoiceRecording,
   DEFAULT_PERSONA, DEFAULT_WINDOW,
 } from "./types";
 import { DEFAULT_VOICE_SCRIPTS } from "./seedScripts";
@@ -63,6 +64,8 @@ const store = {
   leads: {} as Record<string, VoiceLead[]>,
   consent: [] as VoiceConsent[],
   scripts: [] as VoiceScript[],
+  /** Pre-recorded pitches (personal artifacts, owner-stamped). */
+  recordings: [] as VoiceRecording[],
   drops: [] as DropLog[],
   pending: {} as Record<string, PendingDrop>,
   /** Per-workspace settings (the chosen active voice/engine). */
@@ -83,6 +86,7 @@ function hydrate(s: any) {
   store.leads = s.leads ?? {};
   store.consent = s.consent ?? [];
   store.scripts = s.scripts ?? [];
+  store.recordings = s.recordings ?? [];
   store.drops = s.drops ?? [];
   store.pending = s.pending ?? {};
   store.settings = s.settings ?? {};
@@ -143,6 +147,9 @@ export function upsertCampaign(workspaceId: string, input: VoiceCampaignInput): 
     // An explicit "" detaches attribution (the script was hand-edited away from the
     // named library script); absent keeps the existing link; an id (re)sets it.
     scriptId: input.scriptId === "" ? undefined : (input.scriptId ?? existing?.scriptId),
+    messageMode: input.messageMode ?? existing?.messageMode ?? "script",
+    recordingId: input.recordingId === "" ? undefined : (input.recordingId ?? existing?.recordingId),
+    introTemplate: input.introTemplate ?? existing?.introTemplate,
     voiceId: input.voiceId ?? existing?.voiceId,
     voiceProvider: input.voiceProvider ?? existing?.voiceProvider,
     callerId: input.callerId ?? existing?.callerId ?? "",
@@ -456,6 +463,59 @@ export function deleteScript(workspaceId: string, id: string): boolean {
   store.scripts = store.scripts.filter((s) => !(s.workspaceId === workspaceId && s.id === id));
   persist();
   return store.scripts.length < before;
+}
+
+/* ---------------- pre-recorded pitches (personal artifacts) ---------------- */
+
+/**
+ * List a workspace's recordings, filtered per the personal-artifact rule:
+ * workspace owner/admin see all, plain members only their own. Pass
+ * requesterEmail (lowercased) + isAdmin from the route's auth context.
+ */
+export function listRecordings(workspaceId: string, requesterEmail: string, isAdmin: boolean): VoiceRecording[] {
+  return store.recordings
+    .filter((r) => r.workspaceId === workspaceId && (isAdmin || r.ownerEmail === requesterEmail))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+export function getRecording(workspaceId: string, id: string): VoiceRecording | undefined {
+  return store.recordings.find((r) => r.workspaceId === workspaceId && r.id === id);
+}
+
+/** May this requester attach/hear/delete this recording? (Own, or admin.) */
+export function canUseRecording(rec: VoiceRecording, requesterEmail: string, isAdmin: boolean): boolean {
+  return isAdmin || rec.ownerEmail === requesterEmail;
+}
+
+export function addRecording(rec: Omit<VoiceRecording, "createdAt">): VoiceRecording {
+  const full: VoiceRecording = { ...rec, createdAt: nowIso() };
+  store.recordings.push(full);
+  persist();
+  return full;
+}
+
+export function updateRecording(
+  workspaceId: string, id: string, patch: Partial<Pick<VoiceRecording, "name" | "identifiesAttested" | "durationSec">>,
+): VoiceRecording | undefined {
+  const rec = getRecording(workspaceId, id);
+  if (!rec) return undefined;
+  Object.assign(rec, patch);
+  persist();
+  return rec;
+}
+
+/** Remove the record; returns it so the route can also delete the audio file. */
+export function deleteRecording(workspaceId: string, id: string): VoiceRecording | undefined {
+  const rec = getRecording(workspaceId, id);
+  if (!rec) return undefined;
+  store.recordings = store.recordings.filter((r) => r !== rec);
+  // Detach it from any campaign that pointed at it, so a send can never chase a
+  // deleted file (checkLaunch will then ask for a new recording).
+  for (const c of store.campaigns) {
+    if (c.workspaceId === workspaceId && c.recordingId === id) c.recordingId = undefined;
+  }
+  persist();
+  return rec;
 }
 
 /* ---------------- drop audit log ---------------- */

@@ -17807,6 +17807,8 @@
      are filtered out and never dialed; each lead is dialed only inside its own local
      window (default 7-9 PM). Three tabs: Campaigns, Voice & Consent, Test. Talks to
      /api/voice/*. Shared by BD + Recruiting (the active motion tags the campaign). */
+  var VD_DEFAULT_INTRO =
+    "Hi {first_name}. I know you're the {role} at {company}, so I'll keep this quick.";
   var VD_DEFAULT_SCRIPT =
     "Hi {first_name}... this is {agent_name}, with {agent_company}. I came across your {role} search, and wanted to reach out. We help teams hire faster. If it’s useful, give me a call back, at this number. Thanks {first_name}.";
   var VD_CONSENT_TEXT =
@@ -17870,24 +17872,24 @@
   function renderVoiceDrops(el) {
     var vd = { tab: "campaigns", creating: false, scripts: [], prefill: null };
     el.innerHTML = head("Voice Drops",
-      "Cloned-voice voicemail to verified business landlines. Mobiles are filtered out and never dialed; each lead is dialed only inside its own local window (default 7-9 PM).") +
+      "The AMD outbound dialer: it calls a business direct line, Premium Answering Machine Detection tells human from voicemail, and it drops your personalized message on the machine. Mobiles are filtered out and never dialed; each lead is dialed only inside its own local window (default 7-9 PM).") +
       '<div class="vd-summary" style="margin:0 0 14px;padding:12px 14px;border-radius:12px;background:var(--surface-2);font-size:12.5px;line-height:1.55">' +
-      '<b style="font-size:13px">How it works</b>' +
+      '<b style="font-size:13px">Run it in 5 steps</b>' +
       '<div class="muted" style="margin-top:6px">' +
-      'Your script is just an <b>example</b>. Pick your engine: <b>Placeholders</b> merge first name &amp; role into one shared script (cheapest, the voice is synthesized once, reused free), or <b>AI-customize</b> lets the LLM rewrite each lead’s drop. Either way it follows the same rules:' +
+      '<b>1 · Voice</b> tab: add your cloned voice id (your ElevenLabs voice), it reads every intro and script.<br>' +
+      '<b>2 · Message</b>: either upload/record your pitch in the <b>Recordings</b> tab (the AI then speaks a personal intro with the prospect’s first name and job title before your recording plays), or write a merge-slot script in <b>Scripts</b> and the AI voice reads the whole thing.<br>' +
+      '<b>3 · Campaigns</b> tab: create a campaign, pick your caller-ID number and the message, then <b>Import</b> your list (first name, job title, company, phone, city/state). Mobile numbers are stripped automatically.<br>' +
+      '<b>4 · Attest consent</b> on the campaign card, then <b>Launch</b>. Drops go out 7-9 PM in each lead’s own local time; <b>Run now</b> fires the current window by hand (Test mode ignores the clock while you trial it).<br>' +
+      '<b>5 · What happens on the call</b>: voicemail gets your personalized message; a live human hears an honest "This is ' + '{your name} with {your firm}, is this {first name}?" so you find the right person without tricks. Every outcome lands on the campaign card.' +
       '</div>' +
-      '<div class="muted" style="margin-top:6px">' +
-      '• <b>Length</b>, 15-25s for AMD voicemail, 20-45s for LinkedIn voice notes.<br>' +
-      '• <b>After-hours</b>, sent 7-9 PM in each lead’s OWN local time, clamped to a lawful 8 AM-9 PM envelope.<br>' +
-      '• <b>Landline/VoIP only</b>, every number is line-checked; mobiles are stripped and never dialed.<br>' +
-      '• <b>Honest + natural</b>, always states your real name &amp; firm, formatted for natural speech, never invents referrals or claims.<br>' +
-      '• <b>Estimated spend</b>, the campaign builder shows live cost for both models before you launch.' +
+      '<div class="muted" style="margin-top:8px">' +
+      'Guardrails, always on: landline/VoIP only (every number line-checked), each lead dialed inside a lawful 8 AM-9 PM local envelope, honest identification required, daily + re-dial caps, and the builder shows live cost before you launch.' +
       '</div></div>' +
       '<div class="vd-tabs" style="display:flex;flex-wrap:wrap"></div>' +
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
-      var tabs = [["campaigns", "Campaigns"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
+      var tabs = [["campaigns", "Campaigns"], ["recordings", "Recordings"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vd-tab' + (vd.tab === t[0] ? " active" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -17900,6 +17902,7 @@
     function paint() {
       var body = $("#vdBody"); if (!body) return;
       if (vd.tab === "campaigns") return paintCampaigns(body);
+      if (vd.tab === "recordings") return paintRecordings(body);
       if (vd.tab === "scripts") return paintScripts(body);
       if (vd.tab === "voice") return paintVoice(body);
       return paintTest(body);
@@ -18024,6 +18027,250 @@
           (d.withinWindow ? ", in window" : ", outside window") + (d.identifies ? "" : " · add your name/firm") + "</span>";
         if (typeof renderEstimate === "function") renderEstimate();
       }).catch(function () { if (out) out.textContent = "Could not reach the server."; });
+    }
+
+    /* ---- Recordings tab: your pre-recorded pitch library ----
+       "A place to put in the recordings": upload an mp3/wav of YOUR real voice,
+       or record one right here. On a recording-mode campaign the AI first speaks
+       a short personalized intro (the prospect's first name + job title, in your
+       cloned voice), then this recording plays onto the voicemail. */
+    function loadRecordings(cb) {
+      api("/voice/recordings").then(function (d) {
+        vd.recordings = (d && d.recordings) || [];
+        if (cb) cb();
+      }).catch(function () { vd.recordings = vd.recordings || []; if (cb) cb(); });
+    }
+    function recPickerOptions(sel) {
+      var rows = vd.recordings || [];
+      if (!rows.length) return '<option value="">- no recordings yet, add one in the Recordings tab -</option>';
+      return '<option value="">- pick a recording -</option>' + rows.map(function (r) {
+        return '<option value="' + esc(r.id) + '"' + (sel === r.id ? " selected" : "") + '>' + esc(r.name) +
+          (r.durationSec ? " (~" + r.durationSec + "s)" : "") + "</option>";
+      }).join("");
+    }
+    function vrFmtBytes(n) {
+      n = n || 0;
+      if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+      if (n >= 1024) return Math.round(n / 1024) + " KB";
+      return n + " B";
+    }
+    /* 16kHz mono 16-bit WAV from raw Float32 mic chunks. Returns the peak level
+       so a silent take (dead/wrong mic) is rejected instead of saved. */
+    function vrEncodeWav(chunks, inRate) {
+      var len = 0; chunks.forEach(function (c) { len += c.length; });
+      var all = new Float32Array(len); var off = 0;
+      chunks.forEach(function (c) { all.set(c, off); off += c.length; });
+      var outRate = 16000, ratio = inRate / outRate;
+      var outLen = Math.max(1, Math.floor(all.length / ratio));
+      var pcm = new Int16Array(outLen), peak = 0;
+      for (var i = 0; i < outLen; i++) {
+        var v = all[Math.floor(i * ratio)] || 0;
+        var a = Math.abs(v); if (a > peak) peak = a;
+        v = Math.max(-1, Math.min(1, v));
+        pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+      }
+      var buf = new ArrayBuffer(44 + pcm.length * 2), dv = new DataView(buf);
+      function wstr(o, s) { for (var j = 0; j < s.length; j++) dv.setUint8(o + j, s.charCodeAt(j)); }
+      wstr(0, "RIFF"); dv.setUint32(4, 36 + pcm.length * 2, true); wstr(8, "WAVE");
+      wstr(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+      dv.setUint32(24, outRate, true); dv.setUint32(28, outRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+      wstr(36, "data"); dv.setUint32(40, pcm.length * 2, true);
+      new Int16Array(buf, 44).set(pcm);
+      return { blob: new Blob([buf], { type: "audio/wav" }), peak: peak, seconds: Math.round(outLen / outRate) };
+    }
+    function paintRecordings(body) {
+      body.innerHTML = loading();
+      loadRecordings(function () {
+        var rows = vd.recordings || [];
+        // Pending take: either an uploaded file or a mic recording, staged before Save.
+        var pending = null; // { blob, mime, durationSec, label }
+        var rec = null;     // live mic session { ctx, stream, node, src, chunks, rate, timer, t0 }
+        var player = null;
+
+        function rowCard(r) {
+          var meta = [];
+          if (r.durationSec) meta.push("~" + r.durationSec + "s");
+          meta.push(vrFmtBytes(r.bytes));
+          meta.push(r.mime === "audio/wav" ? "wav" : "mp3");
+          var idBadge = r.identifiesAttested
+            ? '<span style="font-size:11px;font-weight:600;color:#0b0b0b;background:var(--ok);border-radius:4px;padding:1px 6px">states name + firm</span>'
+            : '<span style="font-size:11px;font-weight:600;color:#0b0b0b;background:var(--warn);border-radius:4px;padding:1px 6px">identify in the intro</span>';
+          return '<div class="card" style="margin-top:12px" data-rid="' + esc(r.id) + '">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+            "<h3 style='margin:0'>" + esc(r.name) + ' <span class="muted" style="font-size:12px">· ' + meta.join(" · ") + "</span> " + idBadge + "</h3></div>" +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">' +
+            '<button class="btn btn-sm btn-primary" data-ract="play" data-rid="' + esc(r.id) + '">Play</button>' +
+            '<button class="btn btn-ghost btn-sm" data-ract="rename" data-rid="' + esc(r.id) + '">Rename</button>' +
+            '<button class="btn btn-ghost btn-sm" data-ract="attest" data-rid="' + esc(r.id) + '">' + (r.identifiesAttested ? "Unmark name + firm" : "It states my name + firm") + "</button>" +
+            '<span style="flex:1"></span>' +
+            '<button class="btn btn-ghost btn-sm" data-ract="del" data-rid="' + esc(r.id) + '"><svg class="isvg" aria-hidden="true"><use href="#i-trash"/></svg></button></div>' +
+            '<div class="muted" data-rmsg="' + esc(r.id) + '" style="font-size:12px;margin-top:6px"></div></div>';
+        }
+
+        body.innerHTML =
+          '<div class="card"><h3>Add a recording</h3>' +
+          '<p class="muted" style="font-size:13px;margin:4px 0 12px">Your pitch, in your real voice. On a campaign set to "My recording + AI intro", the AI first says a personal line with the prospect’s first name and job title (in your cloned voice), then this recording plays onto their voicemail. mp3 or wav, up to 10 MB; 15-25 seconds works best.</p>' +
+          '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+          inp("vrName", "Name this recording", "Perm placement pitch, Q3") +
+          '<div class="vd-field"><label>Upload an mp3 / wav</label><input id="vrFile" type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" /></div>' +
+          "</div>" +
+          '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<button class="btn btn-sm" id="vrRecBtn">Record with my mic</button>' +
+          '<span id="vrLevel" style="display:none;width:90px;height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden"><span id="vrLevelFill" style="display:block;height:100%;width:0%;background:var(--ok)"></span></span>' +
+          '<button class="btn btn-sm" id="vrPreview" style="display:none">Play take</button>' +
+          '<span class="muted" id="vrStat" style="font-size:12px"></span></div>' +
+          '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-size:13px;cursor:pointer">' +
+          '<input type="checkbox" id="vrIdent" style="margin-top:2px" /> <span>This recording states my real name and firm <span class="muted">(if not, the AI intro must, e.g. "this is Ryan with Executive Search"; launch checks one of the two)</span></span></label>' +
+          '<div style="margin-top:12px"><button class="btn btn-primary btn-sm" id="vrSave">Save recording</button></div></div>' +
+          '<div style="margin:16px 0 4px" class="muted">' + rows.length + " saved recording" + (rows.length === 1 ? "" : "s") + "</div>" +
+          (rows.length ? rows.map(rowCard).join("") :
+            '<div class="card"><p class="muted" style="font-size:13px">Nothing here yet. Upload your pitch above, or hit "Record with my mic" and read it straight in.</p></div>');
+
+        function stat(t, bad) { var s = $("#vrStat"); if (s) { s.textContent = t || ""; s.style.color = bad ? "var(--danger)" : ""; } }
+        function stopPlayer() { if (player) { try { player.pause(); } catch (e) {} player = null; } }
+
+        // Upload path: measure duration client-side, stage as the pending take.
+        var fi = $("#vrFile");
+        if (fi) fi.addEventListener("change", function () {
+          var f = fi.files && fi.files[0]; if (!f) return;
+          var mime = /wav$/i.test(f.name) || f.type === "audio/wav" ? "audio/wav"
+            : /mp3$/i.test(f.name) || f.type === "audio/mpeg" ? "audio/mpeg" : null;
+          if (!mime) { stat("Use an mp3 or wav file.", true); fi.value = ""; return; }
+          if (f.size > 10 * 1024 * 1024) { stat("Keep it under 10 MB.", true); fi.value = ""; return; }
+          pending = { blob: f, mime: mime, durationSec: 0, label: f.name };
+          var url = URL.createObjectURL(f), au = new Audio();
+          au.onloadedmetadata = function () {
+            if (isFinite(au.duration)) pending.durationSec = Math.round(au.duration);
+            stat("Staged “" + f.name + "”" + (pending.durationSec ? " · ~" + pending.durationSec + "s" : "") + ". Name it and hit Save.");
+            var pv = $("#vrPreview"); if (pv) pv.style.display = "";
+            URL.revokeObjectURL(url);
+          };
+          au.onerror = function () { stat("Staged “" + f.name + "”. Name it and hit Save."); var pv = $("#vrPreview"); if (pv) pv.style.display = ""; };
+          au.src = url;
+        });
+
+        // Mic path. Lessons from the voicemail-greeting silent-capture bug baked
+        // in: AudioContext created + resumed synchronously INSIDE the click, a
+        // real input meter while recording, and a near-silent take is rejected.
+        var rb = $("#vrRecBtn");
+        if (rb) rb.addEventListener("click", function () {
+          if (rec) { // stop
+            var r = rec; rec = null;
+            rb.textContent = "Record with my mic";
+            clearInterval(r.timer);
+            try { r.node.disconnect(); r.src.disconnect(); } catch (e) {}
+            r.stream.getTracks().forEach(function (t) { t.stop(); });
+            try { r.ctx.close(); } catch (e) {}
+            var lv = $("#vrLevel"); if (lv) lv.style.display = "none";
+            var out = vrEncodeWav(r.chunks, r.rate);
+            if (out.peak < 0.004) { stat("That take was silent, check the mic Windows is using and try again.", true); return; }
+            if (out.seconds < 2) { stat("Too short, give it at least a couple of seconds.", true); return; }
+            pending = { blob: out.blob, mime: "audio/wav", durationSec: out.seconds, label: "mic take" };
+            stat("Recorded ~" + out.seconds + "s. Play it back, name it, and hit Save.");
+            var pv = $("#vrPreview"); if (pv) pv.style.display = "";
+            return;
+          }
+          var AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { stat("This browser can't record, upload a file instead.", true); return; }
+          var ctx = new AC(); ctx.resume();
+          navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+            var src = ctx.createMediaStreamSource(stream);
+            var node = ctx.createScriptProcessor(4096, 1, 1);
+            var chunks = [];
+            node.onaudioprocess = function (ev) {
+              var d = ev.inputBuffer.getChannelData(0);
+              chunks.push(new Float32Array(d));
+              var peak = 0; for (var i = 0; i < d.length; i += 16) { var a = Math.abs(d[i]); if (a > peak) peak = a; }
+              var fill = $("#vrLevelFill"); if (fill) fill.style.width = Math.min(100, Math.round(peak * 260)) + "%";
+            };
+            src.connect(node); node.connect(ctx.destination);
+            rec = { ctx: ctx, stream: stream, node: node, src: src, chunks: chunks, rate: ctx.sampleRate, t0: Date.now(), timer: 0 };
+            rec.timer = setInterval(function () {
+              if (!rec) return;
+              var s = Math.round((Date.now() - rec.t0) / 1000);
+              stat("Recording... " + s + "s (max 120s). Click Stop when done.");
+              if (s >= 120) rb.click();
+            }, 500);
+            rb.textContent = "Stop";
+            var lv = $("#vrLevel"); if (lv) lv.style.display = "inline-block";
+            stat("Recording... speak now.");
+          }).catch(function () { try { ctx.close(); } catch (e) {} stat("Mic permission was blocked.", true); });
+        });
+
+        var pv = $("#vrPreview");
+        if (pv) pv.addEventListener("click", function () {
+          if (!pending) return;
+          stopPlayer();
+          var url = URL.createObjectURL(pending.blob);
+          player = new Audio(url);
+          player.onended = function () { URL.revokeObjectURL(url); };
+          player.onerror = function () { stat("Could not play that take.", true); };
+          player.play().catch(function () { stat("Tap again to allow audio.", true); });
+        });
+
+        var sv = $("#vrSave");
+        if (sv) sv.addEventListener("click", function () {
+          var name = val("vrName");
+          if (!name) { toast("Name the recording first"); return; }
+          if (!pending) { toast("Upload a file or record a take first"); return; }
+          sv.disabled = true; stat("Saving...");
+          var fr = new FileReader();
+          fr.onload = function () {
+            var b64 = String(fr.result || "").split(",")[1] || "";
+            send("/voice/recordings", "POST", {
+              name: name, audio: b64, mime: pending.mime,
+              durationSec: pending.durationSec || undefined,
+              identifiesAttested: !!(($("#vrIdent") || {}).checked),
+            }).then(function (r) {
+              sv.disabled = false;
+              if (!r.ok) { stat("Save failed: " + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status), true); return; }
+              toast("Recording saved");
+              paintRecordings(body);
+            }).catch(function () { sv.disabled = false; stat("Could not reach the server.", true); });
+          };
+          fr.onerror = function () { sv.disabled = false; stat("Could not read the audio.", true); };
+          fr.readAsDataURL(pending.blob);
+        });
+
+        Array.prototype.forEach.call(body.querySelectorAll("[data-ract]"), function (b) {
+          b.addEventListener("click", function () {
+            var act = b.getAttribute("data-ract"), id = b.getAttribute("data-rid");
+            var r = (vd.recordings || []).filter(function (x) { return x.id === id; })[0];
+            if (!r) return;
+            var msg = $('[data-rmsg="' + id + '"]');
+            if (act === "play") {
+              stopPlayer();
+              player = new Audio(r.url);
+              if (msg) msg.textContent = "playing...";
+              player.onended = function () { if (msg) msg.textContent = ""; };
+              player.onerror = function () { if (msg) msg.textContent = "audio error"; };
+              player.play().catch(function () { if (msg) msg.textContent = "tap Play again to allow audio"; });
+              return;
+            }
+            if (act === "rename") {
+              var name = (window.prompt("Rename recording", r.name) || "").trim();
+              if (!name) return;
+              send("/voice/recordings", "PATCH", { id: id, name: name }).then(function (res) {
+                if (res.ok) { toast("Renamed"); paintRecordings(body); } else toast("Rename failed");
+              });
+              return;
+            }
+            if (act === "attest") {
+              send("/voice/recordings", "PATCH", { id: id, identifiesAttested: !r.identifiesAttested }).then(function (res) {
+                if (res.ok) paintRecordings(body); else toast("Update failed");
+              });
+              return;
+            }
+            if (act === "del") {
+              if (!confirm("Delete “" + r.name + "”? Campaigns pointing at it will need a new recording.")) return;
+              send("/voice/recordings?id=" + encodeURIComponent(id), "DELETE").then(function (res) {
+                if (res.ok) { toast("Deleted"); paintRecordings(body); } else toast("Delete failed");
+              });
+              return;
+            }
+          });
+        });
+      });
     }
 
     /* ---- Scripts tab: a saved library of reusable voicemail scripts ----
@@ -18191,13 +18438,31 @@
         vdToggle("vdAiCustomize", "AI-customize per lead", "The AI rewrites each drop from your script below, kept to 15–25s and the speech rules. More natural, but each lead synthesizes fresh (a little more spend).") +
         vdToggle("vdAutoPilot", "Always-on autopilot", "Keep this campaign running and auto-send to leads as they’re fed in (email-sent trigger or import). Turns on AI-customize so every incoming lead gets a fresh, in-window drop. Consent + all safeguards still required.") +
         "</div>" +
-        '<div class="vd-section-label" style="margin-top:20px">Voicemail script</div>' +
+        '<div class="vd-section-label" style="margin-top:20px">Voicemail message</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:2px 0 12px">' +
+        '<label id="vdModeScriptTile" style="display:flex;gap:9px;align-items:flex-start;border:1.5px solid var(--brand);border-radius:12px;padding:11px 12px;cursor:pointer;background:var(--bg-soft)">' +
+        '<input type="radio" name="vdMode" id="vdModeScript" value="script" checked style="margin-top:2px" />' +
+        '<span style="font-size:12.5px;line-height:1.5"><b>Script, AI voice reads it all</b><br><span class="muted">Write it once; your cloned voice speaks the whole message, with first name and job title merged in.</span></span></label>' +
+        '<label id="vdModeRecTile" style="display:flex;gap:9px;align-items:flex-start;border:1.5px solid var(--border);border-radius:12px;padding:11px 12px;cursor:pointer;background:var(--bg-soft)">' +
+        '<input type="radio" name="vdMode" id="vdModeRec" value="recording" style="margin-top:2px" />' +
+        '<span style="font-size:12.5px;line-height:1.5"><b>My recording + AI intro</b><br><span class="muted">The AI says a personal line with their first name and job title in your cloned voice, then your uploaded recording plays.</span></span></label>' +
+        "</div>" +
+        '<div id="vdRecBlock" style="display:none">' +
+        '<div class="vd-field vd-script" style="margin-top:0"><label>Your recording <span>- upload or record one in the Recordings tab</span></label>' +
+        '<select id="vdRecording" style="width:100%">' + recPickerOptions() + "</select></div>" +
+        '<div class="vd-field vd-script"><label>Personalized intro, spoken before the recording <span>- their first name and job title merge in; leave empty to drop the recording alone</span></label>' +
+        '<div class="vd-chips">' + fieldChips("vdIntro") + "</div>" +
+        '<textarea id="vdIntro" rows="2">' + esc(VD_DEFAULT_INTRO) + "</textarea>" +
+        '<div class="vd-hint">Keep it one or two short sentences. Identification must live somewhere: the intro says your name/firm, or mark the recording as stating it (Recordings tab).</div></div>' +
+        "</div>" +
+        '<div id="vdScriptBlock">' +
         '<div class="vd-field vd-script" style="margin-top:0"><label>Start from a saved script <span>- pick one from your library, or write your own below</span></label>' +
         '<select id="vdScriptPick" style="width:100%">' + scriptPickerOptions() + "</select></div>" +
         '<div class="vd-field vd-script"><label>Your script <span>- an example; the AI customizes the rest. First name &amp; role splice in like an email merge</span></label>' +
         '<div class="vd-chips">' + fieldChips("vdScript") + "</div>" +
         '<textarea id="vdScript" rows="4">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
         '<div class="vd-hint">Sweet spot is 15–25s. Human-answer sign-off: “' + esc("Sorry, wrong number. Thanks.") + '” (editable per campaign).</div></div>' +
+        "</div>" +
         '<div class="vd-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vdCreate">Create campaign</button>' +
         '<button class="btn btn-sm" id="vdAi">AI customize</button>' +
         '<button class="btn btn-sm" id="vdListen">Listen first</button>' +
@@ -18257,8 +18522,16 @@
     function renderEstimate() {
       var box = $("#vdEst"); if (!box) return;
       var cap = Math.max(0, parseInt(val("vdDailyCap") || "0", 10) || 0);
-      var ai = !!(($("#vdAiCustomize") || {}).checked);
-      var shape = estimateScriptShape(val("vdScript"));
+      var mode = vdMode();
+      // Recording mode: only the short intro is synthesized (cached per unique
+      // name/role); the pitch is your own audio, played free. AI-customize is a
+      // script-mode concept and is ignored here.
+      var ai = mode === "recording" ? false : !!(($("#vdAiCustomize") || {}).checked);
+      var shape = estimateScriptShape(mode === "recording" ? val("vdIntro") : val("vdScript"));
+      if (mode === "recording") {
+        var recRow = (vd.recordings || []).filter(function (x) { return x.id === val("vdRecording"); })[0];
+        shape.seconds += (recRow && recRow.durationSec) || 20;
+      }
       var minutes = Math.max(1, Math.ceil((shape.seconds + VD_RATE.callOverheadSec) / 60));
       var c = computeCost(cap, shape.sentences, minutes, ai);
       var landed = Math.round(cap * VD_LAND_RATE);
@@ -18305,11 +18578,16 @@
       var aiBadge = c.aiCustomize ? ' <span style="font-size:11px;font-weight:600;color:#cdd6ea;background:var(--brand-soft);border-radius:4px;padding:1px 6px">AI</span>' : "";
       // Show the actual voicemail wording on the card, with its length vs. the
       // 15-25s sweet spot and inline Edit / Listen, so the card explains itself.
-      var shape = estimateScriptShape(c.scriptTemplate || "");
-      var inSweet = shape.seconds >= 15 && shape.seconds <= 25;
+      var isRec = c.messageMode === "recording";
+      var shape = estimateScriptShape((isRec ? (c.introTemplate || VD_DEFAULT_INTRO) : c.scriptTemplate) || "");
+      var inSweet = isRec ? true : (shape.seconds >= 15 && shape.seconds <= 25);
       var lenDot = inSweet ? "var(--ok)" : "var(--warn)";
-      var snip = String(c.scriptTemplate || "").replace(/\s+/g, " ").trim();
+      var snip = String((isRec ? (c.introTemplate || VD_DEFAULT_INTRO) : c.scriptTemplate) || "").replace(/\s+/g, " ").trim();
       var snipShort = snip.slice(0, 150) + (snip.length > 150 ? "…" : "");
+      var recLine = isRec
+        ? '<div style="font-size:12px;margin-top:5px;color:' + (c.recordingName ? "var(--text-muted)" : "var(--danger)") + '">then your recording plays: <b>' +
+          esc(c.recordingName || "deleted, pick a new one in the campaign") + "</b></div>"
+        : "";
       return '<div class="card" data-cid="' + c.id + '" style="margin-top:12px' + (testOn ? ";box-shadow:inset 0 0 0 1px var(--warn)" : "") + '">' +
         '<div style="display:flex;justify-content:space-between;align-items:center">' +
         "<h3 style='margin:0'>" + esc(c.name) + ' <span class="muted" style="font-size:12px">· ' + esc(c.status) + "</span>" + autoBadge + aiBadge + testBadge + "</h3>" +
@@ -18318,12 +18596,15 @@
         // The script, front and centre: what it says + how long + edit/listen.
         '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--surface-2)">' +
         '<div class="muted" style="font-size:12.5px;line-height:1.55;flex:1">“' + (snipShort ? esc(snipShort) : "No script yet.") + '”' +
-        '<div style="font-size:11px;color:' + lenDot + ';margin-top:5px">~' + shape.seconds + "s · " + (inSweet ? "in the 15-25s sweet spot" : "outside the 15-25s sweet spot") + "</div></div>" +
+        recLine +
+        '<div style="font-size:11px;color:' + lenDot + ';margin-top:5px">' +
+        (isRec ? "AI intro in your cloned voice, then your own recording" : "~" + shape.seconds + "s · " + (inSweet ? "in the 15-25s sweet spot" : "outside the 15-25s sweet spot")) + "</div></div>" +
         '<div style="display:flex;gap:6px;white-space:nowrap">' +
-        '<button class="btn btn-sm" data-vdact="editscript" data-cid="' + c.id + '">Edit script</button>' +
+        '<button class="btn btn-sm" data-vdact="editscript" data-cid="' + c.id + '">' + (isRec ? "Edit intro" : "Edit script") + "</button>" +
         '<button class="btn btn-ghost btn-sm" data-vdact="preview" data-cid="' + c.id + '">Listen</button></div></div>' +
         // Lifecycle actions on the left; test toggle + remove on the right.
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center">' +
+        (ready ? "" : '<button class="btn btn-sm" data-vdact="attest" data-cid="' + c.id + '" style="box-shadow:inset 0 0 0 1px var(--warn)">Attest consent</button>') +
         '<button class="btn btn-sm btn-primary" data-vdact="launch" data-cid="' + c.id + '">Launch</button>' +
         '<button class="btn btn-sm" data-vdact="run" data-cid="' + c.id + '">Run now</button>' +
         '<button class="btn btn-sm" data-vdact="import" data-cid="' + c.id + '">Import</button>' +
@@ -18336,8 +18617,10 @@
 
     function paintCampaigns(body) {
       body.innerHTML = loading();
-      // Load the saved-script library first so the create form's picker is populated.
+      // Load the saved-script + recordings libraries first so the create form's
+      // pickers are populated.
       loadScripts(function () {
+      loadRecordings(function () {
       api("/voice/campaigns?motion=" + motion).then(function (d) {
         var camps = (d && d.campaigns) || [];
         vd.camps = camps; // so the card's "Edit script" action can read the current template/persona
@@ -18356,6 +18639,23 @@
         var nb = $("#vdNew"); if (nb) nb.addEventListener("click", function () { vd.creating = true; paint(); });
         var cb = $("#vdCancel"); if (cb) cb.addEventListener("click", function () { vd.creating = false; paint(); });
         var cr = $("#vdCreate"); if (cr) cr.addEventListener("click", createCampaign);
+        // Message-mode tiles: swap the script block for the recording + intro
+        // block (and re-run the estimate, the models cost differently).
+        function syncMode() {
+          var mode = vdMode();
+          var sb = $("#vdScriptBlock"), rb2 = $("#vdRecBlock");
+          if (sb) sb.style.display = mode === "script" ? "" : "none";
+          if (rb2) rb2.style.display = mode === "recording" ? "" : "none";
+          var st = $("#vdModeScriptTile"), rt = $("#vdModeRecTile");
+          if (st) st.style.borderColor = mode === "script" ? "var(--brand)" : "var(--border)";
+          if (rt) rt.style.borderColor = mode === "recording" ? "var(--brand)" : "var(--border)";
+          renderEstimate();
+        }
+        var mS = $("#vdModeScript"), mR = $("#vdModeRec");
+        if (mS) mS.addEventListener("change", syncMode);
+        if (mR) mR.addEventListener("change", syncMode);
+        var recSel = $("#vdRecording"); if (recSel) recSel.addEventListener("change", renderEstimate);
+        var introTa = $("#vdIntro"); if (introTa) introTa.addEventListener("input", renderEstimate);
         // Saved-script picker → drop the chosen template into the script box.
         var pick = $("#vdScriptPick");
         if (pick) pick.addEventListener("change", function () {
@@ -18372,11 +18672,17 @@
         // Listen to the assembled cloned voicemail before creating/launching.
         var lb = $("#vdListen");
         if (lb) lb.addEventListener("click", function () {
+          var persona = { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" };
+          if (vdMode() === "recording") {
+            var rid2 = val("vdRecording");
+            if (!rid2) { toast("Pick a recording first (Recordings tab to add one)"); return; }
+            previewInto($("#vdListenOut"), {
+              messageMode: "recording", recordingId: rid2, introTemplate: val("vdIntro"), persona: persona,
+            });
+            return;
+          }
           var tpl = val("vdScript"); if (!tpl) { toast("Write or pick a script first"); return; }
-          previewInto($("#vdListenOut"), {
-            scriptTemplate: tpl,
-            persona: { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" },
-          });
+          previewInto($("#vdListenOut"), { scriptTemplate: tpl, persona: persona });
         });
         // AI-customize the script in place (preview the LLM rewrite before saving).
         var aib = $("#vdAi");
@@ -18410,8 +18716,11 @@
         });
       }).catch(function () { body.innerHTML = needsSetup(); });
       });
+      });
     }
     function val(id) { var e = $("#" + id); return e ? e.value.trim() : ""; }
+    /* The create form's chosen message mode ("script" | "recording"). */
+    function vdMode() { var r = $("#vdModeRec"); return r && r.checked ? "recording" : "script"; }
     /* Swap the caller-ID text input for a dropdown of the operator's approved
        Telnyx numbers. Keeps the same #vdCaller id so val()/createCampaign read it
        unchanged. If the account has no numbers (not keyed / dry-run / shim), the
@@ -18446,8 +18755,13 @@
       // carries no scriptId (so per-script stats stay honest).
       var picked = vd.pickedScript;
       var scriptId = (picked && val("vdScript") === String(picked.template).trim()) ? picked.id : undefined;
+      var mode = vdMode();
+      if (mode === "recording" && !val("vdRecording")) { toast("Pick a recording (add one in the Recordings tab)."); return; }
       var payload = {
         name: val("vdName"), motion: motion, callerId: val("vdCaller"),
+        messageMode: mode,
+        recordingId: mode === "recording" ? val("vdRecording") : undefined,
+        introTemplate: mode === "recording" ? val("vdIntro") : undefined,
         scriptTemplate: val("vdScript"), scriptId: scriptId,
         persona: { agentName: val("vdAgentName") || "Ryan", agentCompany: val("vdAgentCompany") || "Executive Search" },
         window: { startHour: parseInt(val("vdWinStart") || "19", 10), endHour: parseInt(val("vdWinEnd") || "21", 10) },
@@ -18508,12 +18822,15 @@
     function editCampaignScript(cid) {
       var c = (vd.camps || []).filter(function (x) { return x.id === cid; })[0] || {};
       var persona = c.persona || {};
-      openModal("Edit voice script · " + (c.name || "campaign"),
-        "Tweak the wording so it sounds better. First name & role splice in like an email merge. Sweet spot is 15-25s, listen before you save.",
+      var isRec = c.messageMode === "recording";
+      openModal((isRec ? "Edit intro · " : "Edit voice script · ") + (c.name || "campaign"),
+        isRec
+          ? "The AI speaks this line in your cloned voice, then your recording plays. First name & job title splice in like an email merge. Keep it to a sentence or two."
+          : "Tweak the wording so it sounds better. First name & role splice in like an email merge. Sweet spot is 15-25s, listen before you save.",
         '<div style="margin:2px 0 8px">' + fieldChips("ceTpl") + "</div>" +
-        '<textarea id="ceTpl" rows="5" style="width:100%">' + esc(c.scriptTemplate || VD_DEFAULT_SCRIPT) + "</textarea>" +
+        '<textarea id="ceTpl" rows="5" style="width:100%">' + esc(isRec ? (c.introTemplate || VD_DEFAULT_INTRO) : (c.scriptTemplate || VD_DEFAULT_SCRIPT)) + "</textarea>" +
         '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-        '<button class="btn btn-sm" id="ceAi">AI customize</button>' +
+        (isRec ? "" : '<button class="btn btn-sm" id="ceAi">AI customize</button>') +
         '<button class="btn btn-sm" id="ceListen">Listen</button><span class="muted" id="ceListenOut" style="font-size:12px"></span></div>' +
         '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">' +
         '<label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Test it on a real phone <span style="color:var(--text-dim)">- landline or VoIP you control (E.164), let it roll to voicemail to hear the drop</span></label>' +
@@ -18525,21 +18842,29 @@
         function (root, close) {
           wireChips(root);
           var personaOpt = { agentName: persona.agentName || "Ryan", agentCompany: persona.agentCompany || "Executive Search" };
-          $("#ceAi", root).addEventListener("click", function () {
+          var ceAi = $("#ceAi", root);
+          if (ceAi) ceAi.addEventListener("click", function () {
             aiCustomizeInto("ceTpl", "ceListenOut", { templated: true, persona: personaOpt });
           });
           $("#ceListen", root).addEventListener("click", function () {
             var tpl = ($("#ceTpl", root).value || "").trim();
+            if (isRec) {
+              previewInto($("#ceListenOut", root), { messageMode: "recording", recordingId: c.recordingId, introTemplate: tpl, persona: personaOpt });
+              return;
+            }
             if (!tpl) { toast("Write a script first"); return; }
             previewInto($("#ceListenOut", root), { scriptTemplate: tpl, persona: personaOpt });
           });
           $("#ceTestCall", root).addEventListener("click", function () {
             var tpl = ($("#ceTpl", root).value || "").trim();
             var to = ($("#ceTestTo", root).value || "").trim();
-            if (!tpl) { toast("Write a script first"); return; }
+            if (!isRec && !tpl) { toast("Write a script first"); return; }
             if (!to) { toast("Enter a landline/VoIP number to test"); return; }
             var out = $("#ceTestOut", root); if (out) out.innerHTML = loading();
-            send("/voice/test-drop", "POST", { to: to, scriptTemplate: tpl, motion: c.motion || motion, persona: personaOpt }).then(function (r) {
+            var payload = isRec
+              ? { to: to, messageMode: "recording", recordingId: c.recordingId, introTemplate: tpl, motion: c.motion || motion, persona: personaOpt }
+              : { to: to, scriptTemplate: tpl, motion: c.motion || motion, persona: personaOpt };
+            send("/voice/test-drop", "POST", payload).then(function (r) {
               if (!out) return;
               if (!r.ok) { out.innerHTML = '<span style="color:var(--danger)">Test failed: ' + esc((r.data && r.data.detail) || (r.data && r.data.error) || r.status) + "</span>"; return; }
               var d = r.data || {};
@@ -18551,6 +18876,16 @@
           });
           $("#ceSave", root).addEventListener("click", function () {
             var tpl = ($("#ceTpl", root).value || "").trim();
+            if (isRec) {
+              // Recording mode: this modal edits the personalized intro (empty =
+              // drop the recording with no intro).
+              send("/voice/campaigns", "PUT", { id: cid, introTemplate: tpl }).then(function (r) {
+                close();
+                if (r.ok) { toast("Intro updated"); paint(); }
+                else toast("Save failed");
+              });
+              return;
+            }
             if (!tpl) { toast("Write a script first"); return; }
             // If this campaign was attributed to a library script and the operator
             // edited the text away from it, detach the attribution ("") so per-script
@@ -18751,7 +19086,8 @@
     function vtSnapshot() {
       return {
         to: val("vtTo"), first: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),
-        agentName: val("vtAgentName"), agentCompany: val("vtAgentCompany"), script: val("vtScript")
+        agentName: val("vtAgentName"), agentCompany: val("vtAgentCompany"), script: val("vtScript"),
+        mode: (($("#vtMode") || {}).value) || "script", recording: val("vtRecording")
       };
     }
     function paintTest(body) {
@@ -18785,14 +19121,39 @@
         inp("vtAgentName", "Your name", "Ryan") +
         inp("vtAgentCompany", "Your firm", "Executive Search") + "</div>" +
 
-        grpLabel("4 · Script") +
+        grpLabel("4 · Message") +
+        '<div class="vd-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:8px">' +
+        '<div class="vd-field"><label>Message source</label><select id="vtMode">' +
+        '<option value="script">Script, AI voice reads it all</option>' +
+        '<option value="recording">My recording + AI intro</option></select></div>' +
+        '<div class="vd-field" id="vtRecField" style="display:none"><label>Recording</label><select id="vtRecording">' + recPickerOptions() + "</select></div></div>" +
         '<div><div style="margin:4px 0">' + fieldChips("vtScript") + "</div>" +
-        '<textarea id="vtScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea></div>" +
+        '<textarea id="vtScript" rows="4" style="width:100%">' + esc(VD_DEFAULT_SCRIPT) + "</textarea>" +
+        '<div class="muted" id="vtScriptHint" style="font-size:12px;margin-top:4px"></div></div>' +
         '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" id="vtGo">Send test drop</button>' +
         '<button class="btn btn-sm" id="vtAi">AI customize</button>' +
         '<button class="btn btn-sm" id="vtListen">Listen first</button></div>' +
         '<div id="vtResult" style="margin-top:12px"></div></div>';
       wireChips(body);
+      // Message-source switch: in recording mode the textarea holds the SHORT
+      // personalized intro (spoken before the recording), not the whole message.
+      function vtModeVal() { var m = $("#vtMode"); return m && m.value === "recording" ? "recording" : "script"; }
+      function vtSyncMode(swapText) {
+        var mode = vtModeVal();
+        var rf = $("#vtRecField"); if (rf) rf.style.display = mode === "recording" ? "" : "none";
+        var hint = $("#vtScriptHint");
+        if (hint) hint.textContent = mode === "recording"
+          ? "This box is the short AI intro spoken before your recording (leave empty for no intro)."
+          : "";
+        if (swapText) {
+          var ta = $("#vtScript");
+          if (ta) ta.value = mode === "recording" ? VD_DEFAULT_INTRO : VD_DEFAULT_SCRIPT;
+        }
+      }
+      loadRecordings(function () { var s = $("#vtRecording"); if (s) s.innerHTML = recPickerOptions(s.value); });
+      var vtM = $("#vtMode");
+      if (vtM) vtM.addEventListener("change", function () { vtSyncMode(true); });
+      vtSyncMode(false);
       // Show which cloned voice this test will actually use (the active engine),
       // so "Send test drop" / "Listen first" are never ambiguous. Links to the
       // Voice & Consent tab where it's chosen.
@@ -18831,6 +19192,8 @@
         if (!t) { toast("Saved test not found"); vtRefreshSaved(); return; }
         vtSetVal("vtTo", t.to); vtSetVal("vtFirst", t.first); vtSetVal("vtRole", t.role); vtSetVal("vtCompany", t.company);
         vtSetVal("vtAgentName", t.agentName); vtSetVal("vtAgentCompany", t.agentCompany); vtSetVal("vtScript", t.script);
+        vtSetVal("vtMode", t.mode || "script"); vtSetVal("vtRecording", t.recording || "");
+        vtSyncMode(false);
         toast("Loaded “" + t.name + "”");
       });
       $("#vtDelete").addEventListener("click", function () {
@@ -18850,18 +19213,37 @@
       });
       $("#vtListen").addEventListener("click", function () {
         var tpl = val("vtScript");
+        var persona = { agentName: val("vtAgentName") || "Ryan", agentCompany: val("vtAgentCompany") || "Executive Search" };
+        if (vtModeVal() === "recording") {
+          var rid3 = val("vtRecording");
+          if (!rid3) { toast("Pick a recording (add one in the Recordings tab)"); return; }
+          previewInto($("#vtResult"), {
+            messageMode: "recording", recordingId: rid3, introTemplate: tpl,
+            firstName: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"), persona: persona,
+          });
+          return;
+        }
         if (!tpl) { toast("Write a script first"); return; }
         previewInto($("#vtResult"), {
           scriptTemplate: tpl, firstName: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),
-          persona: { agentName: val("vtAgentName") || "Ryan", agentCompany: val("vtAgentCompany") || "Executive Search" },
+          persona: persona,
         });
       });
       $("#vtGo").addEventListener("click", function () {
+        var mode = vtModeVal();
         var payload = {
           to: val("vtTo"), firstName: val("vtFirst"), role: val("vtRole"), company: val("vtCompany"),
-          scriptTemplate: val("vtScript"), motion: motion,
+          motion: motion,
           persona: { agentName: val("vtAgentName") || "Ryan", agentCompany: val("vtAgentCompany") || "Executive Search" }
         };
+        if (mode === "recording") {
+          payload.messageMode = "recording";
+          payload.recordingId = val("vtRecording");
+          payload.introTemplate = val("vtScript");
+          if (!payload.recordingId) { toast("Pick a recording (add one in the Recordings tab)"); return; }
+        } else {
+          payload.scriptTemplate = val("vtScript");
+        }
         if (!payload.to) { toast("Enter your test number"); return; }
         $("#vtResult").innerHTML = loading();
         send("/voice/test-drop", "POST", payload).then(function (r) {
@@ -26263,6 +26645,12 @@
           '<div class="card" style="padding:16px;margin-top:16px" id="bdpQueue"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Call queue</h4>' + loading() + "</div>" +
           '<div class="card" style="padding:16px;margin-top:16px" id="bdpRecents"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Recent calls</h4>' + loading() + "</div>" +
           '<div class="card" style="padding:16px;margin-top:16px" id="bdpVmCard"><h4 style="margin:0 0 10px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Voicemail greeting</h4>' + loading() + "</div>" +
+          // Discoverability: the AMD outbound dialer is its own tool (Build ->
+          // Voice Drops); people look for it here on the phone, so point at it.
+          '<div class="card" style="padding:16px;margin-top:16px">' +
+          '<h4 style="margin:0 0 8px;font:500 11px var(--font);text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">Voicemail campaigns (AMD)</h4>' +
+          '<div class="muted" style="font-size:12.5px;line-height:1.55">Want to dial a whole list hands-free? <b>Voice Drops</b> calls business direct lines, detects the answering machine, and leaves a message personalized with each prospect’s first name and job title, either your own recording with an AI intro, or a full AI-voiced script.</div>' +
+          '<a class="btn btn-sm btn-primary" href="#voicedrops" style="margin-top:10px;display:inline-flex">Open Voice Drops</a></div>' +
         "</div>" +
       "</div>";
 

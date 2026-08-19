@@ -108,6 +108,30 @@ export async function cacheStats(): Promise<{
   return { total: Object.keys(m.entries).length, byKind, bytes };
 }
 
+/* ---------------- pre-recorded pitch audio (uploaded, not synthesized) ------
+   Recordings live in the SAME cache volume + manifest as clone segments, so the
+   existing public serve route (/api/voice/audio/{file}), file-volume durability,
+   and cache stats all just work. Keyed "recording:<id>"; never re-synthesized. */
+
+/** Persist an uploaded/mic-recorded pitch; returns the servable file name. */
+export async function saveRecordingAudio(id: string, bytes: Buffer, ext: "mp3" | "wav"): Promise<string> {
+  const m = await loadManifest();
+  const file = `rec_${id.replace(/[^a-z0-9_-]+/gi, "_")}.${ext}`;
+  await fs.mkdir(cacheDir(), { recursive: true });
+  await fs.writeFile(join(cacheDir(), file), bytes);
+  m.entries[file] = { key: `recording:${id}`, voiceId: "recording", bytes: bytes.length, createdAt: new Date().toISOString() };
+  await saveManifest();
+  return file;
+}
+
+/** Delete a recording's audio + manifest entry (best-effort on the file). */
+export async function deleteRecordingAudio(file: string): Promise<void> {
+  const m = await loadManifest();
+  delete m.entries[file];
+  await saveManifest();
+  await fs.unlink(join(cacheDir(), file)).catch(() => {});
+}
+
 export interface RenderedSegment {
   key: string;
   url: string;

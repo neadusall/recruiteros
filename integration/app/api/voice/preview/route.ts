@@ -17,8 +17,8 @@
 import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import { withWorkspaceCreds } from "../../../../lib/connected";
 import {
-  getCampaign, activeVoiceRef, segmentScript, assembleDrop, DEFAULT_PERSONA,
-  type VoiceProvider,
+  getCampaign, activeVoiceRef, assembleMessage, DEFAULT_PERSONA, DEFAULT_INTRO,
+  type VoiceProvider, type VoiceMessageMode,
 } from "../../../../lib/voice";
 
 export async function POST(req: Request) {
@@ -27,9 +27,12 @@ export async function POST(req: Request) {
   const ws = g.ctx.workspace.id;
   const b = await body<any>(req);
 
-  // Resolve the script + voice from a campaign, or from an ad-hoc payload.
+  // Resolve the message (script, or recording + intro) + voice from a campaign,
+  // or from an ad-hoc payload.
   let scriptTemplate = "";
   let persona = { ...DEFAULT_PERSONA };
+  let mode: VoiceMessageMode = "script";
+  let recordingId: string | undefined;
   let voiceId: string | undefined = (b?.voiceId || "").trim() || undefined;
   let provider: VoiceProvider | undefined =
     b?.provider === "cartesia" || b?.provider === "elevenlabs" || b?.provider === "hume"
@@ -39,14 +42,21 @@ export async function POST(req: Request) {
   if (b?.campaignId) {
     const c = getCampaign(ws, b.campaignId);
     if (!c) return fail("not_found", 404);
-    scriptTemplate = c.scriptTemplate;
+    mode = c.messageMode === "recording" ? "recording" : "script";
+    recordingId = c.recordingId;
+    scriptTemplate = mode === "recording" ? (c.introTemplate ?? DEFAULT_INTRO) : c.scriptTemplate;
     persona = { ...DEFAULT_PERSONA, ...c.persona };
     if (!voiceId && c.voiceId) { voiceId = c.voiceId; provider = c.voiceProvider; }
   } else {
-    scriptTemplate = (b?.scriptTemplate || "").trim();
+    mode = b?.messageMode === "recording" ? "recording" : "script";
+    recordingId = (b?.recordingId || "").trim() || undefined;
+    scriptTemplate = mode === "recording"
+      ? String(b?.introTemplate ?? b?.scriptTemplate ?? "").trim()
+      : (b?.scriptTemplate || "").trim();
     persona = { ...DEFAULT_PERSONA, ...(b?.persona || {}) };
   }
-  if (!scriptTemplate) return fail("missing_fields", 422, { detail: "campaignId or scriptTemplate is required" });
+  if (mode === "recording" && !recordingId) return fail("missing_fields", 422, { detail: "pick a recording first (Recordings tab)" });
+  if (mode === "script" && !scriptTemplate) return fail("missing_fields", 422, { detail: "campaignId or scriptTemplate is required" });
 
   // Fall back to the workspace's chosen ACTIVE engine/voice, so "Listen first"
   // previews the exact provider + voice that real tests and sends will use
@@ -63,16 +73,24 @@ export async function POST(req: Request) {
     company: (b?.company || "Acme").trim(),
   };
 
-  const segments = segmentScript(scriptTemplate, vars, persona);
-  const drop = await withWorkspaceCreds(ws, () => assembleDrop(segments, { provider, voiceId }));
+  let drop;
+  try {
+    drop = await withWorkspaceCreds(ws, () => assembleMessage({
+      workspaceId: ws, mode, text: scriptTemplate, recordingId,
+      vars, persona, voice: { provider, voiceId },
+    }));
+  } catch (e: any) {
+    if (e?.message === "recording_missing") return fail("not_found", 404, { detail: "that recording no longer exists" });
+    throw e;
+  }
 
   return ok({
     playlist: drop.playlist,
     dryRun: drop.dryRun,
     synthesized: drop.synthesized,
     cached: drop.cached,
-    clips: segments.length,
-    rendered: segments.map((s) => s.text).join(" "),
+    clips: drop.playlist.length,
+    rendered: drop.rendered,
     voice: { provider: provider || null, voiceId: voiceId || null },
   });
 }

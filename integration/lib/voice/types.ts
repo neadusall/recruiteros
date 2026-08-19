@@ -154,6 +154,44 @@ export interface VoiceScript {
   updatedAt: string;
 }
 
+/**
+ * A pre-recorded pitch (the operator's OWN voice, uploaded or mic-recorded) that
+ * a campaign can drop onto voicemails instead of a synthesized script. The drop
+ * plays a short personalized AI intro first ("Hi {first_name}. I know you're the
+ * {role} at {company}.") in the operator's cloned voice, then this recording.
+ *
+ * PERSONAL artifact (CLAUDE.md rule 2): it carries a specific person's voice, so
+ * it stamps the owning recruiter's email and portal routes filter to the
+ * requester (workspace owner/admin keep the full-workspace view).
+ */
+export interface VoiceRecording {
+  id: string;
+  workspaceId: string;
+  /** Owning recruiter (lowercased email). Personal: filtered per requester. */
+  ownerEmail: string;
+  /** Display name, e.g. "Perm placement pitch, Q3". */
+  name: string;
+  /** Audio file in the voice cache (rec_*.mp3 / rec_*.wav), served publicly via
+   *  /api/voice/audio/{file} so Telnyx playback can fetch it. Opaque name. */
+  file: string;
+  mime: "audio/mpeg" | "audio/wav";
+  bytes: number;
+  /** Measured client-side on upload; used for cost/length estimates. */
+  durationSec?: number;
+  /** Operator attested the recording states their real name + firm (honest
+   *  identification lives INSIDE the audio, which we cannot machine-check). */
+  identifiesAttested: boolean;
+  createdAt: string;
+  createdBy: string;
+}
+
+/** How a campaign's voicemail message is built. */
+export type VoiceMessageMode = "script" | "recording";
+
+/** Default personalized-intro template for recording-mode drops. */
+export const DEFAULT_INTRO =
+  "Hi {first_name}. I know you're the {role} at {company}, so I'll keep this quick.";
+
 /** A Voice Drops campaign — the unit of work, in BD or Recruiting. */
 export interface VoiceCampaign {
   id: string;
@@ -168,6 +206,20 @@ export interface VoiceCampaign {
    *  so per-script performance can be tallied (see scriptStats). Decoupled from
    *  scriptTemplate so editing the campaign copy doesn't lose the attribution. */
   scriptId?: string;
+  /**
+   * How the voicemail is built (default "script"):
+   *  - script:    the whole message is the cloned-voice TTS of scriptTemplate.
+   *  - recording: a short personalized AI intro (introTemplate, cloned voice)
+   *               plays first, then the operator's pre-recorded pitch
+   *               (recordingId). The intro is cached per unique name/role, so
+   *               repeats cost nothing; the recording is never re-synthesized.
+   */
+  messageMode?: VoiceMessageMode;
+  /** The pre-recorded pitch dropped after the intro (messageMode "recording"). */
+  recordingId?: string;
+  /** Personalized intro template for recording mode ({first_name}/{role}/{company}).
+   *  Empty = drop the recording with no intro. */
+  introTemplate?: string;
   /** Cloned voice used to render the drop (operator's consented voice). */
   voiceId?: string;
   /** TTS vendor for voiceId (default elevenlabs). */
@@ -227,6 +279,10 @@ export interface VoiceCampaignInput {
   persona?: Partial<VoicePersona>;
   scriptTemplate?: string;
   scriptId?: string;
+  messageMode?: VoiceMessageMode;
+  /** "" detaches the recording; absent keeps it; an id (re)sets it. */
+  recordingId?: string;
+  introTemplate?: string;
   voiceId?: string;
   voiceProvider?: VoiceProvider;
   callerId?: string;

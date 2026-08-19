@@ -18,9 +18,16 @@ export async function POST(req: Request) {
   const b = await body<any>(req);
 
   const to = (b?.to || "").trim();
-  const scriptTemplate = (b?.scriptTemplate || "").trim();
+  const messageMode = b?.messageMode === "recording" ? "recording" as const : "script" as const;
+  // Script mode: scriptTemplate is the whole message (required). Recording mode:
+  // the message is the pre-recorded pitch (recordingId required) with an optional
+  // personalized AI intro (introTemplate; empty = drop the recording alone).
+  const scriptTemplate = messageMode === "recording"
+    ? (b?.introTemplate ?? b?.scriptTemplate ?? "").trim()
+    : (b?.scriptTemplate || "").trim();
   if (!to) return fail("missing_fields", 422, { detail: "to (your own test number) is required" });
-  if (!scriptTemplate) return fail("missing_fields", 422, { detail: "scriptTemplate is required" });
+  if (messageMode === "script" && !scriptTemplate) return fail("missing_fields", 422, { detail: "scriptTemplate is required" });
+  if (messageMode === "recording" && !b?.recordingId) return fail("missing_fields", 422, { detail: "recordingId is required (pick one in the Recordings tab)" });
 
   const persona = { ...DEFAULT_PERSONA, ...(b?.persona || {}) };
   const motion: Motion = b?.motion === "bd" ? "bd" : "recruiting";
@@ -34,6 +41,8 @@ export async function POST(req: Request) {
       scriptTemplate,
       persona,
       voiceId: b?.voiceId,
+      messageMode,
+      recordingId: b?.recordingId,
     });
     return ok(result);
   } catch (e: any) {

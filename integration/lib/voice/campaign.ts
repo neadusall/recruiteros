@@ -27,13 +27,13 @@ import type { Motion } from "../core/types";
 
 import { segmentScript, renderScript, checkScript, identifierLine, type MergeVars } from "./script";
 import { draftVoiceScript } from "./draft";
-import { assembleDrop, type VoiceRef } from "./clones";
+import { assembleDrop, audioUrl, type VoiceRef } from "./clones";
 import { getVoiceClientFor } from "./provider";
 import { checkWindow, resolveTimezone, type WindowCheck } from "./compliance";
 import { toE164 } from "./phone";
 import {
   getCampaign, getLeads, setLeads, updateLead, recordDrop, registerPending,
-  getPending, clearPending, activeVoiceRef,
+  getPending, clearPending, activeVoiceRef, getRecording,
 } from "./store";
 
 /**
@@ -51,7 +51,8 @@ function resolveVoiceRef(workspaceId: string, voiceId?: string, voiceProvider?: 
   if (voiceId) return { provider: voiceProvider, voiceId };
   return activeVoiceRef(workspaceId);
 }
-import type { VoiceCampaign, VoiceLead, DropOutcome } from "./types";
+import type { VoiceCampaign, VoiceLead, DropOutcome, VoiceMessageMode, VoicePersona } from "./types";
+import { DEFAULT_INTRO } from "./types";
 
 function appUrl(): string {
   return process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
@@ -129,6 +130,62 @@ export async function importLeads(
   return summary;
 }
 
+/* ---------------- message assembly (script OR recording + AI intro) --------- */
+
+export interface AssembledMessage {
+  /** Ordered audio URLs the webhook plays onto the voicemail. */
+  playlist: string[];
+  /** Billable cache-miss TTS renders (intro/script only; recordings are free). */
+  synthesized: number;
+  cached: number;
+  dryRun: boolean;
+  /** What the drop says: the rendered script, or the rendered intro plus a note
+   *  that the recording follows (we cannot transcribe the recording). */
+  rendered: string;
+}
+
+/**
+ * Build one drop's playlist either way:
+ *  - script:    the whole message is cloned-voice TTS of `text`.
+ *  - recording: `text` is the personalized INTRO template ("Hi {first_name}. I
+ *               know you're the {role} at {company}...") rendered in the cloned
+ *               voice, followed by the operator's pre-recorded pitch. The intro
+ *               caches per unique rendered text, so a repeated name+role costs
+ *               nothing; the recording itself is never synthesized. An empty
+ *               intro drops the recording alone.
+ * Throws when recording mode points at a recording that no longer exists (the
+ * launch gate normally catches this first).
+ */
+export async function assembleMessage(opts: {
+  workspaceId: string;
+  mode: VoiceMessageMode;
+  text: string;
+  recordingId?: string;
+  vars: MergeVars;
+  persona: VoicePersona;
+  voice: VoiceRef;
+}): Promise<AssembledMessage> {
+  if (opts.mode === "recording") {
+    const rec = opts.recordingId ? getRecording(opts.workspaceId, opts.recordingId) : undefined;
+    if (!rec) throw new Error("recording_missing");
+    const introTpl = opts.text.trim();
+    const segments = introTpl ? segmentScript(introTpl, opts.vars, opts.persona) : [];
+    const intro = segments.length
+      ? await assembleDrop(segments, opts.voice)
+      : { playlist: [], synthesized: 0, cached: 0, dryRun: false };
+    return {
+      playlist: [...intro.playlist, audioUrl(rec.file)],
+      synthesized: intro.synthesized,
+      cached: intro.cached,
+      dryRun: intro.dryRun,
+      rendered: (segments.map((s) => s.text).join(" ") + ` [then your recording "${rec.name}" plays]`).trim(),
+    };
+  }
+  const segments = segmentScript(opts.text, opts.vars, opts.persona);
+  const drop = await assembleDrop(segments, opts.voice);
+  return { ...drop, rendered: segments.map((s) => s.text).join(" ") };
+}
+
 /* ---------------- launch gating ---------------- */
 
 export interface LaunchCheck {
@@ -141,7 +198,22 @@ export function checkLaunch(c: VoiceCampaign): LaunchCheck {
   const errors: string[] = [];
   if (!c.consentAttested) errors.push("Consent attestation required before launch.");
   if (!c.callerId) errors.push("Select an approved 10DLC caller-ID number.");
-  if (!c.scriptTemplate.trim()) errors.push("Write a voicemail script.");
+  if ((c.messageMode ?? "script") === "recording") {
+    // Recording mode: the pitch is pre-recorded audio we cannot machine-check,
+    // so honest identification must live in the AI intro OR be attested on the
+    // recording itself ("states my real name and firm").
+    const rec = c.recordingId ? getRecording(c.workspaceId, c.recordingId) : undefined;
+    if (!rec) errors.push("Pick a recording to drop (Recordings tab).");
+    else {
+      const introTpl = (c.introTemplate ?? DEFAULT_INTRO).trim();
+      const introIdentifies = introTpl
+        ? checkScript(renderScript(introTpl, { firstName: "there", role: "leader" }, c.persona), c.persona).identifies
+        : false;
+      if (!introIdentifies && !rec.identifiesAttested) {
+        errors.push("The drop must identify you: add {agent_name}/{agent_company} to the intro, or attest the recording states your name and firm.");
+      }
+    }
+  } else if (!c.scriptTemplate.trim()) errors.push("Write a voicemail script.");
   else {
     const rendered = renderScript(c.scriptTemplate, { firstName: "there", role: "leader" }, c.persona);
     const chk = checkScript(rendered, c.persona);
@@ -223,8 +295,9 @@ export async function runDueDrops(
     //     the campaign template. Identification is re-checked; a failure (or any
     //     LLM error) falls back to the template, so it can never block a drop, else
     //  3) the shared campaign template.
+    const mode: VoiceMessageMode = c.messageMode ?? "script";
     let scriptText = lead.customScript || c.scriptTemplate;
-    if (!lead.customScript && c.aiCustomize) {
+    if (mode === "script" && !lead.customScript && c.aiCustomize) {
       try {
         const ai = await withWorkspaceCreds(workspaceId, () =>
           draftVoiceScript({
@@ -235,8 +308,23 @@ export async function runDueDrops(
         if (ai.text && ai.identifies) scriptText = ai.text; // keep honest identification
       } catch { /* fall back to the template */ }
     }
-    const segments = segmentScript(scriptText, vars, c.persona);
-    const drop = await assembleDrop(segments, voice);
+    // Recording mode plays the personalized AI intro then the operator's
+    // pre-recorded pitch; per-lead custom scripts / AI-customize are script-mode
+    // concepts and are ignored there.
+    let drop: AssembledMessage;
+    try {
+      drop = await assembleMessage({
+        workspaceId, mode,
+        text: mode === "recording" ? (c.introTemplate ?? DEFAULT_INTRO) : scriptText,
+        recordingId: c.recordingId,
+        vars, persona: c.persona, voice,
+      });
+    } catch {
+      // The attached recording vanished mid-run: mark failed, keep the tick going.
+      updateLead(campaignId, lead.id, { outcome: "failed" });
+      recordDrop({ workspaceId, campaignId, leadId: lead.id, outcome: "failed", meta: { reason: "recording_missing" } });
+      continue;
+    }
     sum.synthesized += drop.synthesized;
     sum.cached += drop.cached;
     if (drop.dryRun) sum.dryRun = true;
@@ -291,10 +379,14 @@ export interface TestDropInput {
   firstName?: string;
   role?: string;
   company?: string;
+  /** Script mode: the whole message. Recording mode: the intro template. */
   scriptTemplate: string;
   persona: VoiceCampaign["persona"];
   voiceId?: string;
   voiceProvider?: VoiceRef["provider"];
+  /** "recording" = personalized AI intro + the pre-recorded pitch. */
+  messageMode?: VoiceMessageMode;
+  recordingId?: string;
 }
 
 /**
@@ -305,21 +397,36 @@ export interface TestDropInput {
 export async function testDrop(workspaceId: string, motion: Motion, input: TestDropInput) {
   const voice = resolveVoiceRef(workspaceId, input.voiceId, input.voiceProvider);
   const vars: MergeVars = { firstName: input.firstName, role: input.role, company: input.company };
-  const rendered = renderScript(input.scriptTemplate, vars, input.persona);
+  const mode: VoiceMessageMode = input.messageMode === "recording" ? "recording" : "script";
+  let rendered = renderScript(input.scriptTemplate, vars, input.persona);
   const chk = checkScript(rendered, input.persona);
-  const warnings = [...chk.warnings];
+  // Sweet-spot/identification warnings describe the whole message; in recording
+  // mode the pitch lives in the recording, so only surface an identification
+  // nudge when neither the intro nor the recording covers it (checked below).
+  const warnings = mode === "script" ? [...chk.warnings] : [];
 
   // Assemble the cloned-voice playlist. A synthesis failure (bad voice id, clone
   // quota, provider 4xx) must NOT abort the test — we still want to show the
   // rendered script and dial the honest identifier. Degrade to a dry playlist and
   // tell the operator exactly what failed.
-  const segments = segmentScript(input.scriptTemplate, vars, input.persona);
-  let drop: Awaited<ReturnType<typeof assembleDrop>>;
+  let drop: AssembledMessage;
   try {
-    drop = await assembleDrop(segments, voice);
+    drop = await assembleMessage({
+      workspaceId, mode, text: input.scriptTemplate, recordingId: input.recordingId,
+      vars, persona: input.persona, voice,
+    });
+    rendered = drop.rendered || rendered;
+    if (mode === "recording") {
+      const rec = input.recordingId ? getRecording(workspaceId, input.recordingId) : undefined;
+      if (rec && !rec.identifiesAttested && !chk.identifies) {
+        warnings.push("Neither the intro nor the recording is marked as stating your name and firm; a live launch will ask for one.");
+      }
+    }
   } catch (e: any) {
-    warnings.push(`Voice synthesis failed (${e?.message || "error"}); dialed without the cloned drop.`);
-    drop = { playlist: [], synthesized: 0, cached: 0, dryRun: true };
+    warnings.push(mode === "recording" && e?.message === "recording_missing"
+      ? "The selected recording no longer exists; pick another in the Recordings tab."
+      : `Voice synthesis failed (${e?.message || "error"}); dialed without the cloned drop.`);
+    drop = { playlist: [], synthesized: 0, cached: 0, dryRun: true, rendered };
   }
 
   // Dial. A Telnyx error here is reported, not thrown, so the operator sees the
@@ -364,8 +471,11 @@ export async function testDrop(workspaceId: string, motion: Motion, input: TestD
     cloneDryRun: drop.dryRun,
     dialError,
     rendered,
-    estSeconds: chk.seconds,
-    withinSweetSpot: chk.withinSweetSpot,
+    // Recording mode: message length = intro + the recording's measured length.
+    estSeconds: mode === "recording"
+      ? chk.seconds + Math.round((input.recordingId && getRecording(workspaceId, input.recordingId)?.durationSec) || 0)
+      : chk.seconds,
+    withinSweetSpot: mode === "recording" ? true : chk.withinSweetSpot,
     warnings,
     playlistLength: drop.playlist.length,
     synthesized: drop.synthesized,

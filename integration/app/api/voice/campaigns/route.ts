@@ -11,10 +11,11 @@
  */
 
 import { body, ok, fail, requireCapability } from "../../../../lib/api";
+import { isWorkspaceAdmin, requesterEmail } from "../../../../lib/inmarket/ownership";
 import type { Motion } from "../../../../lib/core/types";
 import {
   listCampaigns, getCampaign, upsertCampaign, deleteCampaign, attestConsent, campaignStats,
-  importLeads, checkLaunch, runDueDrops, getLeads,
+  importLeads, checkLaunch, runDueDrops, getLeads, getRecording, canUseRecording,
   type VoiceCampaignInput, type RawLead,
 } from "../../../../lib/voice";
 
@@ -28,6 +29,8 @@ export async function GET(req: Request) {
   const motion = asMotion(new URL(req.url).searchParams.get("motion"));
   const campaigns = listCampaigns(g.ctx.workspace.id, motion).map((c) => ({
     ...c, stats: campaignStats(c.id),
+    // Card copy for recording-mode campaigns ("drops <name> after the intro").
+    recordingName: c.recordingId ? getRecording(g.ctx.workspace.id, c.recordingId)?.name ?? null : null,
   }));
   return ok({ campaigns });
 }
@@ -39,6 +42,13 @@ export async function PUT(req: Request) {
   // Name is required to CREATE; an update (id present) may patch a subset of
   // fields — e.g. flipping testMode — without resending everything.
   if (!b?.id && !b?.name) return fail("missing_fields", 422);
+  // Attaching a recording: it must exist in THIS workspace and be the
+  // requester's own (or the requester is owner/admin) — personal-artifact rule.
+  if (b?.recordingId) {
+    const rec = getRecording(g.ctx.workspace.id, b.recordingId);
+    if (!rec) return fail("recording_not_found", 404);
+    if (!canUseRecording(rec, requesterEmail(g.ctx), isWorkspaceAdmin(g.ctx))) return fail("forbidden", 403);
+  }
   const c = upsertCampaign(g.ctx.workspace.id, b);
   return ok({ campaign: { ...c, stats: campaignStats(c.id) } });
 }
