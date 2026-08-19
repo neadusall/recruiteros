@@ -384,19 +384,39 @@ export async function recruiterPools(workspaceId: string): Promise<RecruiterPool
   return [...map.values()].sort((a, b) => b.inboxes - a.inboxes);
 }
 
-export async function stats(workspaceId: string): Promise<{ inboxes: number; active: number; recruiters: number; dailyCapacity: number; remainingToday: number }> {
+/**
+ * Sending domains currently benched by the bounce circuit breaker (mpc_domain_rest_v1).
+ * Capacity math must exclude their mailboxes: a resting domain sends nothing, and counting
+ * its boxes anyway is how the Senders tab could read 2,150 cold sends/day while the sender
+ * could physically do ~100. Fail-open: no ledger (or a read error) benches nothing.
+ */
+async function restingDomainsNow(): Promise<Set<string>> {
+  const out = new Set<string>();
+  try {
+    const snap = await loadSnapshot<{ domains?: Record<string, { state?: string; until?: string }> }>("mpc_domain_rest_v1");
+    const now = Date.now();
+    for (const [d, v] of Object.entries(snap?.domains || {})) {
+      if (v?.state === "resting" && (!v.until || Date.parse(v.until) > now)) out.add(d.toLowerCase());
+    }
+  } catch { /* fail-open */ }
+  return out;
+}
+
+export async function stats(workspaceId: string): Promise<{ inboxes: number; active: number; recruiters: number; dailyCapacity: number; remainingToday: number; benched: number }> {
   await hydrate();
+  const resting = await restingDomainsNow();
   const mine = state.inboxes.filter((m) => m.workspaceId === workspaceId);
   const owners = new Set(mine.filter((m) => m.ownerId).map((m) => m.ownerId));
-  let cap = 0, rem = 0, active = 0;
+  let cap = 0, rem = 0, active = 0, benched = 0;
   for (const m of mine) {
     if (m.status === "active" || m.status === "warming") {
       active++;
+      if (resting.has(domainOf(m.email))) { benched++; continue; }
       cap += coldCapFor(m);
       rem += Math.max(0, coldCapFor(m) - m.sentToday);
     }
   }
-  return { inboxes: mine.length, active, recruiters: owners.size, dailyCapacity: cap, remainingToday: rem };
+  return { inboxes: mine.length, active, recruiters: owners.size, dailyCapacity: cap, remainingToday: rem, benched };
 }
 
 /** Record a send against an inbox's daily cap + lifetime counter. */
@@ -503,6 +523,7 @@ export interface ProviderCapacity {
   coldUsedToday: number;
   coldRemaining: number;
   matureCapacity: number;            // cold sends/day at FULL ramp (flat model: == coldCapacity)
+  benchedInboxes: number;            // this provider's boxes idled by resting domains
 }
 
 export interface SendCapacity {
@@ -516,6 +537,9 @@ export interface SendCapacity {
   coldRemaining: number;
   matureCapacity: number;            // portal-wide cold sends/day at FULL ramp
   warmingPerDay: number;
+  benchedInboxes: number;            // boxes idled because their domain is resting after bounces
+  benchedCapacity: number;           // the cold sends/day those benched boxes would carry
+  restingDomains: number;            // domains currently on the bounce bench
   byRecruiter: RecruiterCapacity[];
   byProvider: ProviderCapacity[];
 }
@@ -528,6 +552,7 @@ export interface SendCapacity {
  */
 export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
   await hydrate();
+  const resting = await restingDomainsNow();
   const mine = state.inboxes.filter(
     (m) => m.workspaceId === workspaceId && (m.status === "active" || m.status === "warming"),
   );
@@ -535,6 +560,7 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
   const provs = new Map<string, ProviderCapacity & { _domains: Set<string> }>();
   const domains = new Set<string>();
   let inboxes = 0, coldCapacity = 0, coldUsedToday = 0, matureCapacity = 0;
+  let benchedInboxes = 0, benchedCapacity = 0;
   for (const m of mine) {
     const cap = coldCapFor(m);
     // Full-ramp ceiling for this inbox: Sending.ac is flat (never ramps), every
@@ -543,18 +569,28 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
     const mature = m.provider === "sending-ac" ? SENDING_AC_PER_INBOX : coldMaxPerInbox();
     const used = Math.min(m.sentToday, cap);
     const dom = domainOf(m.email);
-    inboxes++; coldCapacity += cap; coldUsedToday += used; matureCapacity += mature;
-    if (dom) domains.add(dom);
     const pKey = m.provider || "other";
     let pv = provs.get(pKey);
     if (!pv) {
       pv = {
         provider: pKey, capModel: pKey === "sending-ac" ? "flat" : "ramp",
         inboxes: 0, domains: 0, coldCapacity: 0, coldUsedToday: 0, coldRemaining: 0, matureCapacity: 0,
+        benchedInboxes: 0,
         _domains: new Set<string>(),
       };
       provs.set(pKey, pv);
     }
+    // A box on a resting domain sends nothing today: it is BENCHED capacity, not
+    // available capacity. Counted separately so the tab can show both truthfully.
+    if (dom && resting.has(dom)) {
+      benchedInboxes++; benchedCapacity += cap;
+      pv.benchedInboxes++;
+      if (dom) pv._domains.add(dom);
+      if (dom) domains.add(dom);
+      continue;
+    }
+    inboxes++; coldCapacity += cap; coldUsedToday += used; matureCapacity += mature;
+    if (dom) domains.add(dom);
     pv.inboxes++; pv.coldCapacity += cap; pv.coldUsedToday += used; pv.matureCapacity += mature;
     if (dom) pv._domains.add(dom);
     const key = m.ownerId || "_unassigned";
@@ -585,14 +621,16 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
       coldCapacity: p.coldCapacity, coldUsedToday: p.coldUsedToday,
       coldRemaining: Math.max(0, p.coldCapacity - p.coldUsedToday),
       matureCapacity: p.matureCapacity,
+      benchedInboxes: p.benchedInboxes,
     }))
-    .sort((a, b) => b.inboxes - a.inboxes);
+    .sort((a, b) => (b.inboxes + b.benchedInboxes) - (a.inboxes + a.benchedInboxes));
   return {
     coldPerInbox: coldMaxPerInbox(), warmingPerInbox: WARMING_PER_INBOX, inboxesPerDomain: INBOXES_PER_DOMAIN,
     inboxes, domains: domains.size,
     coldCapacity, coldUsedToday, coldRemaining: Math.max(0, coldCapacity - coldUsedToday),
     matureCapacity,
     warmingPerDay: inboxes * WARMING_PER_INBOX,
+    benchedInboxes, benchedCapacity, restingDomains: resting.size,
     byRecruiter,
     byProvider,
   };

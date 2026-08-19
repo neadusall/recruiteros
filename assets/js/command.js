@@ -1443,6 +1443,7 @@
 
         // Today's send capacity, spelled out from Email IDs x domains.
         body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> available today" + (cap.matureCapacity && cap.matureCapacity > cap.coldCapacity ? ' <span style="color:var(--text-dim)">(' + n(cap.matureCapacity) + "/day at full ramp, as warming mailboxes mature)</span>" : "") + " across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
+          (cap.benchedInboxes ? ', with <b style="color:#b26a00">' + n(cap.benchedInboxes) + ' Email IDs benched</b> on ' + n(cap.restingDomains || 0) + " resting domains (they rejoin automatically as the bounce bench lifts)" : "") +
           (cap.warmingPerDay ? ', plus about ' + n(cap.warmingPerDay) + " external warm-up sends/day that build reputation (not outreach)." : ".") + "</div>";
         var provRows = (cap.byProvider || []).map(function (p) {
           var nm = provName[p.provider] || p.provider;
@@ -9664,7 +9665,9 @@
   function renderSenderStats() {
     var s = sndData.stats || {}, box = $("#sndStatsBox"); if (!box) return;
     function c(v, l) { return '<div class="snd-stat"><div class="snd-statv">' + esc(v) + '</div><div class="snd-statl">' + esc(l) + '</div></div>'; }
-    box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") + c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
+    box.innerHTML = c(s.inboxes || 0, "Email IDs") + c(s.active || 0, "Active") +
+      (s.benched ? c(s.benched, "Benched (resting domains)") : "") +
+      c(s.recruiters || 0, "Recruiters") + c(s.dailyCapacity || 0, "Cold sends/day") + c(s.remainingToday || 0, "Remaining today");
     renderSenderProviders();
   }
 
@@ -9684,8 +9687,11 @@
         // Show today's warm-up-throttled figure, plus the full-ramp ceiling when the
         // provider ramps and isn't there yet, so the capacity never reads misleadingly low.
         var ramps = p.matureCapacity > p.coldCapacity;
+        // Benched boxes sit on domains resting after bounce trouble: real inventory,
+        // zero capacity today. Shown, never blended into the sends/day number.
+        var benched = p.benchedInboxes ? ' · <span style="color:#b26a00">' + fmt(p.benchedInboxes) + ' benched on resting domains</span>' : '';
         return '<div class="snd-split-row">' + sndProviderBadge(p.provider) +
-          '<span class="snd-split-meta">' + p.inboxes + ' Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + fmt(p.coldCapacity) + '</b> cold sends/day' + (ramps ? ' <span class="muted">(ramps to <b>' + fmt(p.matureCapacity) + '</b>/day at full ramp)</span>' : '') + ' · ' + fmt(p.coldRemaining) + ' left today</span>' +
+          '<span class="snd-split-meta">' + p.inboxes + ' sendable Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + fmt(p.coldCapacity) + '</b> cold sends/day' + (ramps ? ' <span class="muted">(ramps to <b>' + fmt(p.matureCapacity) + '</b>/day at full ramp)</span>' : '') + ' · ' + fmt(p.coldRemaining) + ' left today' + benched + '</span>' +
           (notes[p.provider] ? '<span class="snd-split-note">' + esc(notes[p.provider]) + '</span>' : '') +
         '</div>';
       }).join("") + '</div>';
