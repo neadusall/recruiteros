@@ -590,8 +590,12 @@ interface WatchState {
  *  Epoch 2 same day: the epoch-1 rewrite hard-sliced two overlong drafts
  *  mid-word ("Happy to compare not") and let one closing formula repeat
  *  across the queue; rewrite once more with the sentence-safe fit and the
- *  variety brief in place. */
-const COMMENT_COPY_EPOCH = 2;
+ *  variety brief in place. Epoch 3: epoch 2's variety push made the model
+ *  drop the invitation entirely (13 of 18 shipped observation-only) and one
+ *  greeting post drew a meta-refusal; the invitation is now enforced with a
+ *  corrective retry, contentless posts SKIP out of the queue, and used
+ *  closings are banned by wording. */
+const COMMENT_COPY_EPOCH = 3;
 
 const KEY = "linkedin_comment_watch_v1";
 let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {} };
@@ -1025,16 +1029,35 @@ function priorComments(workspaceId: string): string[] {
   return sent.concat(queued);
 }
 
+/** Does the draft end on an actual invitation to engage? The owner rule
+ *  (2026-08-19) is that every public comment closes with a low-pressure
+ *  offer of help; the epoch-2 rewrite showed the model quietly dropping it
+ *  when pushed hard on variety (13 of 18 drafts shipped observation-only),
+ *  so presence is enforced with a check and one corrective retry, not by
+ *  the prompt alone. Heuristic on the final stretch of the text. */
+const INVITE_RE = /\b(happy to|glad to|worth (comparing|trading|a chat|a conversation|swapping)|if (you|it) (want|ever|need|would|'d)|just (ask|say the word|reach)|inbox is open|my inbox|door is open|open to (comparing|trading|sharing|swapping)|second (set of eyes|perspective|opinion)|compare notes|trade notes|swap notes|can share what we|happy either way)\b/i;
+function hasClosingInvite(text: string): boolean {
+  return INVITE_RE.test(text.slice(-240));
+}
+
 /** Prompt-side variety steering. The dup guard rejects near-duplicates after
  *  the fact, but it cannot stop every draft closing on the same invitation
  *  ("Happy to compare notes...", seen 5 of 6 in the epoch-1 rewrite), because
  *  the observation carries the word-set while the closing formula repeats
- *  freely. Showing the model the most recent comments and telling it to shape
- *  its own differently kills the formula at the source. */
+ *  freely. Showing the model the most recent comments, plus every closing
+ *  wording already in use, kills the formula at the source, and the brief
+ *  restates that the invitation itself is NOT optional: epoch 2 proved that
+ *  "close differently" alone reads to the model as permission to not close
+ *  at all. */
 function varietyBrief(workspaceId: string, excluding?: string): string {
-  const recent = priorComments(workspaceId).filter((t) => t !== excluding).slice(-4);
+  const priors = priorComments(workspaceId).filter((t) => t !== excluding);
+  const recent = priors.slice(-4);
   if (!recent.length) return "";
-  return `\n\nRECENT COMMENTS THIS ACCOUNT ALREADY LEFT (yours must open differently, be shaped differently, and close on a DIFFERENT invitation wording than every one of these):\n${recent.map((t) => `- ${t}`).join("\n")}`;
+  const closings = [...new Set(priors
+    .map((t) => t.trim().split(/(?<=[.?!])\s+/).pop() ?? "")
+    .filter((s) => s.length >= 15 && INVITE_RE.test(s)))].slice(-8);
+  return `\n\nRECENT COMMENTS THIS ACCOUNT ALREADY LEFT. Yours must open differently and be shaped differently, and it still ENDS with its own short, low-pressure invitation to engage (that rule always stands), worded unlike any of these:\n${recent.map((t) => `- ${t}`).join("\n")}`
+    + (closings.length ? `\n\nCLOSING INVITATIONS ALREADY USED (write a fresh one, never reuse these wordings):\n${closings.map((s) => `- ${s}`).join("\n")}` : "");
 }
 
 /** Fit a draft inside MAX_COMMENT_CHARS without ever cutting mid-word. The
@@ -1123,6 +1146,8 @@ const MODEL = () =>
 function scrub(text: string): string {
   return text
     .replace(/[—–]/g, ",")
+    // "--" is the model dodging the long-dash ban with ASCII; same rule applies.
+    .replace(/\s+--+\s+/g, ", ")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/^```[a-z]*\n?|```$/gm, "")
@@ -1195,6 +1220,7 @@ Rules:
 - Banned openers: "Great post", "Love this", "So true", "This is spot on", "Couldn't agree more", "Thanks for sharing", "Commenting for reach".
 - Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies", "reach out".
 - Vary your sentence shape from comment to comment: do not settle into one formula. If nothing specific and true can be said about this post, ask the one question an operator who runs these searches weekly would ask, never a generic one.
+- If the post offers nothing a comment could genuinely engage with (a holiday greeting, a bare celebration, an announcement with no substance), return exactly SKIP. Never write about these rules, never describe the post, never explain why you cannot comment.
 - Never mention AI.
 Return ONLY the comment text, nothing else.`;
 
@@ -1481,7 +1507,7 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     save();
     try {
       const r = await redraftOpenComments(workspaceId);
-      console.log(`[comment-radar] ${workspaceId}: copy epoch ${COMMENT_COPY_EPOCH}: rewritten=${r.redrafted} kept=${r.kept}`);
+      console.log(`[comment-radar] ${workspaceId}: copy epoch ${COMMENT_COPY_EPOCH}: rewritten=${r.redrafted} kept=${r.kept} skipped=${r.skipped}`);
     } catch (e) {
       console.log(`[comment-radar] ${workspaceId}: epoch redraft error (${e instanceof Error ? e.message : e})`);
     }
@@ -2393,10 +2419,19 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       const brief = combo.id === "industry_conversation"
         ? `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`
         : `The role they are hiring for is ${jobTitle}${city ? ` in ${city}` : ""}.`;
-      const drafted = await draft(POST_COMMENT_RULES,
-        `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId)}`);
-      if (!drafted) { g.commentDraft++; continue; }
-      const candidate = fitComment(scrub(drafted));
+      const userMsg = `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId)}`;
+      const drafted = await draft(POST_COMMENT_RULES, userMsg);
+      if (!drafted || /^\s*SKIP\b/i.test(drafted)) { g.commentDraft++; continue; }
+      let candidate = fitComment(scrub(drafted));
+      // The closing invitation is the point of the lane (owner 2026-08-19);
+      // a draft without one gets one corrective pass, then the lead is
+      // dropped rather than queued observation-only.
+      if (candidate && !hasClosingInvite(candidate)) {
+        const retry = await draft(POST_COMMENT_RULES,
+          `${userMsg}\n\nYour previous attempt:\n${candidate}\n\nIt is missing the closing invitation. Keep the observation, and END with one short, low-pressure invitation to engage.`);
+        candidate = retry && !/^\s*SKIP\b/i.test(retry) ? fitComment(scrub(retry)) : null;
+        if (candidate && !hasClosingInvite(candidate)) candidate = null;
+      }
       if (!candidate) { g.commentDraft++; continue; }
       const leak = pitchLeakReason(candidate, c.text);
       if (leak) { g.commentLeak++; console.log(`[comment-radar] draft dropped, ${leak}: ${candidate}`); continue; }
@@ -2759,11 +2794,11 @@ export async function editPostComment(workspaceId: string, id: string, text: str
  * approved, skipped, or blocked keeps its history. A failed or leaky redraft
  * keeps the existing text rather than losing the lead.
  */
-export async function redraftOpenComments(workspaceId: string): Promise<{ redrafted: number; kept: number }> {
+export async function redraftOpenComments(workspaceId: string): Promise<{ redrafted: number; kept: number; skipped: number }> {
   await hydrate();
   const open = state.items.filter((i) =>
     i.workspaceId === workspaceId && i.kind === "poster" && i.commentStatus === "suggested" && i.commentDraft);
-  let redrafted = 0, kept = 0;
+  let redrafted = 0, kept = 0, skipped = 0;
   for (const item of open) {
     const author = [item.authorName, item.title, item.company ? `at ${item.company}` : undefined].filter(Boolean).join(", ");
     const role = item.matchedRole ?? "candidate";
@@ -2773,10 +2808,25 @@ export async function redraftOpenComments(workspaceId: string): Promise<{ redraf
     const brief = HIRING_INTENT_RE.test(item.postExcerpt ?? "")
       ? `The role they are hiring for is ${role}${city ? ` in ${city}` : ""}.`
       : `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`;
-    const drafted = await draft(POST_COMMENT_RULES,
-      `THEIR POST (by ${author}):\n${(item.postExcerpt ?? "").slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId, item.commentDraft)}`);
+    const userMsg = `THEIR POST (by ${author}):\n${(item.postExcerpt ?? "").slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId, item.commentDraft)}`;
+    const drafted = await draft(POST_COMMENT_RULES, userMsg);
     if (!drafted) { kept++; continue; }
-    const candidate = fitComment(scrub(drafted));
+    // SKIP means the post itself has nothing to engage with (epoch 2 caught a
+    // holiday greeting whose "draft" was the model describing these rules).
+    // The item leaves the queue honestly instead of holding a forced comment.
+    if (/^\s*SKIP\b/i.test(drafted)) {
+      item.commentStatus = "skipped";
+      item.updatedAt = nowIso();
+      skipped++;
+      continue;
+    }
+    let candidate = fitComment(scrub(drafted));
+    if (candidate && !hasClosingInvite(candidate)) {
+      const retry = await draft(POST_COMMENT_RULES,
+        `${userMsg}\n\nYour previous attempt:\n${candidate}\n\nIt is missing the closing invitation. Keep the observation, and END with one short, low-pressure invitation to engage.`);
+      candidate = retry && !/^\s*SKIP\b/i.test(retry) ? fitComment(scrub(retry)) : null;
+      if (candidate && !hasClosingInvite(candidate)) candidate = null;
+    }
     // The dup check excludes the item's OWN current draft: a rewrite of the
     // same post legitimately shares most of its content words with the text
     // it is replacing, and comparing against it would freeze every draft in
@@ -2787,8 +2837,8 @@ export async function redraftOpenComments(workspaceId: string): Promise<{ redraf
     item.updatedAt = nowIso();
     redrafted++;
   }
-  if (redrafted) save();
-  return { redrafted, kept };
+  if (redrafted || skipped) save();
+  return { redrafted, kept, skipped };
 }
 
 export async function skipPostComment(workspaceId: string, id: string): Promise<CommentLeadItem | null> {
