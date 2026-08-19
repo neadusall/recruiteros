@@ -17,7 +17,7 @@
 import { requireSession, requireCapability, body, ok, fail } from "../../../lib/api";
 import {
   listInboxes, toPublic, addInbox, deleteInbox, getInbox, saveInbox,
-  assignOwner, setStatus, recruiterPools, stats, verifyInbox, sendCapacity,
+  assignOwner, setStatus, recruiterPools, stats, verifyInbox, sendCapacity, fleetOverview,
 } from "../../../lib/senders";
 import type { SenderProvider, SenderStatus } from "../../../lib/senders";
 
@@ -27,15 +27,17 @@ export async function GET(req: Request) {
   const ws = g.ctx.workspace.id;
   const url = new URL(req.url);
   const ownerId = url.searchParams.get("ownerId") || undefined;
-  const [inboxes, pools, s, capacity] = await Promise.all([
+  const [inboxes, pools, s, capacity, fleets] = await Promise.all([
     listInboxes(ws, { ownerId }),
     recruiterPools(ws),
     stats(ws),
     sendCapacity(ws),
+    fleetOverview(ws).catch(() => []),
   ]);
   // `capacity.byProvider` is the Sending.ac (flat 2/day) vs internal-SMTP (ramp)
   // split the Senders tab renders; totals mirror `stats` but provider-aware.
-  return ok({ inboxes: inboxes.map(toPublic), pools, stats: s, capacity });
+  // `fleets` is the per-infrastructure monitor (Sending.ac / Google / internal).
+  return ok({ inboxes: inboxes.map(toPublic), pools, stats: s, capacity, fleets });
 }
 
 interface SenderBody {

@@ -18,7 +18,7 @@
 
 import { requireSession, ok } from "../../../../lib/api";
 import { loadSnapshot } from "../../../../lib/db";
-import { sendCapacity } from "../../../../lib/senders";
+import { sendCapacity, fleetOverview } from "../../../../lib/senders";
 
 interface MpcStats {
   workspaceId?: string; generatedAt?: string;
@@ -199,6 +199,17 @@ export async function GET(req: Request) {
       capToday, rampCap: ramp.cap, base: ramp.base, ceiling: ramp.ceiling, growthUnlocked: ramp.growthUnlocked,
       sentToday, remaining, fleetBoxes, usableBoxes, benchedBoxes, perBox,
     },
+    // Per-infrastructure capacity for the Dashboard's real-time card: what each
+    // fleet can actually send today (rest-aware), what sits benched, and where
+    // warming boxes stand. Same math as the Senders tab monitor (fleetOverview).
+    fleets: await fleetOverview(g.ctx.workspace.id)
+      .then((fs) => fs.map((f) => ({
+        key: f.key, name: f.name,
+        today: f.capacity.today, benched: f.capacity.benched, atFullRamp: f.capacity.atFullRamp,
+        activeBoxes: f.boxes.active, warmingBoxes: f.boxes.warming, benchedBoxes: f.boxes.benched,
+        graduationAt: f.graduation?.eligibleAt || null,
+      })))
+      .catch(() => []),
     supply: { ready: supplyReady, message: gap.message || null, engineOk, engineLastRunAt: engine?.lastCurationAt || null },
     fleet: {
       domainsSending: deliv?.overall?.domainsSending || 0,

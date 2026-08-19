@@ -16,6 +16,9 @@ export type { NewInboxInput, RecruiterCapacity, SendCapacity } from "./store";
 
 export { pickSender, poolCapacity, fleetDailyCapacity } from "./pool";
 
+export { fleetOverview } from "./fleets";
+export type { FleetCard, FleetKey } from "./fleets";
+
 export { syncFleetInboxes, maybeAutoFleetSync, buildPortalRouter } from "./fleetSync";
 export type { FleetSyncReport } from "./fleetSync";
 

@@ -4272,10 +4272,47 @@
       : "Your recruiting sending engine, capacity, throughput and what's running right now.")
       + (showRecruiterBar ? " Pick a recruiter to scope it, or see every recruiter's stats below." : "");
     el.innerHTML = head("Dashboard", sub) +
+      '<div id="ovCapacity"></div>' +
       '<div id="ovMpc"></div>' +
       '<div id="ovVisitors"></div>' +
       (showRecruiterBar ? '<div class="ov-recruiters" id="ovRecruiters">' + loading() + "</div>" : "") +
       '<div id="ovBody">' + loading() + "</div>";
+
+    // TODAY'S REAL SENDING CAPACITY, live on the Dashboard: what the machine can
+    // actually send right now per fleet (rest-aware, same source as the Senders
+    // tab), sent so far, and room left. Refreshes every minute while on screen.
+    function loadOvCapacity() {
+      api("/senders/story").then(function (d) {
+        var host = $("#ovCapacity"); if (!host) return;
+        if (!d || !d.present) { host.innerHTML = ""; return; }
+        var cap = d.capacity || {}, fleets = d.fleets || [];
+        function fmt(n) { return Number(n || 0).toLocaleString(); }
+        var pillMap = {
+          healthy: ["All clear", "#1a7f37"], supply: ["Supply-limited", "#b26a00"],
+          capacity: ["Ramp-limited", "#2e5bd7"], fleet: ["Fleet resting", "#b26a00"],
+          placement: ["Placement hold", "#b42318"], engine: ["Engine stalled", "#b42318"],
+        };
+        var pill = pillMap[d.verdict] || ["Status", "#6b7280"];
+        var frows = fleets.map(function (f) {
+          var extra = f.benched ? ' <span style="color:#b26a00">(+' + fmt(f.benched) + ' benched)</span>'
+            : (f.warmingBoxes && f.graduationAt ? ' <span class="muted">(' + f.warmingBoxes + ' warming, live ~' + esc(String(f.graduationAt).slice(5, 10)).replace("-", "/") + ')</span>' : '');
+          return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:2px 0">' +
+            '<span class="muted">' + esc(f.name) + '</span><span><b>' + fmt(f.today) + '</b><span class="muted">/day</span>' + extra + '</span></div>';
+        }).join("");
+        host.innerHTML =
+          '<div class="snd-story" style="border:1px solid var(--border-strong);border-radius:12px;padding:14px 16px;margin-bottom:14px">' +
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+              '<span class="snd-split-t" style="margin:0">Sending capacity today</span>' +
+              '<span style="border:1px solid ' + pill[1] + ';color:' + pill[1] + ';border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:600">' + pill[0] + '</span>' +
+              '<span style="margin-left:auto;font-size:12.5px" class="muted"><b style="color:var(--text)">' + fmt(cap.sentToday) + '</b> sent · <b style="color:var(--text)">' + fmt(cap.remaining) + '</b> room · cap <b style="color:var(--text)">' + fmt(cap.capToday) + '</b></span>' +
+            '</div>' +
+            '<div style="margin-top:8px">' + frows + '</div>' +
+            '<div class="muted" style="font-size:11.5px;margin-top:6px">Live from the send engine (rest-aware). Full story: Admin &gt; Infrastructure &gt; Senders.</div>' +
+          '</div>';
+      });
+    }
+    loadOvCapacity();
+    viewTimers.push(setInterval(loadOvCapacity, 60000));
 
     // Who is on your site: first-party visitor intelligence for the marketing site.
     // A company we emailed shows with the exact people we emailed there (recruiter +
@@ -9539,6 +9576,7 @@
         '</div>' +
       '</div>' +
       '<div id="sndStoryBox"></div>' +
+      '<div id="sndFleetsBox"></div>' +
       '<div id="wuWrap"></div>' +
       '<div id="siWrap"></div>' +
       '<div id="sndStatsBox" class="snd-stats"></div>' +
@@ -9681,7 +9719,7 @@
     send("/senders", "GET").then(function (r) {
       if (!r.ok) { if (box) box.innerHTML = '<div class="empty">Could not load senders.</div>'; return; }
       sndData = r.data || {};
-      renderSenderStats(); renderSenderPools(); renderSenderRows();
+      renderSenderStats(); renderSenderFleets(); renderSenderPools(); renderSenderRows();
     });
   }
 
@@ -9695,6 +9733,52 @@
     };
     var e = map[p] || [p || "?", "#6b7280"];
     return '<span class="snd-prov" style="border-color:' + e[1] + ';color:' + e[1] + '">' + esc(e[0]) + '</span>';
+  }
+
+  /** Fleet monitor: every sending infrastructure (Sending.ac, Google/Zapmail, the
+   *  internal server) reports in one place - usable capacity today, what's benched,
+   *  warming clocks, bounce pressure, and each fleet's known caveats. */
+  function renderSenderFleets() {
+    var box = $("#sndFleetsBox"); if (!box) return;
+    var fleets = sndData.fleets || [];
+    if (!fleets.length) { box.innerHTML = ""; return; }
+    function fmt(n) { return Number(n || 0).toLocaleString(); }
+    function pillFor(f) {
+      if (f.boxes.error > 0 || (f.warmupBounces7d || 0) > 50) return ["Attention", "#b42318"];
+      if (f.boxes.benched > (f.boxes.active + f.boxes.warming) / 2) return ["Mostly benched", "#b26a00"];
+      if (f.boxes.warming > f.boxes.active) return ["Warming", "#2e5bd7"];
+      return ["Healthy", "#1a7f37"];
+    }
+    var rows = fleets.map(function (f) {
+      var pill = pillFor(f);
+      var grad = f.graduation && f.graduation.eligibleAt
+        ? ' · ' + f.graduation.warming + ' warming (auto-activate ~' + esc(String(f.graduation.eligibleAt).slice(0, 10)) + ')'
+        : (f.boxes.warming ? ' · ' + f.boxes.warming + (f.key === "sendingac" ? ' externally warmed, sending' : ' warming') : '');
+      var benched = f.boxes.benched
+        ? ' · <span style="color:#b26a00">' + fmt(f.boxes.benched) + ' benched (' + fmt(f.capacity.benched) + '/day idle)</span>'
+        : '';
+      var resting = f.domains.resting
+        ? ' · ' + f.domains.resting + ' of ' + f.domains.total + ' domains resting' + (f.domains.nextRevival ? ' (next back ' + esc(String(f.domains.nextRevival).slice(0, 10)) + ')' : '')
+        : ' · ' + f.domains.total + ' domain' + (f.domains.total === 1 ? '' : 's');
+      var ramp = f.capacity.atFullRamp > f.capacity.today + f.capacity.benched
+        ? ' <span class="muted">(ramps to ' + fmt(f.capacity.atFullRamp) + '/day)</span>' : '';
+      var notes = (f.notes || []).map(function (t) {
+        return '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(t) + '</div>';
+      }).join("");
+      return '<div style="padding:10px 0;border-top:1px solid var(--border)">' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<b>' + esc(f.name) + '</b>' +
+          '<span class="snd-story-pill" style="border:1px solid ' + pill[1] + ';color:' + pill[1] + ';border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:600">' + pill[0] + '</span>' +
+          '<span style="margin-left:auto"><b>' + fmt(f.capacity.today) + '</b><span class="muted">/day usable now</span>' + ramp + '</span>' +
+        '</div>' +
+        '<div class="muted" style="font-size:12.5px;margin-top:4px">' + fmt(f.boxes.active) + ' active' + grad + benched + resting +
+          ' · bounces last sweep: ' + fmt(f.bounces7d) + (f.warmupBounces7d != null ? ' campaign / ' + fmt(f.warmupBounces7d) + ' on warm-up traffic' : '') +
+        '</div>' + notes +
+      '</div>';
+    }).join("");
+    box.innerHTML = '<div class="snd-story" style="margin-top:14px">' +
+      '<div class="snd-story-top"><span class="snd-split-t" style="margin:0">Fleet monitor</span>' +
+      '<span class="snd-story-ts">every sending infrastructure, one report</span></div>' + rows + '</div>';
   }
 
   function renderSenderStats() {
