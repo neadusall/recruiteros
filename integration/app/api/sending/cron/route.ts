@@ -85,6 +85,16 @@ async function run(req: Request) {
     revive = { workspaces: ids.length, checked, revived, stillFailing, cleared };
   } catch (e: any) { revive = { error: e?.message ?? "revive_failed" }; }
 
+  // Onboarding audit over never-audited Email IDs (any import path): SMTP login,
+  // live DNS posture, blocklists, mail-server rDNS. Stamped per inbox, reported
+  // to the health board, owner alerted once per new failure set. Bounded per
+  // tick so a large backfill spreads across the day.
+  let onboarding: unknown = null;
+  try {
+    const { auditPendingOnboards } = await import("../../../../lib/senders/onboarding");
+    onboarding = await auditPendingOnboards();
+  } catch (e: any) { onboarding = { error: e?.message ?? "onboarding_audit_failed" }; }
+
   // MPC variant bank: the weekly Haiku refresh of pre-generated Day-0 phrasing variants (the
   // layer that replaced per-send humanizer spend). Self-gating: a no-op unless the bank is
   // stale (>7d), incomplete, or a template changed; when it does run it's ~50 small calls.
@@ -112,7 +122,7 @@ async function run(req: Request) {
     jobBlasts = await runJobBlastTickAll();
   } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, variants, replies, jobBlasts });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, variants, replies, jobBlasts });
 }
 
 export const GET = run;

@@ -70,6 +70,11 @@ export interface SenderInbox {
   guardBaseSent?: number;     // bounce window baseline (reset on each revive)
   guardBaseBounced?: number;
 
+  // Onboarding audit (set ONLY by lib/senders/onboarding): every imported Email ID
+  // is vetted (SMTP login, DNS posture, blocklists) within one maintenance tick.
+  onboardAuditAt?: string;
+  onboardProblems?: string[]; // empty/absent = clean bill
+
   createdAt: string;
   updatedAt: string;
 }

@@ -83,6 +83,10 @@ export interface GuardReport {
   adopted: number;
   /** Warming inboxes promoted to active this run (warm-up provably complete). */
   graduated: GuardAction[];
+  /** Warming inboxes that met the clock + reputation bar but were held back by
+   *  real bounce pressure (warm-up NDRs): the receiving world gets a veto that
+   *  the vendor's reputation score does not carry. */
+  gradDeferred?: GuardAction[];
   smartleadData: boolean;
 }
 
@@ -237,9 +241,29 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
   const held: GuardAction[] = [];
   const revived: GuardAction[] = [];
   const graduated: GuardAction[] = [];
+  const gradDeferred: GuardAction[] = [];
   let checked = 0;
   let holding = 0;
   let adopted = 0;
+
+  // Graduation veto data: per-box bounce-notice counts from the host NDR sweeps
+  // (campaign perBox + warm-up warmupPerBox, ~7-day window, both lanes). The
+  // 2026-08 lesson: "reputation 100%" can coexist with hundreds of receiver
+  // rejections; only the real notices know. Missing sweep data reads as zero
+  // pressure (fail-open), the sweep's own freshness is watched on the health board.
+  const ndrPressure = new Map<string, number>();
+  try {
+    const ndr = await loadSnapshot<{ perBox?: Record<string, number>; warmupPerBox?: Record<string, number> }>("mpc_ndr_v1");
+    for (const [box, n] of Object.entries(ndr?.perBox || {})) ndrPressure.set(box.toLowerCase(), n || 0);
+    for (const [box, n] of Object.entries(ndr?.warmupPerBox || {})) {
+      const k = box.toLowerCase();
+      ndrPressure.set(k, (ndrPressure.get(k) || 0) + (n || 0));
+    }
+  } catch { /* fail-open */ }
+  const gradMaxNdr = (() => {
+    const n = Number(process.env.SENDER_GRADUATE_MAX_NDR);
+    return Number.isFinite(n) && n >= 0 ? n : 20;
+  })();
 
   // One upstream fleet pull serves every workspace (same account list).
   let byEmail = new Map<string, SmartleadAccount>();
@@ -340,11 +364,19 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
         m.provider !== "sending-ac" && acct && typeof rep === "number" && rep >= gradRep() &&
         ageDays(m, acct) >= (m.provider === "own-smtp" ? gradDaysInternal() : gradDaysProvider())
       ) {
-        m.status = "active";
-        m.guardBaseSent = m.sent || 0;
-        m.guardBaseBounced = m.bounced || 0;
-        dirty = true;
-        graduated.push({ workspaceId: ws, email: m.email, action: "graduated", reason: `warm-up complete: day ${Math.floor(ageDays(m, acct))}, reputation ${rep}%`, at });
+        // Receiving-world veto: a box the sweeps saw bouncing does not graduate,
+        // whatever the vendor's reputation score says. It re-qualifies by itself
+        // once a sweep window passes without pressure (nothing to un-set here).
+        const pressure = ndrPressure.get(m.email.toLowerCase()) || 0;
+        if (pressure > gradMaxNdr) {
+          gradDeferred.push({ workspaceId: ws, email: m.email, action: "held", reason: `graduation deferred: ${pressure} bounce notices in the sweep window (max ${gradMaxNdr})`, at });
+        } else {
+          m.status = "active";
+          m.guardBaseSent = m.sent || 0;
+          m.guardBaseBounced = m.bounced || 0;
+          dirty = true;
+          graduated.push({ workspaceId: ws, email: m.email, action: "graduated", reason: `warm-up complete: day ${Math.floor(ageDays(m, acct))}, reputation ${rep}%`, at });
+        }
       }
 
       if (m.autoHold && m.status === "paused") holding++;
@@ -352,7 +384,7 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
     }
   }
 
-  const report: GuardReport = { at, checked, held, revived, holding, adopted, graduated, smartleadData: haveSmartlead };
+  const report: GuardReport = { at, checked, held, revived, holding, adopted, graduated, gradDeferred, smartleadData: haveSmartlead };
   state.lastReport = report;
   state.journal = [...held, ...revived, ...graduated, ...state.journal].slice(0, 200);
   save();

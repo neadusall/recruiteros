@@ -28,6 +28,27 @@
 5. No em-dashes in copy/UI/email. No unsubscribe links or open-tracking pixels in cold
    email. Email creation and meeting summaries stay pinned to claude-haiku-4-5.
 
+## Sending safety (receiver-side truth beats vendor dashboards)
+
+9. **Never hardcode a receiver block in routing code.** Which providers reject which
+   sending fleet is DATA: the host NDR sweeps detect block signatures across every
+   bounce notice (campaign AND warm-up) and persist fleet x provider pairs to
+   `snap_provider_blocks_v1`. Routers (`lib/senders/recipientGuard.ts`, batch.mjs)
+   read that ledger and steer; a healed provider ages out on its own. To cover a new
+   rejection pattern, extend the sweep's signature table, never a router's if-branch.
+
+10. **Every new Email ID passes the onboarding audit before it is relied on.**
+    `lib/senders/onboarding.ts` vets imports (SMTP login, live SPF/DMARC/MX,
+    blocklists, mail-server rDNS) on the maintenance tick, stamps
+    `onboardAuditAt`/`onboardProblems`, and alerts the owner on new failures. New
+    import paths need NO extra wiring (the tick audits anything unstamped), but they
+    must never pre-stamp `onboardAuditAt`.
+
+11. **Warm-up vendor metrics are never sufficient proof of health.** Activation and
+    graduation decisions must consult real bounce notices (the NDR sweeps' snapshots);
+    the guard's graduation veto (`SENDER_GRADUATE_MAX_NDR`) exists because a fleet ran
+    "reputation 100%" for weeks while Gmail rejected every message.
+
 ## Prod snapshots (hydration trap)
 
 In-memory stores backed by `/data/snap_*.json` are re-saved by the running app. Never
