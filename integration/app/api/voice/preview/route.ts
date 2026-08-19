@@ -33,6 +33,7 @@ export async function POST(req: Request) {
   let persona = { ...DEFAULT_PERSONA };
   let mode: VoiceMessageMode = "script";
   let recordingId: string | undefined;
+  let clipReuse = true;
   let voiceId: string | undefined = (b?.voiceId || "").trim() || undefined;
   let provider: VoiceProvider | undefined =
     b?.provider === "cartesia" || b?.provider === "elevenlabs" || b?.provider === "hume"
@@ -46,6 +47,7 @@ export async function POST(req: Request) {
     recordingId = c.recordingId;
     scriptTemplate = mode === "recording" ? (c.introTemplate ?? DEFAULT_INTRO) : c.scriptTemplate;
     persona = { ...DEFAULT_PERSONA, ...c.persona };
+    clipReuse = c.clipReuse !== false && !c.aiCustomize;
     if (!voiceId && c.voiceId) { voiceId = c.voiceId; provider = c.voiceProvider; }
   } else {
     mode = b?.messageMode === "recording" ? "recording" : "script";
@@ -54,6 +56,7 @@ export async function POST(req: Request) {
       ? String(b?.introTemplate ?? b?.scriptTemplate ?? "").trim()
       : (b?.scriptTemplate || "").trim();
     persona = { ...DEFAULT_PERSONA, ...(b?.persona || {}) };
+    clipReuse = b?.clipReuse !== false;
   }
   if (mode === "recording" && !recordingId) return fail("missing_fields", 422, { detail: "pick a recording first (Recordings tab)" });
   if (mode === "script" && !scriptTemplate) return fail("missing_fields", 422, { detail: "campaignId or scriptTemplate is required" });
@@ -77,7 +80,7 @@ export async function POST(req: Request) {
   try {
     drop = await withWorkspaceCreds(ws, () => assembleMessage({
       workspaceId: ws, mode, text: scriptTemplate, recordingId,
-      vars, persona, voice: { provider, voiceId },
+      vars, persona, voice: { provider, voiceId }, clipReuse,
     }));
   } catch (e: any) {
     if (e?.message === "recording_missing") return fail("not_found", 404, { detail: "that recording no longer exists" });

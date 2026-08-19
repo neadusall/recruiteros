@@ -150,6 +150,7 @@ export function upsertCampaign(workspaceId: string, input: VoiceCampaignInput): 
     messageMode: input.messageMode ?? existing?.messageMode ?? "script",
     recordingId: input.recordingId === "" ? undefined : (input.recordingId ?? existing?.recordingId),
     introTemplate: input.introTemplate ?? existing?.introTemplate,
+    clipReuse: input.clipReuse ?? existing?.clipReuse ?? true,
     voiceId: input.voiceId ?? existing?.voiceId,
     voiceProvider: input.voiceProvider ?? existing?.voiceProvider,
     callerId: input.callerId ?? existing?.callerId ?? "",
@@ -586,6 +587,110 @@ export function scriptStats(workspaceId: string): Record<string, ScriptPerforman
     p.connectRate = p.dialed ? (p.voicemail_delivered + p.human_answered) / p.dialed : 0;
   }
   return out;
+}
+
+/* ---------------- outbound tracker (who we left a voicemail with) ---------- */
+
+export interface TrackerRow {
+  leadId: string;
+  campaignId: string;
+  campaignName: string;
+  name: string;
+  firstName?: string;
+  role?: string;
+  company?: string;
+  phone: string;
+  lineType: string;
+  outcome: DropOutcome;
+  attempts: number;
+  lastAttemptAt?: string;
+  /** Plain-language "what happened" for the outcome column. */
+  status: string;
+  /** The recommended next step, so the operator knows where to go from here. */
+  nextAction: string;
+}
+
+export interface TrackerTotals {
+  contacts: number;
+  dialed: number;            // reached a phone (delivered + human + no-answer)
+  voicemailsLeft: number;
+  liveHumans: number;
+  noAnswer: number;
+  queued: number;            // queued + scheduled, not yet reached
+  filteredMobile: number;
+  failed: number;
+  /** voicemailsLeft / dialed, 0-1. */
+  deliveryRate: number;
+}
+
+/** Plain-language status + the next step to take, per outcome. */
+function outcomeGuidance(o: DropOutcome): { status: string; nextAction: string } {
+  switch (o) {
+    case "voicemail_delivered":
+      return { status: "Voicemail left", nextAction: "Left on their machine. Follow up by email or LinkedIn in a few days." };
+    case "human_answered":
+      return { status: "Live person answered", nextAction: "A person picked up; this number was rotated off for them. Try another channel." };
+    case "no_answer":
+      return { status: "No answer / no voicemail", nextAction: "Rang out. It will retry automatically in the next calling window." };
+    case "dialing":
+      return { status: "Dialing now", nextAction: "Call in progress." };
+    case "scheduled":
+      return { status: "Scheduled", nextAction: "Waiting for this lead's local calling window (7-9 PM their time)." };
+    case "queued":
+      return { status: "Queued", nextAction: "Imported and dialable. Launch or run the campaign to send." };
+    case "filtered_mobile":
+      return { status: "Mobile, not dialed", nextAction: "Cell numbers are never dialed. Find a direct/landline line to reach them." };
+    case "suppressed":
+      return { status: "Suppressed (do-not-call)", nextAction: "On the do-not-call list. No further dials." };
+    case "failed":
+      return { status: "Failed", nextAction: "The drop errored. Check the voice + phone setup, then retry." };
+    default:
+      return { status: String(o), nextAction: "" };
+  }
+}
+
+/**
+ * The outbound tracker: every lead across the workspace's campaigns with what
+ * happened and where to go next — the "who did we leave a voicemail with" view.
+ * Most-recent activity first, then still-queued leads.
+ */
+export function voiceTracker(workspaceId: string, motion?: Motion, limit = 500): { rows: TrackerRow[]; totals: TrackerTotals } {
+  const camps = store.campaigns.filter((c) => c.workspaceId === workspaceId && (!motion || c.motion === motion));
+  const rows: TrackerRow[] = [];
+  for (const c of camps) {
+    for (const l of getLeads(c.id)) {
+      const g = outcomeGuidance(l.outcome);
+      rows.push({
+        leadId: l.id, campaignId: c.id, campaignName: c.name,
+        name: l.fullName || l.firstName || "Unknown",
+        firstName: l.firstName, role: l.role, company: l.company,
+        phone: l.phone, lineType: l.lineType, outcome: l.outcome,
+        attempts: l.attempts, lastAttemptAt: l.lastAttemptAt,
+        status: g.status, nextAction: g.nextAction,
+      });
+    }
+  }
+  rows.sort((a, b) => {
+    const ta = a.lastAttemptAt ? Date.parse(a.lastAttemptAt) : 0;
+    const tb = b.lastAttemptAt ? Date.parse(b.lastAttemptAt) : 0;
+    return tb - ta;
+  });
+
+  const totals: TrackerTotals = {
+    contacts: rows.length, dialed: 0, voicemailsLeft: 0, liveHumans: 0,
+    noAnswer: 0, queued: 0, filteredMobile: 0, failed: 0, deliveryRate: 0,
+  };
+  for (const r of rows) {
+    if (r.outcome === "voicemail_delivered") { totals.voicemailsLeft++; totals.dialed++; }
+    else if (r.outcome === "human_answered") { totals.liveHumans++; totals.dialed++; }
+    else if (r.outcome === "no_answer") { totals.noAnswer++; totals.dialed++; }
+    else if (r.outcome === "queued" || r.outcome === "scheduled") totals.queued++;
+    else if (r.outcome === "filtered_mobile") totals.filteredMobile++;
+    else if (r.outcome === "failed") totals.failed++;
+  }
+  totals.deliveryRate = totals.dialed ? totals.voicemailsLeft / totals.dialed : 0;
+
+  return { rows: rows.slice(0, limit), totals };
 }
 
 /* ---------------- pending per-call playback plan ---------------- */

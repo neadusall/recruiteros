@@ -18023,7 +18023,7 @@
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
-      var tabs = [["campaigns", "Campaigns"], ["recordings", "Recordings"], ["intel", "Find people"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
+      var tabs = [["campaigns", "Campaigns"], ["tracker", "Tracker"], ["recordings", "Recordings"], ["intel", "Find people"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vd-tab' + (vd.tab === t[0] ? " active" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -18036,6 +18036,7 @@
     function paint() {
       var body = $("#vdBody"); if (!body) return;
       if (vd.tab === "campaigns") return paintCampaigns(body);
+      if (vd.tab === "tracker") return paintTracker(body);
       if (vd.tab === "recordings") return paintRecordings(body);
       if (vd.tab === "intel") return paintIntel(body);
       if (vd.tab === "scripts") return paintScripts(body);
@@ -18162,6 +18163,92 @@
           (d.withinWindow ? ", in window" : ", outside window") + (d.identifies ? "" : " · add your name/firm") + "</span>";
         if (typeof renderEstimate === "function") renderEstimate();
       }).catch(function () { if (out) out.textContent = "Could not reach the server."; });
+    }
+
+    /* ---- Tracker tab: outbound voicemail log + next actions + credit archive ----
+       "Track outbound calls and who we left a voicemail with." Every lead across
+       the workspace's campaigns, what happened, and where to go from here, plus
+       the reusable voice-clip archive that keeps ElevenLabs credits near zero. */
+    function trOutcomeChip(o, status) {
+      var col = o === "voicemail_delivered" ? "var(--ok)"
+        : o === "human_answered" ? "var(--brand)"
+        : o === "dialing" ? "var(--warn)"
+        : (o === "filtered_mobile" || o === "suppressed" || o === "failed") ? "var(--danger)"
+        : "var(--text-dim)";
+      return '<span style="font-size:11px;font-weight:600;color:' + col + ';border:1px solid ' + col + ';border-radius:4px;padding:1px 7px;white-space:nowrap">' + esc(status || o) + "</span>";
+    }
+    function trWhen(s) {
+      if (!s) return "";
+      try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+      catch (e) { return ""; }
+    }
+    function paintTracker(body) {
+      body.innerHTML = loading();
+      api("/voice/tracker?motion=" + motion).then(function (d) {
+        if (!document.body.contains(body)) return;
+        d = d || {};
+        var t = d.totals || {}, rows = d.rows || [], arch = d.archive || {};
+        var filter = vd.trackerFilter || "all";
+        function kpi(n, label, col) {
+          return '<div style="min-width:118px"><div style="font-size:22px;font-weight:650;line-height:1.1' + (col ? ";color:" + col : "") + '">' + n + '</div><div class="muted" style="font-size:11.5px;margin-top:2px">' + label + "</div></div>";
+        }
+        var connect = t.dialed ? Math.round((t.deliveryRate || 0) * 100) : 0;
+
+        // Filter chips + which outcomes each covers.
+        var filters = [["all", "All"], ["voicemail_delivered", "Voicemails left"], ["queued", "Queued / scheduled"], ["no_answer", "No answer"], ["human_answered", "Live answers"], ["filtered_mobile", "Mobiles filtered"]];
+        var shown = rows.filter(function (r) {
+          if (filter === "all") return true;
+          if (filter === "queued") return r.outcome === "queued" || r.outcome === "scheduled";
+          return r.outcome === filter;
+        });
+
+        body.innerHTML =
+          '<div class="card"><h3>Outbound voicemail tracker</h3>' +
+          '<p class="muted" style="font-size:13px;margin:4px 0 0">Every person we have dialed, what happened, and the next step. The goal is a tailored voicemail in the right person’s box; this is where you see who got one.</p>' +
+          '<div style="display:flex;gap:26px;flex-wrap:wrap;margin-top:14px">' +
+          kpi(t.voicemailsLeft || 0, "voicemails left", "var(--ok)") +
+          kpi(t.dialed || 0, "reached a phone") +
+          kpi(connect + "%", "delivery rate") +
+          kpi(t.queued || 0, "queued / scheduled") +
+          kpi(t.liveHumans || 0, "live answers") +
+          kpi(t.filteredMobile || 0, "mobiles filtered") +
+          "</div></div>" +
+
+          // Credit archive card: the reusable clip library.
+          '<div class="card" style="margin-top:14px;border-color:var(--brand-2)"><h3>Voice clip archive (credit saver)</h3>' +
+          '<p class="muted" style="font-size:13px;margin:4px 0 10px">The fixed part of your voicemail is synthesized once. Only a NEW first name or job title uses ElevenLabs credits, and each one is saved here and reused free forever after.</p>' +
+          '<div style="display:flex;gap:26px;flex-wrap:wrap">' +
+          kpi(arch.firstNames || 0, "first names archived") +
+          kpi(arch.roles || 0, "job titles archived") +
+          kpi(arch.staticPhrases || 0, "fixed phrases cached") +
+          kpi(arch.totalClips || 0, "total clips") +
+          "</div></div>" +
+
+          '<div class="card" style="margin-top:14px">' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' + filters.map(function (f) {
+            var on = filter === f[0];
+            return '<button class="btn btn-sm' + (on ? " btn-primary" : "") + '" data-trf="' + f[0] + '">' + esc(f[1]) + "</button>";
+          }).join("") + "</div>" +
+          (shown.length
+            ? '<div style="overflow-x:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse">' +
+              "<tr class='muted' style='text-align:left'><th style='padding:5px 8px'>Person</th><th style='padding:5px 8px'>Company</th><th style='padding:5px 8px'>What happened</th><th style='padding:5px 8px'>When</th><th style='padding:5px 8px'>Next step</th></tr>" +
+              shown.slice(0, 300).map(function (r) {
+                return "<tr style='border-top:1px solid var(--border)'>" +
+                  "<td style='padding:6px 8px'><b>" + esc(r.name) + "</b>" + (r.role ? " <span class='muted'>" + esc(r.role) + "</span>" : "") +
+                  "<div class='muted' style='font-size:11px'>" + esc(r.phone) + " · " + esc(r.campaignName) + "</div></td>" +
+                  "<td style='padding:6px 8px'>" + esc(r.company || "") + "</td>" +
+                  "<td style='padding:6px 8px'>" + trOutcomeChip(r.outcome, r.status) + "</td>" +
+                  "<td style='padding:6px 8px;white-space:nowrap'>" + esc(trWhen(r.lastAttemptAt)) + "</td>" +
+                  "<td style='padding:6px 8px' class='muted'>" + esc(r.nextAction || "") + "</td></tr>";
+              }).join("") + "</table></div>" +
+              (shown.length > 300 ? '<div class="muted" style="font-size:12px;margin-top:8px">Showing the 300 most recent of ' + shown.length + ".</div>" : "")
+            : '<p class="muted" style="font-size:13px">' + (rows.length ? "No leads match this filter." : "No outbound activity yet. Create a campaign, import a list, and launch to start leaving voicemails.") + "</p>") +
+          "</div>";
+
+        Array.prototype.forEach.call(body.querySelectorAll("[data-trf]"), function (b) {
+          b.addEventListener("click", function () { vd.trackerFilter = b.getAttribute("data-trf"); paintTracker(body); });
+        });
+      }).catch(function () { if (document.body.contains(body)) body.innerHTML = needsSetup(); });
     }
 
     /* ---- Find people tab: Phone Intelligence (IVR navigation) ----
@@ -18768,8 +18855,9 @@
         '<div class="vd-note"><span class="vd-note-ico"><svg class="isvg" aria-hidden="true"><use href="#i-moon"/></svg></span><span>Drops land after hours, in each lead’s <b>own local time</b> (default 7–9 PM), so the line rolls to voicemail. Always clamped to a lawful 8 AM–9 PM envelope.</span></div>' +
         '<div class="vd-section-label">Delivery &amp; safeguards</div>' +
         '<div class="vd-toggles">' +
+        vdToggle("vdClipReuse", "Credit saver: reuse name & title clips", "Recommended. Synthesize the fixed part of the message once, and only ever spend ElevenLabs credits on a NEW first name or job title. Each name and title is saved and reused free forever after. Keep this on unless AI-customize is on.") +
         vdToggle("vdTestMode", "Test mode", "Ignore the calling window. Testing only, every other safeguard stays on.") +
-        vdToggle("vdAiCustomize", "AI-customize per lead", "The AI rewrites each drop from your script below, kept to 15–25s and the speech rules. More natural, but each lead synthesizes fresh (a little more spend).") +
+        vdToggle("vdAiCustomize", "AI-customize per lead", "The AI rewrites each drop from your script below, kept to 15–25s and the speech rules. More natural, but each lead synthesizes fresh (uses more credits, and the credit saver above does not apply).") +
         vdToggle("vdAutoPilot", "Always-on autopilot", "Keep this campaign running and auto-send to leads as they’re fed in (email-sent trigger or import). Turns on AI-customize so every incoming lead gets a fresh, in-window drop. Consent + all safeguards still required.") +
         "</div>" +
         '<div class="vd-section-label" style="margin-top:20px">Voicemail message</div>' +
@@ -19029,10 +19117,23 @@
           var e = $("#" + id); if (e) e.addEventListener("input", renderEstimate);
         });
         var aic = $("#vdAiCustomize"); if (aic) aic.addEventListener("change", renderEstimate);
+        // Credit saver defaults ON (matches the backend default). AI-customize
+        // makes every lead's prose unique, so clip reuse can't apply then, reflect
+        // that by switching the saver off and disabling it while AI-customize is on.
+        var crc = $("#vdClipReuse");
+        function syncClipReuse() {
+          if (!crc) return;
+          if (aic && aic.checked) { crc.checked = false; crc.disabled = true; }
+          else { crc.disabled = false; }
+        }
+        if (crc) { crc.checked = true; }
+        if (aic) aic.addEventListener("change", syncClipReuse);
+        syncClipReuse();
         // Autopilot implies AI-customize (every incoming lead gets a fresh drop).
         var apc = $("#vdAutoPilot");
         if (apc) apc.addEventListener("change", function () {
           if (apc.checked && aic) aic.checked = true;
+          syncClipReuse();
           renderEstimate();
         });
         renderEstimate();
@@ -19102,7 +19203,8 @@
         dailyCap: parseInt(val("vdDailyCap") || "100", 10), frequencyCapDays: parseInt(val("vdFreq") || "30", 10),
         testMode: !!(($("#vdTestMode") || {}).checked),
         aiCustomize: !!(($("#vdAiCustomize") || {}).checked),
-        autoPilot: !!(($("#vdAutoPilot") || {}).checked)
+        autoPilot: !!(($("#vdAutoPilot") || {}).checked),
+        clipReuse: !(($("#vdAiCustomize") || {}).checked) && !!(($("#vdClipReuse") || {}).checked)
       };
       if (!payload.name) { toast("Name the campaign first."); return; }
       send("/voice/campaigns", "PUT", payload).then(function (r) {

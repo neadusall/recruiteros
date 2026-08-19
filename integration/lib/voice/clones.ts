@@ -20,7 +20,7 @@
 
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import type { ScriptSegment } from "./script";
+import { cacheKey, type ScriptSegment } from "./script";
 import { getVoiceClientFor, type VoiceProvider } from "./provider";
 
 /**
@@ -206,4 +206,67 @@ export async function assembleDrop(
     cached: rendered.filter((r) => r.cached).length,
     dryRun: rendered.some((r) => r.dryRun),
   };
+}
+
+/**
+ * CREDIT-SAVER assembly: render each splice segment (static prose + the tiny
+ * name/title/company clips, all cache-aware), then CONCATENATE the audio bytes
+ * into ONE mp3 and return a single-URL playlist. The webhook then plays one file,
+ * so there is no dead air between pieces (the reason the plain path renders whole
+ * messages), while only NEW names/titles/static ever cost a synthesis.
+ *
+ * mp3 byte-concatenation is safe here: every clip comes from the same voice +
+ * encoder settings, so the frames play back as one file (the same trick the
+ * "Download voicemail" button uses). The concatenated file is itself cached by the
+ * ordered segment keys, so an identical (name + title + script) combo reuses it.
+ */
+export async function assembleSplicedDrop(
+  segments: ScriptSegment[],
+  voice: VoiceRef,
+): Promise<AssembledDrop> {
+  const rendered: RenderedSegment[] = [];
+  for (const s of segments) rendered.push(await renderSegment(s, voice));
+  const synthesized = rendered.filter((r) => r.synthesized).length;
+  const cached = rendered.filter((r) => r.cached).length;
+
+  // Dry-run (provider unconfigured): nothing was rendered, so there is nothing to
+  // stitch — hand back the per-segment URLs so the flow still runs end to end.
+  if (rendered.some((r) => r.dryRun)) {
+    return { playlist: rendered.map((r) => r.url), synthesized, cached, dryRun: true };
+  }
+  if (!segments.length) return { playlist: [], synthesized, cached, dryRun: false };
+
+  const combo = fileFor(voiceKey(voice), cacheKey("vm-spliced", segments.map((s) => s.key).join("|")));
+  const m = await loadManifest();
+  if (!m.entries[combo]) {
+    const parts: Buffer[] = [];
+    for (const s of segments) {
+      const buf = await readSegment(fileFor(voiceKey(voice), s.key));
+      if (buf) parts.push(buf);
+    }
+    const joined = Buffer.concat(parts);
+    await fs.mkdir(cacheDir(), { recursive: true });
+    await fs.writeFile(join(cacheDir(), combo), joined);
+    m.entries[combo] = { key: `vm-spliced:${segments.length}`, voiceId: voiceKey(voice), bytes: joined.length, createdAt: new Date().toISOString() };
+    await saveManifest();
+  }
+  return { playlist: [audioUrl(combo)], synthesized, cached, dryRun: false };
+}
+
+/** Archive rollup for the credit-saver UI: how many name/title/company clips and
+ *  static phrases are cached, so the operator can see the reusable library grow. */
+export async function voiceArchiveStats(): Promise<{
+  firstNames: number; roles: number; companies: number; staticPhrases: number; totalClips: number; bytes: number;
+}> {
+  const m = await loadManifest();
+  let firstNames = 0, roles = 0, companies = 0, staticPhrases = 0, bytes = 0;
+  for (const e of Object.values(m.entries)) {
+    bytes += e.bytes;
+    const kind = e.key.split(":")[0];
+    if (kind === "first_name") firstNames++;
+    else if (kind === "role") roles++;
+    else if (kind === "company") companies++;
+    else if (kind === "static") staticPhrases++;
+  }
+  return { firstNames, roles, companies, staticPhrases, totalClips: Object.keys(m.entries).length, bytes };
 }

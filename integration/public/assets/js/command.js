@@ -4252,10 +4252,47 @@
       : "Your recruiting sending engine, capacity, throughput and what's running right now.")
       + (showRecruiterBar ? " Pick a recruiter to scope it, or see every recruiter's stats below." : "");
     el.innerHTML = head("Dashboard", sub) +
+      '<div id="ovCapacity"></div>' +
       '<div id="ovMpc"></div>' +
       '<div id="ovVisitors"></div>' +
       (showRecruiterBar ? '<div class="ov-recruiters" id="ovRecruiters">' + loading() + "</div>" : "") +
       '<div id="ovBody">' + loading() + "</div>";
+
+    // TODAY'S REAL SENDING CAPACITY, live on the Dashboard: what the machine can
+    // actually send right now per fleet (rest-aware, same source as the Senders
+    // tab), sent so far, and room left. Refreshes every minute while on screen.
+    function loadOvCapacity() {
+      api("/senders/story").then(function (d) {
+        var host = $("#ovCapacity"); if (!host) return;
+        if (!d || !d.present) { host.innerHTML = ""; return; }
+        var cap = d.capacity || {}, fleets = d.fleets || [];
+        function fmt(n) { return Number(n || 0).toLocaleString(); }
+        var pillMap = {
+          healthy: ["All clear", "#1a7f37"], supply: ["Supply-limited", "#b26a00"],
+          capacity: ["Ramp-limited", "#2e5bd7"], fleet: ["Fleet resting", "#b26a00"],
+          placement: ["Placement hold", "#b42318"], engine: ["Engine stalled", "#b42318"],
+        };
+        var pill = pillMap[d.verdict] || ["Status", "#6b7280"];
+        var frows = fleets.map(function (f) {
+          var extra = f.benched ? ' <span style="color:#b26a00">(+' + fmt(f.benched) + ' benched)</span>'
+            : (f.warmingBoxes && f.graduationAt ? ' <span class="muted">(' + f.warmingBoxes + ' warming, live ~' + esc(String(f.graduationAt).slice(5, 10)).replace("-", "/") + ')</span>' : '');
+          return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:2px 0">' +
+            '<span class="muted">' + esc(f.name) + '</span><span><b>' + fmt(f.today) + '</b><span class="muted">/day</span>' + extra + '</span></div>';
+        }).join("");
+        host.innerHTML =
+          '<div class="snd-story" style="border:1px solid var(--border-strong);border-radius:12px;padding:14px 16px;margin-bottom:14px">' +
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+              '<span class="snd-split-t" style="margin:0">Sending capacity today</span>' +
+              '<span style="border:1px solid ' + pill[1] + ';color:' + pill[1] + ';border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:600">' + pill[0] + '</span>' +
+              '<span style="margin-left:auto;font-size:12.5px" class="muted"><b style="color:var(--text)">' + fmt(cap.sentToday) + '</b> sent · <b style="color:var(--text)">' + fmt(cap.remaining) + '</b> room · cap <b style="color:var(--text)">' + fmt(cap.capToday) + '</b></span>' +
+            '</div>' +
+            '<div style="margin-top:8px">' + frows + '</div>' +
+            '<div class="muted" style="font-size:11.5px;margin-top:6px">Live from the send engine (rest-aware). Full story: Admin &gt; Infrastructure &gt; Senders.</div>' +
+          '</div>';
+      });
+    }
+    loadOvCapacity();
+    viewTimers.push(setInterval(loadOvCapacity, 60000));
 
     // Who is on your site: first-party visitor intelligence for the marketing site.
     // A company we emailed shows with the exact people we emailed there (recruiter +
@@ -9388,12 +9425,14 @@
     var head =
       '<div class="wu-head">' +
         '<div class="wu-title">Sending servers</div>' +
-        '<span class="wu-live"><span class="wu-dot"></span> Live · updated ' + esc(wuAgo(siData.updatedAt)) + '</span>' +
+        '<span class="wu-live"><span class="wu-dot"></span> Live · updated <span id="siAgo">' + esc(wuAgo(siData.updatedAt)) + '</span></span>' +
         '<span style="flex:1"></span>' +
         '<button class="btn btn-ghost btn-sm" id="siSweep"' + (siSweeping ? " disabled" : "") + '>' + (siSweeping ? "Testing logins…" : "Test logins now") + '</button>' +
       '</div>' +
       '<div class="wu-sub">The servers your Email IDs actually send through, probed live from this portal, with real login checks rotating through the pool so every credential is re-proven at least daily.</div>';
-    var sweepLine = '<div class="muted" style="font-size:12px;margin:0 0 10px">Login checks this pass: ' + (sweep.tested || 0) + ' tested, ' + (sweep.passed || 0) + ' passed, ' + (sweep.failed || 0) + ' failed' + (sweep.pendingStale ? ', ' + sweep.pendingStale + ' queued' : '') + '.</div>';
+    var sweepLine = (!sweep.tested && !sweep.pendingStale)
+      ? '<div class="muted" style="font-size:12px;margin:0 0 10px">Login checks: every held credential re-proven within the last 24 hours.</div>'
+      : '<div class="muted" style="font-size:12px;margin:0 0 10px">Login checks this pass: ' + (sweep.tested || 0) + ' tested, ' + (sweep.passed || 0) + ' passed, ' + (sweep.failed || 0) + ' failed' + (sweep.pendingStale ? ', ' + sweep.pendingStale + ' queued' : '') + '.</div>';
     var mailcow = siData.mailcow
       ? '<div class="muted" style="font-size:12px;margin:0 0 10px">Mail server inventory (' + esc(siData.mailcow.baseUrl.replace(/^https?:\/\//, "")) + '): ' + (siData.mailcow.mailboxes != null ? siData.mailcow.mailboxes + ' mailboxes' : 'mailboxes n/a') + (siData.mailcow.domains != null ? ' across ' + siData.mailcow.domains + ' domains' : '') + (siData.mailcow.ok ? '' : ' · <span style="color:#b3261e">inventory API unreachable, check the key</span>') + '</div>'
       : '';
@@ -9419,9 +9458,15 @@
           var inb = s.inboxes
             ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + warmingLabel + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
             : '<span class="muted">none imported yet</span>';
+          // Login health only speaks for logins we can actually test from here.
+          // Credential-less upstream fleets (Sending.ac OAuth boxes) have nothing
+          // to re-check, so say that instead of a forever-stale "due a re-check".
           var auth = s.error
             ? '<span style="color:#b3261e">' + s.error + ' failing</span>' + (s.staleAuth ? ' <span class="muted">· ' + s.staleAuth + ' due a re-check</span>' : '')
-            : (s.staleAuth ? '<span class="muted">' + s.staleAuth + ' due a re-check</span>' : (s.inboxes ? '<span style="color:#1a7f37">all recently verified</span>' : '<span class="muted">n/a</span>'));
+            : (s.staleAuth ? '<span class="muted">' + s.staleAuth + ' due a re-check</span>'
+              : (s.inboxes && s.verifiable === 0 ? '<span class="muted">managed upstream, no logins held here</span>'
+                : (s.inboxes && s.verifiable != null && s.verifiable < s.inboxes ? '<span style="color:#1a7f37">all ' + s.verifiable + ' held logins verified</span> <span class="muted">· ' + (s.inboxes - s.verifiable) + ' managed upstream</span>'
+                  : (s.inboxes ? '<span style="color:#1a7f37">all recently verified</span>' : '<span class="muted">n/a</span>'))));
           var errs = s.lastErrors && s.lastErrors.length
             ? s.lastErrors.map(function (e) { return '<div class="muted" style="font-size:11px" title="' + esc(e) + '">' + esc(e.length > 60 ? e.slice(0, 60) + "…" : e) + '</div>'; }).join("")
             : '<span class="muted">none</span>';
@@ -9446,6 +9491,8 @@
     });
   }
 
+  var siAgoTimer = null, siFocusBound = false;
+
   function loadInfra() {
     if (siLoading) return;
     siLoading = true;
@@ -9455,11 +9502,27 @@
       if (r.ok) siData = r.data || null;
       renderInfra();
     });
+    // Real-time loop: refetch every 30s while the panel is mounted (each poll
+    // also advances the server-side login sweep), tick the "updated Xs ago"
+    // label every second, and refetch immediately when the tab regains focus.
     if (!siTimer) {
       siTimer = setInterval(function () {
         if (!document.getElementById("siWrap")) { clearInterval(siTimer); siTimer = null; return; }
         loadInfra();
-      }, 120000);
+      }, 30000);
+    }
+    if (!siAgoTimer) {
+      siAgoTimer = setInterval(function () {
+        var ago = document.getElementById("siAgo");
+        if (!ago) { clearInterval(siAgoTimer); siAgoTimer = null; return; }
+        if (siData && siData.updatedAt) ago.textContent = wuAgo(siData.updatedAt);
+      }, 1000);
+    }
+    if (!siFocusBound) {
+      siFocusBound = true;
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden && document.getElementById("siWrap")) loadInfra();
+      });
     }
   }
 
@@ -9519,6 +9582,7 @@
         '</div>' +
       '</div>' +
       '<div id="sndStoryBox"></div>' +
+      '<div id="sndFleetsBox"></div>' +
       '<div id="wuWrap"></div>' +
       '<div id="siWrap"></div>' +
       '<div id="sndStatsBox" class="snd-stats"></div>' +
@@ -9661,7 +9725,7 @@
     send("/senders", "GET").then(function (r) {
       if (!r.ok) { if (box) box.innerHTML = '<div class="empty">Could not load senders.</div>'; return; }
       sndData = r.data || {};
-      renderSenderStats(); renderSenderPools(); renderSenderRows();
+      renderSenderStats(); renderSenderFleets(); renderSenderPools(); renderSenderRows();
     });
   }
 
@@ -9675,6 +9739,52 @@
     };
     var e = map[p] || [p || "?", "#6b7280"];
     return '<span class="snd-prov" style="border-color:' + e[1] + ';color:' + e[1] + '">' + esc(e[0]) + '</span>';
+  }
+
+  /** Fleet monitor: every sending infrastructure (Sending.ac, Google/Zapmail, the
+   *  internal server) reports in one place - usable capacity today, what's benched,
+   *  warming clocks, bounce pressure, and each fleet's known caveats. */
+  function renderSenderFleets() {
+    var box = $("#sndFleetsBox"); if (!box) return;
+    var fleets = sndData.fleets || [];
+    if (!fleets.length) { box.innerHTML = ""; return; }
+    function fmt(n) { return Number(n || 0).toLocaleString(); }
+    function pillFor(f) {
+      if (f.boxes.error > 0 || (f.warmupBounces7d || 0) > 50) return ["Attention", "#b42318"];
+      if (f.boxes.benched > (f.boxes.active + f.boxes.warming) / 2) return ["Mostly benched", "#b26a00"];
+      if (f.boxes.warming > f.boxes.active) return ["Warming", "#2e5bd7"];
+      return ["Healthy", "#1a7f37"];
+    }
+    var rows = fleets.map(function (f) {
+      var pill = pillFor(f);
+      var grad = f.graduation && f.graduation.eligibleAt
+        ? ' · ' + f.graduation.warming + ' warming (auto-activate ~' + esc(String(f.graduation.eligibleAt).slice(0, 10)) + ')'
+        : (f.boxes.warming ? ' · ' + f.boxes.warming + (f.key === "sendingac" ? ' externally warmed, sending' : ' warming') : '');
+      var benched = f.boxes.benched
+        ? ' · <span style="color:#b26a00">' + fmt(f.boxes.benched) + ' benched (' + fmt(f.capacity.benched) + '/day idle)</span>'
+        : '';
+      var resting = f.domains.resting
+        ? ' · ' + f.domains.resting + ' of ' + f.domains.total + ' domains resting' + (f.domains.nextRevival ? ' (next back ' + esc(String(f.domains.nextRevival).slice(0, 10)) + ')' : '')
+        : ' · ' + f.domains.total + ' domain' + (f.domains.total === 1 ? '' : 's');
+      var ramp = f.capacity.atFullRamp > f.capacity.today + f.capacity.benched
+        ? ' <span class="muted">(ramps to ' + fmt(f.capacity.atFullRamp) + '/day)</span>' : '';
+      var notes = (f.notes || []).map(function (t) {
+        return '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(t) + '</div>';
+      }).join("");
+      return '<div style="padding:10px 0;border-top:1px solid var(--border)">' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<b>' + esc(f.name) + '</b>' +
+          '<span class="snd-story-pill" style="border:1px solid ' + pill[1] + ';color:' + pill[1] + ';border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:600">' + pill[0] + '</span>' +
+          '<span style="margin-left:auto"><b>' + fmt(f.capacity.today) + '</b><span class="muted">/day usable now</span>' + ramp + '</span>' +
+        '</div>' +
+        '<div class="muted" style="font-size:12.5px;margin-top:4px">' + fmt(f.boxes.active) + ' active' + grad + benched + resting +
+          ' · bounces last sweep: ' + fmt(f.bounces7d) + (f.warmupBounces7d != null ? ' campaign / ' + fmt(f.warmupBounces7d) + ' on warm-up traffic' : '') +
+        '</div>' + notes +
+      '</div>';
+    }).join("");
+    box.innerHTML = '<div class="snd-story" style="margin-top:14px">' +
+      '<div class="snd-story-top"><span class="snd-split-t" style="margin:0">Fleet monitor</span>' +
+      '<span class="snd-story-ts">every sending infrastructure, one report</span></div>' + rows + '</div>';
   }
 
   function renderSenderStats() {
@@ -17913,7 +18023,7 @@
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
-      var tabs = [["campaigns", "Campaigns"], ["recordings", "Recordings"], ["intel", "Find people"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
+      var tabs = [["campaigns", "Campaigns"], ["tracker", "Tracker"], ["recordings", "Recordings"], ["intel", "Find people"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vd-tab' + (vd.tab === t[0] ? " active" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -17926,6 +18036,7 @@
     function paint() {
       var body = $("#vdBody"); if (!body) return;
       if (vd.tab === "campaigns") return paintCampaigns(body);
+      if (vd.tab === "tracker") return paintTracker(body);
       if (vd.tab === "recordings") return paintRecordings(body);
       if (vd.tab === "intel") return paintIntel(body);
       if (vd.tab === "scripts") return paintScripts(body);
@@ -18052,6 +18163,92 @@
           (d.withinWindow ? ", in window" : ", outside window") + (d.identifies ? "" : " · add your name/firm") + "</span>";
         if (typeof renderEstimate === "function") renderEstimate();
       }).catch(function () { if (out) out.textContent = "Could not reach the server."; });
+    }
+
+    /* ---- Tracker tab: outbound voicemail log + next actions + credit archive ----
+       "Track outbound calls and who we left a voicemail with." Every lead across
+       the workspace's campaigns, what happened, and where to go from here, plus
+       the reusable voice-clip archive that keeps ElevenLabs credits near zero. */
+    function trOutcomeChip(o, status) {
+      var col = o === "voicemail_delivered" ? "var(--ok)"
+        : o === "human_answered" ? "var(--brand)"
+        : o === "dialing" ? "var(--warn)"
+        : (o === "filtered_mobile" || o === "suppressed" || o === "failed") ? "var(--danger)"
+        : "var(--text-dim)";
+      return '<span style="font-size:11px;font-weight:600;color:' + col + ';border:1px solid ' + col + ';border-radius:4px;padding:1px 7px;white-space:nowrap">' + esc(status || o) + "</span>";
+    }
+    function trWhen(s) {
+      if (!s) return "";
+      try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+      catch (e) { return ""; }
+    }
+    function paintTracker(body) {
+      body.innerHTML = loading();
+      api("/voice/tracker?motion=" + motion).then(function (d) {
+        if (!document.body.contains(body)) return;
+        d = d || {};
+        var t = d.totals || {}, rows = d.rows || [], arch = d.archive || {};
+        var filter = vd.trackerFilter || "all";
+        function kpi(n, label, col) {
+          return '<div style="min-width:118px"><div style="font-size:22px;font-weight:650;line-height:1.1' + (col ? ";color:" + col : "") + '">' + n + '</div><div class="muted" style="font-size:11.5px;margin-top:2px">' + label + "</div></div>";
+        }
+        var connect = t.dialed ? Math.round((t.deliveryRate || 0) * 100) : 0;
+
+        // Filter chips + which outcomes each covers.
+        var filters = [["all", "All"], ["voicemail_delivered", "Voicemails left"], ["queued", "Queued / scheduled"], ["no_answer", "No answer"], ["human_answered", "Live answers"], ["filtered_mobile", "Mobiles filtered"]];
+        var shown = rows.filter(function (r) {
+          if (filter === "all") return true;
+          if (filter === "queued") return r.outcome === "queued" || r.outcome === "scheduled";
+          return r.outcome === filter;
+        });
+
+        body.innerHTML =
+          '<div class="card"><h3>Outbound voicemail tracker</h3>' +
+          '<p class="muted" style="font-size:13px;margin:4px 0 0">Every person we have dialed, what happened, and the next step. The goal is a tailored voicemail in the right person’s box; this is where you see who got one.</p>' +
+          '<div style="display:flex;gap:26px;flex-wrap:wrap;margin-top:14px">' +
+          kpi(t.voicemailsLeft || 0, "voicemails left", "var(--ok)") +
+          kpi(t.dialed || 0, "reached a phone") +
+          kpi(connect + "%", "delivery rate") +
+          kpi(t.queued || 0, "queued / scheduled") +
+          kpi(t.liveHumans || 0, "live answers") +
+          kpi(t.filteredMobile || 0, "mobiles filtered") +
+          "</div></div>" +
+
+          // Credit archive card: the reusable clip library.
+          '<div class="card" style="margin-top:14px;border-color:var(--brand-2)"><h3>Voice clip archive (credit saver)</h3>' +
+          '<p class="muted" style="font-size:13px;margin:4px 0 10px">The fixed part of your voicemail is synthesized once. Only a NEW first name or job title uses ElevenLabs credits, and each one is saved here and reused free forever after.</p>' +
+          '<div style="display:flex;gap:26px;flex-wrap:wrap">' +
+          kpi(arch.firstNames || 0, "first names archived") +
+          kpi(arch.roles || 0, "job titles archived") +
+          kpi(arch.staticPhrases || 0, "fixed phrases cached") +
+          kpi(arch.totalClips || 0, "total clips") +
+          "</div></div>" +
+
+          '<div class="card" style="margin-top:14px">' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' + filters.map(function (f) {
+            var on = filter === f[0];
+            return '<button class="btn btn-sm' + (on ? " btn-primary" : "") + '" data-trf="' + f[0] + '">' + esc(f[1]) + "</button>";
+          }).join("") + "</div>" +
+          (shown.length
+            ? '<div style="overflow-x:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse">' +
+              "<tr class='muted' style='text-align:left'><th style='padding:5px 8px'>Person</th><th style='padding:5px 8px'>Company</th><th style='padding:5px 8px'>What happened</th><th style='padding:5px 8px'>When</th><th style='padding:5px 8px'>Next step</th></tr>" +
+              shown.slice(0, 300).map(function (r) {
+                return "<tr style='border-top:1px solid var(--border)'>" +
+                  "<td style='padding:6px 8px'><b>" + esc(r.name) + "</b>" + (r.role ? " <span class='muted'>" + esc(r.role) + "</span>" : "") +
+                  "<div class='muted' style='font-size:11px'>" + esc(r.phone) + " · " + esc(r.campaignName) + "</div></td>" +
+                  "<td style='padding:6px 8px'>" + esc(r.company || "") + "</td>" +
+                  "<td style='padding:6px 8px'>" + trOutcomeChip(r.outcome, r.status) + "</td>" +
+                  "<td style='padding:6px 8px;white-space:nowrap'>" + esc(trWhen(r.lastAttemptAt)) + "</td>" +
+                  "<td style='padding:6px 8px' class='muted'>" + esc(r.nextAction || "") + "</td></tr>";
+              }).join("") + "</table></div>" +
+              (shown.length > 300 ? '<div class="muted" style="font-size:12px;margin-top:8px">Showing the 300 most recent of ' + shown.length + ".</div>" : "")
+            : '<p class="muted" style="font-size:13px">' + (rows.length ? "No leads match this filter." : "No outbound activity yet. Create a campaign, import a list, and launch to start leaving voicemails.") + "</p>") +
+          "</div>";
+
+        Array.prototype.forEach.call(body.querySelectorAll("[data-trf]"), function (b) {
+          b.addEventListener("click", function () { vd.trackerFilter = b.getAttribute("data-trf"); paintTracker(body); });
+        });
+      }).catch(function () { if (document.body.contains(body)) body.innerHTML = needsSetup(); });
     }
 
     /* ---- Find people tab: Phone Intelligence (IVR navigation) ----
@@ -18658,8 +18855,9 @@
         '<div class="vd-note"><span class="vd-note-ico"><svg class="isvg" aria-hidden="true"><use href="#i-moon"/></svg></span><span>Drops land after hours, in each lead’s <b>own local time</b> (default 7–9 PM), so the line rolls to voicemail. Always clamped to a lawful 8 AM–9 PM envelope.</span></div>' +
         '<div class="vd-section-label">Delivery &amp; safeguards</div>' +
         '<div class="vd-toggles">' +
+        vdToggle("vdClipReuse", "Credit saver: reuse name & title clips", "Recommended. Synthesize the fixed part of the message once, and only ever spend ElevenLabs credits on a NEW first name or job title. Each name and title is saved and reused free forever after. Keep this on unless AI-customize is on.") +
         vdToggle("vdTestMode", "Test mode", "Ignore the calling window. Testing only, every other safeguard stays on.") +
-        vdToggle("vdAiCustomize", "AI-customize per lead", "The AI rewrites each drop from your script below, kept to 15–25s and the speech rules. More natural, but each lead synthesizes fresh (a little more spend).") +
+        vdToggle("vdAiCustomize", "AI-customize per lead", "The AI rewrites each drop from your script below, kept to 15–25s and the speech rules. More natural, but each lead synthesizes fresh (uses more credits, and the credit saver above does not apply).") +
         vdToggle("vdAutoPilot", "Always-on autopilot", "Keep this campaign running and auto-send to leads as they’re fed in (email-sent trigger or import). Turns on AI-customize so every incoming lead gets a fresh, in-window drop. Consent + all safeguards still required.") +
         "</div>" +
         '<div class="vd-section-label" style="margin-top:20px">Voicemail message</div>' +
@@ -18919,10 +19117,23 @@
           var e = $("#" + id); if (e) e.addEventListener("input", renderEstimate);
         });
         var aic = $("#vdAiCustomize"); if (aic) aic.addEventListener("change", renderEstimate);
+        // Credit saver defaults ON (matches the backend default). AI-customize
+        // makes every lead's prose unique, so clip reuse can't apply then, reflect
+        // that by switching the saver off and disabling it while AI-customize is on.
+        var crc = $("#vdClipReuse");
+        function syncClipReuse() {
+          if (!crc) return;
+          if (aic && aic.checked) { crc.checked = false; crc.disabled = true; }
+          else { crc.disabled = false; }
+        }
+        if (crc) { crc.checked = true; }
+        if (aic) aic.addEventListener("change", syncClipReuse);
+        syncClipReuse();
         // Autopilot implies AI-customize (every incoming lead gets a fresh drop).
         var apc = $("#vdAutoPilot");
         if (apc) apc.addEventListener("change", function () {
           if (apc.checked && aic) aic.checked = true;
+          syncClipReuse();
           renderEstimate();
         });
         renderEstimate();
@@ -18992,7 +19203,8 @@
         dailyCap: parseInt(val("vdDailyCap") || "100", 10), frequencyCapDays: parseInt(val("vdFreq") || "30", 10),
         testMode: !!(($("#vdTestMode") || {}).checked),
         aiCustomize: !!(($("#vdAiCustomize") || {}).checked),
-        autoPilot: !!(($("#vdAutoPilot") || {}).checked)
+        autoPilot: !!(($("#vdAutoPilot") || {}).checked),
+        clipReuse: !(($("#vdAiCustomize") || {}).checked) && !!(($("#vdClipReuse") || {}).checked)
       };
       if (!payload.name) { toast("Name the campaign first."); return; }
       send("/voice/campaigns", "PUT", payload).then(function (r) {

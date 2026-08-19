@@ -43,6 +43,7 @@ export async function POST(req: Request) {
       voiceId: b?.voiceId,
       messageMode,
       recordingId: b?.recordingId,
+      clipReuse: b?.clipReuse !== false,
     });
     return ok(result);
   } catch (e: any) {

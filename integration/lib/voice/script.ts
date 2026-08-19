@@ -196,6 +196,61 @@ export function segmentScript(template: string, vars: MergeVars, persona: VoiceP
   return [{ key: cacheKey("vm", rendered), text: rendered, kind: "static" as const }];
 }
 
+/**
+ * CREDIT-SAVER segmentation. Split a templated voicemail so ONLY the per-lead
+ * variables ({first_name}, {role}, {company}) are their own tiny audio clips and
+ * everything else is fixed prose. The fixed prose is synthesized ONCE (cached by
+ * its exact text), and each unique name / title / company is synthesized ONCE and
+ * kept forever in the archive (keyed "first_name:hector", "role:vp of sales", …),
+ * so the next lead named Hector, or the next "VP of Sales", costs zero credits.
+ *
+ * The pieces are stitched back into ONE audio file before the drop plays (see
+ * assembleSplicedDrop), so there is no mid-call dead air — the reason the plain
+ * path renders the whole message at once. Trade-off vs that path: the variable
+ * words are synthesized without their sentence's surrounding prosody, so write
+ * the template with the slots at natural pause points (a vocative name, a title
+ * set off by commas) and it reads cleanly. This is the intended model when the
+ * ONLY thing that changes lead-to-lead is the name and job title.
+ *
+ * The persona slots ({agent_name}/{agent_company}) are fixed for a campaign, so
+ * they are baked into the static prose (not treated as variable clips).
+ */
+const VAR_SLOT_RE = /\{(first_name|role|company)\}/g;
+
+export function spliceSegments(template: string, vars: MergeVars, persona: VoicePersona): ScriptSegment[] {
+  // Bake the fixed persona values in; only the per-lead slots stay as markers.
+  const withPersona = stripDashes(
+    (template || "")
+      .replace(/\{agent_name\}/g, persona.agentName)
+      .replace(/\{agent_company\}/g, persona.agentCompany),
+  );
+  const slotValue = (slot: "first_name" | "role" | "company"): string =>
+    slot === "first_name" ? (vars.firstName?.trim() || "there")
+      : slot === "role" ? (vars.role?.trim() || "leader")
+      : (vars.company?.trim() || "your team");
+
+  const segs: ScriptSegment[] = [];
+  const pushStatic = (raw: string) => {
+    const text = raw.replace(/\s+/g, " ").trim();
+    if (text) segs.push({ key: cacheKey("static", text), text, kind: "static" });
+  };
+
+  let last = 0;
+  let m: RegExpExecArray | null;
+  VAR_SLOT_RE.lastIndex = 0;
+  while ((m = VAR_SLOT_RE.exec(withPersona))) {
+    pushStatic(withPersona.slice(last, m.index));
+    const slot = m[1] as "first_name" | "role" | "company";
+    const value = slotValue(slot);
+    // Slot clips are keyed by VALUE ONLY (not the surrounding text) so the same
+    // name/title is reused across every script and campaign in this voice.
+    segs.push({ key: `${slot}:${value.toLowerCase().replace(/\s+/g, " ").trim()}`, text: value, kind: slot });
+    last = m.index + m[0].length;
+  }
+  pushStatic(withPersona.slice(last));
+  return segs;
+}
+
 /** Tiny stable string hash (FNV-1a, base36) — disambiguates long, similar text. */
 function hash36(text: string): string {
   let h = 0x811c9dc5;

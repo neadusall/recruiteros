@@ -220,6 +220,14 @@ export interface VoiceCampaign {
   /** Personalized intro template for recording mode ({first_name}/{role}/{company}).
    *  Empty = drop the recording with no intro. */
   introTemplate?: string;
+  /**
+   * CREDIT-SAVER (default true). Synthesize the fixed prose ONCE and reuse cached
+   * name / title / company clips (the archive), stitched into one audio file, so
+   * only a NEW first name or job title ever costs ElevenLabs credits. Turn off to
+   * render the whole message per lead (needed only when every lead's prose differs
+   * — e.g. AI-customize, which bypasses this automatically).
+   */
+  clipReuse?: boolean;
   /** Cloned voice used to render the drop (operator's consented voice). */
   voiceId?: string;
   /** TTS vendor for voiceId (default elevenlabs). */
@@ -283,6 +291,7 @@ export interface VoiceCampaignInput {
   /** "" detaches the recording; absent keeps it; an id (re)sets it. */
   recordingId?: string;
   introTemplate?: string;
+  clipReuse?: boolean;
   voiceId?: string;
   voiceProvider?: VoiceProvider;
   callerId?: string;

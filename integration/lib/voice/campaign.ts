@@ -25,9 +25,9 @@ import { recordUsage } from "../billing/ledger";
 import { rateCost } from "../billing/rates";
 import type { Motion } from "../core/types";
 
-import { segmentScript, renderScript, checkScript, identifierLine, type MergeVars } from "./script";
+import { segmentScript, spliceSegments, renderScript, checkScript, identifierLine, type MergeVars } from "./script";
 import { draftVoiceScript } from "./draft";
-import { assembleDrop, audioUrl, type VoiceRef } from "./clones";
+import { assembleDrop, assembleSplicedDrop, audioUrl, type VoiceRef } from "./clones";
 import { getVoiceClientFor } from "./provider";
 import { checkWindow, resolveTimezone, type WindowCheck } from "./compliance";
 import { toE164 } from "./phone";
@@ -164,15 +164,30 @@ export async function assembleMessage(opts: {
   vars: MergeVars;
   persona: VoicePersona;
   voice: VoiceRef;
+  /** CREDIT-SAVER: synthesize the static prose once and reuse cached name/title/
+   *  company clips, stitched into one file. Applies to the intro (recording mode)
+   *  and the script (script mode). Off = render the whole message per lead. */
+  clipReuse?: boolean;
 }): Promise<AssembledMessage> {
+  // Build the intro/script playlist either by splicing cached clips (credit-saver)
+  // or rendering the whole text as one take.
+  const build = (text: string) => {
+    if (opts.clipReuse) {
+      const segments = spliceSegments(text, opts.vars, opts.persona);
+      return { segments, drop: assembleSplicedDrop(segments, opts.voice) };
+    }
+    const segments = segmentScript(text, opts.vars, opts.persona);
+    return { segments, drop: assembleDrop(segments, opts.voice) };
+  };
+
   if (opts.mode === "recording") {
     const rec = opts.recordingId ? getRecording(opts.workspaceId, opts.recordingId) : undefined;
     if (!rec) throw new Error("recording_missing");
     const introTpl = opts.text.trim();
-    const segments = introTpl ? segmentScript(introTpl, opts.vars, opts.persona) : [];
-    const intro = segments.length
-      ? await assembleDrop(segments, opts.voice)
-      : { playlist: [], synthesized: 0, cached: 0, dryRun: false };
+    const { segments, drop: introP } = introTpl
+      ? build(introTpl)
+      : { segments: [] as ReturnType<typeof segmentScript>, drop: Promise.resolve({ playlist: [] as string[], synthesized: 0, cached: 0, dryRun: false }) };
+    const intro = await introP;
     return {
       playlist: [...intro.playlist, audioUrl(rec.file)],
       synthesized: intro.synthesized,
@@ -181,9 +196,9 @@ export async function assembleMessage(opts: {
       rendered: (segments.map((s) => s.text).join(" ") + ` [then your recording "${rec.name}" plays]`).trim(),
     };
   }
-  const segments = segmentScript(opts.text, opts.vars, opts.persona);
-  const drop = await assembleDrop(segments, opts.voice);
-  return { ...drop, rendered: segments.map((s) => s.text).join(" ") };
+  const { segments, drop } = build(opts.text);
+  const resolved = await drop;
+  return { ...resolved, rendered: segments.map((s) => s.text).join(" ") };
 }
 
 /* ---------------- launch gating ---------------- */
@@ -311,13 +326,17 @@ export async function runDueDrops(
     // Recording mode plays the personalized AI intro then the operator's
     // pre-recorded pitch; per-lead custom scripts / AI-customize are script-mode
     // concepts and are ignored there.
+    // Credit-saver splicing helps only when the static prose is SHARED across
+    // leads (templated placeholder mode). A per-lead AI rewrite or custom script
+    // has unique prose, so it's rendered whole; the templated intro/script splices.
+    const clipReuse = c.clipReuse !== false && (mode === "recording" || (!c.aiCustomize && !lead.customScript));
     let drop: AssembledMessage;
     try {
       drop = await assembleMessage({
         workspaceId, mode,
         text: mode === "recording" ? (c.introTemplate ?? DEFAULT_INTRO) : scriptText,
         recordingId: c.recordingId,
-        vars, persona: c.persona, voice,
+        vars, persona: c.persona, voice, clipReuse,
       });
     } catch {
       // The attached recording vanished mid-run: mark failed, keep the tick going.
@@ -387,6 +406,8 @@ export interface TestDropInput {
   /** "recording" = personalized AI intro + the pre-recorded pitch. */
   messageMode?: VoiceMessageMode;
   recordingId?: string;
+  /** Credit-saver: reuse cached name/title clips + concatenate (default true). */
+  clipReuse?: boolean;
 }
 
 /**
@@ -413,7 +434,7 @@ export async function testDrop(workspaceId: string, motion: Motion, input: TestD
   try {
     drop = await assembleMessage({
       workspaceId, mode, text: input.scriptTemplate, recordingId: input.recordingId,
-      vars, persona: input.persona, voice,
+      vars, persona: input.persona, voice, clipReuse: input.clipReuse !== false,
     });
     rendered = drop.rendered || rendered;
     if (mode === "recording") {
