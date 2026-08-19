@@ -94,10 +94,14 @@ const SMTP_LANE = process.env.MPC_SMTP_LANE === "1";
 // short hold): each box's cold volume steps up weekly from ITS OWN first cold send, so what
 // Google sees from any one mailbox is a slow, organic growth curve on top of its continuing
 // warm-up, never a day-one volume spike. Steps are per-box/day by week since first send
-// (MPC_GOOGLE_RAMP, default "2,3,5,8,10"; last value = permanent ceiling).
+// (MPC_GOOGLE_RAMP; last value = permanent ceiling). Defaults set 2026-08-19 from the
+// owner's call + industry research: 8/day week 1, 14 week 2, 20/day ceiling week 3+
+// (consensus safe band for warmed Workspace inboxes is 20-50/day with 2-3 boxes per
+// domain; our domains are ~3 weeks old, so we ride the conservative edge and let the
+// health guard + domain-rest breaker veto anything that degrades).
 // MPC_GOOGLE_LANE=0 parks the lane again.
 const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE !== "0";
-const GOOGLE_RAMP = String(process.env.MPC_GOOGLE_RAMP || "2,3,5,8,10")
+const GOOGLE_RAMP = String(process.env.MPC_GOOGLE_RAMP || "8,14,20")
   .split(",").map((n) => Math.max(1, Number(n) || 0)).filter(Boolean);
 function recruiterBoxes() {
   const s = JSON.parse(readFileSync(SENDERS, "utf8"));
