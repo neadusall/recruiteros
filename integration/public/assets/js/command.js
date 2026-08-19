@@ -4014,7 +4014,7 @@
         redraftBtn.disabled = true; redraftBtn.textContent = "Rewriting...";
         send("/linkedin/comments", "POST", { action: "comment_redraft" }).then(function (r) {
           if (r.ok && r.data && r.data.view) paint(r.data.view);
-          if (r.ok && typeof r.data.redrafted === "number") toast(r.data.redrafted + " draft" + (r.data.redrafted === 1 ? "" : "s") + " rewritten" + (r.data.kept ? ", " + r.data.kept + " kept as-is" : "") + ".");
+          if (r.ok && r.data && typeof r.data.redrafted === "number") toast(r.data.redrafted + " draft" + (r.data.redrafted === 1 ? "" : "s") + " rewritten" + (r.data.kept ? ", " + r.data.kept + " kept as-is" : "") + ".");
         });
       });
       Array.prototype.forEach.call(mount.querySelectorAll("[data-lic]"), function (btn) {
