@@ -235,6 +235,10 @@ export interface KoldLinkRow {
   status: string;
   emailValidated?: boolean;
   emailCatchAll?: boolean;
+  emailInvalid?: boolean;
+  sentAt?: string;
+  bouncedAt?: string;
+  repliedAt?: string;
 }
 
 /** One resolved link: which prospect id gets which address (and a name, if KoldInfo found one). */
@@ -244,10 +248,16 @@ function koldCompanyKey(company?: string, domain?: string): string {
   return ((company || "") + "|" + (domain || "")).toLowerCase().replace(/[^a-z0-9|.]/g, "");
 }
 
-/** An "open" slot is one we can still fill: has a domain, no confirmed/catch-all verdict, not locked. */
+/** An "open" slot is one we can still fill: has a domain, no confirmed/catch-all verdict, not locked.
+ *  A suppressed row is open ONLY in the rescue sense (same guard as curation.rescuableInvalid): the
+ *  guessed address failed but the person was never contacted. Without this branch the rescue pipeline
+ *  self-defeats: koldInfoExportRows sends the rejected pile OUT, KoldInfo finds addresses, and the
+ *  linker refuses to match the results back (the first live run re-linked 6 of 318). */
 function isOpenSlot(r: KoldLinkRow): boolean {
-  return !!r.domain && !r.emailValidated && !r.emailCatchAll
-    && r.status !== "enrolled" && r.status !== "queued" && r.status !== "suppressed";
+  if (!r.domain || r.emailValidated || r.emailCatchAll) return false;
+  if (r.status === "enrolled" || r.status === "queued") return false;
+  if (r.status === "suppressed") return !!(r.emailInvalid && r.managerName && !r.sentAt && !r.bouncedAt && !r.repliedAt);
+  return true;
 }
 
 /**
