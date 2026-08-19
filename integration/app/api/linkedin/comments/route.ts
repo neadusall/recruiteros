@@ -22,6 +22,10 @@
  *   comment_edit    { id, text }
  *   comment_redraft {}          -> rewrite all OPEN comment drafts under the
  *                                  current copy rules (used after rule changes)
+ *   followup_approve { id, text? } -> post the staged threaded reply after the
+ *                                  poster responded to our public comment
+ *   followup_skip   { id }
+ *   followup_draft  { id }      -> (re)draft the threaded reply on demand
  *   comment_limits_set { enabled?, perDay?, perWeek?, autoPost? }
  *                               -> the public-comment lane's throttle, and
  *                                  whether autopilot may post without approval
@@ -39,7 +43,7 @@ import {
   approveConnect, skipConnect, approveDm, skipDm, editDm, setCommentWatchPaused,
   setCommentWatchAuto, setMarketKeywords, setScenarios, expandRoleFamily, aiHunt,
   setAutoIndustries, approvePostComment, skipPostComment, editPostComment, setCommentLimits,
-  redraftOpenComments,
+  redraftOpenComments, approveFollowUp, skipFollowUp, draftFollowUp,
 } from "../../../../lib/linkedin/commentWatch";
 
 export const runtime = "nodejs";
@@ -143,6 +147,18 @@ export async function POST(req: Request): Promise<Response> {
   if (b.action === "comment_redraft") {
     const r = await redraftOpenComments(ws);
     return ok({ ...r, view: await commentWatchView(ws) });
+  }
+  if (b.action === "followup_approve") {
+    const r = await approveFollowUp(ws, g.ctx.user.id, g.ctx.user.email, String(b.id), b.text);
+    return ok({ accepted: r.accepted, reason: r.reason, view: await commentWatchView(ws) });
+  }
+  if (b.action === "followup_skip") {
+    await skipFollowUp(ws, String(b.id));
+    return ok({ view: await commentWatchView(ws) });
+  }
+  if (b.action === "followup_draft") {
+    const item = await draftFollowUp(ws, String(b.id));
+    return ok({ drafted: !!item, view: await commentWatchView(ws) });
   }
   if (b.action === "comment_skip") {
     await skipPostComment(ws, String(b.id));

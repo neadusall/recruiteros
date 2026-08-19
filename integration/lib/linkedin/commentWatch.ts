@@ -106,6 +106,12 @@ const COMMENT_LOG_KEEP_DAYS = 21;      // send log kept for the weekly window
 const COMMENT_DUP_WINDOW = 25;         // recent comments checked for overlap
 const COMMENT_DUP_RATIO = 0.6;         // >60% shared words = too similar
 const MAX_COMMENT_CHARS = 400;         // well under LinkedIn's 1,250 ceiling
+// Outcome tracking (owner ask 2026-08-19): how long a posted comment's thread
+// is watched for the poster writing back, and how many threads each 15-min
+// tick re-reads (round-robin, stalest first; at the lane's volume every live
+// thread gets re-read well inside an hour).
+const RESPONSE_WATCH_DAYS = 14;
+const RESPONSE_CHECKS_PER_TICK = 6;
 
 /** The keyword bank is the ROLES the desk places (owner decision 2026-08-13):
  *  each entry is a job title or phrase, searched against LinkedIn posts to
@@ -462,6 +468,31 @@ export interface CommentLeadItem {
    */
   commentDraft?: string;
   commentStatus?: "suggested" | "approved" | "skipped" | "blocked";
+  /**
+   * Outcome tracking for a posted comment (owner ask 2026-08-19): approved
+   * items leave the queue but land in the "Comments posted" tracker, which
+   * watches the thread for the poster writing back and stages a threaded
+   * reply when they do.
+   */
+  /** Ledger record id of the comment_post action; how posting is confirmed. */
+  commentActionId?: string;
+  /** Stamped when the ledger shows the provider accepted the comment. */
+  commentPostedAt?: string;
+  /** Our posted comment's provider id (ledger providerMessageId). */
+  commentProviderId?: string;
+  /** pending = engine has it; posted = live, watching the thread;
+   *  responded = the poster wrote back; no_response = watch window expired;
+   *  failed = the engine could not post it. */
+  responseStatus?: "pending" | "posted" | "responded" | "no_response" | "failed";
+  responseText?: string;
+  responseAt?: string;
+  /** Their reply's comment id: the threading anchor for our follow-up. */
+  responseCommentId?: string;
+  /** Round-robin cursor so each tick polls the stalest threads first. */
+  responseCheckedAt?: string;
+  /** The staged in-thread follow-up once they respond. */
+  followUpText?: string;
+  followUpStatus?: "suggested" | "approved" | "skipped" | "blocked";
   /** The commenter. */
   authorProviderId?: string;
   authorName: string;
@@ -1167,6 +1198,20 @@ Rules:
 - Never mention AI.
 Return ONLY the comment text, nothing else.`;
 
+/** The in-thread follow-up after a poster REPLIES to our public comment.
+ *  This is the warmest moment the lane produces: they engaged in public, on
+ *  their own hiring post, so the reply may move toward the search directly,
+ *  but it is still visible to their whole network, so it stays classy. */
+const FOLLOWUP_RULES = `You write a threaded LinkedIn reply for a recruiting agency owner. Earlier the owner left a public comment on a hiring decision-maker's post; the decision-maker has now REPLIED to that comment. You are writing the owner's reply back, in the same public thread on THEIR post. The reader must never suspect a machine wrote it.
+Rules:
+- Respond to the SUBSTANCE of what they said back. Extend the point, answer their question, or concede a nuance; never restate, never flatter, never thank them for replying.
+- Close with ONE concrete, low-pressure step toward the search: offer to send over what you are seeing on this exact search, or invite them to connect or message you so you can share specifics privately. One clause, easy to take or leave.
+- 15 to 45 words. One or two sentences. No exclamation marks, no emoji, no hashtags, no long dashes.
+- NEVER invent a number; react only to figures they themselves stated. No links, no email addresses, no phone numbers, no calendar, no naming the firm, no fees.
+- Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies".
+- Never mention AI.
+Return ONLY the reply text, nothing else.`;
+
 async function draft(system: string, user: string): Promise<string | null> {
   try {
     const { anthropicClient } = await import("../sourcing/anthropic");
@@ -1459,10 +1504,17 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     console.log(`[comment-bd] ${workspaceId}: handoff error (${e instanceof Error ? e.message : e})`);
   }
 
+  // Outcome tracking: confirm posts against the ledger, watch live threads
+  // for the poster writing back, stage follow-up replies.
+  let responses = 0;
+  try { responses = await checkCommentResponses(workspaceId); } catch (e) {
+    console.log(`[comment-radar] ${workspaceId}: response check error (${e instanceof Error ? e.message : e})`);
+  }
+
   state.lastScan[workspaceId] = nowIso();
   prune();
   save();
-  console.log(`[comment-radar] ${workspaceId}: scanned=${scanned} created=${created + dmCreated} autopilot_sent=${sent} bd_handoff=${handedOff}`);
+  console.log(`[comment-radar] ${workspaceId}: scanned=${scanned} created=${created + dmCreated} autopilot_sent=${sent} bd_handoff=${handedOff} replies_found=${responses}`);
   return { scanned, created: created + dmCreated, skipped: null };
 }
 
@@ -1511,6 +1563,213 @@ async function handoffCommentedToBd(workspaceId: string): Promise<number> {
     }
   }
   return done;
+}
+
+/**
+ * Outcome tracking for posted comments (owner ask 2026-08-19).
+ *
+ * Step 1: items the engine accepted ("pending") are confirmed against the
+ * ledger: success stamps commentPostedAt plus our comment's provider id; a
+ * terminal failure surfaces as "failed" in the tracker instead of silently
+ * looking live forever.
+ *
+ * Step 2: live threads are re-read (round-robin, stalest first) looking for
+ * a reply by the POSTER. Anything they write on their own post after our
+ * comment counts: threading metadata is inconsistent across providers, and
+ * a poster answering "thanks, will DM you" as a top-level comment is a
+ * response by any useful definition. On a hit the in-thread follow-up is
+ * drafted immediately and staged for one-tap approval while the thread is
+ * still hot.
+ *
+ * Step 3: threads quiet past the watch window flip to "no_response". Those
+ * people are already on the re-engagement path by then: the BD handoff put
+ * them in the "Commented (Role Hunter)" email campaign at ~60 hours.
+ */
+async function checkCommentResponses(workspaceId: string): Promise<number> {
+  const accounts = await connectedAccounts(workspaceId);
+  if (!accounts.length) return 0;
+  const tracked = state.items.filter((i) =>
+    i.workspaceId === workspaceId && i.kind === "poster" && i.commentStatus === "approved"
+    && (!i.responseStatus || i.responseStatus === "pending" || i.responseStatus === "posted"));
+  if (!tracked.length) return 0;
+
+  // Step 1: pending -> posted/failed, read off the engine's ledger. Items
+  // approved before tracking existed carry no responseStatus; their ledger
+  // record is recovered through the approval's idempotency key, so history
+  // joins the tracker instead of sitting untracked forever.
+  const pending = tracked.filter((i) => i.responseStatus === "pending" || (!i.responseStatus && i.commentStatus === "approved"));
+  if (pending.length) {
+    const { ledger } = await import("./os/store");
+    const records = await ledger.all();
+    for (const item of pending) {
+      const rec = item.commentActionId
+        ? records.find((r) => r.id === item.commentActionId)
+        : records.find((r) => r.workspaceId === workspaceId && r.idempotencyKey === `licw_pubcomment_${item.id}`);
+      if (!rec) {
+        // Ledger record aged out of the capped store: assume the comment
+        // posted at approval time so the thread still gets watched.
+        item.responseStatus = "posted";
+        item.commentPostedAt = item.commentPostedAt ?? item.updatedAt;
+        continue;
+      }
+      item.commentActionId = rec.id;
+      if (rec.status === "success" || rec.status === "submitted") {
+        item.responseStatus = "posted";
+        item.commentPostedAt = nowIso();
+        item.commentProviderId = rec.providerReference;
+        item.updatedAt = nowIso();
+      } else if (rec.status === "failed" || rec.status === "cancelled" || rec.status === "suppressed") {
+        item.responseStatus = "failed";
+        item.reason = rec.statusReason || "The engine could not post this comment.";
+        item.updatedAt = nowIso();
+      }
+      // Anything else (queued, scheduled, processing) stays pending.
+    }
+  }
+
+  // Step 3 is cheap, so it runs every tick: expire quiet threads.
+  const expiry = Date.now() - RESPONSE_WATCH_DAYS * 86_400_000;
+  for (const item of tracked) {
+    if (item.responseStatus === "posted" && item.commentPostedAt
+      && new Date(item.commentPostedAt).getTime() < expiry) {
+      item.responseStatus = "no_response";
+      item.updatedAt = nowIso();
+    }
+  }
+
+  // Step 2: re-read the stalest live threads.
+  const live = tracked
+    .filter((i) => i.responseStatus === "posted")
+    .sort((a, b) => (a.responseCheckedAt ?? "").localeCompare(b.responseCheckedAt ?? ""))
+    .slice(0, RESPONSE_CHECKS_PER_TICK);
+  let found = 0;
+  if (!live.length) return 0;
+  const { unipile } = await import("../providers");
+  for (const item of live) {
+    item.responseCheckedAt = nowIso();
+    const account = accounts.find((a) => a.accountId === item.accountId) ?? accounts[0];
+    const provider = providerIdOf(account);
+    if (!provider) continue;
+    try {
+      const comments = listOf(await unipile.listPostComments(provider, item.postId))
+        .map(parseComment).filter((c): c is RawComment => !!c);
+      const postedAt = item.commentPostedAt ? new Date(item.commentPostedAt).getTime() : 0;
+      const reply = comments.find((c) =>
+        c.commentId !== item.commentProviderId
+        && (item.authorProviderId
+          ? c.authorProviderId === item.authorProviderId
+          : c.authorName.trim().toLowerCase() === item.authorName.trim().toLowerCase())
+        // A minute of slack: comment timestamps and our posted stamp are from
+        // different clocks. Undated replies are accepted; posters answering
+        // their own post's comments are overwhelmingly answering the newest.
+        && (!c.date || new Date(c.date).getTime() >= postedAt - 60_000));
+      if (!reply) continue;
+      item.responseStatus = "responded";
+      item.responseText = reply.text.slice(0, 700);
+      item.responseAt = reply.date ?? nowIso();
+      item.responseCommentId = reply.commentId;
+      item.updatedAt = nowIso();
+      found++;
+      console.log(`[comment-radar] ${workspaceId}: ${item.authorName} replied to our comment on their post`);
+      // Stage the follow-up now. A model failure just leaves the Draft
+      // button in the tracker; the response itself is already recorded.
+      try {
+        const text = await draft(FOLLOWUP_RULES, followUpBrief(item, reply.text));
+        if (text) {
+          item.followUpText = scrub(text).slice(0, MAX_COMMENT_CHARS);
+          item.followUpStatus = "suggested";
+        }
+      } catch { /* draft on demand instead */ }
+    } catch (e) {
+      console.log(`[comment-radar] ${workspaceId}: thread check failed for ${item.authorName} (${e instanceof Error ? e.message : e})`);
+    }
+  }
+  return found;
+}
+
+function followUpBrief(item: CommentLeadItem, replyText: string): string {
+  return `THEIR ORIGINAL POST:\n${(item.postExcerpt ?? "").slice(0, 600)}\n\n` +
+    `OUR PUBLIC COMMENT:\n${item.commentDraft ?? ""}\n\n` +
+    `THEIR REPLY (by ${item.authorName}${item.title ? `, ${item.title}` : ""}${item.company ? ` at ${item.company}` : ""}):\n${replyText.slice(0, 600)}\n\n` +
+    `Write the owner's reply.`;
+}
+
+/** Draft (or re-draft) the in-thread follow-up for a responded tracker item. */
+export async function draftFollowUp(workspaceId: string, id: string): Promise<CommentLeadItem | null> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.responseStatus !== "responded" || item.followUpStatus === "approved") return null;
+  const text = await draft(FOLLOWUP_RULES, followUpBrief(item, item.responseText ?? ""));
+  if (!text) return null;
+  item.followUpText = scrub(text).slice(0, MAX_COMMENT_CHARS);
+  item.followUpStatus = "suggested";
+  item.updatedAt = nowIso();
+  save();
+  return item;
+}
+
+/** Post the follow-up as a threaded reply to THEIR response on THEIR post.
+ *  This is a live conversation, not a cold touch, so it spends none of the
+ *  cold-comment allowance; engine account caps still apply. */
+export async function approveFollowUp(
+  workspaceId: string, userId: string, userEmail: string, id: string, editedText?: string,
+): Promise<{ item: CommentLeadItem | null; accepted: boolean; reason?: string }> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.followUpStatus !== "suggested" || !item.followUpText || !item.responseCommentId) {
+    return { item: item ?? null, accepted: false, reason: "not_open" };
+  }
+  if (editedText && scrub(editedText).length >= 2) item.followUpText = scrub(editedText).slice(0, MAX_COMMENT_CHARS);
+  const accounts = await connectedAccounts(workspaceId);
+  const account = accounts.find((a) => a.accountId === item.accountId)
+    ?? accounts.find((a) => a.ownerUserId === userId)
+    ?? accounts.find((a) => !a.ownerUserId)
+    ?? accounts[0];
+  if (!account) {
+    item.followUpStatus = "blocked"; item.reason = "No connected LinkedIn account."; item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+  try {
+    const result = await requestLinkedInAction({
+      workspaceId,
+      accountId: account.accountId,
+      person: {
+        fullName: item.authorName, linkedinUrl: item.authorPublicUrl,
+        company: item.company, title: item.title,
+        providerProfileId: item.authorProviderId, prospectId: item.prospectId,
+      },
+      actionType: "comment_post",
+      payload: {
+        postUrl: item.postId, commentId: item.responseCommentId, text: item.followUpText,
+        providerProfileId: item.authorProviderId, linkedinUrl: item.authorPublicUrl,
+      },
+      businessUnit: "bd",
+      sourceType: "manual",
+      approvedBy: userEmail,
+      idempotencyKey: `licw_followup_${item.id}`,
+    });
+    if (result.accepted) {
+      item.followUpStatus = "approved"; item.reason = undefined;
+    } else {
+      item.followUpStatus = "blocked"; item.reason = result.reason || "The engine declined this action.";
+    }
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: result.accepted, reason: result.reason };
+  } catch (e) {
+    item.followUpStatus = "blocked"; item.reason = e instanceof Error ? e.message : "engine_error";
+    item.updatedAt = nowIso(); save();
+    return { item, accepted: false, reason: item.reason };
+  }
+}
+
+export async function skipFollowUp(workspaceId: string, id: string): Promise<CommentLeadItem | null> {
+  await hydrate();
+  const item = findItem(workspaceId, id);
+  if (!item || item.followUpStatus !== "suggested") return null;
+  item.followUpStatus = "skipped";
+  item.updatedAt = nowIso();
+  save();
+  return item;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2214,6 +2473,23 @@ export interface CommentWatchView {
   industryOptions: Array<{ key: string; label: string }>;
   /** The public-comment lane: its limits and where today stands against them. */
   commentThrottle: CommentThrottle;
+  /** Outcome tracker: every posted comment still in its watch/retention
+   *  window, plus the tallies the card leads with. */
+  tracked: CommentLeadItem[];
+  trackedTally: {
+    /** Comments posted, all time (the throttle's own send log). */
+    postedTotal: number;
+    /** Posted in the trailing 7 days. */
+    posted7d: number;
+    /** Tracked items where the poster wrote back. */
+    responded: number;
+    /** Live threads still being watched. */
+    watching: number;
+    /** Watch window expired with no reply (already on the email path). */
+    noResponse: number;
+    /** Follow-up replies staged and waiting for approval. */
+    followUpsOpen: number;
+  };
 }
 
 const TIER_RANK: Record<CommentTier, number> = { hot: 0, warm: 1, community: 2 };
@@ -2228,6 +2504,17 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
       // before the current wall tightened (they also cannot be approved).
       && !((i.dmStatus === "suggested" || i.commentStatus === "suggested") && wallForItem(i)))
     .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || b.createdAt.localeCompare(a.createdAt));
+  // The outcome tracker: posted comments, newest first, responded and
+  // follow-up-ready threads pinned to the top.
+  const trackRank = (i: CommentLeadItem): number =>
+    i.followUpStatus === "suggested" ? 0
+    : i.responseStatus === "responded" ? 1
+    : i.responseStatus === "pending" || i.responseStatus === "posted" ? 2
+    : i.responseStatus === "failed" ? 3 : 4;
+  const tracked = state.items
+    .filter((i) => i.workspaceId === workspaceId && i.kind === "poster" && i.commentStatus === "approved")
+    .sort((a, b) => trackRank(a) - trackRank(b)
+      || (b.commentPostedAt ?? b.updatedAt).localeCompare(a.commentPostedAt ?? a.updatedAt));
   return {
     status, autopilot,
     keywords: marketKeywordsFor(workspaceId),
@@ -2246,6 +2533,16 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
     autoIndustries: autoIndustriesFor(workspaceId),
     industryOptions: INDUSTRY_MATCHERS.map((m) => ({ key: m.key, label: m.label })),
     commentThrottle: commentThrottleFor(workspaceId),
+    tracked,
+    trackedTally: {
+      postedTotal: (state.commentLog[workspaceId] ?? []).length,
+      posted7d: (state.commentLog[workspaceId] ?? [])
+        .filter((t) => Date.now() - new Date(t).getTime() < 7 * 86_400_000).length,
+      responded: tracked.filter((i) => i.responseStatus === "responded").length,
+      watching: tracked.filter((i) => i.responseStatus === "pending" || i.responseStatus === "posted").length,
+      noResponse: tracked.filter((i) => i.responseStatus === "no_response").length,
+      followUpsOpen: tracked.filter((i) => i.followUpStatus === "suggested").length,
+    },
   };
 }
 
@@ -2579,6 +2876,10 @@ export async function approvePostComment(
     });
     if (result.accepted) {
       item.commentStatus = "approved"; item.reason = undefined;
+      // Outcome tracking starts here: the ledger record is how the response
+      // checker learns the comment actually posted (and its provider id).
+      item.commentActionId = result.record?.id;
+      item.responseStatus = "pending";
       // Only an accepted action counts against the day and the week.
       recordComment(workspaceId, item.commentDraft);
     } else {

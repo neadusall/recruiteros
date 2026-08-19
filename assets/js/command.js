@@ -3861,7 +3861,8 @@
       comment_approve: "Comment approved: it posts on their hiring post from your LinkedIn account.",
       dm_approve: "Message approved: sending from your LinkedIn account.",
       connect_approve: "Connect request approved and queued.",
-      approve: "Reply approved: sending from your LinkedIn account."
+      approve: "Reply approved: sending from your LinkedIn account.",
+      followup_approve: "Reply approved: it posts in the thread from your LinkedIn account."
     };
     function receiptsBlock() {
       if (!receipts.length) return "";
@@ -3952,6 +3953,71 @@
       if (t.dmStatus === "skipped") return '<div><span class="lie-chip mut">Skipped</span></div>';
       return "";
     }
+    // ---- Comments posted: the outcome tracker (owner ask 2026-08-19) ----
+    function trackDay(iso) {
+      try { return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" }); } catch (e) { return ""; }
+    }
+    function trackChip(t) {
+      if (t.followUpStatus === "approved") return '<span class="lie-chip ok">Follow-up sent</span>';
+      if (t.responseStatus === "responded") return '<span class="lie-chip ok">They replied</span>';
+      if (t.responseStatus === "pending") return '<span class="lie-chip mut">Posting...</span>';
+      if (t.responseStatus === "posted") return '<span class="lie-chip">Live, watching for a reply</span>';
+      if (t.responseStatus === "no_response") return '<span class="lie-chip mut">No reply</span>';
+      if (t.responseStatus === "failed") return '<span class="lie-chip bad">Did not post</span>';
+      return '<span class="lie-chip mut">Posted</span>';
+    }
+    function trackRow(t) {
+      var open = t.followUpStatus === "suggested";
+      var who = esc(t.authorName) +
+        (t.title || t.company ? ' <span class="muted">' + esc([t.title, t.company].filter(Boolean).join(" · ")) + "</span>" : "");
+      var postLink = t.postUrl ? ' · <a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener">View the post</a>' : "";
+      var out = '<div class="lie-row' + (open ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
+        '<div class="lie-who">' + who + " " + trackChip(t) + "</div>" +
+        '<div class="lie-post muted">Commented ' + esc(trackDay(t.commentPostedAt || t.updatedAt)) + ': "' +
+          esc((t.commentDraft || "").slice(0, 200)) + '"' + postLink + "</div>";
+      if (t.responseStatus === "responded") {
+        out += '<div class="lie-post">Their reply: ' + esc((t.responseText || "").slice(0, 280)) + "</div>";
+        if (open) {
+          out += '<textarea class="lie-text" data-lic-followup rows="2">' + esc(t.followUpText || "") + "</textarea>" +
+            '<div class="lie-actions">' +
+              '<button class="btn btn-sm btn-primary" data-lic="followup_approve">Reply in the thread</button> ' +
+              '<button class="btn btn-sm btn-ghost" data-lic="followup_skip">Skip</button>' +
+            "</div>";
+        } else if (t.followUpStatus === "approved") {
+          out += '<div><span class="lie-chip ok">Follow-up reply approved, posting from your account</span></div>';
+        } else if (t.followUpStatus === "blocked") {
+          out += '<div><span class="lie-chip bad">' + esc(t.reason || "Follow-up blocked") + "</span></div>";
+        } else {
+          out += '<div class="lie-actions"><button class="btn btn-sm" data-lic="followup_draft">Draft a reply</button></div>';
+        }
+      } else if (t.responseStatus === "no_response") {
+        out += '<div class="lie-post muted">No reply in two weeks. They ' + (t.prospectId ? "are already in" : "move to") +
+          ' the Commented (Role Hunter) email campaign, so the next touch arrives by email.</div>';
+      } else if (t.responseStatus === "failed") {
+        out += '<div class="lie-post muted">' + esc(t.reason || "The comment could not be posted.") + "</div>";
+      }
+      return out + "</div>";
+    }
+    function trackerCard(d) {
+      var tr = (d && d.tracked) || [];
+      var tally = (d && d.trackedTally) || {};
+      if (!tr.length && !(tally.postedTotal > 0)) return "";
+      return '<div class="card liops-card">' +
+        '<div class="liops-head"><div><b>Comments posted</b>' +
+          '<div class="muted liops-sub">Every comment that went out, tallied and watched. Each thread is re-checked around the clock; when the poster replies, a threaded response is drafted here for one tap. Quiet threads move to the email follow-up campaign automatically.</div></div>' +
+          (tally.followUpsOpen ? '<span class="liops-progress">' + tally.followUpsOpen + " to review</span>" : "") +
+        "</div>" +
+        '<div class="lie-actions">' +
+          '<span class="lie-chip">' + (tally.posted7d || 0) + " posted this week (" + (tally.postedTotal || 0) + " total)</span> " +
+          '<span class="lie-chip' + (tally.responded ? " ok" : " mut") + '">' + (tally.responded || 0) + " replied</span> " +
+          '<span class="lie-chip mut">' + (tally.watching || 0) + " being watched</span> " +
+          '<span class="lie-chip mut">' + (tally.noResponse || 0) + " no reply</span>" +
+        "</div>" +
+        (tr.length
+          ? tr.map(trackRow).join("")
+          : '<div class="lie-post muted">Nothing tracked yet. Approved comments land here the moment they post.</div>') +
+      "</div>";
+    }
     function row(t, throttle) {
       var who = esc(t.authorName) +
         (t.authorHeadline ? ' <span class="muted">' + esc(t.authorHeadline.slice(0, 120)) + "</span>" : "");
@@ -3998,7 +4064,7 @@
       mount.innerHTML =
         '<div class="card liops-card">' +
           '<div class="liops-head"><div><b>Messages to approve</b>' +
-            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a draft. Approve, edit, or skip; approved and skipped items leave this list. Open profiles and existing connections get a private direct message that ends with a clear ask. Closed profiles get a public comment on their own hiring post instead, throttled, US posters only: proof you run these searches first, then an invitation to engage if they want help.</div></div>' +
+            '<div class="muted liops-sub">Decision makers the Role Hunter found posting open roles, each with a draft. Approve, edit, or skip; approved and skipped items leave this list. Open profiles and existing connections get a private direct message that ends with a clear ask. Closed profiles get a public comment on their own hiring post instead, throttled, US posters only: proof you run these searches first, then an invitation to engage if they want help. Approved comments move to the Comments posted tracker below.</div></div>' +
             (open ? '<span class="liops-progress">' + open + " to review</span>" : "") +
           "</div>" +
           (items.some(function (t) { return t.commentStatus === "suggested"; })
@@ -4008,7 +4074,8 @@
           (items.length
             ? items.map(function (t) { return row(t, throttle); }).join("")
             : '<div class="lie-post muted">Nothing to review right now. The Role Hunter above fills this list as it finds people posting roles they need filled.</div>') +
-        "</div>";
+        "</div>" +
+        trackerCard(d);
       var redraftBtn = mount.querySelector("[data-lic-redraft]");
       if (redraftBtn) redraftBtn.addEventListener("click", function () {
         redraftBtn.disabled = true; redraftBtn.textContent = "Rewriting...";
@@ -4026,7 +4093,8 @@
           var ta = act === "approve" ? rowEl.querySelector("[data-lic-reply]")
             : act === "connect_approve" ? rowEl.querySelector("[data-lic-connect]")
             : act === "dm_approve" ? rowEl.querySelector("[data-lic-dm]")
-            : act === "comment_approve" ? rowEl.querySelector("[data-lic-comment]") : null;
+            : act === "comment_approve" ? rowEl.querySelector("[data-lic-comment]")
+            : act === "followup_approve" ? rowEl.querySelector("[data-lic-followup]") : null;
           if (ta) payload.text = ta.value;
           var whoEl = rowEl.querySelector(".lie-who");
           var whoName = whoEl && whoEl.firstChild ? String(whoEl.firstChild.textContent || "").trim() : "";
