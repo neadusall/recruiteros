@@ -21,7 +21,7 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { cacheKey, type ScriptSegment } from "./script";
-import { getVoiceClientFor, type VoiceProvider } from "./provider";
+import { getVoiceClientFor, voiceSettingsTag, type VoiceProvider } from "./provider";
 
 /**
  * Which voice to synthesize in: a provider + that provider's voice id. Either may
@@ -33,9 +33,11 @@ export interface VoiceRef {
   voiceId?: string;
 }
 
-/** Stable cache namespace for a voice so two providers never collide on an id. */
+/** Stable cache namespace for a voice so two providers never collide on an id.
+ *  Includes a settings tag so re-tuning the voice (stability/similarity/etc.)
+ *  produces fresh audio instead of replaying the old take from cache. */
 function voiceKey(voice: VoiceRef): string {
-  return `${voice.provider || "el"}_${voice.voiceId || "default"}`;
+  return `${voice.provider || "el"}_${voice.voiceId || "default"}_${voiceSettingsTag(voice.provider)}`;
 }
 
 function cacheDir(): string {

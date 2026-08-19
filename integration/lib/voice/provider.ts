@@ -28,6 +28,61 @@ import { cred } from "../providers/http";
 /** The TTS/clone vendors a voice id can belong to. */
 export type VoiceProvider = "elevenlabs" | "cartesia" | "hume";
 
+/**
+ * ElevenLabs voice settings — the naturalness dials. Env-tunable so the voice can
+ * be dialed in by EAR without a code change (set, redeploy, "Listen first",
+ * repeat). Defaults are the values Ryan Nead tuned in the ElevenLabs playground.
+ *
+ * How the pros use these:
+ *  - stability   0.30-0.55: lower = more expressive + varied (more human), higher
+ *                = more consistent + monotone. ~0.45 is the natural-voicemail spot.
+ *  - similarity  0.60-0.90: how closely it hugs the SOURCE clone. Higher = more
+ *                "sounds like Ryan"; too high can amplify any noise in the clone.
+ *  - style       0.00-0.30: adds emotive delivery; keep low for a calm, warm VM.
+ *  - speed       0.94-1.02: slightly under 1.0 reads more deliberate + warm.
+ * Model: eleven_multilingual_v2 reads numbers/prosody naturally and honors the
+ *  <break time="0.5s" /> pause tag; override with VOICE_EL_MODEL (e.g. a v3 model).
+ */
+export interface ElevenSettings {
+  model: string;
+  stability: number;
+  similarity: number;
+  style: number;
+  speed: number;
+  speakerBoost: boolean;
+}
+
+function num(name: string, dflt: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) ? v : dflt;
+}
+
+export function elevenSettings(): ElevenSettings {
+  return {
+    model: (process.env.VOICE_EL_MODEL || "eleven_multilingual_v2").trim(),
+    stability: num("VOICE_EL_STABILITY", 0.46),
+    similarity: num("VOICE_EL_SIMILARITY", 0.36),
+    style: num("VOICE_EL_STYLE", 0.03),
+    speed: num("VOICE_EL_SPEED", 0.97),
+    speakerBoost: /^(1|true|yes|on)$/i.test(process.env.VOICE_EL_SPEAKER_BOOST || ""),
+  };
+}
+
+/**
+ * A short, stable tag of the current synthesis settings, folded into the clone
+ * cache key so that CHANGING a setting re-renders fresh audio instead of replaying
+ * the old take. Only the ElevenLabs dials vary today; other providers get "d".
+ */
+export function voiceSettingsTag(provider?: VoiceProvider): string {
+  const p = provider || ((cred("VOICE_CLONE_PROVIDER") as VoiceProvider) || "elevenlabs");
+  if (p !== "elevenlabs") return "d";
+  const s = elevenSettings();
+  const key = `${s.model}|${s.stability}|${s.similarity}|${s.style}|${s.speed}|${s.speakerBoost}`;
+  let h = 5381;
+  for (let i = 0; i < key.length; i++) h = ((h << 5) + h + key.charCodeAt(i)) | 0;
+  return "s" + (h >>> 0).toString(36);
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
@@ -169,22 +224,23 @@ class ElevenLabsClient implements VoiceCloneClient {
       console.info(`[voice-clone:dry] synth "${text.slice(0, 48)}" (voice=${vid || "unset"})`);
       return { contentType: "audio/mpeg", dryRun: true };
     }
+    // Env-tunable naturalness dials (see elevenSettings). Drops are pre-rendered +
+    // cached, so we use the most natural production model, not a low-latency one.
+    // The script's punctuation and any <break time="0.5s" /> tags drive the human
+    // pauses; these settings shape the timbre + expressiveness.
+    const s = elevenSettings();
     const res = await synthRequest(`${this.base}/text-to-speech/${encodeURIComponent(vid)}`, {
       method: "POST",
       headers: { "xi-api-key": this.key(), "Content-Type": "application/json", Accept: "audio/mpeg" },
       body: JSON.stringify({
         text,
-        // Mirrors the values dialed in on the ElevenLabs playground for this
-        // voice (Ryan Nead). Drops are pre-rendered + cached, so we use the most
-        // natural production model, not a low-latency one. eleven_turbo_v2 was
-        // deprecated; multilingual v2 reads numbers/prosody more naturally.
-        model_id: "eleven_multilingual_v2",
+        model_id: s.model,
         voice_settings: {
-          stability: 0.46,
-          similarity_boost: 0.36,
-          style: 0.03,
-          use_speaker_boost: false,
-          speed: 0.97,
+          stability: s.stability,
+          similarity_boost: s.similarity,
+          style: s.style,
+          use_speaker_boost: s.speakerBoost,
+          speed: s.speed,
         },
       }),
     });
