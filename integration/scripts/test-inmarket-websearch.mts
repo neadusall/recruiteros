@@ -58,7 +58,7 @@ process.env.DATAFORSEO_PASSWORD = "p";
 check("dataforseo outranks rapidapi", ws.webSearchProvider() === "dataforseo");
 
 process.env.SERPER_API_KEY = "s";
-check("serper outranks dataforseo (cheaper AND better)", ws.webSearchProvider() === "serper");
+check("dataforseo outranks serper (its balance cannot lapse; same Google rows)", ws.webSearchProvider() === "dataforseo");
 check("any credential → enabled", ws.webSearchEnabled() === true);
 
 // A half-configured DataForSEO account must not register as usable.
@@ -84,6 +84,10 @@ delete process.env.INMARKET_SEARCH_PROVIDER;
 /* 2. The daily ceiling                                              */
 /* ---------------------------------------------------------------- */
 
+// The ceiling knobs are measured on the REFERENCE provider (serper) in isolation, so the
+// numbers read exactly as configured; 2b covers the money guard when a pricier rung serves.
+clearProviders();
+process.env.SERPER_API_KEY = "s";
 delete process.env.INMARKET_SEARCH_DAILY_MAX;
 check("default cap is 2000", ws.dailyQueryCap() === 2_000);
 process.env.INMARKET_SEARCH_DAILY_MAX = "3";
@@ -98,9 +102,10 @@ check("cap 0 → not ready (never spends)", (await ws.webSearchReady()) === fals
 /* 2b. The money guard on automatic failover                         */
 /* ---------------------------------------------------------------- */
 
-// The query cap is denominated in SERPER queries. DataForSEO is automatic failover at 10-20x the
-// unit price, so if Serper credits run dry the identical configuration must not quietly buy 20x the
-// spend. These pin that the ceiling is enforced in money, and that the two knobs cannot disagree.
+// The query cap is denominated in SERPER queries. Whichever rung actually serves may be pricier
+// (dataforseo bills 2x serper's unit rate with the site:-rewrite in effect), so the identical
+// configuration must not quietly multiply the spend when a different rung serves. These pin that
+// the ceiling is enforced in money, and that the two knobs cannot disagree.
 clearProviders();
 delete process.env.INMARKET_SEARCH_DAILY_MAX;
 delete process.env.INMARKET_SEARCH_DAILY_USD;
@@ -114,15 +119,16 @@ check("raising the query cap raises it on serper", ws.dailyQueryCap() === 6_000)
 check("…and carries the dollar ceiling up with it", ws.dailyUsdCap() === 6);
 
 // Same config, Serper gone: DataForSEO takes over and must be held to the SAME dollars.
+// At $0.002/query the $6 ceiling buys 3000 queries, not the configured 6000.
 delete process.env.SERPER_API_KEY;
 process.env.DATAFORSEO_LOGIN = "l";
 process.env.DATAFORSEO_PASSWORD = "p";
-check("failover keeps the dollar ceiling, not the query count", ws.dailyQueryCap() === 300);
-check("failover spend stays inside the same budget", 300 * 0.02 <= ws.dailyUsdCap());
+check("failover keeps the dollar ceiling, not the query count", ws.dailyQueryCap() === 3_000);
+check("failover spend stays inside the same budget", 3_000 * 0.002 <= ws.dailyUsdCap());
 
-// An explicit dollar ceiling wins over the inferred one.
+// An explicit dollar ceiling wins over the inferred one: $1 buys 500 dataforseo queries.
 process.env.INMARKET_SEARCH_DAILY_USD = "1";
-check("an explicit usd cap overrides the inferred one", ws.dailyQueryCap() === 50);
+check("an explicit usd cap overrides the inferred one", ws.dailyQueryCap() === 500);
 delete process.env.INMARKET_SEARCH_DAILY_USD;
 delete process.env.INMARKET_SEARCH_DAILY_MAX;
 

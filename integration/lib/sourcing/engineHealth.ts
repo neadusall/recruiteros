@@ -285,6 +285,21 @@ function worstOf(engines: EngineStatus[]): EngineState {
   return out;
 }
 
+/**
+ * Does this down-detail describe a TRANSIENT transport failure (timeout, network drop,
+ * vendor 5xx) rather than anything a billing dashboard can fix? Account-shaped failures
+ * never match: their details say "Balance empty", "out of credits", "login rejected",
+ * "key rejected", none of which appear here. Matched against the detail text because the
+ * probe error is already embedded in it verbatim by the check functions above.
+ *
+ * Why it matters: on 2026-08-19 DataForSEO's SERP endpoint timed out with $46.93 in the
+ * account, and the alert said "Top up at app.dataforseo.com" anyway, sending the owner
+ * to fix the one thing that was NOT broken.
+ */
+function transientDown(detail: string): boolean {
+  return /timeout|timed out|abort|network|fetch failed|socket hang|ECONN|\b(dataforseo|serper|google|rapidapi)?\s?50[0-9]\b/i.test(detail);
+}
+
 /** Human sentence for the notification body. */
 function alertBody(wsName: string, e: EngineStatus): string {
   // Which wide-web engine leads is a setting, so the copy follows it rather than naming
@@ -299,9 +314,17 @@ function alertBody(wsName: string, e: EngineStatus): string {
     : "the RapidAPI people-search engine";
   const topUpAt = e.engine === "dataforseo" ? "app.dataforseo.com" : "serper.dev";
   if ((e.engine === "dataforseo" || e.engine === "serper") && e.state === "down") {
-    return isLead
-      ? `${who} is not answering for ${wsName}: ${e.detail} This is the engine that carries most of JD Sourcing's candidates, so searches will return far fewer people until it is restored. Top up or check the login at ${topUpAt}.`
-      : `${who} is not answering for ${wsName}: ${e.detail} The primary pass runs first and absorbs the volume, so runs continue without it — but they lose the second pass that picked up what the primary missed. Top up at ${topUpAt} when convenient.`;
+    const impact = isLead
+      ? `This is the engine that carries most of JD Sourcing's candidates, so searches will return far fewer people until it is restored.`
+      : `The primary pass runs first and absorbs the volume, so runs continue without it, just minus the second pass that picked up what the primary missed.`;
+    // A vendor-side outage and an empty balance need OPPOSITE advice: telling someone to
+    // top up a funded account teaches them the alerts can't be trusted.
+    const action = transientDown(e.detail)
+      ? `The failure is on the vendor's side, not the account, so there is nothing to top up. The health watch re-probes on its own schedule and clears this alert once the vendor recovers; if it is still down after a day, that is worth a support ticket at ${topUpAt}.`
+      : isLead
+        ? `Top up or check the login at ${topUpAt}.`
+        : `Top up at ${topUpAt} when convenient.`;
+    return `${who} is not answering for ${wsName}: ${e.detail} ${impact} ${action}`;
   }
   if (e.engine === "rapidapi" && e.state === "down") {
     return `${who} is refusing requests for ${wsName}: ${e.detail} JD Sourcing runs will skip the paid people search until this is fixed. Check the key, the listing subscription and the search host/path under Setup -> JD Sourcing.`;
