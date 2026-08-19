@@ -154,14 +154,18 @@ function receiverOf(text) { for (const [k, re] of RECEIVER_PATTERNS) if (re.test
 const providerBlocks = {};
 function noteBlock(fleet, text, at) {
   if (!BLOCK_RE.test(text)) return;
-  const rcv = receiverOf(text);
+  // Classify the receiver from the window around the block signature (quoted headers
+  // can mention every provider; the rejection line names the one that matters).
+  const hit = text.search(BLOCK_RE);
+  const windowText = text.slice(Math.max(0, hit - 300), hit + 300);
+  const rcv = receiverOf(windowText) || receiverOf(text);
   if (!rcv) return;
   const key = `${fleet}|${rcv}`;
   const b = providerBlocks[key] || (providerBlocks[key] = { fleet, provider: rcv, count: 0, lastSeen: null, sample: null });
   b.count++;
   const seen = at || new Date().toISOString();
   if (!b.lastSeen || seen > b.lastSeen) b.lastSeen = seen;
-  if (!b.sample) b.sample = text.slice(0, 220);
+  if (!b.sample) b.sample = windowText.slice(0, 220);
 }
 
 const bounced = new Set();

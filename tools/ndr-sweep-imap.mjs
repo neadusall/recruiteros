@@ -117,6 +117,41 @@ console.log(`imap ndr sweep: ${inboxes.length} boxes (own-smtp + active gmail), 
 // server's IP being blocked says nothing about the Gmail-lane boxes, and vice versa).
 const fleetByBox = new Map(inboxes.map((m) => [m.email, m.provider === "own-smtp" ? "internal" : "google"]));
 
+// PROVIDER-BLOCK RADAR. Receiver-side "your server is not welcome" signatures, scanned
+// across EVERY notice INCLUDING warm-up traffic: a burned IP shows there first, and the
+// 2026-08 Gmail block sat invisible for weeks because campaign-only counters never saw
+// the warm-up rejections. Detection runs at FETCH time on the full message source (the
+// stored 400-char preview is raw headers; the rejection text sits deeper in the body).
+// POLICY lives in the consumers (the app's sender rotation and batch.mjs read the merged
+// ledger and steer traffic away while a pair stays fresh); a pair heals by silence.
+const BLOCK_RE = /unsolicited ?message ?error|banned sending ip|poor (ip|domain) reputation|low reputation|reputation of \d+\.\d+\.\d+\.\d+|blocked using|listed (at|on|in) [a-z0-9 .-]*(spamhaus|barracuda|spamcop|sorbs|psbl)|5\.7\.606|\bs3140\b|likely unsolicited|message (?:is |was |has been )?(?:likely )?blocked|sending ip [^.]{0,40}(blocked|denied|banned)/i;
+const RECEIVER_PATTERNS = [
+  ["google", /gmail|google/i],
+  ["microsoft", /outlook|office ?365|\.protection\.|microsoft|5\.7\.606|\bs3140\b/i],
+  ["mailspamprotection", /mailspamprotection/i],
+  ["proofpoint", /proofpoint|pphosted/i],
+  ["mimecast", /mimecast/i],
+  ["barracuda", /barracuda/i],
+];
+function receiverOf(text) { for (const [k, re] of RECEIVER_PATTERNS) if (re.test(text)) return k; return null; }
+const providerBlocks = {};
+function noteBlock(fleet, text, at) {
+  if (!BLOCK_RE.test(text)) return;
+  // The receiver is named in the REJECTION line, not just anywhere in the source
+  // (every notice mentions google somewhere in Received headers). Classify on the
+  // window around the block signature so the verdict names the right receiver.
+  const hit = text.search(BLOCK_RE);
+  const windowText = text.slice(Math.max(0, hit - 300), hit + 300);
+  const rcv = receiverOf(windowText) || receiverOf(text);
+  if (!rcv) return;
+  const key = `${fleet}|${rcv}`;
+  const b = providerBlocks[key] || (providerBlocks[key] = { fleet, provider: rcv, count: 0, lastSeen: null, sample: null });
+  b.count++;
+  const seen = at || new Date().toISOString();
+  if (!b.lastSeen || seen > b.lastSeen) b.lastSeen = seen;
+  if (!b.sample) b.sample = windowText.slice(0, 220);
+}
+
 const NDR_FROM = /postmaster@|mailer-daemon@/i;
 const NDR_SUBJ = /^(undeliverable|delivery has failed|mail delivery failed|delivery status notification|message not delivered|failure notice|delivery failure|returned mail|mail delivery system)/i;
 
@@ -150,7 +185,9 @@ async function worker() {
           if (!(NDR_FROM.test(from) || NDR_SUBJ.test(subj))) continue;
           const text = (msg.source ? msg.source.toString("utf8") : "").replace(/\s+/g, " ");
           const rcpt = (text.match(/(?:failed[- ]recipients?|final-rcpt|original-recipient|to)[:;][^@]{0,60}?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i) || text.match(/([a-z0-9._%+-]+@(?!.*\b(?:lumesp|mailcow|googlemail|google|gmail)\b)[a-z0-9.-]+\.[a-z]{2,})/i) || [null, null])[1];
-          ndrs.push({ box: m.email, rcpt: rcpt ? rcpt.toLowerCase() : null, subj: subj.slice(0, 120), at: msg.envelope?.date ? new Date(msg.envelope.date).toISOString() : null, preview: text.slice(0, 400) });
+          const atIso = msg.envelope?.date ? new Date(msg.envelope.date).toISOString() : null;
+          noteBlock(fleetByBox.get(m.email) || "internal", subj + " :: " + text, atIso); // full source, not the header-only preview
+          ndrs.push({ box: m.email, rcpt: rcpt ? rcpt.toLowerCase() : null, subj: subj.slice(0, 120), at: atIso, preview: text.slice(0, 400) });
         }
       } finally { lock.release(); }
       await client.logout().catch(() => {});
@@ -165,35 +202,6 @@ async function worker() {
 await Promise.all(Array.from({ length: 5 }, worker));
 console.log(`swept ${swept}/${inboxes.length} boxes (${errors} errors), ${ndrs.length} NDR notices`);
 
-// PROVIDER-BLOCK RADAR. Receiver-side "your server is not welcome" signatures, scanned
-// across EVERY notice INCLUDING warm-up traffic: a burned IP shows there first, and the
-// 2026-08 Gmail block sat invisible for weeks because campaign-only counters never saw
-// the warm-up rejections. Detection lives here; POLICY lives in the consumers (the app's
-// sender rotation and batch.mjs read the merged ledger and steer traffic away while a
-// pair stays fresh). A pair heals by silence: no matches for a week and routers release it.
-const BLOCK_RE = /unsolicited ?message ?error|banned sending ip|poor (ip|domain) reputation|low reputation|reputation of \d+\.\d+\.\d+\.\d+|blocked using|listed (at|on|in) [a-z0-9 .-]*(spamhaus|barracuda|spamcop|sorbs|psbl)|5\.7\.606|\bs3140\b|likely unsolicited|message (?:is |was |has been )?(?:likely )?blocked|sending ip [^.]{0,40}(blocked|denied|banned)/i;
-const RECEIVER_PATTERNS = [
-  ["google", /gmail|google/i],
-  ["microsoft", /outlook|office ?365|\.protection\.|microsoft|5\.7\.606|\bs3140\b/i],
-  ["mailspamprotection", /mailspamprotection/i],
-  ["proofpoint", /proofpoint|pphosted/i],
-  ["mimecast", /mimecast/i],
-  ["barracuda", /barracuda/i],
-];
-function receiverOf(text) { for (const [k, re] of RECEIVER_PATTERNS) if (re.test(text)) return k; return null; }
-const providerBlocks = {};
-function noteBlock(fleet, text, at) {
-  if (!BLOCK_RE.test(text)) return;
-  const rcv = receiverOf(text);
-  if (!rcv) return;
-  const key = `${fleet}|${rcv}`;
-  const b = providerBlocks[key] || (providerBlocks[key] = { fleet, provider: rcv, count: 0, lastSeen: null, sample: null });
-  b.count++;
-  const seen = at || new Date().toISOString();
-  if (!b.lastSeen || seen > b.lastSeen) b.lastSeen = seen;
-  if (!b.sample) b.sample = text.slice(0, 220);
-}
-
 const bounced = new Set();
 const perDomain = {};
 const perBox = {};
@@ -207,7 +215,6 @@ for (const n of ndrs) {
   const subjLower = n.subj.replace(/^undeliverable:\s*/i, "");
   const looksCampaign = subjLower === subjLower.toLowerCase() && /[a-z]/.test(subjLower);
   const isCampaign = (rcpt && sentTo.has(rcpt)) || looksCampaign;
-  noteBlock(fleetByBox.get(n.box) || "internal", n.subj + " :: " + (n.preview || ""), n.at);
   if (!isCampaign) { warmupNdrs++; warmupPerBox[n.box] = (warmupPerBox[n.box] || 0) + 1; continue; }
   const d = n.box.split("@")[1];
   const benchStart = restSince.get(d);
