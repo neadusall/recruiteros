@@ -52,10 +52,22 @@ const BOUNCE_MIN_SAMPLE = INBOX_MIN_SAMPLE; // sends in the window before the bo
 const RECOVER_STREAK = 2;          // consecutive healthy checks required to revive
 const MIN_HOLD_MS = 24 * 60 * 60 * 1000; // minimum rest before a revive
 
+// WARM GRADUATION (owner mandate 2026-08-19): a warming inbox that has provably
+// finished its warm-up promotes itself to active, so ready fleets never sit parked
+// waiting for a human. Bars mirror the Senders panel readiness rules: provider-run
+// fleets 14 days, the internal SMTP server a full month, both at 95%+ reputation
+// measured THIS run (no stale data). Sending.ac inboxes are skipped: their cap is
+// a flat 2/day either way, so graduating them only churns rows. SENDER_AUTO_GRADUATE=0
+// turns the whole behavior off.
+const gradRep = () => envNum("SENDER_GRADUATE_REP", 95);
+const gradDaysProvider = () => envNum("SENDER_GRADUATE_DAYS", 14);
+const gradDaysInternal = () => envNum("SENDER_GRADUATE_DAYS_INTERNAL", 30);
+const autoGraduate = () => process.env.SENDER_AUTO_GRADUATE !== "0";
+
 export interface GuardAction {
   workspaceId: string;
   email: string;
-  action: "held" | "revived";
+  action: "held" | "revived" | "graduated";
   reason: string;
   at: string;
 }
@@ -69,6 +81,8 @@ export interface GuardReport {
   holding: number;
   /** Orphaned holds re-claimed from the journal this run (fleet-wide). */
   adopted: number;
+  /** Warming inboxes promoted to active this run (warm-up provably complete). */
+  graduated: GuardAction[];
   smartleadData: boolean;
 }
 
@@ -222,6 +236,7 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
   const at = nowIso();
   const held: GuardAction[] = [];
   const revived: GuardAction[] = [];
+  const graduated: GuardAction[] = [];
   let checked = 0;
   let holding = 0;
   let adopted = 0;
@@ -317,14 +332,29 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
         }
       }
 
+      // WARM GRADUATION: healthy, warming, warm-up provably complete -> active.
+      // Requires live reputation from THIS run (no stale mirror), warm-up still
+      // running upstream, and a clean bill from every hold rule above.
+      if (
+        autoGraduate() && !reason && !m.autoHold && m.status === "warming" &&
+        m.provider !== "sending-ac" && acct && typeof rep === "number" && rep >= gradRep() &&
+        ageDays(m, acct) >= (m.provider === "own-smtp" ? gradDaysInternal() : gradDaysProvider())
+      ) {
+        m.status = "active";
+        m.guardBaseSent = m.sent || 0;
+        m.guardBaseBounced = m.bounced || 0;
+        dirty = true;
+        graduated.push({ workspaceId: ws, email: m.email, action: "graduated", reason: `warm-up complete: day ${Math.floor(ageDays(m, acct))}, reputation ${rep}%`, at });
+      }
+
       if (m.autoHold && m.status === "paused") holding++;
       if (dirty) { try { await saveInbox(m); } catch { /* one row */ } }
     }
   }
 
-  const report: GuardReport = { at, checked, held, revived, holding, adopted, smartleadData: haveSmartlead };
+  const report: GuardReport = { at, checked, held, revived, holding, adopted, graduated, smartleadData: haveSmartlead };
   state.lastReport = report;
-  state.journal = [...held, ...revived, ...state.journal].slice(0, 200);
+  state.journal = [...held, ...revived, ...graduated, ...state.journal].slice(0, 200);
   save();
   return report;
 }

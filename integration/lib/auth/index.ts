@@ -874,6 +874,16 @@ export async function sendWorkspaceEmail(
   workspaceId?: string,
   opts?: { ics?: MailIcs },
 ): Promise<void> {
+  // Universal pre-send safeguard: never mail an address the fleet NDR sweep has seen
+  // hard-bounce. Real users' auth mail is unaffected (their addresses work); fail-open
+  // on ledger errors so a broken snapshot can never block sign-in email.
+  try {
+    const { isKnownHardBounce } = await import("../senders/preflight");
+    if (await isKnownHardBounce(to)) {
+      console.warn(`[mail] suppressed send to known hard-bouncer ${to}`);
+      return;
+    }
+  } catch { /* gate failure never blocks */ }
   if (workspaceId) {
     try {
       const { notifyBrand } = await import("../outbound/brand");

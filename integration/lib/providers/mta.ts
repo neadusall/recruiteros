@@ -68,6 +68,12 @@ export async function sendEmail(workspaceId: string, input: MtaSendInput): Promi
   const to = input.to.toLowerCase().trim();
   if (!to) return { ok: false, provider: "mta", error: "no_recipient" };
   if (await isSuppressed(to)) return { ok: false, provider: "mta", skipped: "suppressed" };
+  // Universal pre-send safeguard: an address the fleet NDR sweep has seen hard-bounce
+  // never gets more mail from ANY lane, including this one. Fail-open on ledger errors.
+  try {
+    const { isKnownHardBounce } = await import("../senders/preflight");
+    if (await isKnownHardBounce(to)) return { ok: false, provider: "mta", skipped: "suppressed" };
+  } catch { /* gate failure never blocks */ }
   if (input.coldOutreach) {
     // Workspace DNC/STOP/unsubscribe list. The direct callers (BD Bulk, the
     // nurture drip) used to bypass this entirely, so a STOP'd address could

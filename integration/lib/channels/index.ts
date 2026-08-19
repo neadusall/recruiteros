@@ -384,6 +384,19 @@ async function trySenderPool(workspaceId: string, t: SendTouch, brand: BrandIden
       // picking a dead login forever (it used to be re-picked FIRST).
       const { isRecipientRejection } = await import("../sending/bounces");
       const senders = await import("../senders");
+      if (res.error && res.error.startsWith("preflight_")) {
+        // The safeguard gate stopped this before transmit: nothing left the box, so the
+        // inbox takes no strike. A known-dead recipient is parked like a real bounce.
+        if (res.error === "preflight_recipient_hard_bounced") {
+          try {
+            const store = await import("../sending/store");
+            await store.suppress(t.prospect.email, "bounce", "preflight", { kind: "hard" });
+            const fresh = await getCore().getProspect(t.prospect.id);
+            if (fresh && fresh.status !== "do_not_contact") { fresh.status = "do_not_contact"; await getCore().saveProspect(fresh); }
+          } catch { /* best-effort */ }
+        }
+        return { ok: false, channel: "email", provider: "smtp:" + inbox.provider, error: res.error };
+      }
       if (res.error && isRecipientRejection(res.error)) {
         const store = await import("../sending/store");
         await store.suppress(t.prospect.email, "bounce", "smtp", { kind: "hard" });

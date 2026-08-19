@@ -56,6 +56,15 @@ export function hasVerifiableSmtp(m: SenderInbox): boolean {
  *  Sending.ac mailboxes with no stored SMTP login go over the Mailbox API (Graph proxy);
  *  everything with a real SMTP credential sends by SMTP as before. */
 export async function sendViaInbox(m: SenderInbox, msg: SmtpMessage): Promise<SmtpResult> {
+  // Universal pre-send safeguard (owner mandate 2026-08-19): known-dead recipients and
+  // benched/broken senders never transmit, whichever transport this hop takes.
+  // Callers see a normal { ok:false } with a preflight_* error; trySenderPool knows
+  // not to count these as inbox strikes (nothing was actually sent).
+  try {
+    const { preflightOutbound } = await import("./preflight");
+    const gate = await preflightOutbound({ fromEmail: m.email, fromStatus: m.status, to: msg.to, threadReply: !!msg.inReplyTo });
+    if (gate.ok === false) return { ok: false, error: `preflight_${gate.reason}` };
+  } catch { /* the gate itself failing never blocks mail */ }
   const { canSendViaMailboxApi, sendViaMailboxApi } = await import("./mailboxApi");
   if (canSendViaMailboxApi(m)) return sendViaMailboxApi(m, msg);
   try {
