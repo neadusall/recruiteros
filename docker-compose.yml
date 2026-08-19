@@ -83,6 +83,9 @@ services:
       INMARKET_SEARXNG_URL: http://searxng:8080
     volumes:
       - app_data:/data
+      # MPC autopilot ledgers (tools/batch.mjs writes them on the host). Read-only: the
+      # Send Queue reader needs the sent ledger to say who was already contacted.
+      - ./mpc-out:/mpc-out:ro
     expose:
       - "3000"
     # not published to the host directly; Caddy reaches it on the internal net

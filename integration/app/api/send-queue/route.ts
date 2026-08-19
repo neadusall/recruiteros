@@ -25,11 +25,14 @@ export async function GET(req: Request) {
   try {
     ensureAutofill(); // arm the buffer keeper (no-op until turned on)
     const nowIso = new Date().toISOString();
-    const [overview, autofill, campaigns, senders] = await Promise.all([
+    const [overview, autofill, campaigns, senders, autopilot] = await Promise.all([
       sendQueueOverview(ws, nowIso),
       autofillStatus(nowIso, ws),
       getCore().listCampaigns(ws),
       sendCapacity(ws),
+      // The cold-email autopilot reader (what sends next, and what is holding more back).
+      // Best-effort: the page must render even if the curation store read fails.
+      import("../../../lib/inmarket/curation").then((m) => m.autopilotSendPlan()).catch(() => null),
     ]);
     // Slim campaign list for the picker (+ whether it's set up as the Send Queue campaign, its launch
     // date, and which recruiter's inbox pool it's tied to).
@@ -38,7 +41,7 @@ export async function GET(req: Request) {
     const members = listMembers(ws, g.ctx.user.id).filter((m) => m.role === "member").map((m) => ({ userId: m.userId, name: m.name }));
     // Go-live readiness for the chosen Send Queue campaign (the auto-fill target if set).
     const goLive = await goLiveReadiness(ws, nowIso, autofill?.settings?.campaignId);
-    return ok({ overview, autofill, campaigns: camps, senders, members, goLive });
+    return ok({ overview, autofill, campaigns: camps, senders, members, goLive, autopilot });
   } catch (e: any) {
     return fail(e?.message ?? "send_queue_failed", e?.status ?? 500);
   }

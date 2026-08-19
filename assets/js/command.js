@@ -6969,12 +6969,105 @@
       }).catch(function () { fill.disabled = false; fill.textContent = "Fill now"; toast("Fill didn’t run."); });
     });
   }
+  // 📬 Cold-email autopilot reader: what sends next, when, how much, and what is holding more
+  // back, each hold with its fix spelled out (connect a key, top up credits, or nothing at all:
+  // the pipeline clears it itself). Data: d.autopilot from /send-queue + owner tool-usage meters.
+  function sqApCss() {
+    if (document.getElementById("sqApCss")) return "";
+    return '<style id="sqApCss">' +
+      '.sqap{border:1px solid var(--border);border-radius:16px;background:var(--surface);padding:16px 18px;margin:0 0 16px}' +
+      '.sqap-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}' +
+      '.sqap-head h3{font-size:15px;font-weight:650;margin:0}' +
+      '.sqap-head .sub{font-size:12px;color:var(--text-muted,var(--text-dim))}' +
+      '.sqap-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0 4px}' +
+      '.sqap-tile{border:1px solid var(--border);border-radius:12px;padding:11px 12px}' +
+      '.sqap-tile .v{font-size:22px;font-weight:650;letter-spacing:-.02em;line-height:1.1}' +
+      '.sqap-tile .k{font-size:12px;font-weight:600;margin-top:3px}' +
+      '.sqap-tile .s{font-size:11px;color:var(--text-muted,var(--text-dim));margin-top:2px}' +
+      '.sqap-tile.hot{border-color:var(--brand)}' +
+      '.sqap-h2{font-size:12px;font-weight:650;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted,var(--text-dim));margin:14px 0 6px}' +
+      '.sqap-row{display:flex;align-items:baseline;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap}' +
+      '.sqap-row:last-child{border-bottom:0}' +
+      '.sqap-n{font-weight:650;font-variant-numeric:tabular-nums;min-width:56px;text-align:right}' +
+      '.sqap-l{font-weight:600;min-width:180px}' +
+      '.sqap-d{color:var(--text-muted,var(--text-dim));flex:1;min-width:220px}' +
+      '.sqap-pill{font-size:11px;font-weight:650;border-radius:999px;padding:2px 9px;white-space:nowrap}' +
+      '.sqap-pill.auto{background:var(--ok-bg);color:var(--ok)}' +
+      '.sqap-pill.you{background:var(--warn-bg);color:var(--warn)}' +
+      '.sqap-pill.hold{background:var(--border);color:var(--text-muted,var(--text-dim))}' +
+      '.sqap-cred{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}' +
+      '.sqap-tool{border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:12px;min-width:170px;flex:1}' +
+      '.sqap-tool b{display:block;font-size:12.5px}' +
+      '.sqap-tool .m{color:var(--text-muted,var(--text-dim));margin-top:2px}' +
+      '.sqap-tool.watch{border-color:var(--warn)}' +
+      '.sqap-tool.critical{border-color:var(--danger)}' +
+      '.sqap-alert{font-size:12.5px;color:var(--warn);margin-top:8px}' +
+      '.sqap-foot{font-size:12px;color:var(--text-muted,var(--text-dim));margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}' +
+      '@media (max-width:560px){.sqap-l{min-width:120px}.sqap-n{min-width:40px}}' +
+      '</style>';
+  }
+  function sqApWhen(iso) {
+    var d = new Date(iso), mins = Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
+    var rel = mins < 1 ? "now" : mins < 60 ? "in " + mins + " min" : "in " + Math.floor(mins / 60) + "h " + (mins % 60) + "m";
+    var day = d.toLocaleDateString([], { weekday: "short" });
+    var tm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return { rel: rel, label: day + " " + tm + " your time" };
+  }
+  function sqApRow(n, label, note, pillCls, pillText, href, hrefLabel) {
+    return '<div class="sqap-row"><span class="sqap-n">' + sqFmt(n) + '</span><span class="sqap-l">' + label + "</span>" +
+      '<span class="sqap-d">' + note + (href ? ' <a href="' + href + '">' + hrefLabel + "</a>" : "") + "</span>" +
+      '<span class="sqap-pill ' + pillCls + '">' + pillText + "</span></div>";
+  }
+  function sqApHtml(a, tu) {
+    if (!a) return "";
+    var w = sqApWhen(a.nextSendAt);
+    var tiles =
+      '<div class="sqap-tiles">' +
+        '<div class="sqap-tile hot"><div class="v">' + sqFmt(a.readyNow) + '</div><div class="k">Ready to send</div><div class="s">validated, never contacted' + (a.ledgersVisible ? "" : " (send-history view still syncing)") + "</div></div>" +
+        '<div class="sqap-tile"><div class="v">' + w.rel + '</div><div class="k">Next send run</div><div class="s">' + esc(w.label) + " · weekdays 15:00 UTC</div></div>" +
+        '<div class="sqap-tile"><div class="v">' + sqFmt(a.sentToday) + '</div><div class="k">Sent today</div><div class="s">all touches, every recruiter</div></div>' +
+        '<div class="sqap-tile"><div class="v">' + sqFmt(a.rescuedToday) + '</div><div class="k">Rescued today</div><div class="s">KoldInfo found + verified</div></div>' +
+      "</div>";
+    var rows = "";
+    if (a.pendingValidation) rows += sqApRow(a.pendingValidation, "Being validated", "New addresses in the validator now; valid ones move to Ready by themselves.", "auto", "runs itself");
+    if (a.rescueQueue) rows += sqApRow(a.rescueQueue, "Rejected addresses in rescue", "Every guessed address failed for these people. The KoldInfo rescue sweeps them around the clock; verified finds move straight to Ready.", "auto", "runs itself");
+    if (a.unnamed) rows += a.namingConnected
+      ? sqApRow(a.unnamed, "No decision-maker name yet", "The naming lookup clears these at its daily pace.", "auto", "runs itself", "#tools", "Watch credits")
+      : sqApRow(a.unnamed, "No decision-maker name yet", "The paid naming lookup is not connected, so these sit still. Connect the key or upgrade the Decision-Maker Lookup package.", "you", "needs you", "#tools", "Open Tools and Credits");
+    if (a.catchAll) rows += sqApRow(a.catchAll, "Catch-all domains", "The domain accepts any address, so a mailbox cannot be proven. Held to protect deliverability.", "hold", "held");
+    if (a.heldByCutoff) rows += sqApRow(a.heldByCutoff, "Validated before the fresh-start line", "Curated before " + esc(a.cutoff) + ". Rescued people re-enter by themselves when their new address verifies.", "hold", "held");
+    if (a.alreadyContacted) rows += sqApRow(a.alreadyContacted, "Already contacted", "Validated people this engine has emailed. Follow-up touches handle them.", "hold", "done");
+    var credits;
+    if (tu && tu.tools && tu.tools.length) {
+      var chips = tu.tools.map(function (t) {
+        var m = t.metered
+          ? sqFmt(t.remaining) + " of " + sqFmt(t.limit) + " left" + (t.daysToEmpty != null ? " · ~" + t.daysToEmpty + "d at current burn" : "")
+          : (t.note ? esc(String(t.note)).slice(0, 140) : "");
+        return '<div class="sqap-tool ' + esc(t.status || "ok") + '"><b>' + esc(t.label) + '</b><div class="m">' + m + "</div></div>";
+      }).join("");
+      var alerts = (tu.alerts || []).map(function (al) { return '<div class="sqap-alert">' + esc(al.message) + ' <a href="#tools">Fix in Tools and Credits</a></div>'; }).join("");
+      credits = '<div class="sqap-h2">API credits powering the pipeline</div><div class="sqap-cred">' + chips + "</div>" + alerts;
+    } else {
+      credits = '<div class="sqap-foot">Credit meters live in <a href="#tools">Owner Console: Tools and Credits</a>.</div>';
+    }
+    return sqApCss() + '<div class="sqap">' +
+      '<div class="sqap-head"><h3>Cold email autopilot</h3><span class="sub">what sends next, and what unlocks more</span></div>' +
+      tiles +
+      (rows ? '<div class="sqap-h2">Waiting upstream</div>' + rows : "") +
+      credits +
+      "</div>";
+  }
   function sqReload() {
     var body = document.getElementById("sqBody"); if (!body) return;
-    api("/send-queue").then(function (d) {
+    // Tool-usage is owner-only; non-owners simply don't get the credit chips.
+    Promise.all([
+      api("/send-queue"),
+      api("/owner/tool-usage").catch(function () { return null; })
+    ]).then(function (rs) {
+      var d = rs[0], tu = rs[1];
       var b = document.getElementById("sqBody"); if (!b) return;
       if (!d || !d.overview) { b.innerHTML = '<div class="empty">Couldn’t load the send queue. Try again.</div>'; return; }
-      b.innerHTML = sqOverviewHtml(d.overview) + sqGoLiveHtml(d.goLive) + sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || [], d.members || []) + sqSecondaryHtml(d.overview, d.senders);
+      b.innerHTML = sqApHtml(d.autopilot, tu) + sqOverviewHtml(d.overview) + sqGoLiveHtml(d.goLive) + sqAutofillHtml(d.autofill || { settings: {} }, d.campaigns || [], d.members || []) + sqSecondaryHtml(d.overview, d.senders);
       sqWireAutofill();
       sqWireWorklist();
     }).catch(function () {

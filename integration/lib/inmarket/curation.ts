@@ -1139,6 +1139,101 @@ export async function applyKoldInfoResults(
   });
 }
 
+/* ------------------------------------------------------------------ */
+/* Autopilot send plan — the Send Queue "what sends next" reader        */
+/* ------------------------------------------------------------------ */
+
+export interface AutopilotSendPlan {
+  nextSendAt: string;          // next weekday 15:00 UTC (the mpc-daily window)
+  cutoff: string;              // MPC_CURATED_SINCE in force
+  readyNow: number;            // validated + contactable + never contacted by the engine
+  alreadyContacted: number;    // validated but present in the engine's sent ledgers
+  heldByCutoff: number;        // validated but curated before the cutoff (rescues re-stamp out of here)
+  sentToday: number;           // ledger rows stamped today, all touches
+  pendingValidation: number;   // has an address, no verdict yet — the validator clears these itself
+  catchAll: number;            // domain accepts everything; unprovable, held
+  unnamed: number;             // no decision-maker name yet — naming API is the unlock
+  rescueQueue: number;         // rejected-address people the KoldInfo rescue is sweeping
+  rescuedToday: number;        // KoldInfo finds Reoon-verified today
+  ledgersVisible: boolean;     // false when the /mpc-out mount is absent (numbers are store-only)
+  namingConnected: boolean;    // RAPID_NAMING_KEY present
+  finderConnected: boolean;    // a paid residual email finder is keyed (beyond KoldInfo)
+}
+
+let sentLedgerCache: { at: number; day: string; contacted: Set<string>; sentToday: number; visible: boolean } | null = null;
+
+/** Distinct recipients + today's row count across the MPC engine's sent-*.jsonl ledgers.
+ *  The engine tracks its own sends outside this store, so "ready" is honest only after
+ *  subtracting these. Cached 5 minutes; absent mount degrades to store-only numbers. */
+async function readSentLedgers(): Promise<{ contacted: Set<string>; sentToday: number; visible: boolean }> {
+  const day = new Date().toISOString().slice(0, 10);
+  if (sentLedgerCache && sentLedgerCache.day === day && Date.now() - sentLedgerCache.at < 5 * 60_000) return sentLedgerCache;
+  const contacted = new Set<string>();
+  let sentToday = 0;
+  let visible = false;
+  try {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const dir = process.env.MPC_OUT_DIR || "/mpc-out";
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.startsWith("sent-") || !f.endsWith(".jsonl")) continue;
+      visible = true;
+      let text = "";
+      try { text = fs.readFileSync(path.join(dir, f), "utf8"); } catch { continue; }
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const r = JSON.parse(line) as { to_email?: string; at?: string };
+          const em = String(r.to_email || "").toLowerCase();
+          if (em) contacted.add(em);
+          if (String(r.at || "").slice(0, 10) === day) sentToday++;
+        } catch { /* skip a torn line */ }
+      }
+    }
+  } catch { /* mount absent (dev box) */ }
+  sentLedgerCache = { at: Date.now(), day, contacted, sentToday, visible };
+  return sentLedgerCache;
+}
+
+export async function autopilotSendPlan(): Promise<AutopilotSendPlan> {
+  const rows = await load();
+  const { contacted, sentToday, visible } = await readSentLedgers();
+  const cutoff = process.env.MPC_CURATED_SINCE || "2026-08-11";
+  const today = new Date().toISOString().slice(0, 10);
+
+  let readyNow = 0, alreadyContacted = 0, heldByCutoff = 0, pendingValidation = 0,
+    catchAll = 0, unnamed = 0, rescueQueue = 0, rescuedToday = 0;
+  for (const r of rows) {
+    if (r.emailSource === "koldinfo" && r.emailValidated && (r.validatedAt || "").slice(0, 10) === today) rescuedToday++;
+    if (r.status === "suppressed") { if (rescuableInvalid(r)) rescueQueue++; continue; }
+    if (r.status === "enrolled" || r.status === "queued") continue;
+    if (!r.managerName) { if (r.domain) unnamed++; continue; }
+    const email = (r.likelyEmail || "").toLowerCase();
+    if (r.emailValidated && r.status === "contactable" && !r.sentAt) {
+      if (email && contacted.has(email)) { alreadyContacted++; continue; }
+      if ((r.curatedAt || "") >= cutoff) readyNow++; else heldByCutoff++;
+      continue;
+    }
+    if (r.emailCatchAll) { catchAll++; continue; }
+    if (email && !r.emailValidated && !r.emailInvalid) pendingValidation++;
+  }
+
+  // The mpc-daily window: weekdays 15:00 UTC.
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 15, 0, 0));
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
+  while (next.getUTCDay() === 0 || next.getUTCDay() === 6) next.setUTCDate(next.getUTCDate() + 1);
+
+  return {
+    nextSendAt: next.toISOString(), cutoff,
+    readyNow, alreadyContacted, heldByCutoff, sentToday,
+    pendingValidation, catchAll, unnamed, rescueQueue, rescuedToday,
+    ledgersVisible: visible,
+    namingConnected: Boolean(process.env.RAPID_NAMING_KEY),
+    finderConnected: Boolean(process.env.INMARKET_FINDER_URL || process.env.ICYPEAS_API_KEY),
+  };
+}
+
 /**
  * EMAIL FINDER PASS (opt-in, SMTP) — turn more prospects VALID without guessing-and-bouncing.
  * For pending rows (a real person + a domain, no verdict yet), walk the name's permutations and
