@@ -104,7 +104,10 @@ function recruiterBoxes() {
     if (m.provider === "sending-ac" && !m.smtpPassEnc && OWNER_PATTERN.test(m.ownerName || "")) {
       add(String(m.ownerName).toLowerCase(), { kind: "api", email: m.email, owner: m.ownerName });
     } else if (SMTP_LANE && m.provider === "own-smtp" && m.smtpPassEnc && /ariel/i.test(m.ownerName || m.email.split("@")[0])) {
-      add("ariel", { kind: "smtp", email: m.email, owner: "Ariel Grosser", host: m.smtpHost, port: m.smtpPort || 587, secure: !!m.smtpSecure, user: m.smtpUser || m.email, passEnc: m.smtpPassEnc, dailyCap: m.dailyCap || 2 });
+      // noGoogle: Gmail 550-rejects the Mailcow server's IP (UnsolicitedMessageError,
+      // 2026-08-19), so internal boxes never draw google-hosted recipients; those go
+      // via the Sending.ac / Gmail-lane boxes, which Gmail's IP filter cannot touch.
+      add("ariel", { kind: "smtp", noGoogle: true, email: m.email, owner: "Ariel Grosser", host: m.smtpHost, port: m.smtpPort || 587, secure: !!m.smtpSecure, user: m.smtpUser || m.email, passEnc: m.smtpPassEnc, dailyCap: m.dailyCap || 2 });
     } else if (GOOGLE_LANE && m.status === "active" && m.smtpPassEnc && /^smtp\.gmail\.com$/i.test(m.smtpHost || "") && OWNER_PATTERN.test(m.email.split("@")[0] || "")) {
       const local = String(m.email.split("@")[0] || "");
       const key = (local.match(OWNER_PATTERN) || ["ryan"])[0].toLowerCase();
@@ -435,10 +438,21 @@ async function main() {
   const apiBoxes = fleet.filter(b => b.kind !== "smtp").length;
   console.log(`\n[SEND] fleet ${fleet.length} boxes (api ${apiBoxes} + smtp ${fleet.length - apiBoxes}${SMTP_LANE ? "" : "; own-SMTP lane parked"}${GOOGLE_LANE ? "" : "; google lane parked"}) | under per-box cap (${PER_BOX}/day): ${avail.length}`);
   const logFile = `${OUT}/sent-${stamp}.jsonl`;
-  let sent = 0, failed = 0, idx = 0;
+  // Provider-compatible routing: a google-hosted recipient must never be assigned to a
+  // noGoogle box (Gmail rejects that server's IP outright; every attempt is a burned send
+  // AND more bad behavior on the IP). classifyEmails is domain-cached, so this is free.
+  const clsSend = await classifyEmails(drafts.map((d) => d.to_email));
+  const isGoogleRcpt = (to) => (clsSend.get(String(to || "").toLowerCase().trim()) || {}).family === "google";
+  let sent = 0, failed = 0, idx = 0, googleRouted = 0, googleDeferred = 0;
   for (const d of drafts) {
     if (!avail.length) { console.log("  every box is at its per-box daily cap; stopping (deliverability guard)"); break; }
-    const pos = idx % avail.length;
+    let pos = idx % avail.length;
+    if (isGoogleRcpt(d.to_email)) {
+      let hops = 0;
+      while (hops < avail.length && avail[pos].noGoogle) { pos = (pos + 1) % avail.length; hops++; }
+      if (hops >= avail.length) { googleDeferred++; continue; } // only internal boxes left: not logged as sent, re-enters next run
+      if (hops > 0) googleRouted++;
+    }
     const box = avail[pos];
     const rec = recruiterFor(box.owner);
     const body = d.body + signature(rec) + footer();
@@ -455,6 +469,7 @@ async function main() {
     else { failed++; console.log(`  FAIL ${d.to_email}: ${r.error}`); }
     await new Promise(res => setTimeout(res, 1200)); // pace under 60/min
   }
+  if (googleRouted || googleDeferred) console.log(`  google routing: ${googleRouted} steered off internal boxes, ${googleDeferred} deferred (no compatible box this run)`);
   console.log(`\n[SEND] done: ${sent} sent, ${failed} failed. Log: ${logFile}`);
 }
 
