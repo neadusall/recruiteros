@@ -304,7 +304,8 @@ export interface SmtpServerRow {
   warming: number;
   paused: number;
   error: number;
-  staleAuth: number;      // logins not re-proven inside the freshness bar
+  verifiable: number;     // inboxes holding a real SMTP login we can prove from here
+  staleAuth: number;      // verifiable logins not re-proven inside the freshness bar
   lastErrors: string[];   // up to 3 distinct recent SMTP errors
   probe: SmtpProbe;
   watched: boolean;       // came from SMTP_WATCH_HOSTS (monitor even with 0 inboxes)
@@ -349,7 +350,11 @@ export async function smtpServerFleet(workspaceId: string, portalToken: string |
       warming: list.filter((m) => m.status === "warming").length,
       paused: list.filter((m) => m.status === "paused").length,
       error: list.filter((m) => m.status === "error").length,
-      staleAuth: list.filter((m) => Date.now() - lastVerifiedAt(m) > SWEEP_FRESH_MS).length,
+      verifiable: list.filter((m) => hasVerifiableSmtp(m)).length,
+      // Only logins we can actually test count as "due a re-check": credential-less
+      // upstream fleets (Sending.ac OAuth boxes) would otherwise sit at "900 due a
+      // re-check" forever, since the sweep rightly never touches them.
+      staleAuth: list.filter((m) => hasVerifiableSmtp(m) && Date.now() - lastVerifiedAt(m) > SWEEP_FRESH_MS).length,
       lastErrors: errors,
       probe,
       watched: !!w,

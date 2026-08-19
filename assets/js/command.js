@@ -9414,12 +9414,14 @@
     var head =
       '<div class="wu-head">' +
         '<div class="wu-title">Sending servers</div>' +
-        '<span class="wu-live"><span class="wu-dot"></span> Live · updated ' + esc(wuAgo(siData.updatedAt)) + '</span>' +
+        '<span class="wu-live"><span class="wu-dot"></span> Live · updated <span id="siAgo">' + esc(wuAgo(siData.updatedAt)) + '</span></span>' +
         '<span style="flex:1"></span>' +
         '<button class="btn btn-ghost btn-sm" id="siSweep"' + (siSweeping ? " disabled" : "") + '>' + (siSweeping ? "Testing logins…" : "Test logins now") + '</button>' +
       '</div>' +
       '<div class="wu-sub">The servers your Email IDs actually send through, probed live from this portal, with real login checks rotating through the pool so every credential is re-proven at least daily.</div>';
-    var sweepLine = '<div class="muted" style="font-size:12px;margin:0 0 10px">Login checks this pass: ' + (sweep.tested || 0) + ' tested, ' + (sweep.passed || 0) + ' passed, ' + (sweep.failed || 0) + ' failed' + (sweep.pendingStale ? ', ' + sweep.pendingStale + ' queued' : '') + '.</div>';
+    var sweepLine = (!sweep.tested && !sweep.pendingStale)
+      ? '<div class="muted" style="font-size:12px;margin:0 0 10px">Login checks: every held credential re-proven within the last 24 hours.</div>'
+      : '<div class="muted" style="font-size:12px;margin:0 0 10px">Login checks this pass: ' + (sweep.tested || 0) + ' tested, ' + (sweep.passed || 0) + ' passed, ' + (sweep.failed || 0) + ' failed' + (sweep.pendingStale ? ', ' + sweep.pendingStale + ' queued' : '') + '.</div>';
     var mailcow = siData.mailcow
       ? '<div class="muted" style="font-size:12px;margin:0 0 10px">Mail server inventory (' + esc(siData.mailcow.baseUrl.replace(/^https?:\/\//, "")) + '): ' + (siData.mailcow.mailboxes != null ? siData.mailcow.mailboxes + ' mailboxes' : 'mailboxes n/a') + (siData.mailcow.domains != null ? ' across ' + siData.mailcow.domains + ' domains' : '') + (siData.mailcow.ok ? '' : ' · <span style="color:#b3261e">inventory API unreachable, check the key</span>') + '</div>'
       : '';
@@ -9445,9 +9447,15 @@
           var inb = s.inboxes
             ? s.inboxes + ' <span class="muted" style="font-size:11px">(' + s.active + ' active, ' + warmingLabel + (s.paused ? ', ' + s.paused + ' paused' : '') + (s.error ? ', <span style="color:#b3261e">' + s.error + ' error</span>' : '') + ')</span>'
             : '<span class="muted">none imported yet</span>';
+          // Login health only speaks for logins we can actually test from here.
+          // Credential-less upstream fleets (Sending.ac OAuth boxes) have nothing
+          // to re-check, so say that instead of a forever-stale "due a re-check".
           var auth = s.error
             ? '<span style="color:#b3261e">' + s.error + ' failing</span>' + (s.staleAuth ? ' <span class="muted">· ' + s.staleAuth + ' due a re-check</span>' : '')
-            : (s.staleAuth ? '<span class="muted">' + s.staleAuth + ' due a re-check</span>' : (s.inboxes ? '<span style="color:#1a7f37">all recently verified</span>' : '<span class="muted">n/a</span>'));
+            : (s.staleAuth ? '<span class="muted">' + s.staleAuth + ' due a re-check</span>'
+              : (s.inboxes && s.verifiable === 0 ? '<span class="muted">managed upstream, no logins held here</span>'
+                : (s.inboxes && s.verifiable != null && s.verifiable < s.inboxes ? '<span style="color:#1a7f37">all ' + s.verifiable + ' held logins verified</span> <span class="muted">· ' + (s.inboxes - s.verifiable) + ' managed upstream</span>'
+                  : (s.inboxes ? '<span style="color:#1a7f37">all recently verified</span>' : '<span class="muted">n/a</span>'))));
           var errs = s.lastErrors && s.lastErrors.length
             ? s.lastErrors.map(function (e) { return '<div class="muted" style="font-size:11px" title="' + esc(e) + '">' + esc(e.length > 60 ? e.slice(0, 60) + "…" : e) + '</div>'; }).join("")
             : '<span class="muted">none</span>';
@@ -9472,6 +9480,8 @@
     });
   }
 
+  var siAgoTimer = null, siFocusBound = false;
+
   function loadInfra() {
     if (siLoading) return;
     siLoading = true;
@@ -9481,11 +9491,27 @@
       if (r.ok) siData = r.data || null;
       renderInfra();
     });
+    // Real-time loop: refetch every 30s while the panel is mounted (each poll
+    // also advances the server-side login sweep), tick the "updated Xs ago"
+    // label every second, and refetch immediately when the tab regains focus.
     if (!siTimer) {
       siTimer = setInterval(function () {
         if (!document.getElementById("siWrap")) { clearInterval(siTimer); siTimer = null; return; }
         loadInfra();
-      }, 120000);
+      }, 30000);
+    }
+    if (!siAgoTimer) {
+      siAgoTimer = setInterval(function () {
+        var ago = document.getElementById("siAgo");
+        if (!ago) { clearInterval(siAgoTimer); siAgoTimer = null; return; }
+        if (siData && siData.updatedAt) ago.textContent = wuAgo(siData.updatedAt);
+      }, 1000);
+    }
+    if (!siFocusBound) {
+      siFocusBound = true;
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden && document.getElementById("siWrap")) loadInfra();
+      });
     }
   }
 
