@@ -90,10 +90,15 @@ function bouncedStopList() {
 const OWNER_PATTERN = /ryan|josh|noah|sam|ariel/i;
 const SMTP_LANE = process.env.MPC_SMTP_LANE === "1";
 // Google lane: warm-ready Zapmail Gmail boxes (active + working smtp.gmail.com credentials)
-// can join cold rotation at the same flat per-box cap as Sending.ac. OWNER HOLD 2026-08-19:
-// the lane is PARKED until the owner flips MPC_GOOGLE_LANE=1 (built same day, held before
-// any send left a Gmail box; the boxes stay active app-side and keep warming).
-const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE === "1";
+// join cold rotation on a RECEIVER-FRIENDLY RAMP (owner order 2026-08-19, same day as the
+// short hold): each box's cold volume steps up weekly from ITS OWN first cold send, so what
+// Google sees from any one mailbox is a slow, organic growth curve on top of its continuing
+// warm-up, never a day-one volume spike. Steps are per-box/day by week since first send
+// (MPC_GOOGLE_RAMP, default "2,3,5,8,10"; last value = permanent ceiling).
+// MPC_GOOGLE_LANE=0 parks the lane again.
+const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE !== "0";
+const GOOGLE_RAMP = String(process.env.MPC_GOOGLE_RAMP || "2,3,5,8,10")
+  .split(",").map((n) => Math.max(1, Number(n) || 0)).filter(Boolean);
 function recruiterBoxes() {
   const s = JSON.parse(readFileSync(SENDERS, "utf8"));
   const rows = s.inboxes || (s.state && s.state.inboxes) || [];
@@ -111,7 +116,7 @@ function recruiterBoxes() {
     } else if (GOOGLE_LANE && m.status === "active" && m.smtpPassEnc && /^smtp\.gmail\.com$/i.test(m.smtpHost || "") && OWNER_PATTERN.test(m.email.split("@")[0] || "")) {
       const local = String(m.email.split("@")[0] || "");
       const key = (local.match(OWNER_PATTERN) || ["ryan"])[0].toLowerCase();
-      add(key, { kind: "smtp", email: m.email, owner: m.ownerName || local, host: m.smtpHost, port: m.smtpPort || 587, secure: !!m.smtpSecure, user: m.smtpUser || m.email, passEnc: m.smtpPassEnc, dailyCap: m.dailyCap || 2 });
+      add(key, { kind: "smtp", google: true, email: m.email, owner: m.ownerName || local, host: m.smtpHost, port: m.smtpPort || 587, secure: !!m.smtpSecure, user: m.smtpUser || m.email, passEnc: m.smtpPassEnc, dailyCap: m.dailyCap || 2 });
     }
   }
   const pools = [...byOwner.values()];
@@ -134,6 +139,24 @@ function restingDomains() {
       .filter(([, v]) => v && v.state === "resting" && (!v.until || Date.parse(v.until) > now))
       .map(([d]) => d.toLowerCase()));
   } catch { return new Set(); }
+}
+
+// When each box made its FIRST cold send ever (from the ledgers). This anchors the Google
+// lane's ramp: a box's cap grows by weeks since ITS OWN first send, so a box added later
+// starts its own gentle curve instead of inheriting the fleet's.
+function firstSendByBox() {
+  const first = new Map();
+  if (!existsSync(OUT)) return first;
+  for (const f of readdirSync(OUT).filter((n) => /^sent-.*\.jsonl$/.test(n))) {
+    for (const line of readFileSync(`${OUT}/${f}`, "utf8").split("\n")) {
+      const s = line.trim(); if (!s) continue;
+      try {
+        const r = JSON.parse(s);
+        if (r && r.from && r.at && (!first.has(r.from) || r.at < first.get(r.from))) first.set(r.from, r.at);
+      } catch { /* skip */ }
+    }
+  }
+  return first;
 }
 
 // How many sends each box has already made TODAY (across all runs + follow-ups), so the
@@ -426,7 +449,13 @@ async function main() {
   }
 
   const PER_BOX = Number(process.env.MPC_PER_BOX_DAILY || 2);
-  const capFor = (b) => (b.kind === "smtp" ? Math.min(PER_BOX, b.dailyCap || PER_BOX) : PER_BOX);
+  const firstSend = firstSendByBox();
+  const googleCapFor = (b) => {
+    const at = firstSend.get(b.email);
+    const week = at ? Math.floor(Math.max(0, Date.now() - Date.parse(at)) / (7 * 86_400_000)) : 0;
+    return GOOGLE_RAMP[Math.min(week, GOOGLE_RAMP.length - 1)];
+  };
+  const capFor = (b) => (b.google ? googleCapFor(b) : b.kind === "smtp" ? Math.min(PER_BOX, b.dailyCap || PER_BOX) : PER_BOX);
   const allBoxes = recruiterBoxes();
   if (!allBoxes.length) { console.log("no recruiter sending boxes found; aborting send"); return; }
   const resting = restingDomains();

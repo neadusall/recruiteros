@@ -15,6 +15,8 @@
 // into the daily rota now, it simply kicks in as today's sends age.
 
 import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
+import { createDecipheriv, scryptSync } from "node:crypto";
+import { createRequire } from "node:module";
 
 const OUT = process.env.MPC_OUT_DIR || "/out";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
@@ -132,6 +134,58 @@ async function writeFollowup(p, touch, rec) {
   return { subject: dash(j.subject), body: dash(j.body) };
 }
 
+// Google lane follow-ups (owner order 2026-08-19): a touch-1 that left a Gmail box must
+// follow up from the SAME box over SMTP - the Mailbox API cannot see Gmail boxes, and the
+// 8/15 domain-bench disaster came from exactly that lane mismatch on the own-SMTP fleet.
+const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE !== "0";
+let cachedKey = null;
+function cryptoKey() {
+  if (cachedKey) return cachedKey;
+  const secret = process.env.SENDERS_ENCRYPTION_KEY || process.env.APP_ENCRYPTION_KEY || "ros-senders-dev-key-do-not-use-in-prod";
+  cachedKey = scryptSync(secret, "ros-senders-salt-v1", 32);
+  return cachedKey;
+}
+function decryptSecret(stored) {
+  if (!stored) return "";
+  if (!stored.startsWith("v1:")) return stored;
+  try {
+    const raw = Buffer.from(stored.slice(3), "base64");
+    const d = createDecipheriv("aes-256-gcm", cryptoKey(), raw.subarray(0, 12));
+    d.setAuthTag(raw.subarray(12, 28));
+    return Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString("utf8");
+  } catch { return ""; }
+}
+let gmailMap = null;
+function gmailBoxFor(email) {
+  if (!gmailMap) {
+    gmailMap = new Map();
+    try {
+      const s = JSON.parse(readFileSync(SENDERS, "utf8"));
+      for (const m of (s.inboxes || s.state?.inboxes || [])) {
+        if (m.workspaceId === LUME_WS && m.status === "active" && m.smtpPassEnc && /^smtp\.gmail\.com$/i.test(m.smtpHost || "")) {
+          gmailMap.set(m.email, { email: m.email, host: m.smtpHost, port: m.smtpPort || 587, secure: !!m.smtpSecure, user: m.smtpUser || m.email, passEnc: m.smtpPassEnc });
+        }
+      }
+    } catch { /* no snapshot: no gmail lane */ }
+  }
+  return gmailMap.get(email) || null;
+}
+let mailerMod = null;
+function nodemailer() {
+  if (!mailerMod) mailerMod = createRequire("/app/integration/package.json")("nodemailer");
+  return mailerMod;
+}
+async function sendViaSmtp(box, fromName, to, subject, body) {
+  const pass = decryptSecret(box.passEnc);
+  if (!pass) return { ok: false, error: "smtp password would not decrypt" };
+  try {
+    const t = nodemailer().createTransport({ host: box.host, port: box.port, secure: box.secure, auth: { user: box.user, pass }, connectionTimeout: 20_000, socketTimeout: 30_000 });
+    await t.sendMail({ from: `"${fromName}" <${box.email}>`, to, subject, text: body });
+    t.close();
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e && e.message || e).slice(0, 160) }; }
+}
+
 async function sendViaMailboxApi(fromEmail, to, subject, body) {
   const key = process.env.SENDINGAC_MAILBOX_API_KEY;
   const res = await fetch(`${MAILBOX_BASE}/users/${encodeURIComponent(fromEmail)}/sendMail`, {
@@ -179,11 +233,18 @@ async function main() {
   // built so the deferred prospects stay visible in the count and simply come back next run.
   const resting = restingDomains();
   let deferred = 0;
+  let smtpParked = 0;
   const sendable = due.filter((t) => {
+    // Touch 1 sent on an SMTP lane has NO Sending.ac mailbox behind it; firing its follow-up
+    // at the Mailbox API just 404s ("No such mailbox") and those failures were booked as
+    // domain hard-fails (benched 14 healthy domains on 8/15). Gmail-lane rows follow up over
+    // SMTP below; own-SMTP rows park until MPC_SMTP_LANE=1.
+    if (t.last.lane === "smtp" && !(GOOGLE_LANE && gmailBoxFor(t.last.from)) && process.env.MPC_SMTP_LANE !== "1") { smtpParked++; return false; }
     const d = String((t.last.from || "").split("@")[1] || "").toLowerCase();
     if (d && resting.has(d)) { deferred++; return false; }
     return true;
   });
+  if (smtpParked) console.log(`  smtp lane parked: ${smtpParked} follow-up(s) held until MPC_SMTP_LANE=1`);
   if (deferred) console.log(`  domain rest: ${deferred} follow-up(s) deferred (resting: ${[...resting].join(", ")})`);
 
   // Fill only the REMAINING daily capacity: follow-ups + fresh sends share one 490 ceiling, so the
@@ -212,7 +273,10 @@ async function main() {
       if (sent < 3) { console.log(`\n--- FOLLOW-UP touch ${nextTouch} | ${r.company} -> ${t.email} ---\nsubject: ${fu.subject}\n${fullBody}`); }
       sent++; continue;
     }
-    const res = await sendViaMailboxApi(r.from, t.email, fu.subject, fullBody);
+    const gbox = GOOGLE_LANE ? gmailBoxFor(r.from) : null;
+    const res = gbox
+      ? await sendViaSmtp(gbox, (rec && rec.name) || "Ryan Nead", t.email, fu.subject, fullBody)
+      : await sendViaMailboxApi(r.from, t.email, fu.subject, fullBody);
     // Log as a normal send row so the touch count increments for the NEXT run.
     // A follow-up stays on the side (BD/Recruiting) of the thread it continues.
     appendFileSync(`${OUT}/sent-followup-${stamp}.jsonl`, JSON.stringify({ at: new Date().toISOString(), motion: r.motion || "bd", from: r.from, to_email: t.email, to_name: r.to_name, company: r.company, role: r.role, variant: r.variant, subject: fu.subject, body: fullBody, touch: nextTouch, result: res }) + "\n");
