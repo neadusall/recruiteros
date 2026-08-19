@@ -547,10 +547,17 @@ interface WatchState {
    */
   autoMode: Record<string, boolean>;
   lastScan: Record<string, string>;
+  /** ws -> last comment-copy epoch whose open drafts were rewritten. Bump
+   *  COMMENT_COPY_EPOCH when the public-comment rules change materially and
+   *  every workspace's pending queue is rewritten once on its next scan. */
+  redraftEpoch: Record<string, number>;
 }
 
+/** Bumped 2026-08-19: drafts must close with a call to action (owner ask). */
+const COMMENT_COPY_EPOCH = 1;
+
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -629,6 +636,7 @@ async function hydrate(): Promise<void> {
           paused: snap.paused ?? {},
           autoMode: snap.autoMode ?? {},
           lastScan: snap.lastScan ?? {},
+          redraftEpoch: snap.redraftEpoch ?? {},
         };
       }
       hydrated = true;
@@ -1384,6 +1392,22 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
   // own posts in search results. Never a gate (owner decision 2026-08-12:
   // the radar hunts OTHER people's posts, not the owner's).
   try { await ownProfileFor(workspaceId, account); } catch { /* optional */ }
+
+  // One-shot after a comment-copy rules change (owner ask 2026-08-19): drafts
+  // written under the old no-ask rules are rewritten with the CTA close BEFORE
+  // this tick's autopilot can post any of them. The epoch is stamped first so
+  // a bad run can never turn into an every-tick LLM loop; whatever it keeps
+  // stays approvable as-is and the queue's Redraft button remains the retry.
+  if ((state.redraftEpoch[workspaceId] ?? 0) < COMMENT_COPY_EPOCH) {
+    state.redraftEpoch[workspaceId] = COMMENT_COPY_EPOCH;
+    save();
+    try {
+      const r = await redraftOpenComments(workspaceId);
+      console.log(`[comment-radar] ${workspaceId}: copy epoch ${COMMENT_COPY_EPOCH}: rewritten=${r.redrafted} kept=${r.kept}`);
+    } catch (e) {
+      console.log(`[comment-radar] ${workspaceId}: epoch redraft error (${e instanceof Error ? e.message : e})`);
+    }
+  }
 
   const scanned = 0;
   const created = 0;
