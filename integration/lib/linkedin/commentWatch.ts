@@ -1057,6 +1057,20 @@ function seatRoomToday(workspaceId: string, accountId: string, day: string, pend
 }
 
 /**
+ * The same room as a SHARE of the seat's own allowance, which is what work
+ * should actually be dealt on. Allowances are jittered per seat per day, so
+ * comparing raw room hands everything to whoever drew the biggest number that
+ * morning: a seat on 16 outbids a seat on 13 four times over before they tie,
+ * and the seat on 13 sits idle meanwhile. Shares put every seat on the same
+ * scale, so all five start moving in the same tick.
+ */
+function seatShareLeft(workspaceId: string, accountId: string, day: string, pendingBySeat?: Record<string, number>): number {
+  const allowance = dayAllowanceFor(workspaceId, day, accountId);
+  if (allowance <= 0) return -1;
+  return seatRoomToday(workspaceId, accountId, day, pendingBySeat) / allowance;
+}
+
+/**
  * Which seat a newly captured lead is assigned to. A flat round robin was
  * fair only if every seat had been connected the whole time: Lume adopted
  * three seats mid-day on 2026-08-20 and the rota kept handing work to the two
@@ -1077,7 +1091,7 @@ function pickSendSeat(
   let bestRoom = -Infinity;
   for (let n = 0; n < accounts.length; n++) {
     const a = accounts[(rota + n) % accounts.length];
-    const room = seatRoomToday(workspaceId, a.accountId, day, pendingBySeat);
+    const room = seatShareLeft(workspaceId, a.accountId, day, pendingBySeat);
     if (room > bestRoom) { bestRoom = room; best = a; }
   }
   return best;
@@ -1096,18 +1110,26 @@ function rebalanceCommentQueue(workspaceId: string, accounts: LiAccountState[]):
   if (accounts.length <= 1) return 0;
   const day = nowIso().slice(0, 10);
   const room: Record<string, number> = {};
-  for (const a of accounts) room[a.accountId] = seatRoomToday(workspaceId, a.accountId, day);
+  const allowance: Record<string, number> = {};
+  for (const a of accounts) {
+    allowance[a.accountId] = Math.max(1, dayAllowanceFor(workspaceId, day, a.accountId));
+    room[a.accountId] = seatRoomToday(workspaceId, a.accountId, day);
+  }
   const pending = state.items.filter(
     (i) => i.workspaceId === workspaceId && i.commentStatus === "suggested" && !wallForItem(i),
   );
   let moved = 0;
   for (const item of pending) {
     let best = "";
-    let bestRoom = -Infinity;
+    let bestShare = -Infinity;
+    // Dealt by SHARE of each seat's own allowance, not by raw room: see
+    // seatShareLeft. Raw room gave every draft to whichever seat drew the
+    // biggest jittered allowance that day and left the rest waiting.
     for (const a of accounts) {
-      if (room[a.accountId] > bestRoom) { bestRoom = room[a.accountId]; best = a.accountId; }
+      const share = room[a.accountId] / allowance[a.accountId];
+      if (share > bestShare) { bestShare = share; best = a.accountId; }
     }
-    if (!best || bestRoom <= 0) break;
+    if (!best || room[best] <= 0) break;
     if (item.accountId !== best) { item.accountId = best; item.updatedAt = nowIso(); moved++; }
     room[best] -= 1;
   }
