@@ -111,7 +111,7 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
   const w = fuse?.window || {};
   add(GROUP_SEND, "sendfuse", "Send fuse (fleet kill switch + source breakers)",
     !fuse ? "bad" : tripped ? "bad" : fAge > 6 * 60 ? "amber" : paused.length ? "amber" : "good",
-    !fuse ? "no ledger" : tripped ? `TRIPPED ${fmtAge(ageMin(fuse.fleet.since))} by ${fuse.fleet.by}` : `armed · ${w.bounces ?? 0} bounces / ${w.sends ?? 0} sends in ${w.windowH ?? 24}h${paused.length ? ` · paused: ${paused.join(", ")}` : ""}`,
+    !fuse ? "no ledger" : tripped ? `TRIPPED ${fmtAge(ageMin(fuse.fleet.since))} by ${fuse.fleet.by}` : `armed · ${w.bounces ?? 0} bounces / ${w.sends ?? 0} sends in ${w.windowH ?? 24}h${w.bouncesOffFleet ? ` (+${w.bouncesOffFleet} on benched domains, not counted)` : ""}${paused.length ? ` · paused: ${paused.join(", ")}` : ""}`,
     !fuse ? "No sender has evaluated the fuse yet; batch.mjs writes it before every run and the sweep timer re-evaluates it" :
     tripped ? `${fuse.fleet.reason}. Cold sends are stopped on every lane until cleared: bash /opt/recruiteros/tools/send-fuse.sh --clear` :
     fAge > 6 * 60 ? "Ledger is stale: neither the send tick nor the sweep has evaluated it lately" :

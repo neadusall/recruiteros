@@ -20,7 +20,7 @@ function print(ledger) {
   const f = ledger.fleet || {};
   const w = ledger.window || {};
   console.log(`fleet fuse: ${f.tripped ? `TRIPPED since ${f.since} (${f.by}: ${f.reason})` : "armed"}${f.clearedAt ? ` | last cleared ${f.clearedAt} by ${f.clearedBy}` : ""}`);
-  console.log(`window: ${w.available === false ? "bounce notices unavailable (sweep predates the fuse)" : `${w.bounces ?? "?"} bounces / ${w.sends ?? "?"} sends in ${w.windowH ?? 24}h = ${w.ratio == null ? "n/a" : (w.ratio * 100).toFixed(2) + "%"} (trip: >${(w.maxRatio ?? 0.05) * 100}% on ${w.minSends ?? 100}+ sends)`} | NDR data ${w.ndrAt || "missing"}`);
+  console.log(`window: ${w.available === false ? "bounce notices unavailable (sweep predates the fuse)" : `${w.bounces ?? "?"} bounces / ${w.sends ?? "?"} sends in ${w.windowH ?? 24}h = ${w.ratio == null ? "n/a" : (w.ratio * 100).toFixed(2) + "%"} (trip: >${(w.maxRatio ?? 0.05) * 100}% on ${w.minSends ?? 100}+ sends)${w.bouncesOffFleet ? `, plus ${w.bouncesOffFleet} on benched domains that sent nothing this window (already stopped, not counted)` : ""}`} | NDR data ${w.ndrAt || "missing"}`);
   const srcs = Object.entries(ledger.sources || {});
   if (!srcs.length) console.log("sources: no attributed sends yet");
   for (const [k, s] of srcs) console.log(`  source ${k.padEnd(20)} ${s.tier || ""} sent ${s.sent ?? 0} bounces ${s.bounces ?? 0}${s.ratio != null ? ` (${(s.ratio * 100).toFixed(1)}%)` : ""}${s.paused ? ` PAUSED until ${s.until} (${s.reason})` : ""}`);

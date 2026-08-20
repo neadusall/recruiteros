@@ -36,6 +36,36 @@ test("does not trip at 4% on 100 sends", () => {
   assert.equal(ledger.fleet.tripped, false);
   assert.equal(ledger.window.sends, 100); assert.equal(ledger.window.bounces, 4);
 });
+test("a benched domain's late bounces do not trip the live fleet", () => {
+  // 100 sends from the live domain, 9 notices — but every notice belongs to a domain that
+  // sent nothing in this window (it is already on the bounce bench). Fleet-wide that reads
+  // 9% and trips; attributed to the fleet that actually sent, it is 0%.
+  const late = notices(9).map((n) => ({ ...n, domain: "lumeresting.com" }));
+  const { ledger } = evaluateFuse({ ledger: emptyLedger(), sentRows: sends(100), ndr: ndr(late), now, config });
+  assert.equal(ledger.fleet.tripped, false);
+  assert.equal(ledger.window.bounces, 0);
+  assert.equal(ledger.window.bouncesAll, 9);
+  assert.equal(ledger.window.bouncesOffFleet, 9);
+});
+test("a LIVE domain's bounces still trip the fleet", () => {
+  const mine = notices(6).map((n) => ({ ...n, domain: "lumeone.com" }));
+  const { ledger } = evaluateFuse({ ledger: emptyLedger(), sentRows: sends(100), ndr: ndr(mine), now, config });
+  assert.equal(ledger.fleet.tripped, true);
+  assert.equal(ledger.window.bounces, 6);
+  assert.equal(ledger.window.bouncesOffFleet, 0);
+});
+test("a notice with no domain is never excused", () => {
+  const { ledger } = evaluateFuse({ ledger: emptyLedger(), sentRows: sends(100), ndr: ndr(notices(6)), now, config });
+  assert.equal(ledger.fleet.tripped, true);
+  assert.equal(ledger.window.bounces, 6);
+});
+test("MPC_FUSE_ATTRIBUTE=0 restores the fleet-wide numerator", () => {
+  const late = notices(9).map((n) => ({ ...n, domain: "lumeresting.com" }));
+  const off = { ...config, fuseAttribute: false };
+  const { ledger } = evaluateFuse({ ledger: emptyLedger(), sentRows: sends(100), ndr: ndr(late), now, config: off });
+  assert.equal(ledger.fleet.tripped, true);
+  assert.equal(ledger.window.bounces, 9);
+});
 test("does not trip below the 100-send floor, however bad the ratio", () => {
   const { ledger } = evaluateFuse({ ledger: emptyLedger(), sentRows: sends(50), ndr: ndr(notices(20)), now, config });
   assert.equal(ledger.fleet.tripped, false);

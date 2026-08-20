@@ -140,7 +140,7 @@ export function releaseSource(ledger, source, { by = "owner", now = Date.now() }
 /* ------------------------------ evaluation ------------------------------ */
 
 export const DEFAULTS = {
-  fuseMinSends: 100, fuseMaxRatio: 0.05, fuseWindowH: 24,
+  fuseMinSends: 100, fuseMaxRatio: 0.05, fuseWindowH: 24, fuseAttribute: true,
   sourceMinSends: 30, sourceMaxRatio: 0.05, sourceWindowD: 7, sourcePauseH: [48, 168], sourceStrikeD: 14,
 };
 export function configFromEnv(env = process.env) {
@@ -149,6 +149,9 @@ export function configFromEnv(env = process.env) {
     fuseMinSends: num("MPC_FUSE_MIN_SENDS", DEFAULTS.fuseMinSends),
     fuseMaxRatio: num("MPC_FUSE_MAX_RATIO", DEFAULTS.fuseMaxRatio),
     fuseWindowH: num("MPC_FUSE_WINDOW_H", DEFAULTS.fuseWindowH),
+    // Count only bounces the LIVE fleet produced (see the fleet window below).
+    // MPC_FUSE_ATTRIBUTE=0 restores the old fleet-wide numerator.
+    fuseAttribute: env.MPC_FUSE_ATTRIBUTE !== "0",
     sourceMinSends: num("MPC_SOURCE_MIN_SENDS", DEFAULTS.sourceMinSends),
     sourceMaxRatio: num("MPC_SOURCE_MAX_RATIO", DEFAULTS.sourceMaxRatio),
     sourceWindowD: num("MPC_SOURCE_WINDOW_D", DEFAULTS.sourceWindowD),
@@ -174,14 +177,39 @@ export function evaluateFuse({ ledger, sentRows, ndr, now = Date.now(), config =
   const winStart = now - config.fuseWindowH * HOUR;
   const clearedAt = Date.parse(ledger.fleet.clearedAt || 0);
   const countFrom = Math.max(winStart, Number.isFinite(clearedAt) ? clearedAt : 0);
-  const sends = real.filter((r) => Date.parse(r.at || 0) >= countFrom).length;
-  const bounces = notices ? notices.filter((n) => Date.parse(n.at) >= countFrom).length : null;
+  const sendRows = real.filter((r) => Date.parse(r.at || 0) >= countFrom);
+  const sends = sendRows.length;
+  // ATTRIBUTION (2026-08-20). The numerator and the denominator have to describe the same
+  // fleet. `sends` can only ever come from domains that are actually sending, because a
+  // benched domain sends nothing — but the bounce count was fleet-wide, so late NDRs for
+  // mail a RESTING domain sent days ago landed on top of today's sends from entirely
+  // different domains. Live proof the evening this shipped: 10 bounces / 79 sends read
+  // 12.7% and sat 21 sends from latching the whole cold lane, while 8 of those 10 notices
+  // belonged to the 17 domains already on the bounce bench. Attributed to the domains that
+  // actually sent, the same window is 2 / 79 = 2.5%, and every per-source breaker read 0%.
+  // Tripping the fleet on a benched domain's history punishes the healthy domains for
+  // something already acted on, and cannot prevent a single further bounce: that domain
+  // is stopped. A notice with no domain still counts — unattributable is not innocent.
+  const liveDomains = new Set(sendRows.map((r) => String(r.from || "").split("@")[1] || "").filter(Boolean).map((d) => d.toLowerCase()));
+  const inWindow = notices ? notices.filter((n) => Date.parse(n.at) >= countFrom) : null;
+  const attributable = inWindow
+    ? inWindow.filter((n) => !n.domain || liveDomains.has(String(n.domain).toLowerCase()))
+    : null;
+  const bouncesAll = inWindow ? inWindow.length : null;
+  const bounces = config.fuseAttribute ? (attributable ? attributable.length : null) : bouncesAll;
   const ratio = bounces != null && sends > 0 ? bounces / sends : null;
   ledger.window = {
     at: nowIso, windowH: config.fuseWindowH, sends, bounces, ratio: ratio == null ? null : Math.round(ratio * 10000) / 10000,
     minSends: config.fuseMinSends, maxRatio: config.fuseMaxRatio,
     ndrAt: (ndr && ndr.generatedAt) || null,
     available: notices != null,
+    // Both numbers are kept so the bench never hides bounce pressure: `bouncesAll` is every
+    // notice in the window, `bouncesOffFleet` is the part belonging to domains that sent
+    // nothing (already benched, already acted on).
+    attributed: !!config.fuseAttribute,
+    bouncesAll,
+    bouncesOffFleet: bouncesAll != null && attributable != null ? bouncesAll - attributable.length : null,
+    liveDomains: [...liveDomains].sort(),
   };
   ledger.fleet.domains = domains;
   if (notices != null && sends >= config.fuseMinSends && ratio > config.fuseMaxRatio) {
