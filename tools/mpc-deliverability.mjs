@@ -119,7 +119,14 @@ async function authForDomain(domain) {
   const out = { spf: false, spfPolicy: null, dkim: false, dmarc: false, dmarcPolicy: null, mx: false };
   try { const txt = (await dns.resolveTxt(domain)).map((r) => r.join("")); const spf = txt.find((t) => /^v=spf1/i.test(t)); if (spf) { out.spf = true; out.spfPolicy = /-all/.test(spf) ? "-all" : /~all/.test(spf) ? "~all" : "?"; } } catch { /* none */ }
   try { const d = await dns.resolveTxt(`_dmarc.${domain}`); const rec = d.map((r) => r.join("")).find((t) => /^v=DMARC1/i.test(t)); if (rec) { out.dmarc = true; const p = rec.match(/p=(\w+)/i); out.dmarcPolicy = p ? p[1].toLowerCase() : null; } } catch { /* none */ }
-  try { await dns.resolveCname(`selector1._domainkey.${domain}`); out.dkim = true; } catch { try { await dns.resolveTxt(`selector1._domainkey.${domain}`); out.dkim = true; } catch { /* none */ } }
+  // Selector varies by mail host: Microsoft 365 publishes selector1/selector2 (CNAME),
+  // Google Workspace publishes google (TXT), mailcow defaults to dkim. Probing only one
+  // selector false-flags every domain on a different host as "DKIM missing".
+  const DKIM_SELECTORS = ["selector1", "selector2", "google", "dkim", "default", "s1", "s2", "k1"];
+  for (const sel of DKIM_SELECTORS) {
+    try { await dns.resolveCname(`${sel}._domainkey.${domain}`); out.dkim = true; break; } catch { /* try TXT */ }
+    try { const t = (await dns.resolveTxt(`${sel}._domainkey.${domain}`)).map((r) => r.join("")); if (t.some((r) => /v=DKIM1|k=rsa|p=/i.test(r))) { out.dkim = true; break; } } catch { /* next selector */ }
+  }
   try { const mx = await dns.resolveMx(domain); out.mx = mx.length > 0; } catch { /* none */ }
   out.fullyAuthed = out.spf && out.dkim && out.dmarc && out.mx && out.dmarcPolicy !== "none";
   return out;
