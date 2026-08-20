@@ -19,6 +19,7 @@ const INBOX_FILE = process.env.MPC_INBOX_FILE || "/data/snap_inbox.json";
 const EXT_SLUGS = process.env.ATS_EXT_FILE || "/data/snap_inmarket_ats_slugs_ext_v1.json";
 const STATS_FILE = process.env.MPC_STATS_FILE || "/data/snap_mpc_stats_v1.json";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
+const CONTACTED_FILE = process.env.MPC_CONTACTED_FILE || "/data/snap_mpc_contacted_v1.json";
 const SINCE = process.env.MPC_CURATED_SINCE || "2026-08-11";
 const WS = process.env.MPC_WORKSPACE_ID || "ws_mqf6o989003";
 const today = new Date().toISOString().slice(0, 10);
@@ -278,3 +279,47 @@ console.log(`reply sources: ledger ${ledger.size} + inbox ${inboxCls.size} -> ${
 console.log(`by motion: BD today ${bdSlice.sentToday} / total ${bdSlice.sentTotal} / replies ${bdSlice.repliesTotal} | Recruiting today ${recruitingSlice.sentToday} / total ${recruitingSlice.sentTotal} / replies ${recruitingSlice.repliesTotal}`);
 console.log("by variant:", variantRows.map((v) => `${v.variant} ${v.replied}/${v.sent} (${v.rate}%)`).join(" | "));
 console.log("by recruiter:", recruiterRows.map((r) => `${r.name} today ${r.sentToday} / total ${r.sentTotal} / replies ${r.replies}`).join(" | "));
+
+// ===========================================================================
+// PUBLISH WHO WE HAVE ACTUALLY EMAILED.
+//
+// The app cannot see /out — the send ledger lives on the host, outside the container that
+// serves the portal. That blind spot is why the unified inbox could not tell a real reply
+// from Smartlead warm-up chatter and filled up with the latter: every inbound from an
+// address the app did not already know looked equally anonymous.
+//
+// So the engine publishes the one fact the app is missing: the set of people it has emailed.
+// lib/response/contacted.ts reads this, and an inbound from someone in it is a REAL reply
+// no matter which mailbox it landed in. Warm-up partners are, by definition, never in it.
+//
+// Domains are published too, so an assistant or a colleague answering from a different
+// address at a company we emailed still reads as real. FREE PROVIDERS ARE EXCLUDED from the
+// domain set on purpose: one cold email to a gmail.com address would otherwise bless every
+// gmail sender on earth, which is precisely the hole this is meant to close.
+// ===========================================================================
+const FREE_MAIL = new Set(["gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "hotmail.com", "outlook.com", "live.com", "msn.com", "aol.com", "icloud.com", "me.com", "mac.com", "proton.me", "protonmail.com", "gmx.com", "gmx.net", "mail.com", "zoho.com", "yandex.com", "comcast.net", "verizon.net", "att.net", "sbcglobal.net", "bellsouth.net", "cox.net", "charter.net", "earthlink.net"]);
+const contactedDomains = new Set();
+for (const email of contacted) {
+  const d = String(email).split("@")[1];
+  if (d && !FREE_MAIL.has(d)) contactedDomains.add(d);
+}
+// Our own sending boxes must never count as contacts: a warm-up partner replying to one of
+// them would otherwise inherit the blessing of the domain it landed on.
+for (const box of ownerByBox.keys()) {
+  const d = String(box).split("@")[1];
+  if (d) contactedDomains.delete(d);
+}
+try {
+  const contactedOut = {
+    generatedAt: new Date().toISOString(),
+    byWorkspace: {
+      [WS]: { emails: [...contacted].filter(Boolean).sort(), domains: [...contactedDomains].sort() },
+    },
+  };
+  const ctmp = CONTACTED_FILE + ".tmp";
+  writeFileSync(ctmp, JSON.stringify(contactedOut));
+  renameSync(ctmp, CONTACTED_FILE);
+  console.log(`contacted set -> ${contacted.size} addresses / ${contactedDomains.size} domains (the app's real-reply test)`);
+} catch (e) {
+  console.log(`contacted set not written: ${e?.message || e}`);
+}

@@ -31,6 +31,7 @@ let seq = 0;
 function row(over: {
   cls?: ResponseClass; prospectId?: string | null; campaignId?: string;
   fromHandle?: string; receivedAt?: string; channel?: string; ws?: string;
+  verified?: ProcessedResponse["inbound"]["verified"];
 }): ProcessedResponse {
   const cls = over.cls ?? "positive";
   return {
@@ -41,6 +42,7 @@ function row(over: {
       fromHandle: over.fromHandle ?? "person" + seq + "@example.com",
       text: "hello", receivedAt: over.receivedAt ?? hoursAgo(0.1),
       campaignId: over.campaignId,
+      verified: over.verified,
     },
     classification: { class: cls, confidence: 0.9 },
     rule: ruleFor(cls), actionsTaken: [],
@@ -172,6 +174,32 @@ async function main() {
     const afterPrune = await inbox.forPerson(wsR, { prospectId: null, handles: [mpc.inbound.fromHandle] });
     ok(afterPrune.some((p) => p.inbound.id === mpc.inbound.id),
       "prune evicts warm-up chatter before any real reply");
+  }
+
+  // 9. A reply proved by SENDER is as first-class as one matched to a prospect. Most genuine
+  //    replies to the MPC engine arrive with no prospect record and no campaign id (its leads
+  //    live in the curation pool), so without this they would rank as warm-up chatter.
+  {
+    const wsV = "ws_verified";
+    const real = row({ cls: "unclassified", prospectId: null, ws: wsV, verified: "contacted_address", receivedAt: hoursAgo(30) });
+    inbox.add(real);
+    for (let i = 0; i < 40; i++) inbox.add(row({ cls: "unclassified", prospectId: null, ws: wsV }));
+    const listed = await inbox.list(wsV, 5);
+    ok(listed.some((p) => p.inbound.id === real.inbound.id),
+      "a sender-verified reply holds the window against newer chatter");
+    await inbox.prune(5, 20, 20, 2);
+    const kept = await inbox.forPerson(wsV, { prospectId: null, handles: [real.inbound.fromHandle] });
+    ok(kept.some((p) => p.inbound.id === real.inbound.id),
+      "prune evicts chatter before a sender-verified reply");
+  }
+
+  // 10. The chatter quota is PER WORKSPACE: one noisy tenant cannot squeeze out another's.
+  {
+    for (let i = 0; i < 30; i++) inbox.add(row({ cls: "unclassified", prospectId: null, ws: "ws_noisy" }));
+    for (let i = 0; i < 3; i++) inbox.add(row({ cls: "unclassified", prospectId: null, ws: "ws_quiet" }));
+    await inbox.prune(100000, 20, 20, 5);
+    strictEqual((await inbox.list("ws_noisy", 100)).length, 5, "the noisy tenant is capped at the quota");
+    strictEqual((await inbox.list("ws_quiet", 100)).length, 3, "the quiet tenant keeps everything it had");
   }
 
   console.log("response behavior suite: ALL PASS");

@@ -40,11 +40,42 @@ export async function processInbound(
   if (!inbox.claim(inbound.providerMessageId)) return null; // already processed
 
   inbound = await matchProspect(inbound);
-  // Email from a sender we cannot tie to a prospect or campaign is warm-up
-  // network chatter (it arrives hundreds a day on the fleet boxes): keep the
-  // free heuristics but never spend a model call or a hot label on it.
-  const unverifiedEmail = inbound.channel === "email" && !inbound.prospectId && !inbound.campaignId;
+
+  // PROVE IT IS REAL, OR DO NOT KEEP IT.
+  //
+  // The fleet warms through Smartlead, whose traffic is deliberately indistinguishable from
+  // business mail — no header, no tag, nothing to filter on (checked against live headers).
+  // It arrived at ~1,200 rows a day and filled the whole 3,000-row store in under three days,
+  // leaving it with zero real replies in it on 2026-08-20.
+  //
+  // The one thing that does separate them: a real reply comes from someone we emailed. Note
+  // that a prospect record is NOT the test — the MPC engine's leads live in the curation pool,
+  // not the core store, so most genuine replies arrive with prospectId null and used to be
+  // indistinguishable from chatter. contacted.ts closes exactly that gap.
+  if (inbound.prospectId) inbound.verified = "prospect";
+  else if (inbound.campaignId) inbound.verified = "campaign";
+  else if (inbound.channel === "email") {
+    const { wasContacted } = await import("./contacted");
+    const proof = await wasContacted(workspaceId, inbound.fromHandle);
+    if (proof) inbound.verified = proof === "address" ? "contacted_address" : "contacted_domain";
+  }
+  const unverifiedEmail = inbound.channel === "email" && !inbound.verified;
+  // Unproven email still gets the free heuristics, but never a model call and never a hot label.
   const classification = await classify(inbound.text, unverifiedEmail ? { ...hints, unverifiedSender: true } : hints);
+
+  // Chatter stops here. Anything the heuristics DID recognise is kept even from a stranger —
+  // an opt-out, a booking link, an out-of-office all carry real signal and are cheap to hold.
+  // The filter only engages once this workspace has published a contacted set to test against:
+  // without one, wasContacted() cannot distinguish anything, and silently dropping every
+  // inbound would be far worse than keeping noise. The provider message id stays claimed, so
+  // the next sync tick does not re-examine the same message forever.
+  if (unverifiedEmail && classification.class === "unclassified") {
+    const { hasContactedSet } = await import("./contacted");
+    if (await hasContactedSet(workspaceId)) {
+      inbox.noteChatter(workspaceId);
+      return null;
+    }
+  }
   const processed = await route(inbound, classification, pauseSequences);
 
   inbox.add(processed);

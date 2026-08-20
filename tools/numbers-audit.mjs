@@ -154,30 +154,44 @@ if (stats) {
 }
 
 /* =========================================================================
-   4. THE INBOX FLOOD — the condition that hid the replies. Warm-up chatter in
-   the response store is expected; a store with NO identity-verified reply left
-   in it means the reply center is showing a recruiter nothing but noise.
+   4. THE REPLY CENTER'S SIGNAL. Warm-up chatter used to walk straight into the
+   response store at ~1,200 rows a day and take the whole 3,000-row window;
+   processInbound now tests every unproven email sender against the contacted
+   set and drops what it cannot place, counting each one. So there are two
+   ways this can go wrong, and they look nothing alike: nothing arriving at
+   all (ingest is dead), or the filter dropping things it should keep.
    ========================================================================= */
 {
   const inbox = readJson(`${VOL}/snap_inbox.json`);
   const items = (inbox && inbox.items) || [];
   const mine = items.filter((x) => (x.inbound || {}).workspaceId === WS);
-  const real = mine.filter((x) => (x.inbound || {}).prospectId || (x.inbound || {}).campaignId);
-  const pct = mine.length ? Math.round((100 * real.length) / mine.length) : 0;
-  // BAD is reserved for "nothing is arriving at all", which means ingest itself has died. A store
-  // dominated by warm-up chatter is a known, understood condition: replySync only recognises this
-  // system's own warm-up tag, and the fleet warms through Smartlead, whose traffic carries no such
-  // tag. It is worth saying every day, but it is not an outage, and a permanent red on this board
-  // would only teach the operator to stop reading it.
-  const status = !mine.length ? "bad" : real.length === 0 || pct < 2 ? "warn" : "ok";
+  const real = mine.filter((x) => {
+    const i = x.inbound || {};
+    return i.prospectId || i.campaignId || i.verified;
+  });
+  const chatterByDay = ((inbox && inbox.chatter) || {})[WS] || {};
+  const recentChatter = Object.keys(chatterByDay).sort().slice(-2).reduce((n, d) => n + (chatterByDay[d] || 0), 0);
+  const filtering = Object.keys(chatterByDay).length > 0;
+  const unverified = mine.length - real.length;
+
+  // A dead ingest is the only real emergency: no rows AND nothing filtered means no mail is
+  // being read at all. A store with few real replies is not a fault — nine people replied to
+  // 2,223 sends, so a nearly-empty reply center is the honest shape of cold email.
+  let status = "ok";
+  let detail = "";
+  if (!mine.length && !recentChatter) {
+    status = "bad";
+    detail = "Nothing is reaching the Reply center at all: no stored replies and no chatter filtered. Check the reply_sync and mpc_reply_ingest ticks.";
+  } else if (!filtering && unverified > 500) {
+    status = "warn";
+    detail = "Unproven rows dominate the store and nothing is being filtered. The engine may not be publishing a contacted set (snap_mpc_contacted_v1.json), which is what lets the app tell a real reply from warm-up traffic.";
+  } else if (unverified > 500) {
+    status = "warn";
+    detail = "The filter is running, but the store still holds the backlog that arrived before it. prune() drains it to the chatter quota on the watchdog tick.";
+  }
   add("inboxsignal", "Reply center · real replies vs warm-up chatter", status,
-    `${real.length} identity-verified of ${mine.length} rows (${pct}%)`,
-    status === "ok" ? ""
-      : !mine.length
-        ? "The response store is empty: nothing is reaching the Reply center at all. Check the reply_sync and mpc_reply_ingest ticks."
-        : real.length === 0
-          ? "Not one identity-verified reply is left in the response store; warm-up traffic fills the whole window. The Dashboard no longer depends on this (it counts from the durable reply ledger), but the Reply center itself is showing a recruiter mostly chatter."
-          : "Warm-up traffic dominates the response store. Real replies are protected from eviction, but the recruiter's view is mostly chatter.");
+    `${real.length} real / ${unverified} unproven held / ${recentChatter} chatter filtered (48h)`,
+    detail);
 }
 
 /* =========================================================================

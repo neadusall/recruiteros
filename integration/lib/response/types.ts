@@ -46,6 +46,12 @@ export interface InboundResponse {
   toMailbox?: string;
   /** The inbound's subject, for building the "Re: ..." reply subject. */
   subject?: string;
+  /** How this inbound was PROVED to be a real reply rather than warm-up network chatter:
+   *  matched to a prospect, attributed to a campaign, or sent by someone this workspace has
+   *  actually emailed (lib/response/contacted.ts). Absent = unproven, which for email means
+   *  almost certainly chatter. Set once at ingest and never recomputed, so a row keeps its
+   *  provenance even after the contacted set has rolled on. */
+  verified?: "prospect" | "campaign" | "contacted_address" | "contacted_domain";
 }
 
 /** Routing SLA buckets from the reference matrix. */

@@ -6,23 +6,29 @@
 import type { ProcessedResponse, OutboundNote } from "./types";
 import { loadSnapshot, debouncedSaver, dbEnabled } from "../db";
 
-/** Identity-verified: matched to a prospect we know, or attributed to a campaign
- *  send (the MPC bridge only queues sender-verified replies). Email rows with
- *  neither are warm-up network chatter arriving hundreds a day; they must never
- *  crowd out or evict a real reply. */
+/** Identity-verified: matched to a prospect we know, attributed to a campaign send (the MPC
+ *  bridge only queues sender-verified replies), or proved by `verified` — the sender is
+ *  someone this workspace has actually emailed. Email rows with none of the three are warm-up
+ *  network chatter arriving hundreds a day; they must never crowd out or evict a real reply.
+ *  Rows ingested before `verified` existed still pass on the first two, so history is safe. */
 export function isRealReply(p: ProcessedResponse): boolean {
-  return !!(p.inbound.prospectId || p.inbound.campaignId);
+  return !!(p.inbound.prospectId || p.inbound.campaignId || p.inbound.verified);
 }
 
 class InboxStore {
   items: ProcessedResponse[] = [];
   seen = new Set<string>();
   outbound: OutboundNote[] = [];
+  /** workspace -> yyyy-mm-dd -> how much warm-up chatter was filtered out that day. Kept so a
+   *  quiet reply inbox can be read correctly: "nobody wrote back" and "we are dropping the
+   *  wrong things" look identical without it. */
+  chatter: Record<string, Record<string, number>> = {};
 
   private saver = debouncedSaver("inbox", () => ({
     items: this.items,
     seen: [...this.seen],
     outbound: this.outbound,
+    chatter: this.chatter,
   }));
   /** Never let a save run before hydration: a mutation on a not-yet-hydrated
    *  store would snapshot the near-empty boot state over the durable file,
@@ -50,6 +56,7 @@ class InboxStore {
             }
             this.items = items;
             this.outbound = s.outbound || [];
+            this.chatter = s.chatter || {};
           }).catch(() => {})
         : Promise.resolve();
     }
@@ -71,6 +78,24 @@ class InboxStore {
     // row can never be re-ingested by the next sync tick.
     if (p.inbound.providerMessageId) this.seen.add(p.inbound.providerMessageId);
     this.persist();
+  }
+
+  /** Record one filtered warm-up message. Deliberately not stored as a row: the whole point is
+   *  that chatter no longer occupies the inbox. Trimmed to the last 30 days. */
+  noteChatter(workspaceId: string): void {
+    const day = new Date().toISOString().slice(0, 10);
+    const w = (this.chatter[workspaceId] ??= {});
+    w[day] = (w[day] || 0) + 1;
+    const days = Object.keys(w).sort();
+    for (const d of days.slice(0, Math.max(0, days.length - 30))) delete w[d];
+    this.persist();
+  }
+
+  /** How much chatter was filtered for a workspace over the last `days` days. */
+  async chatterFiltered(workspaceId: string, days = 1): Promise<number> {
+    await this.ready();
+    const w = this.chatter[workspaceId] || {};
+    return Object.keys(w).sort().slice(-days).reduce((n, d) => n + (w[d] || 0), 0);
   }
 
   async list(workspaceId: string, limit = 100): Promise<ProcessedResponse[]> {
@@ -149,9 +174,29 @@ class InboxStore {
 
   /** Bound the snapshot so it can never grow without limit. Newest rows are kept
    *  (items are unshifted); the seen-id guard is rebuilt from the newest entries. */
-  async prune(maxItems = 3000, maxOutbound = 3000, maxSeen = 20000): Promise<number> {
+  async prune(maxItems = 3000, maxOutbound = 3000, maxSeen = 20000, maxUnverified = 200): Promise<number> {
     await this.ready();
     let dropped = 0;
+    // Warm-up chatter gets its own small quota, well under the overall cap. Evicting it only
+    // once the store is FULL was not enough: on 2026-08-20 all 3,000 rows were chatter, so
+    // real replies were perfectly protected and there were none left to protect. New chatter
+    // no longer enters the store at all; this is what drains what is already sitting in it.
+    // Per WORKSPACE, so one noisy tenant's chatter can never squeeze out another's.
+    {
+      const perWs = new Map<string, number>();
+      const evict = new Set<ProcessedResponse>();
+      for (const p of this.items) {            // newest-first
+        if (isRealReply(p) || p.deletedAt) continue;
+        const ws = p.inbound.workspaceId;
+        const n = (perWs.get(ws) || 0) + 1;
+        perWs.set(ws, n);
+        if (n > maxUnverified) evict.add(p);
+      }
+      if (evict.size) {
+        this.items = this.items.filter((p) => !evict.has(p));
+        dropped += evict.size;
+      }
+    }
     if (this.items.length > maxItems) {
       // Evict warm-up chatter before any real reply: drop unverified rows from
       // the old end first, and only truncate real rows if the store is somehow
