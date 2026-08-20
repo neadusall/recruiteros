@@ -119,6 +119,9 @@ const MAX_COMMENT_CHARS = 520;
 // thread gets re-read well inside an hour).
 const RESPONSE_WATCH_DAYS = 14;
 const RESPONSE_CHECKS_PER_TICK = 6;
+// Replies whose alert never fired, worked off a few per tick: a catch-up must
+// not land as a dozen simultaneous texts on one recruiter's phone.
+const REPLY_REFLEX_CATCHUP_PER_TICK = 3;
 
 /** The keyword bank is the ROLES the desk places (owner decision 2026-08-13):
  *  each entry is a job title or phrase, searched against LinkedIn posts to
@@ -1797,6 +1800,29 @@ async function handoffCommentedToBd(workspaceId: string): Promise<number> {
 async function checkCommentResponses(workspaceId: string): Promise<number> {
   const accounts = await connectedAccounts(workspaceId);
   if (!accounts.length) return 0;
+
+  // Step 0: replies nobody was told about. Firing the reflex is a one-time
+  // edge at detection, so a reply seen while the alert did not yet exist (or
+  // while it was failing) would sit answered-by-nobody forever. This sweep is
+  // the only path that can reach those, and it runs BEFORE the early returns
+  // below for exactly that reason. A few per tick, so a backlog arrives as a
+  // trickle rather than a burst of texts; the stamps inside the reflex keep
+  // it once-ever per thread.
+  const unalerted = state.items.filter((i) =>
+    i.workspaceId === workspaceId && i.kind === "poster"
+    && i.responseStatus === "responded" && !i.replyAlertAt);
+  if (unalerted.length) {
+    const { posterReplyReflex } = await import("./replyReflex");
+    for (const item of unalerted.slice(0, REPLY_REFLEX_CATCHUP_PER_TICK)) {
+      try {
+        await posterReplyReflex(workspaceId, item, accounts);
+        save();
+      } catch (e) {
+        console.log(`[comment-radar] ${workspaceId}: reply reflex failed for ${item.authorName} (${e instanceof Error ? e.message : e})`);
+      }
+    }
+  }
+
   const tracked = state.items.filter((i) =>
     i.workspaceId === workspaceId && i.kind === "poster" && i.commentStatus === "approved"
     && (!i.responseStatus || i.responseStatus === "pending" || i.responseStatus === "posted"));
@@ -1895,6 +1921,7 @@ async function checkCommentResponses(workspaceId: string): Promise<number> {
       console.log(`[comment-radar] ${workspaceId}: thread check failed for ${item.authorName} (${e instanceof Error ? e.message : e})`);
     }
   }
+
   return found;
 }
 
