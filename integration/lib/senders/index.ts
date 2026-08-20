@@ -19,6 +19,9 @@ export { pickSender, poolCapacity, fleetDailyCapacity } from "./pool";
 export { fleetOverview } from "./fleets";
 export type { FleetCard, FleetKey } from "./fleets";
 
+export { coldCapacity, COLD_LANE_NAMES } from "./coldLane";
+export type { ColdCapacity, ColdLane } from "./coldLane";
+
 export { runOutlookWatch } from "./outlookWatch";
 export type { OutlookWatchReport } from "./outlookWatch";
 export { OUTLOOK_LEDGER_KEY, buildOutlook, foldOutlook, outlookGraceH } from "./outlook";

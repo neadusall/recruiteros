@@ -13,6 +13,7 @@ import { loadSnapshot } from "../db";
 import { listInboxes } from "./store";
 import { coldCapFor, coldMaxPerInbox, SENDING_AC_PER_INBOX } from "./limits";
 import { activeBlocks } from "./recipientGuard";
+import { coldCapacity } from "./coldLane";
 import { buildOutlook, OUTLOOK_LEDGER_KEY, RECEIVER_LABEL } from "./outlook";
 import type {
   BlocksSnap, DomainBoxes, EgressSnap, KeeperSnap, OutlookLedger, OutlookStep, Recv, RestSnap, StandingSnap,
@@ -82,6 +83,8 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
     loadSnapshot<KeeperSnap>("internal_warmup_v1"),
     loadSnapshot<OutlookLedger>(OUTLOOK_LEDGER_KEY),
   ]);
+  // What the cold lane actually carries today, straight from the sender.
+  const cold = await coldCapacity(workspaceId).catch(() => null);
 
   const now = Date.now();
   const resting = new Map<string, string | null>(); // domain -> until
@@ -174,12 +177,14 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
       // Cold-lane reality per fleet. Google's cold ramp is per-box-per-week from its
       // FIRST COLD SEND (batch.mjs); the app can't see that ledger, so we mirror the
       // conservative week-1 step - it understates in later weeks, never overstates.
-      const googleStep = Math.max(1, Number(String(process.env.MPC_GOOGLE_RAMP || "8").split(",")[0]) || 8);
-      const usableBoxes = c.boxes.active + c.boxes.warming - c.boxes.benched;
-      const coldToday =
-        c.key === "sendingac" ? c.capacity.today :
-        c.key === "google" ? Math.min(c.capacity.today, Math.max(0, usableBoxes) * googleStep) :
-        0; // internal + other: cold lane parked (MPC_SMTP_LANE); app sends only
+      // Cold-lane reality per fleet comes from the SENDER's published ledger, never from a
+      // mirror of its ramp: mirroring counted all 100 Google boxes (warming ones included)
+      // at a week-1 step and told the portal 1,200/day against a real 832 (2026-08-20).
+      // Falls back to 0 rather than to a guess — an unpublished ledger is reported as
+      // unknown upstream, and a fabricated ceiling is worse than an absent one.
+      const laneKey = c.key === "internal" ? "internal" : c.key;
+      const published = cold?.lanes?.find((l) => l.lane === laneKey) || null;
+      const coldToday = published ? published.ceiling : 0;
       const out: FleetCard = {
         key: c.key, name: c.name, boxes: c.boxes,
         domains: { total: c._domains.size, resting: restingMine.length, nextRevival: revivals[0] || null },

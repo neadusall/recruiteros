@@ -1376,6 +1376,10 @@
         var pp = d.poolParams || {};
         var rules = guard.rules || {};
         var provName = { "sending-ac": "Provisioned pool", "own-smtp": "Own mail server", google: "Google", outlook: "Microsoft", other: "Other" };
+        // The cold-outreach ledger the SENDER publishes. Absent means "not published", never
+        // "fall back to the app-lane sum" — that fallback is what made this page overstate.
+        var cold = cap.cold || null;
+        var laneName = { sendingac: "Provisioned pool (Sending.ac)", google: "Google (Zapmail)", internal: "Own mail server", other: "Other" };
         function ago(iso) {
           var t = iso ? Date.parse(iso) : NaN;
           if (!isFinite(t)) return "not yet run";
@@ -1407,19 +1411,34 @@
           tile("Healthy + sending", n(healthy), "var(--ok)") +
           tile("In recovery (auto-held)", n(holding), holding ? "var(--warn)" : "var(--ok)") +
           tile("Auto-revived this week", n(guard.revivedThisWeek || 0)) +
-          tile("Cold sends available today", n(cap.coldRemaining || 0) + '<span style="font-size:12px;color:var(--text-dim)"> / ' + n(cap.coldCapacity || 0) + "</span>", "var(--info)") +
+          tile("Cold sends left today", cold ? n(cold.remaining) + '<span style="font-size:12px;color:var(--text-dim)"> / ' + n(cold.ceiling) + "</span>" : '<span style="font-size:13px;color:var(--text-dim)">not published</span>', "var(--info)") +
           "</div>";
 
-        // Today's send capacity, spelled out from Email IDs x domains.
-        body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> available today" + (cap.matureCapacity && cap.matureCapacity > cap.coldCapacity ? ' <span style="color:var(--text-dim)">(' + n(cap.matureCapacity) + "/day at full ramp, as warming mailboxes mature)</span>" : "") + " across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
-          (cap.benchedInboxes ? ', with <b style="color:#b26a00">' + n(cap.benchedInboxes) + ' Email IDs benched</b> on ' + n(cap.restingDomains || 0) + " resting domains (they rejoin automatically as the bounce bench lifts)" : "") +
-          (cap.warmingPerDay ? ', plus about ' + n(cap.warmingPerDay) + " external warm-up sends/day that build reputation (not outreach)." : ".") + "</div>";
-        var provRows = (cap.byProvider || []).map(function (p) {
-          var nm = provName[p.provider] || p.provider;
-          var model = p.capModel === "flat" ? "flat " + (pp.sendingAcPerInbox || 2) + "/day each" : "ramped";
-          return '<div style="font-size:12px;color:var(--text-dim);padding:1px 0">' + esc(nm) + ": " + n(p.inboxes) + " Email IDs on " + n(p.domains) + " domains · " + esc(model) + " · " + n(p.coldCapacity) + "/day</div>";
-        }).join("");
-        if (provRows) body += '<div style="margin-bottom:12px">' + provRows + "</div>";
+        // TODAY'S COLD CEILING. One number, published by the sender that applies the caps
+        // (tools/batch.mjs --capacity). The app-lane ramp below is a DIFFERENT thing and is
+        // labelled as such: showing it as "cold sends/day" is what put 1,422 on this page
+        // against a fleet carrying 832 (2026-08-20).
+        if (cold) {
+          body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cold.ceiling) + " cold emails/day</b> is what this fleet can carry today, across <b>" + n(cold.usableBoxes) + " usable Email IDs</b>" +
+            " · <b>" + n(cold.sentToday) + " sent</b>, <b>" + n(cold.remaining) + " left</b>" +
+            (cold.benchedBoxes ? ', with <b style="color:#b26a00">' + n(cold.benchedBoxes) + ' Email IDs benched</b> on ' + n((cold.restingDomains || []).length) + " resting domains holding back " + n(cold.benchedCeiling) + "/day (they rejoin automatically as the bounce bench lifts)" : "") +
+            ((cold.lanesParked || []).length ? ' · <b style="color:#b26a00">' + esc(cold.lanesParked.join(", ")) + '</b> lane parked, contributing 0' : "") +
+            ".</div>";
+          var laneRows = (cold.lanes || []).map(function (l) {
+            var nm = laneName[l.lane] || l.lane;
+            return '<div style="font-size:12px;color:var(--text-dim);padding:1px 0">' + esc(nm) + ": <b>" + n(l.ceiling) + "/day</b> across " + n(l.usableBoxes) + " Email IDs · " + n(l.sentToday) + " sent, " + n(l.boxesWithHeadroom) + " boxes still under their own cap" +
+              (l.benchedBoxes ? " · " + n(l.benchedBoxes) + " benched holding " + n(l.benchedCeiling) + "/day" : "") + "</div>";
+          }).join("");
+          if (laneRows) body += '<div style="margin-bottom:8px">' + laneRows + "</div>";
+          if (cold.stale) body += '<div style="font-size:12px;color:#b26a00;margin-bottom:10px">These numbers are ' + n(cold.ageMinutes) + ' minutes old. The send loop publishes every 20 minutes, so the cold lane is not running right now.</div>';
+        } else {
+          body += '<div style="font-size:12.5px;color:#b26a00;margin-bottom:10px">The sender has not published a capacity ledger yet, so the cold ceiling for today is unknown. It is written every send tick by <code>batch.mjs --capacity</code>.</div>';
+        }
+        // The app lane is the portal's OWN sending (job blasts, replies, sequences) on its
+        // warm-up ramp. It counts the whole pool, including boxes the cold lane cannot draw.
+        body += '<div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">App lane (job blasts, replies, sequences), a separate ramp over the whole pool: ' + n(cap.coldCapacity || 0) + "/day across " + n(cap.inboxes || 0) + " Email IDs on " + n(cap.domains || 0) + " domains" +
+          (cap.matureCapacity && cap.matureCapacity > cap.coldCapacity ? " (" + n(cap.matureCapacity) + "/day at full ramp)" : "") +
+          (cap.warmingPerDay ? " · about " + n(cap.warmingPerDay) + " external warm-up sends/day build reputation and are not outreach" : "") + ".</div>";
 
         // The set parameters the whole fleet runs on.
         var rampTxt = (pp.ramp || [5, 10, 15]).join(", then ") + ", then " + (pp.coldMax || 20) + "/day max";
@@ -6886,18 +6905,31 @@
       return css + '<div class="syscap"><div class="syscap-h"><h3>Sending system</h3><span class="sub">your domains, Email IDs, and daily cold-send capacity</span></div>' +
         '<div class="empty" style="margin-top:12px">No Email IDs yet. <a href="#senders">Import your inboxes</a> and assign them to recruiters, then this shows the model: <b>domains → Email IDs → ' + (cap.coldPerInbox || 2) + ' cold sends/day each</b>, draining live as you send.</div></div>';
     }
-    var pct = cap.coldCapacity ? Math.min(100, Math.round((cap.coldUsedToday / cap.coldCapacity) * 100)) : 0;
+    // The gauge reads the SENDER's published ledger, so it drains as mail actually goes out.
+    // cap.coldUsedToday is the app lane's own counter and stays 0 all day while the MPC
+    // sender (a host tool that never calls recordSend) does the sending.
+    var cold = cap.cold || null;
+    var capToday = cold ? cold.ceiling : cap.coldCapacity;
+    var usedToday = cold ? cold.sentToday : cap.coldUsedToday;
+    var leftToday = cold ? cold.remaining : cap.coldRemaining;
+    var usableIds = cold ? cold.usableBoxes : cap.inboxes;
+    var pct = capToday ? Math.min(100, Math.round((usedToday / capToday) * 100)) : 0;
+    var perIdNote = cold
+      ? (cold.lanes || []).map(function (l) { return (l.usableBoxes ? Math.round(l.ceiling / l.usableBoxes) : 0) + '/day × ' + sqFmt(l.usableBoxes); }).join(' + ')
+      : sqFmt(cap.inboxes) + ' × ' + cap.coldPerInbox;
     var flow =
       '<div class="syscap-flow">' +
         '<div class="syscap-step"><div class="n">' + sqFmt(cap.domains) + '</div><div class="l">Domains</div><div class="s">' + cap.inboxesPerDomain + ' Email IDs each</div></div>' +
         '<div class="syscap-arrow">→</div>' +
-        '<div class="syscap-step"><div class="n">' + sqFmt(cap.inboxes) + '</div><div class="l">Email IDs</div><div class="s">' + cap.coldPerInbox + ' cold + ' + cap.warmingPerInbox + ' warm / day</div></div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(usableIds) + '</div><div class="l">Email IDs sending</div><div class="s">' + (cold && cold.benchedBoxes ? sqFmt(cold.benchedBoxes) + ' more benched' : 'all in rotation') + '</div></div>' +
         '<div class="syscap-arrow">→</div>' +
-        '<div class="syscap-step"><div class="n">' + sqFmt(cap.coldCapacity) + '</div><div class="l">Cold sends / day</div><div class="s">hard cap · ' + sqFmt(cap.inboxes) + ' × ' + cap.coldPerInbox + '</div></div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(capToday) + '</div><div class="l">Cold sends / day</div><div class="s">' + esc(perIdNote) + '</div></div>' +
       '</div>';
     var meter =
       '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +
-        '<div class="lbl"><span><b>' + sqFmt(cap.coldUsedToday) + '</b> sent today</span><span><b>' + sqFmt(cap.coldRemaining) + '</b> left · ' + pct + '% of capacity used</span></div></div>';
+        '<div class="lbl"><span><b>' + sqFmt(usedToday) + '</b> sent today</span><span><b>' + sqFmt(leftToday) + '</b> left · ' + pct + '% of capacity used</span></div></div>' +
+      (cold && cold.benchedBoxes ? '<div class="syscap-warm">' + sqFmt(cold.benchedBoxes) + ' Email IDs are benched on ' + sqFmt((cold.restingDomains || []).length) + ' resting domains, holding back <b>' + sqFmt(cold.benchedCeiling) + '/day</b> until the bounce bench lifts.</div>' : '') +
+      (cold && cold.stale ? '<div class="syscap-warm">Published ' + sqFmt(cold.ageMinutes) + ' minutes ago. The send loop refreshes every 20 minutes, so the cold lane is not running right now.</div>' : '');
     var warm = '<div class="syscap-warm">+ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>the warm-up engine</b> (' + cap.warmingPerInbox + '/inbox), kept separate from your cold sends.</div>';
     var rows = (cap.byRecruiter || []).map(function (r) {
       var rp = r.coldCapacity ? Math.min(100, Math.round((r.coldUsedToday / r.coldCapacity) * 100)) : 0;
@@ -10006,6 +10038,15 @@
     var box = $("#sndProvBox"); if (!box) return;
     var cap = sndData.capacity || {}, list = cap.byProvider || [];
     if (!list.length) { box.innerHTML = ""; return; }
+    // Cold-lane truth per lane, from the sender's published ledger. The byProvider rows
+    // below describe the APP lane's ramp over the same boxes and are labelled that way:
+    // rendering the app-lane number under a "cold sends/day" heading is what let this
+    // panel advertise 810/day from 54 Zapmail boxes that the cold lane caps at 8/day each.
+    var coldByLane = {};
+    if (cap.cold && cap.cold.lanes) {
+      cap.cold.lanes.forEach(function (l) { coldByLane[l.lane] = l; });
+    }
+    var laneOf = { "sending-ac": "sendingac", "own-smtp": "internal", google: "google", other: "google" };
     var notes = {
       "sending-ac": "Sending.ac model: every mailbox sends a flat 2 cold emails/day, warmed externally. More volume means more mailboxes, not higher caps.",
       "own-smtp": "Your internal SMTP server: each mailbox ramps 5, 10, 15, then " + (cap.coldPerInbox || 20) + "/day over its first four weeks once activated. Mailboxes still warming send the day-one floor until you activate them.",
@@ -10019,8 +10060,12 @@
         // Benched boxes sit on domains resting after bounce trouble: real inventory,
         // zero capacity today. Shown, never blended into the sends/day number.
         var benched = p.benchedInboxes ? ' · <span style="color:#b26a00">' + fmt(p.benchedInboxes) + ' benched on resting domains</span>' : '';
+        var lane = coldByLane[laneOf[p.provider] || p.provider] || null;
+        var coldTxt = lane
+          ? ' · <b>' + fmt(lane.ceiling) + '</b> cold sends/day (' + fmt(lane.sentToday) + ' sent, ' + fmt(lane.remaining != null ? lane.remaining : Math.max(0, lane.ceiling - lane.sentToday)) + ' left)'
+          : ' · <span style="color:#b26a00">no cold volume today</span>';
         return '<div class="snd-split-row">' + sndProviderBadge(p.provider) +
-          '<span class="snd-split-meta">' + p.inboxes + ' sendable Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + fmt(p.coldCapacity) + '</b> cold sends/day' + (ramps ? ' <span class="muted">(ramps to <b>' + fmt(p.matureCapacity) + '</b>/day at full ramp)</span>' : '') + ' · ' + fmt(p.coldRemaining) + ' left today' + benched + '</span>' +
+          '<span class="snd-split-meta">' + p.inboxes + ' sendable Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + coldTxt + ' <span class="muted">· app lane ' + fmt(p.coldCapacity) + '/day' + (ramps ? ' (ramps to ' + fmt(p.matureCapacity) + ')' : '') + '</span>' + benched + '</span>' +
           (notes[p.provider] ? '<span class="snd-split-note">' + esc(notes[p.provider]) + '</span>' : '') +
         '</div>';
       }).join("") + '</div>';
