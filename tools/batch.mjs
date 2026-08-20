@@ -540,9 +540,19 @@ async function main() {
     const fresh = pl && Date.now() - Date.parse(pl.checkedAt || 0) <= 7 * 86_400_000;
     if (fresh && total > 0 && (g.spam || 0) / total > 0.3) googleHeld = true;
   } catch { /* no seed test yet: google still sends, but the ramp governor holds base volume */ }
+  // OWNERS FIRST, INSIDE EACH PROVIDER BUCKET. The provider grouping above is a deliverability
+  // decision and has to stay the outer ordering, but it is built by concatenating buckets, which
+  // silently discarded the buyer-rank sort applied earlier: the 2026-08-20 19:50 run went out
+  // 18/31 to CEOs even though 125 role owners were queued ahead of 90 execs. Sorting inside each
+  // bucket is what actually makes the daily cap get spent on the people who own the req.
+  for (const b of Object.values(buckets)) {
+    if (Array.isArray(b)) b.sort((a, z) => dmRank(a) - dmRank(z));
+  }
   const ordered = googleHeld
     ? [...buckets.microsoft, ...buckets.custom, ...buckets.unknown]
     : [...buckets.microsoft, ...buckets.custom, ...buckets.unknown, ...buckets.google];
+  const orderedMix = ordered.reduce((acc, p) => { acc[dmRank(p)] = (acc[dmRank(p)] || 0) + 1; return acc; }, {});
+  console.log(`sendable, owners first -> role owner:${orderedMix[0] || 0} ambiguous senior:${orderedMix[1] || 0} whole-company exec:${orderedMix[2] || 0}`);
   if (googleHeld) console.log(`placement gate: Gmail seed test failing, ${buckets.google.length} google-hosted prospects deferred`);
   console.log(`provider mix -> outlook-hosted ${buckets.microsoft.length} | custom ${buckets.custom.length} | unknown ${buckets.unknown.length} | google ${buckets.google.length} | SEG deferred ${buckets.seg.length}${SEG_SEND ? " (SEG sends ON)" : ""} | no-MX skipped ${buckets.nomx.length}`);
 
