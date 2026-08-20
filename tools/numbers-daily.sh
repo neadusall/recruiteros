@@ -38,11 +38,15 @@ rm -f /tmp/nb-adv.env
 
 # 3) The audit. Runs on the HOST (not in a container): it compares the docker volume's snapshots
 #    against the tool output logs and the repo checkout, all of which live out here.
-grep -E '^(RESEND_API_KEY|OWNER_EMAIL|EMAIL_FROM)=' .env.production > /tmp/nb-audit.env 2>/dev/null || true
-set -a; # shellcheck disable=SC1091
-[ -s /tmp/nb-audit.env ] && . /tmp/nb-audit.env; set +a
-node /opt/recruiteros/tools/numbers-audit.mjs >> "$LOG" 2>&1 || true
-rm -f /tmp/nb-audit.env
+#    The three values it needs are read out of .env.production and handed over as literal
+#    environment variables. They are NEVER sourced as shell: EMAIL_FROM holds an address in
+#    angle brackets ("RecruitersOS <no-reply@...>"), which a `.` of the file parses as a
+#    redirection and dies on.
+envval() { sed -n "s/^$1=//p" .env.production | head -1; }
+RESEND_API_KEY="$(envval RESEND_API_KEY)" \
+OWNER_EMAIL="$(envval OWNER_EMAIL)" \
+EMAIL_FROM="$(envval EMAIL_FROM)" \
+  node /opt/recruiteros/tools/numbers-audit.mjs >> "$LOG" 2>&1 || true
 
 # 4) Refresh the health board immediately so the audit's verdict is visible in the portal now,
 #    instead of on the next quarter-hour tick.
