@@ -442,37 +442,47 @@ async function runCycleInner(): Promise<void> {
     }
   } catch { /* best-effort */ }
 
-  // 5) RESOLVE COMPANY SIZE — look up real headcounts for a rotating batch of pool companies
-  //    from Wikidata (free, keyless), cached so the size filter carries authoritative sizes
-  //    over time. Companies Wikidata doesn't cover fall back to a marked estimate at search.
+  // 5) RESOLVE COMPANY SIZE — look up real headcounts for a rotating batch of pool companies.
+  //
+  // THESE THREE STEPS ARE INDEPENDENT ON PURPOSE (2026-08-20). They used to share one try block
+  // with an empty catch, so a throw anywhere in the Wikidata enrichment silently skipped BOTH the
+  // back-fill and the purge. That is exactly what happened tonight: a cycle completed "ok", the
+  // pool kept 2,409 companies the band forbids, and nothing anywhere said why. A failure in one of
+  // these must not take the other two down, and none of them may fail silently again.
   try {
     const { names, total } = await poolCompanyNames(sizeCursor, SIZE_BATCH);
     if (names.length) {
       sizeCursor = total ? (sizeCursor + names.length) % total : 0;
       await enrichSizesBatch(names, SIZE_BATCH);
     }
-    // BACK-FILL the resolved counts onto the pool rows themselves (2026-08-20). Sizes resolve on
-    // this rotating cursor AFTER a lead has already been merged, and nothing ever wrote the number
-    // back — so `lead.employeeCount` was undefined on all 15,000 pool rows, curation copied that
-    // undefined into every curated row, and resolveDecisionMaker() therefore ran with
-    // companySize: undefined FOREVER. That is why the org-depth model in targetProfile.ts always
-    // assumed "mid-market" and never targeted a flat company's founder or an enterprise's line
-    // manager. One cheap pass over the size cache fixes the whole chain.
-    try {
-      const { loadSizeMap } = await import("./companySize");
-      const filled = await updateSizesFromCache(await loadSizeMap());
-      if (filled) console.log(`[inmarket] size back-fill: stamped ${filled} pool rows with a confirmed headcount`);
-    } catch { /* best-effort */ }
-    // Enforce the target band [MIN_EMPLOYEES, MAX_EMPLOYEES] = 100-5,000: drop any pool
-    // company Wikidata has now confirmed is below 100 OR above 5,000. Re-read the set so it
-    // includes companies resolved THIS cycle. Authoritative counts only — heuristic
-    // estimates are never purged. (purgeOversizedFromPool just removes the given keys.)
-    try {
-      outOfBand = await outOfBandCompanyKeys();
-      if (outOfBand.size) await purgeOversizedFromPool(outOfBand);
-    } catch { /* best-effort */ }
-  } catch {
-    /* size enrichment is best-effort */
+  } catch (err) {
+    console.warn("[inmarket] size enrichment failed:", (err as Error)?.message || err);
+  }
+
+  // 5a) BACK-FILL the resolved counts onto the pool rows themselves. Sizes resolve on a rotating
+  //     cursor AFTER a lead has been merged, and nothing used to write the number back — so
+  //     lead.employeeCount was undefined on every pool row, curation copied that undefined onto
+  //     every curated row, and resolveDecisionMaker ran with companySize: undefined forever, which
+  //     is why the org-depth model always assumed "mid-market".
+  try {
+    const { loadSizeMap } = await import("./companySize");
+    const filled = await updateSizesFromCache(await loadSizeMap());
+    if (filled) console.log(`[inmarket] size back-fill: stamped ${filled} pool rows with a confirmed headcount`);
+  } catch (err) {
+    console.warn("[inmarket] size back-fill failed:", (err as Error)?.message || err);
+  }
+
+  // 5b) PURGE companies confirmed OUTSIDE the target band, freeing pool slots for companies we can
+  //     actually sell to. Re-reads the set so it includes anything resolved this cycle.
+  //     Authoritative counts only; a heuristic estimate never deletes pool data.
+  try {
+    outOfBand = await outOfBandCompanyKeys();
+    if (outOfBand.size) {
+      const removed = await purgeOversizedFromPool(outOfBand);
+      if (removed) console.log(`[inmarket] purged ${removed} pool companies confirmed outside the target headcount band`);
+    }
+  } catch (err) {
+    console.warn("[inmarket] out-of-band purge failed:", (err as Error)?.message || err);
   }
 
   // 5.5) RECLASSIFY INTENT — re-derive each lead's hiring-intent type (surge / long-open /
