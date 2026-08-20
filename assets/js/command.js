@@ -1411,7 +1411,7 @@
           tile("Healthy + sending", n(healthy), "var(--ok)") +
           tile("In recovery (auto-held)", n(holding), holding ? "var(--warn)" : "var(--ok)") +
           tile("Auto-revived this week", n(guard.revivedThisWeek || 0)) +
-          tile("Cold sends left today", cold ? n(cold.remaining) + '<span style="font-size:12px;color:var(--text-dim)"> / ' + n(cold.ceiling) + "</span>" : '<span style="font-size:13px;color:var(--text-dim)">not published</span>', "var(--info)") +
+          tile("Cold sends left today", cold ? n(cold.remainingToday) + '<span style="font-size:12px;color:var(--text-dim)"> / ' + n(cold.capToday) + "</span>" : '<span style="font-size:13px;color:var(--text-dim)">not published</span>', "var(--info)") +
           "</div>";
 
         // TODAY'S COLD CEILING. One number, published by the sender that applies the caps
@@ -1419,8 +1419,13 @@
         // labelled as such: showing it as "cold sends/day" is what put 1,422 on this page
         // against a fleet carrying 832 (2026-08-20).
         if (cold) {
-          body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cold.ceiling) + " cold emails/day</b> is what this fleet can carry today, across <b>" + n(cold.usableBoxes) + " usable Email IDs</b>" +
-            " · <b>" + n(cold.sentToday) + " sent</b>, <b>" + n(cold.remaining) + " left</b>" +
+          var boundTxt = cold.boundBy === "reputation"
+            ? "held there by the reputation ramp (the fleet could carry " + n(cold.ceiling) + ")"
+            : cold.boundBy === "fleet"
+              ? "held there by the mailboxes (reputation would allow " + n(cold.ramp.cap) + ")"
+              : "the fleet and the reputation ramp agree";
+          body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cold.capToday) + " cold emails/day</b> today, " + esc(boundTxt) + ", across <b>" + n(cold.usableBoxes) + " usable Email IDs</b>" +
+            " · <b>" + n(cold.sentToday) + " sent</b>, <b>" + n(cold.remainingToday) + " left</b>" +
             (cold.benchedBoxes ? ', with <b style="color:#b26a00">' + n(cold.benchedBoxes) + ' Email IDs benched</b> on ' + n((cold.restingDomains || []).length) + " resting domains holding back " + n(cold.benchedCeiling) + "/day (they rejoin automatically as the bounce bench lifts)" : "") +
             ((cold.lanesParked || []).length ? ' · <b style="color:#b26a00">' + esc(cold.lanesParked.join(", ")) + '</b> lane parked, contributing 0' : "") +
             ".</div>";
@@ -6909,9 +6914,9 @@
     // cap.coldUsedToday is the app lane's own counter and stays 0 all day while the MPC
     // sender (a host tool that never calls recordSend) does the sending.
     var cold = cap.cold || null;
-    var capToday = cold ? cold.ceiling : cap.coldCapacity;
+    var capToday = cold ? cold.capToday : cap.coldCapacity;
     var usedToday = cold ? cold.sentToday : cap.coldUsedToday;
-    var leftToday = cold ? cold.remaining : cap.coldRemaining;
+    var leftToday = cold ? cold.remainingToday : cap.coldRemaining;
     var usableIds = cold ? cold.usableBoxes : cap.inboxes;
     var pct = capToday ? Math.min(100, Math.round((usedToday / capToday) * 100)) : 0;
     var perIdNote = cold
@@ -6923,7 +6928,7 @@
         '<div class="syscap-arrow">→</div>' +
         '<div class="syscap-step"><div class="n">' + sqFmt(usableIds) + '</div><div class="l">Email IDs sending</div><div class="s">' + (cold && cold.benchedBoxes ? sqFmt(cold.benchedBoxes) + ' more benched' : 'all in rotation') + '</div></div>' +
         '<div class="syscap-arrow">→</div>' +
-        '<div class="syscap-step"><div class="n">' + sqFmt(capToday) + '</div><div class="l">Cold sends / day</div><div class="s">' + esc(perIdNote) + '</div></div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(capToday) + '</div><div class="l">Cold sends / day</div><div class="s">' + (cold ? esc(cold.boundBy === "reputation" ? "reputation ramp · fleet could carry " + sqFmt(cold.ceiling) : cold.boundBy === "fleet" ? "fleet limit · ramp allows " + sqFmt(cold.ramp.cap) : "fleet and ramp agree") : esc(perIdNote)) + '</div></div>' +
       '</div>';
     var meter =
       '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +

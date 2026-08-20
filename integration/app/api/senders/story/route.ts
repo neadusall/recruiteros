@@ -18,7 +18,7 @@
 
 import { requireSession, ok } from "../../../../lib/api";
 import { loadSnapshot } from "../../../../lib/db";
-import { fleetOverview, coldCapacity } from "../../../../lib/senders";
+import { fleetOverview, coldCapacity, rampCap } from "../../../../lib/senders";
 import type { FleetCard } from "../../../../lib/senders";
 
 interface MpcStats {
@@ -49,22 +49,6 @@ const DAY = 86_400_000;
 /** Mirrors the volume-ramp governor in scripts/mpc/batch.mjs: base 450/day from
  *  2026-08-13, +20%/week toward the 1500 ceiling, growth unlocked only while a
  *  fresh (<=7 day) seed test shows Gmail inboxing (spam share <= 30%). */
-function rampCap(placement: PlacementSnap | null): { cap: number; base: number; ceiling: number; growthUnlocked: boolean } {
-  const base = Number(process.env.MPC_RAMP_BASE ?? 450);
-  const start = Date.parse(process.env.MPC_RAMP_START || "2026-08-13");
-  const envCap = Number(process.env.MPC_DAILY_CAP || 1800);
-  const ceiling = Math.min(1500, envCap);
-  let passes = false;
-  if (placement?.checkedAt && Date.now() - Date.parse(placement.checkedAt) <= 7 * DAY) {
-    const g = placement.gmail || {};
-    const total = (g.inbox || 0) + (g.spam || 0);
-    if (total > 0) passes = (g.spam || 0) / total <= 0.3;
-  }
-  if (!(base > 0) || !Number.isFinite(start)) return { cap: envCap, base, ceiling, growthUnlocked: passes };
-  const weeks = Math.max(0, (Date.now() - start) / (7 * DAY));
-  const cap = Math.min(ceiling, Math.round(base * (passes ? Math.pow(1.2, weeks) : 1)));
-  return { cap: Math.min(envCap, cap), base, ceiling, growthUnlocked: passes };
-}
 
 function placementStatus(pl: PlacementSnap | null): { status: "pass" | "fail" | "stale" | "none"; checkedAt: string | null; inbox: number; spam: number } {
   if (!pl?.checkedAt) return { status: "none", checkedAt: null, inbox: 0, spam: 0 };
@@ -135,7 +119,7 @@ export async function GET(req: Request) {
   // Both ceilings bind: reputation says how much we are ALLOWED to send, the fleet says how
   // much it can physically carry. Whichever is lower is the real number. When the sender has
   // not published, the ramp stands alone and the card says the fleet figure is unknown.
-  const capToday = coldLedger ? Math.min(ramp.cap, fleetCeiling) : ramp.cap;
+  const capToday = coldLedger ? coldLedger.capToday : ramp.cap;
   // Sends today come from the ledger too when we have it: `stats.sentToday` counts the app
   // lane's own counters, which the MPC sender never writes, so it reads 0 on a busy day.
   const coldSentToday = coldLedger ? Math.max(sentToday, coldLedger.sentToday) : sentToday;

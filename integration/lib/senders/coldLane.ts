@@ -36,6 +36,16 @@ export interface ColdLane {
   boxesWithHeadroom: number;
 }
 
+/** The reputation ramp: how much volume our sending reputation currently ALLOWS,
+ *  independent of how many mailboxes exist. Grows 20%/week only while the Gmail seed
+ *  test keeps passing. */
+export interface RampCap {
+  cap: number;
+  base: number;
+  ceiling: number;
+  growthUnlocked: boolean;
+}
+
 export interface ColdCapacity {
   at: string;
   workspaceId: string;
@@ -57,6 +67,43 @@ export interface ColdCapacity {
    *  anything past an hour means the send loop is not running and the number is history. */
   ageMinutes: number;
   stale: boolean;
+  /** TWO ceilings bind, and both belong in the same object so no surface can show one
+   *  without the other: `ceiling` is what the mailboxes can physically carry, `ramp` is
+   *  what reputation allows. `capToday` is the lower one, and it is the only number that
+   *  answers "what can we send today". Keeping the ramp in the story card alone is how the
+   *  Senders tab and the story card ended up quoting 832 and 540 for the same afternoon. */
+  ramp: RampCap;
+  capToday: number;
+  remainingToday: number;
+  /** Which ceiling is binding right now, for a surface that wants to say why. */
+  boundBy: "fleet" | "reputation" | "both";
+}
+
+interface PlacementSnap { checkedAt?: string; gmail?: { inbox?: number; spam?: number } }
+
+const DAY = 86_400_000;
+
+/**
+ * The reputation ramp. Base volume grows 20% a week from MPC_RAMP_START, but ONLY while a
+ * Gmail seed test inside the last 7 days shows <=30% spam placement; a failing or stale test
+ * freezes it at base. Lives here rather than in the story route so every surface reads one
+ * implementation.
+ */
+export function rampCap(placement: PlacementSnap | null): RampCap {
+  const base = Number(process.env.MPC_RAMP_BASE ?? 450);
+  const start = Date.parse(process.env.MPC_RAMP_START || "2026-08-13");
+  const envCap = Number(process.env.MPC_DAILY_CAP || 1800);
+  const ceiling = Math.min(1500, envCap);
+  let passes = false;
+  if (placement?.checkedAt && Date.now() - Date.parse(placement.checkedAt) <= 7 * DAY) {
+    const g = placement.gmail || {};
+    const total = (g.inbox || 0) + (g.spam || 0);
+    if (total > 0) passes = (g.spam || 0) / total <= 0.3;
+  }
+  if (!(base > 0) || !Number.isFinite(start)) return { cap: envCap, base, ceiling, growthUnlocked: passes };
+  const weeks = Math.max(0, (Date.now() - start) / (7 * DAY));
+  const cap = Math.min(ceiling, Math.round(base * (passes ? Math.pow(1.2, weeks) : 1)));
+  return { cap: Math.min(envCap, cap), base, ceiling, growthUnlocked: passes };
 }
 
 /** How old the ledger may be before a surface must say so rather than show it as current. */
@@ -68,12 +115,20 @@ const STALE_MINUTES = 60;
  * which is the exact failure this module exists to end.
  */
 export async function coldCapacity(workspaceId: string): Promise<ColdCapacity | null> {
-  const snap = await loadSnapshot<Partial<ColdCapacity>>("mpc_cold_capacity_v1");
+  const [snap, placement] = await Promise.all([
+    loadSnapshot<Partial<ColdCapacity>>("mpc_cold_capacity_v1"),
+    loadSnapshot<PlacementSnap>("mpc_placement_v1"),
+  ]);
   if (!snap || typeof snap.ceiling !== "number" || !snap.at) return null;
   // The sender publishes for the Lume workspace only; another tenant must never be shown
   // Lume's fleet numbers.
   if (snap.workspaceId && workspaceId && snap.workspaceId !== workspaceId) return null;
   const ageMinutes = Math.max(0, Math.round((Date.now() - Date.parse(snap.at)) / 60_000));
+  const ramp = rampCap(placement);
+  const sentToday = snap.sentToday ?? 0;
+  // Whichever ceiling is lower is the real one: mailboxes we cannot use and reputation we
+  // have not earned are both hard stops, and quoting either alone overstates.
+  const capToday = Math.min(ramp.cap, snap.ceiling);
   return {
     at: snap.at,
     workspaceId: snap.workspaceId || workspaceId,
@@ -93,6 +148,10 @@ export async function coldCapacity(workspaceId: string): Promise<ColdCapacity | 
     lanes: snap.lanes ?? [],
     ageMinutes,
     stale: ageMinutes > STALE_MINUTES,
+    ramp,
+    capToday,
+    remainingToday: Math.max(0, capToday - sentToday),
+    boundBy: ramp.cap === snap.ceiling ? "both" : ramp.cap < snap.ceiling ? "reputation" : "fleet",
   };
 }
 
