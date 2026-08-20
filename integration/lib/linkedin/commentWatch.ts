@@ -39,7 +39,11 @@ import { loadSnapshot, debouncedSaver } from "../db";
 import { nowIso, rid } from "../core/ids";
 import { classifyTitle } from "../signals/filters";
 import { requestLinkedInAction } from "./os/engine";
-import { listAccounts } from "./os/health";
+import { ensureAccount, listAccounts } from "./os/health";
+import { putPolicy } from "./os/policy";
+import { seatsForWorkspace } from "./seats";
+import { unipileRequest } from "./provider";
+import { listMembers } from "../auth/team";
 import type { LiAccountState } from "./os/types";
 
 const POSTS_TO_WATCH = 5;        // owner's most recent posts scanned per tick
@@ -1604,6 +1608,50 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     for (const [k, arr] of Object.entries(rebuilt)) state.commentLog[k] = arr.sort();
     save();
     console.log(`[comment-radar] ${workspaceId}: per-seat send logs rebuilt (${Object.keys(rebuilt).length} seats)`);
+  }
+
+  // Seat adoption (owner mandate 2026-08-20: every recruiter runs the lane).
+  // A recruiter who connected their LinkedIn for JD Sourcing has a healthy
+  // provider login in the SEAT store, but the hunt reads the ENGINE's account
+  // store, and until now only the video-watch bridge ever registered engine
+  // accounts. Every scan, any workspace seat not yet bound to an engine
+  // account is live-verified against the provider (seat.status alone can be
+  // weeks stale) and adopted onto the conservative policy: connect once
+  // anywhere, hunt everywhere, no re-login and no configuration. A signed-out
+  // or unreachable seat is skipped with a log line; the recruiter fixes it
+  // through the JD Sourcing card's own reconnect flow.
+  try {
+    const engineAccounts = await listAccounts(workspaceId);
+    const bound = new Set(engineAccounts.flatMap((a) => [a.accountId, a.providerAccountId].filter(Boolean) as string[]));
+    for (const seat of await seatsForWorkspace(workspaceId)) {
+      if (!seat.accountId || bound.has(seat.accountId)) continue;
+      let live = false;
+      try {
+        const acct = await unipileRequest<{ sources?: Array<{ status?: string }> }>(`/accounts/${encodeURIComponent(seat.accountId)}`);
+        live = !(acct.sources ?? []).some((s) => /CREDENTIALS|DISCONNECTED|ERROR|STOPPED/i.test(String(s.status ?? "")));
+      } catch { /* provider unreachable or account deleted: not adoptable this tick */ }
+      const who = seat.label || seat.userId;
+      if (!live) {
+        console.log(`[comment-radar] ${workspaceId}: seat "${who}" not adopted (needs re-login or provider unreachable)`);
+        continue;
+      }
+      const member = listMembers(workspaceId).find((mm) => mm.userId === seat.userId);
+      const osAccountId = `seat_${seat.userId}`;
+      await ensureAccount(workspaceId, osAccountId, {
+        providerAccountId: seat.accountId,
+        displayName: member?.name || seat.label || osAccountId,
+        ownerUserId: seat.userId,
+        connected: true,
+        timezone: "America/New_York",
+      });
+      try {
+        await putPolicy(workspaceId, osAccountId, { applyPreset: "conservative", timezone: "America/New_York" });
+      } catch { /* policy stays at the engine default if this races */ }
+      bound.add(seat.accountId);
+      console.log(`[comment-radar] ${workspaceId}: adopted seat "${member?.name || who}" into the hunt`);
+    }
+  } catch (e) {
+    console.log(`[comment-radar] ${workspaceId}: seat adoption error (${e instanceof Error ? e.message : e})`);
   }
 
   const scanned = 0;

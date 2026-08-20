@@ -97,6 +97,16 @@ export async function anySeatForWorkspace(workspaceId: string): Promise<Recruite
   return Object.values(store.seats).find((s) => s.workspaceId === workspaceId && s.status === "ok") ?? null;
 }
 
+/** Every recruiter seat in the workspace, whatever its health. Callers that
+ *  act on a seat (the comment radar's seat adoption) must still verify the
+ *  seat live against the provider: `status` is only as fresh as the last
+ *  probe, and a recruiter who has not opened the portal in weeks can carry
+ *  a stale "ok". */
+export async function seatsForWorkspace(workspaceId: string): Promise<RecruiterSeat[]> {
+  await ensureSeatsReady();
+  return Object.values(store.seats).filter((s) => s.workspaceId === workspaceId);
+}
+
 export async function upsertSeat(
   workspaceId: string,
   userId: string,
