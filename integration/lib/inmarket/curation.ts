@@ -256,10 +256,27 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
   // Highest-intent first; expand each company into its distinct-function roles, then research the
   // NOT-yet-done (company, role) slots before refreshing stale ones, never re-touching a locked one.
   // Each run advances through the pool; unnamed slots get repeated naming attempts until they resolve.
+  // Spend the enrichment budget only on companies the sender is allowed to mail. See
+  // isInTargetBand: unknown sizes still get researched, only confirmed out-of-band is skipped.
+  const bandMin = Number(process.env.MPC_MIN_HEADCOUNT) || 100;
+  const bandMax = Number(process.env.MPC_MAX_HEADCOUNT) || 1000;
+  let sizeCache: Record<string, { count?: number }> = {};
+  try {
+    const { loadSizeMap } = await import("./companySize");
+    sizeCache = (await loadSizeMap()) as Record<string, { count?: number }>;
+  } catch { sizeCache = {}; }
+  const headcountOf = (company: string): number | undefined =>
+    sizeCache[(company || "").toLowerCase().trim()]?.count;
+  let skippedOutOfBand = 0;
+
   const expanded: Array<{ lead: PoolLeadLite; role: string }> = [];
   for (const l of leads.filter((l) => l.company && (l.score ?? 0) >= minScore).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))) {
+    if (!isInTargetBand(headcountOf(l.company), bandMin, bandMax)) { skippedOutOfBand++; continue; }
     for (const role of rolesByFunction(l, dmPerCompany)) expanded.push({ lead: l, role });
     if (expanded.length >= limit * 4) break; // bound the pre-filter expansion
+  }
+  if (skippedOutOfBand) {
+    console.log(`[curation] skipped ${skippedOutOfBand} companies confirmed outside ${bandMin}-${bandMax} employees before spending on enrichment`);
   }
   const targets = expanded
     .filter(({ lead, role }) => {
@@ -472,8 +489,19 @@ export async function claimResearchBatch(limit: number, minScore = 10): Promise<
     roles: l.roles as string[] | undefined, sourceUrl: l.sourceUrl as string | undefined,
   })) as PoolLeadLite[];
 
+  // Same band filter as curateFromPool: the distributed research workers must not spend the
+  // enrichment budget on companies the sender is not allowed to mail either.
+  const bandMin = Number(process.env.MPC_MIN_HEADCOUNT) || 100;
+  const bandMax = Number(process.env.MPC_MAX_HEADCOUNT) || 1000;
+  let sizeCache: Record<string, { count?: number }> = {};
+  try {
+    const { loadSizeMap } = await import("./companySize");
+    sizeCache = (await loadSizeMap()) as Record<string, { count?: number }>;
+  } catch { sizeCache = {}; }
+
   const out: Array<{ lead: PoolLeadLite; role: string }> = [];
   for (const l of leads.filter((x) => x.company && (x.score ?? 0) >= minScore).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))) {
+    if (!isInTargetBand(sizeCache[(l.company || "").toLowerCase().trim()]?.count, bandMin, bandMax)) continue;
     for (const role of rolesByFunction(l, dmPerCompany)) {
       const id = curationId(l.company, role);
       const lease = researchLeases.get(id);
@@ -545,6 +573,27 @@ const NEVER_PITCH_ROLE =
 /** A "role" string that is really scraped page furniture, not a job. */
 const NOT_A_ROLE =
   /^(careers?|jobs?|apply|open positions?|view all|search|home|about|contact|benefits|culture|life at .*|join us|our team|see more|load more|submit|next|previous)$/i;
+
+/**
+ * OUT-OF-BAND COMPANIES, filtered BEFORE enrichment (2026-08-20).
+ *
+ * Measured on the live store: of ~2,000 rows curated in a day, 829 were at companies over 1,000
+ * employees and 362 under 100. **62% of everything we enriched was at a company the sender is not
+ * allowed to mail.** Each of those rows still paid for a domain resolve, a team-page scrape, a
+ * decision-maker naming pass and an email validation before being refused at the gate.
+ *
+ * The size cache now covers ~90% of the pool (real LinkedIn headcounts, see companySize.ts), so the
+ * band can finally be applied at the point we CHOOSE what to research. Same enrichment budget,
+ * pointed at companies we can actually sell to.
+ *
+ * Fails OPEN on purpose, the opposite of the send gate: a company whose size we have not resolved
+ * is still researched, because enriching a company that turns out to be in band is far cheaper than
+ * never discovering it. Only a POSITIVELY CONFIRMED out-of-band company is skipped.
+ */
+export function isInTargetBand(count: number | undefined, min: number, max: number): boolean {
+  if (typeof count !== "number" || !isFinite(count) || count <= 0) return true; // unknown: research it
+  return count >= min && count <= max;
+}
 
 export function isResearchableRole(role: string): boolean {
   const r = (role || "").trim();

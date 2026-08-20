@@ -161,6 +161,27 @@ async function main() {
     counts.set(c, (counts.get(c) || 0) + 1);
   }
 
+  // ALSO resolve companies sitting in the POOL that have not been curated yet. This is the point of
+  // the whole exercise: curateFromPool now skips companies confirmed outside the band BEFORE paying
+  // to enrich them, and that filter fails open, so a company with no size on file still gets
+  // enriched. Resolving the pool ahead of curation is what turns the filter from "catches some" into
+  // "catches most", and it is the difference between spending the daily enrichment budget on the 38%
+  // of the pool we can sell to and spending it on all of it. Pool companies are added at a nominal
+  // weight so genuinely curated, send-bearing companies still resolve first.
+  try {
+    const pool = JSON.parse(readFileSync(process.env.MPC_POOL_FILE || "/data/snap_inmarket_pool_v1.json", "utf8"));
+    const entries = Array.isArray(pool) ? pool : (pool.leads || []);
+    let added = 0;
+    for (const e of entries) {
+      const l = e.lead || e;
+      const c = String(l.company || "").trim();
+      if (!c || counts.has(c)) continue;
+      counts.set(c, 0);           // weight 0: resolved after every company that carries curated rows
+      added++;
+    }
+    if (added) console.log(`pool adds ${added} companies not yet curated`);
+  } catch { /* pool unreadable: curated-store companies only, exactly as before */ }
+
   // A negative entry is only respected when THIS resolver wrote it. The Wikidata pass had already
   // stamped ~11,000 companies as unresolvable, and honouring those would have made this tool skip
   // the ~3,300 companies that need it most — Wikidata not knowing a private SMB says nothing about
