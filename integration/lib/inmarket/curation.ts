@@ -1766,33 +1766,53 @@ export async function enrichCompanyPhones(
  */
 export async function syncCompanyPhonesToPipeline(
   limit = 400,
-  workspaceId?: string,
+  workspaceIds?: string[],
 ): Promise<{ checked: number; updated: number; reason?: string }> {
-  let ws = (workspaceId || "").trim();
-  if (!ws) {
-    // Same workspace the in-market -> pipeline enrollment uses, so the two never disagree.
-    try {
-      const { getAutofillSettings } = await import("../sending/autofill");
-      ws = (await getAutofillSettings()).workspaceId || "";
-    } catch { /* fall through */ }
-  }
-  if (!ws) return { checked: 0, updated: 0, reason: "no_workspace" };
-
   const { getCore } = await import("../core/repository");
   const core = getCore();
-  const rows = (await load()).filter((r) => r.companyPhone && r.likelyEmail);
-  let checked = 0, updated = 0;
-  for (const r of rows) {
-    if (updated >= Math.max(0, limit)) break;
-    checked++;
+
+  // Build email -> switchboard once, then sweep prospects ONCE. The reverse (a lookup per
+  // curated row) costs one store hit per row and needs the right workspace up front, which is
+  // exactly what went wrong the first time.
+  const byEmail = new Map<string, { phone: string; via?: string }>();
+  for (const r of await load()) {
+    if (r.companyPhone && r.likelyEmail) {
+      byEmail.set(r.likelyEmail.toLowerCase(), { phone: r.companyPhone, via: r.companyPhoneVia });
+    }
+  }
+  if (!byEmail.size) return { checked: 0, updated: 0, reason: "nothing_resolved_yet" };
+
+  // WORKSPACE RESOLUTION. Do NOT depend on the autofill settings blob: on this deployment it
+  // has never been written, so reading a workspace from it yields "" and the whole pass
+  // silently no-ops. Derive the real set from the campaigns that actually exist, which is
+  // ground truth, and fall back to an explicit argument for tests/manual runs.
+  let workspaces = (workspaceIds ?? []).filter(Boolean);
+  if (!workspaces.length) {
     try {
-      const p = await core.findProspectByEmail(ws, r.likelyEmail!);
-      if (!p || p.companyPhone) continue;      // not in the pipeline yet, or already carries it
-      p.companyPhone = r.companyPhone;
-      p.companyPhoneVia = r.companyPhoneVia;
-      await core.saveProspect(p);
-      updated++;
-    } catch { /* skip this one; the next tick retries */ }
+      const campaigns = await core.listAllCampaigns();
+      workspaces = [...new Set(campaigns.map((c) => c.workspaceId).filter(Boolean))];
+    } catch { /* fall through */ }
+  }
+  if (!workspaces.length) return { checked: 0, updated: 0, reason: "no_workspace" };
+
+  let checked = 0, updated = 0;
+  for (const ws of workspaces) {
+    if (updated >= Math.max(0, limit)) break;
+    let list: Awaited<ReturnType<typeof core.listProspects>>;
+    try { list = await core.listProspects(ws); } catch { continue; }
+    for (const p of list) {
+      if (updated >= Math.max(0, limit)) break;
+      if (p.companyPhone) continue;                    // never overwrite
+      const hit = byEmail.get(String(p.email ?? "").toLowerCase());
+      if (!hit) continue;
+      checked++;
+      try {
+        p.companyPhone = hit.phone;
+        p.companyPhoneVia = hit.via;
+        await core.saveProspect(p);
+        updated++;
+      } catch { /* skip; next tick retries */ }
+    }
   }
   return { checked, updated };
 }
