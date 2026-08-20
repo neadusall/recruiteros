@@ -154,6 +154,50 @@ if (stats) {
 }
 
 /* =========================================================================
+   3b. THE FILTER'S OWN SAFETY CHECK. The reply center now drops any email it
+   cannot tie to someone we emailed, which makes the contacted set load-
+   bearing: a person missing from it has their genuine reply thrown away.
+
+   So test it against the one population we KNOW should pass — the people who
+   have already replied. Everybody in the reply ledger was, by definition,
+   emailed by us, so every one of them must verify. This is not theoretical:
+   the first build of the set was engine-only, and two of the ten known
+   repliers were job-blast recipients recorded solely by the portal. Both
+   would have been discarded. The check exists so that gap cannot reopen
+   quietly the next time a new send path is added.
+   ========================================================================= */
+{
+  const mpc = readJson(`${VOL}/snap_mpc_contacted_v1.json`);
+  const app = readJson(`${VOL}/snap_outreach_contact_ledger_v1.json`);
+  const emails = new Set();
+  const domains = new Set();
+  const mw = ((mpc || {}).byWorkspace || {})[WS] || {};
+  for (const e of mw.emails || []) emails.add(String(e).toLowerCase());
+  for (const d of mw.domains || []) domains.add(String(d).toLowerCase());
+  const aw = ((app || {}).byWorkspace || {})[WS] || {};
+  for (const k of Object.keys(aw)) {
+    const x = String(k).toLowerCase();
+    if (!x.includes("@")) continue;
+    emails.add(x);
+    const d = x.split("@")[1];
+    if (d) domains.add(d);
+  }
+
+  if (!emails.size) {
+    add("contactedset", "Reply center · the test that separates a reply from warm-up", "bad", "no contacted set",
+      "Neither the engine's contacted snapshot nor the portal's outreach ledger has any addresses, so nothing can be verified. The filter fails open (it keeps everything) rather than dropping mail, but the reply center will fill with chatter again.");
+  } else {
+    const unverifiable = [...repliers.keys()].filter((e) => !emails.has(e) && !domains.has(String(e).split("@")[1]));
+    add("contactedset", "Reply center · the test that separates a reply from warm-up",
+      unverifiable.length ? "bad" : "ok",
+      `${emails.size} addresses / ${domains.size} domains, ${repliers.size - unverifiable.length}/${repliers.size} known repliers verify`,
+      unverifiable.length
+        ? `These people REPLIED to us and yet do not appear in the contacted set, so their next reply would be filtered out as chatter: ${unverifiable.slice(0, 5).join(", ")}${unverifiable.length > 5 ? `, +${unverifiable.length - 5} more` : ""}. A send path is not recording its recipients.`
+        : "");
+  }
+}
+
+/* =========================================================================
    4. THE REPLY CENTER'S SIGNAL. Warm-up chatter used to walk straight into the
    response store at ~1,200 rows a day and take the whole 3,000-row window;
    processInbound now tests every unproven email sender against the contacted

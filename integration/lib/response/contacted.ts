@@ -11,43 +11,84 @@
  * There is no header to filter on, so filter on the only fact that actually separates the two:
  * a real reply comes from someone we emailed. A warm-up partner never is.
  *
- * The app cannot see the send ledger — it lives in /out on the host, outside this container — so
- * tools/mpc-stats.mjs publishes the contacted set to a snapshot every 20 minutes and this reads
- * it. Cached in memory with a short TTL: the check runs on every inbound, and the file is a few
- * thousand strings.
+ * TWO SOURCES, because outbound leaves this system by two different roads and a reply that
+ * matched only one of them would be thrown away:
+ *
+ *   1. The MPC engine sends from the host, and its ledger lives in /out where this container
+ *      cannot see it — so tools/mpc-stats.mjs publishes the contacted set to a snapshot.
+ *   2. The portal sends its own mail (job blasts, campaign cadences) and records every recipient
+ *      in the outreach contact ledger.
+ *
+ * Missing (2) is not hypothetical: of the ten people who had replied by 2026-08-20, eight were
+ * in the engine's ledger and two — both job-blast recipients — were only in the portal's. Under
+ * a one-source test those two genuine replies would have been dropped as chatter.
  */
 
 import { loadSnapshot } from "../db";
 
-const KEY = "mpc_contacted_v1";
+const MPC_KEY = "mpc_contacted_v1";
+const APP_KEY = "outreach_contact_ledger_v1";
 const TTL_MS = 5 * 60_000;
 
 export type ContactProof = "address" | "domain";
 
-interface ContactedSnapshot {
+interface MpcSnapshot {
   generatedAt?: string;
   byWorkspace?: Record<string, { emails?: string[]; domains?: string[] }>;
+}
+interface AppLedger {
+  byWorkspace?: Record<string, Record<string, { at?: string; channel?: string }>>;
 }
 
 interface Loaded {
   at: number;
-  generatedAt: string;
   byWorkspace: Map<string, { emails: Set<string>; domains: Set<string> }>;
 }
+
+/** One cold email to a gmail.com address must never bless every gmail sender alive, so consumer
+ *  mail hosts are barred from the DOMAIN test. Exact addresses at them still verify normally.
+ *  Mirrors the list in tools/mpc-stats.mjs, which applies the same rule at publish time. */
+const FREE_MAIL = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "hotmail.com", "outlook.com",
+  "live.com", "msn.com", "aol.com", "icloud.com", "me.com", "mac.com", "proton.me",
+  "protonmail.com", "gmx.com", "gmx.net", "mail.com", "zoho.com", "yandex.com",
+  "comcast.net", "verizon.net", "att.net", "sbcglobal.net", "bellsouth.net", "cox.net",
+  "charter.net", "earthlink.net",
+]);
 
 let cache: Loaded | null = null;
 let inflight: Promise<Loaded> | null = null;
 
 async function load(): Promise<Loaded> {
-  const snap = (await loadSnapshot<ContactedSnapshot>(KEY)) || {};
+  const [mpc, app] = await Promise.all([
+    loadSnapshot<MpcSnapshot>(MPC_KEY).catch(() => null),
+    loadSnapshot<AppLedger>(APP_KEY).catch(() => null),
+  ]);
   const byWorkspace = new Map<string, { emails: Set<string>; domains: Set<string> }>();
-  for (const [ws, v] of Object.entries(snap.byWorkspace || {})) {
-    byWorkspace.set(ws, {
-      emails: new Set((v.emails || []).map((e) => e.toLowerCase().trim()).filter(Boolean)),
-      domains: new Set((v.domains || []).map((d) => d.toLowerCase().trim()).filter(Boolean)),
-    });
+  const bucket = (ws: string) => {
+    let b = byWorkspace.get(ws);
+    if (!b) { b = { emails: new Set(), domains: new Set() }; byWorkspace.set(ws, b); }
+    return b;
+  };
+
+  const mpcWs: Record<string, { emails?: string[]; domains?: string[] }> = mpc?.byWorkspace ?? {};
+  for (const [ws, v] of Object.entries(mpcWs)) {
+    const b = bucket(ws);
+    for (const e of v.emails || []) { const x = e.toLowerCase().trim(); if (x) b.emails.add(x); }
+    for (const d of v.domains || []) { const x = d.toLowerCase().trim(); if (x) b.domains.add(x); }
   }
-  return { at: Date.now(), generatedAt: snap.generatedAt || "", byWorkspace };
+  const appWs: Record<string, Record<string, unknown>> = app?.byWorkspace ?? {};
+  for (const [ws, rows] of Object.entries(appWs)) {
+    const b = bucket(ws);
+    for (const key of Object.keys(rows || {})) {
+      const x = key.toLowerCase().trim();
+      if (!x.includes("@")) continue;              // the ledger also carries non-email handles
+      b.emails.add(x);
+      const d = x.split("@")[1];
+      if (d && !FREE_MAIL.has(d)) b.domains.add(d);
+    }
+  }
+  return { at: Date.now(), byWorkspace };
 }
 
 async function current(): Promise<Loaded> {
@@ -64,16 +105,15 @@ async function current(): Promise<Loaded> {
 /**
  * Has this workspace emailed this address, or anyone at its domain?
  *
- * Returns null when it has not — OR when no contacted set has been published yet. That second
- * case matters: a workspace whose engine does not publish one must not have every inbound
- * treated as chatter, so callers are required to treat null as "unknown, keep it" rather than
- * "fake, drop it". `hasSet()` is how a caller tells the two apart.
+ * Returns null when it has not — OR when no contacted set exists yet. That second case matters:
+ * a workspace with no published set must not have every inbound treated as chatter, so callers
+ * are required to read null as "unknown, keep it" rather than "fake, drop it". `hasContactedSet`
+ * is how a caller tells the two apart.
  */
 export async function wasContacted(workspaceId: string, email: string | undefined | null): Promise<ContactProof | null> {
   const e = String(email || "").toLowerCase().trim();
   if (!e || !e.includes("@")) return null;
-  const l = await current();
-  const w = l.byWorkspace.get(workspaceId);
+  const w = (await current()).byWorkspace.get(workspaceId);
   if (!w) return null;
   if (w.emails.has(e)) return "address";
   const domain = e.split("@")[1];
@@ -81,11 +121,16 @@ export async function wasContacted(workspaceId: string, email: string | undefine
   return null;
 }
 
-/** True when this workspace has a published contacted set, i.e. the test above is meaningful. */
+/** True when this workspace has a contacted set at all, i.e. the test above is meaningful. */
 export async function hasContactedSet(workspaceId: string): Promise<boolean> {
-  const l = await current();
-  const w = l.byWorkspace.get(workspaceId);
+  const w = (await current()).byWorkspace.get(workspaceId);
   return !!w && w.emails.size > 0;
+}
+
+/** How many addresses/domains back the test, for the daily audit and the health board. */
+export async function contactedSetSize(workspaceId: string): Promise<{ emails: number; domains: number }> {
+  const w = (await current()).byWorkspace.get(workspaceId);
+  return { emails: w?.emails.size ?? 0, domains: w?.domains.size ?? 0 };
 }
 
 /** Drop the cache (tests, and after a fresh publish). */
