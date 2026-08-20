@@ -85,7 +85,7 @@ const REASON_RULES = [
   ["blocklist",    /spamhaus|blocklist|blacklist|black list|listed at|banned sending ip|poor (ip|domain)? ?reputation|5\.7\.606|s3140|barracudacentral|sorbs|spamcop|rbl/i],
   ["spam_verdict", /suspect(ed)? ?(of being |as )?spam|considered spam|classified as spam|detected as spam|message looks like spam|spamcause|s3150|high probability of spam|content filter|5\.7\.1.*(spam|content)|bulk (mail|email)/i],
   ["auth_fail",    /dmarc|spf (check )?fail|dkim|not authenticated|authentication (failed|required)|5\.7\.2[0-9]/i],
-  ["dead_address", /5\.1\.[01]|user unknown|recipient(?:'s)? (address )?(not found|rejected|invalid)|no such user|does ?n[o']?t exist|couldn'?t be found|recipientnotfound|unknown recipient|invalid recipient|no mailbox|address unknown|550 #5\.1\.0/i],
+  ["dead_address", /5\.1\.[01]|user unknown|recipient(?:'s)? (address )?(not found|rejected|invalid)|no such user|does ?n[o']?t exist|couldn'?t be found|recipientnotfound|unknown recipient|invalid recipient|no mailbox|address unknown|550 #5\.1\.0|wasn'?t found at|recipient unknown/i],
   ["mailbox_full", /mailbox (is )?full|over ?quota|5\.2\.2/i],
   ["gateway_hold", /proofpoint|mimecast|pphosted|messagelabs|moderation|held for review|quarantin/i],
   ["send_limit",   /5\.4\.316|sending limit|too many (messages|recipients)|rate limit|4\.7\.850|outbound spam/i],

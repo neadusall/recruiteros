@@ -48,7 +48,12 @@ function log(msg) {
 function burnSignals(row) {
   const out = [];
   if (row.sent >= 20 && row.hardFailRatePct > 5) out.push({ why: `hard-fail ${row.hardFailRatePct}% across ${row.sent} sends`, cls: "standard" });
-  if (row.bounces >= 5 && row.sent > 0 && row.bounces > row.sent * 0.05) out.push({ why: `${row.bounces} bounce notices against ${row.sent} sends`, cls: "standard" });
+  // Minimum-sends floor (2026-08-20): a bounce RATE is meaningless on a handful of
+  // sends. Parked fleets showed "26 notices against 2 sends" because lowercase
+  // warm-up NDR subjects leak through the looks-campaign heuristic; benching an
+  // idle domain for two weeks on that noise wastes real capacity. Below the floor
+  // a domain benches only via the other signals (auth broken, reputation, hard-fail).
+  if (row.bounces >= 5 && row.sent >= 25 && row.bounces > row.sent * 0.05) out.push({ why: `${row.bounces} bounce notices against ${row.sent} sends`, cls: "standard" });
   const rep = row.warmupReputationPct;
   if (rep != null && rep < 70) out.push({ why: `warm-up reputation ${rep}%`, cls: "reputation" });
   const a = row.auth;

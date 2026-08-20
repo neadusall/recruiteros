@@ -126,7 +126,9 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
 {
   const led = readJson(`${VOL}/snap_provider_blocks_v1.json`);
   const age = led ? ageMin(led.generatedAt) : null;
-  const active = Object.values(led?.blocks || {}).filter((b) => b?.lastSeen && now - Date.parse(b.lastSeen) < 7 * 86400000);
+  // Same active rule as the routers (fresh <7d AND count >= 20), so the board only
+  // names pairs that are actually steering traffic - never a louder claim than reality.
+  const active = Object.values(led?.blocks || {}).filter((b) => b?.lastSeen && now - Date.parse(b.lastSeen) < 7 * 86400000 && (b.count || 0) >= 20);
   const st = !led ? "bad" : age > 26 * 60 ? "amber" : active.length ? "amber" : "good";
   add(GROUP_SEND, "providerblocks", "Provider-block radar (rejection pressure)", st,
     !led ? "no ledger" : active.length ? `${active.length} active: ${active.map((b) => `${b.fleet} blocked by ${b.provider}`).join(", ")}` : "no provider currently rejecting any fleet",

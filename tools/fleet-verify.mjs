@@ -34,7 +34,12 @@ const senders = readJson(`${VOL}/snap_senders_v1.json`) || {};
 const warmByDomain = new Map((deliv.byDomain || []).map((d) => [d.domain, d]));
 
 // The mailbox fleet: every Sending.ac box on the senders roster, plus anything that sent.
-const roster = (senders.inboxes || senders.state?.inboxes || []).filter((m) => m?.provider === "sending-ac");
+const allSenderRows = senders.inboxes || senders.state?.inboxes || [];
+// Provider per address, so the Mailbox-API existence check below only judges boxes that
+// API actually hosts: own-smtp (Mailcow) and Gmail boxes are NOT there, and 404-ing them
+// falsely flagged 33 internal mailboxes as "does not exist" on 2026-08-20.
+const providerByEmail = new Map(allSenderRows.filter((m) => m?.email).map((m) => [m.email, m.provider || ""]));
+const roster = allSenderRows.filter((m) => m?.provider === "sending-ac");
 const boxes = new Map(); // email -> { owner, domain, sent }
 for (const m of roster) boxes.set(m.email, { owner: m.ownerName || "", domain: m.email.split("@")[1], sent: 0 });
 const sentByDomain = new Map();
@@ -60,7 +65,13 @@ async function dnsAuth(domain) {
   const out = { spf: false, spfPolicy: null, dkim: false, dmarc: false, dmarcPolicy: null, mx: false };
   try { const txt = (await dns.resolveTxt(domain)).map((r) => r.join("")); const spf = txt.find((t) => /^v=spf1/i.test(t)); if (spf) { out.spf = true; out.spfPolicy = /-all/.test(spf) ? "-all" : /~all/.test(spf) ? "~all" : "?"; } } catch {}
   try { const d = await dns.resolveTxt(`_dmarc.${domain}`); const rec = d.map((r) => r.join("")).find((t) => /^v=DMARC1/i.test(t)); if (rec) { out.dmarc = true; out.dmarcPolicy = (rec.match(/p=(\w+)/i) || [])[1]?.toLowerCase() || null; } } catch {}
-  try { await dns.resolveCname(`selector1._domainkey.${domain}`); out.dkim = true; } catch { try { await dns.resolveTxt(`selector1._domainkey.${domain}`); out.dkim = true; } catch {} }
+  // DKIM lives on whatever selector the hosting provider picked: selector1/selector2
+  // (Microsoft 365), google (Workspace - checking only selector1 falsely benched 15
+  // healthy Google domains on 2026-08-20), dkim/smtp/default (self-hosted), rest = ESPs.
+  for (const sel of ["selector1", "selector2", "google", "dkim", "smtp", "default", "k1", "s1", "mail", "mx", "s1024", "sig1"]) {
+    try { await dns.resolveCname(`${sel}._domainkey.${domain}`); out.dkim = true; break; } catch {}
+    try { await dns.resolveTxt(`${sel}._domainkey.${domain}`); out.dkim = true; break; } catch {}
+  }
   try { out.mx = (await dns.resolveMx(domain)).length > 0; } catch {}
   return out;
 }
@@ -155,7 +166,12 @@ const boxRows = [];
       const [email, info] = list[i++];
       const reasons = [], fixes = [];
       let exists = null;
+      const prov = providerByEmail.get(email);
       try {
+        // Only Sending.ac-provisioned boxes live behind this API; other providers'
+        // boxes (own-smtp, gmail) stay "unknown" here and are judged by their own
+        // lanes (SMTP auth sweep, IMAP sweep) instead of a guaranteed 404.
+        if (prov && prov !== "sending-ac") throw new Error("not a mailbox-api box");
         const r = await apiGet(`${BASE}/users/${encodeURIComponent(email)}/mailFolders`);
         if (r.status === 404) exists = false;
         else if (r.ok) exists = true;
