@@ -10290,6 +10290,14 @@
         jobLocation: r.jobLocation || "",  // where the JOB is based (posting location)
         jobPostedAt: r.jobPostedAt || "",  // when the role went up ("open N days" hook)
         email: r.likelyEmail || "",
+        // The EMPLOYER's published main line (free rung: read from the company's own site).
+        // Deliberately kept in its own field and NEVER mapped into phone/mobilePhone: those feed
+        // the dialer and OS Text SMS, and a switchboard must never be texted or auto-dialed.
+        companyPhone: r.companyPhone || "",
+        companyPhoneDisplay: r.companyPhoneDisplay || r.companyPhone || "",
+        companyPhoneVia: r.companyPhoneVia || "",
+        companyPhoneConfidence: r.companyPhoneConfidence || 0,
+        companyPhoneSource: r.companyPhoneSource || "",
         emailVerification: ev,
         emailSource: r.emailSource || "",      // how the email was obtained (guess | site_direct | reoon_validated | …)
         industry: r.industry || "",
@@ -10454,6 +10462,25 @@
           return '<td class="crm-c-email"><div class="crm-id-t"><span class="crm-mono">' +
             (p.email ? '<a href="mailto:' + esc(p.email) + '"' + stop + ">" + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</span>" +
             '<span class="crm-sub">' + vBadge(p) + "</span></div></td>"; } },
+      // The EMPLOYER's main published line. Free rung: read from the company's own site
+      // (schema.org markup > tel: link > labelled contact page), so every number is auditable
+      // back to the page it came from. This is a switchboard, not the prospect's own line: it is
+      // for calling the business, and is never used by the dialer or by SMS.
+      { key: "company_phone", label: "Company phone", get: function (p) { return p.companyPhone || ""; },
+        sort: function (p) { return p.companyPhone ? 0 : 1; },
+        render: function (p) {
+          if (!p.companyPhone) return '<td class="crm-c-cphone"><span class="pr-na">-</span></td>';
+          var viaLabel = { schema_org: "published by the company in its site markup", tel_link: "a click-to-call link on the company site", labeled: "listed next to a phone label on the company site" };
+          var tip = "Company main line · " + (viaLabel[p.companyPhoneVia] || "from the company site") +
+            (p.companyPhoneSource ? " · " + p.companyPhoneSource : "");
+          // Weak-evidence numbers are flagged so a recruiter knows to confirm before dialing.
+          var weak = p.companyPhoneVia === "labeled";
+          return '<td class="crm-c-cphone"><div class="crm-id-t">' +
+            '<span class="crm-mono"><a href="tel:' + esc(p.companyPhone) + '"' + stop + ' title="' + esc(tip) + '">' +
+            esc(p.companyPhoneDisplay || p.companyPhone) + "</a></span>" +
+            '<span class="crm-sub">' + (weak
+              ? '<span class="cl-vb cl-vb-risky" title="Read from page text next to a phone label. Confirm before dialing.">~ check</span>'
+              : '<span class="cl-vb cl-vb-ok" title="' + esc(tip) + '">main line</span>') + "</span></div></td>"; } },
       { key: "signal", label: "Why hiring", get: function (p) { return p.signalReason || ""; }, render: function (p) {
           return '<td class="crm-c-signal"><div class="crm-id-t">' +
             (p.signalReason ? '<span class="crm-sig">' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') +
@@ -10486,7 +10513,13 @@
       ["company_size", function (p) { return p.companySize || ""; }], ["company_location", function (p) { return p.location || ""; }],
       ["industry", function (p) { return p.industry || ""; }], ["desk", function (p) { return p["function"] || ""; }],
       ["email", function (p) { return p.email || ""; }], ["email_status", vStatus], ["email_source", function (p) { return p.emailSource || ""; }],
-      ["phone", phoneOf], ["found_via", function (p) { return p.via || ""; }], ["confidence_tier", function (p) { return p.tier || ""; }],
+      ["phone", phoneOf],
+      // The employer's main line, kept as its OWN merge field so a sequence can never dial or
+      // text it as if it were the prospect's personal number.
+      ["company_phone", function (p) { return p.companyPhone || ""; }],
+      ["company_phone_display", function (p) { return p.companyPhoneDisplay || ""; }],
+      ["company_phone_source", function (p) { return p.companyPhoneSource || ""; }],
+      ["found_via", function (p) { return p.via || ""; }], ["confidence_tier", function (p) { return p.tier || ""; }],
       ["stage", clStatusLabel], ["sequence", function (p) { return p.sequenceName || ""; }],
       ["watch_url", function (p) { return (videoFor(p) || {}).watch || ""; }], ["video_gif_url", function (p) { return (videoFor(p) || {}).gif || ""; }],
       ["verified_at", function (p) { return (p.emailVerification && p.emailVerification.checkedAt) || ""; }]
@@ -10542,7 +10575,10 @@
       var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
         (p.email || "") + " " + (p.location || "") + " " + (p.jobLocation || "") + " " +
         (p.signalReason || "") + " " + (p.openRole || "") + " " + (p.industry || "") + " " +
-        (p["function"] || "")).toLowerCase();
+        (p["function"] || "") + " " +
+        // Searchable by company phone in both the stored and the displayed form, so pasting
+        // either "(415) 926-0123" or "4159260123" finds the row.
+        (p.companyPhone || "") + " " + (p.companyPhoneDisplay || "")).toLowerCase();
       return clFilter.split(/\s+/).every(function (t) { return hay.indexOf(t) >= 0; });
     }
 
@@ -11050,6 +11086,13 @@
             dRow("Company", p.company ? esc(p.company) : "") +
             dRow("Domain", p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener">' + esc(p.companyDomain) + "</a>" : "") +
             dRow("Headcount", n > 0 ? esc(n.toLocaleString()) : "") +
+            // The employer's main line, with the page it came from so it can be checked in one click.
+            dRow("Main line", p.companyPhone
+              ? '<a href="tel:' + esc(p.companyPhone) + '">' + esc(p.companyPhoneDisplay || p.companyPhone) + "</a>" +
+                (p.companyPhoneVia === "labeled" ? ' <span class="cl-vb cl-vb-risky" title="Read from page text next to a phone label. Confirm before dialing.">~ check</span>' : "")
+              : "") +
+            dRow("Line source", p.companyPhoneSource
+              ? '<a href="' + esc(p.companyPhoneSource) + '" target="_blank" rel="noopener">' + esc(p.companyPhoneSource) + "</a>" : "") +
             dRow("Location", p.location ? esc(p.location) : "") +
             dRow("Industry", p.industry ? esc(p.industry) : "") +
             dRow("Desk", p["function"] ? esc(p["function"]) : "")) +

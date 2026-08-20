@@ -78,6 +78,11 @@ const REOON_BATCH = envNum("REOON_VERIFY_BATCH", 30);            // leftover cur
 const REOON_FIND_BATCH = envNum("REOON_FIND_BATCH", 20);         // pending PEOPLE whose email syntaxes Reoon walks to FIND a valid mailbox per tick (each = up to REOON_MAX_CANDIDATES calls)
 const FINDER_BATCH = 40;               // pending people SMTP-verified per tick (opt-in; bounded — slow)
 const PAID_FIND_BATCH = envNum("INMARKET_PAID_FIND_BATCH", 25);  // misses sent to the residual (paid) finder per tick — bills on a hit, so bounded
+// FREE company-phone rung: distinct DOMAINS read per tick (each = up to 5 bounded page fetches,
+// then cached 90 days). 120/tick at a 4-min tick clears a 6K-domain book in about a day and a half.
+const COMPANY_PHONE_ENABLED = process.env.INMARKET_COMPANY_PHONE !== "0";
+const COMPANY_PHONE_BATCH = envNum("INMARKET_COMPANY_PHONE_BATCH", 120);
+const COMPANY_PHONE_CONCURRENCY = envNum("INMARKET_COMPANY_PHONE_CONCURRENCY", 4);
 // FAST INFLOW — brand-new hiring companies/postings flow in on their OWN fast tick (every few
 // minutes) so prospects appear as they're posted, not once an hour. It runs ONLY the cheap,
 // high-yield breadth vacuum (+ a couple of rotating sectors) — never the expensive board
@@ -565,6 +570,18 @@ async function runCurationTickInner(): Promise<void> {
     }
   } catch { /* best-effort; the next tick retries */ }
   mark("reoon");
+
+  // COMPANY PHONE (free) — attach the employer's own published switchboard/HQ line to every
+  // prospect, read from the company's own site (schema.org markup, tel: link, labelled contact
+  // page). Domain-batched + cached 90 days, so a company with 40 prospects costs ONE lookup and
+  // the whole book converges over a few days of ticks. Never gates anything: a company with no
+  // published number just carries no number. Off-switch: INMARKET_COMPANY_PHONE=0.
+  try {
+    if (COMPANY_PHONE_ENABLED) {
+      const { enrichCompanyPhones } = await import("./curation");
+      await enrichCompanyPhones(COMPANY_PHONE_BATCH, new Date().toISOString(), COMPANY_PHONE_CONCURRENCY);
+    }
+  } catch { /* best-effort; the next tick retries */ }
 
   // EMAIL FINDER (opt-in, SMTP) — the right way to convert guesses into VALID prospects: walk each
   // pending person's permutations and SMTP-verify until one is accepted, then keep that real

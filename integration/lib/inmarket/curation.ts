@@ -66,6 +66,17 @@ export interface CuratedProspect {
   function: JobFunction;            // which desk
   score: number;                    // hiring-intent score of the source signal
   employeeCount?: number;           // company headcount (collected via Wikidata) — ICP fit + personalization
+  /* ---- the company's own published business line (FREE rung, companyPhone.ts) ----
+   * ⚠️ This is the BUSINESS SWITCHBOARD, not the prospect's line. It must never be merged into a
+   * person's phone/directPhone/mobilePhone: those feed the auto-dialer and OS Text SMS, and
+   * texting a corporate landline is both useless and a 10DLC problem. Resolved per DOMAIN and
+   * cached, so a company with 40 prospects costs one lookup. */
+  companyPhone?: string;            // E.164 ("+14159260123")
+  companyPhoneDisplay?: string;     // human form ("(415) 926-0123")
+  companyPhoneVia?: string;         // schema_org | tel_link | labeled — the evidence tier
+  companyPhoneConfidence?: number;  // 0-1, so the UI can present it honestly
+  companyPhoneSource?: string;      // the company page it was read from (auditable)
+  companyPhoneAt?: string;          // when this row was last enriched (convergence marker)
   /* ---- the decision-maker (WHO to reach) ---- */
   managerName?: string;
   managerTitle: string;             // resolved title, else the inferred owning title
@@ -1603,6 +1614,113 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
   });
   try { const { flushPatternCache } = await import("./emailPattern"); await flushPatternCache(true); } catch { /* flush best-effort */ }
   return { checked, found, missed };
+}
+
+/* ------------------------------------------------------------------ */
+/* Corporate phone enrichment (FREE)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * COMPANY PHONE PASS — attach each prospect's employer's own published business line.
+ *
+ * Runs on every curation tick, costs $0, and is deliberately DOMAIN-BATCHED: prospects are
+ * grouped by company domain, each distinct domain is resolved at most once (and cached for 90
+ * days by companyPhone.ts), then the answer is fanned out to every prospect at that company. So
+ * a company with 40 curated decision-makers costs ONE lookup, not 40 — which is what makes this
+ * affordable to run across the whole 17K-row book.
+ *
+ * ⚠️ Writes ONLY the companyPhone* fields. It never touches a person's own phone fields, never
+ * changes lifecycle status, and never gates contactability: a company with no published number
+ * is completely normal and must not hold up email outreach.
+ *
+ * Locked rows (queued / enrolled) are still enriched — adding a company's switchboard doesn't
+ * alter who or what was approved, and a recruiter working an active sequence is exactly who
+ * needs the number.
+ *
+ * @param limit  distinct DOMAINS to resolve this tick (not rows) — the real unit of work.
+ */
+export async function enrichCompanyPhones(
+  limit: number,
+  nowIso: string,
+  concurrency = 4,
+): Promise<{ domains: number; resolved: number; rowsUpdated: number }> {
+  const { resolveCompanyPhone } = await import("./companyPhone");
+  const rows = await load();
+
+  // Re-check a row only if it has never been enriched, or the cached verdict has aged out.
+  const STALE_MS = 90 * 24 * 60 * 60 * 1000;
+  const needs = (r: CuratedProspect): boolean => {
+    if (!r.domain) return false;                       // no verified domain = nothing to read
+    if (r.companyPhone) return false;                  // already have the company's line
+    if (!r.companyPhoneAt) return true;                // never tried
+    return Date.now() - Date.parse(r.companyPhoneAt) > STALE_MS;  // tried long ago, retry
+  };
+
+  // Group by domain, carrying the best hiring-intent score so the hottest companies resolve first.
+  const byDomain = new Map<string, number>();
+  for (const r of rows) {
+    if (!needs(r)) continue;
+    const d = r.domain!.toLowerCase();
+    byDomain.set(d, Math.max(byDomain.get(d) ?? 0, r.score || 0));
+  }
+  const domains = [...byDomain.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, Math.max(0, limit))
+    .map(([d]) => d);
+  if (!domains.length) return { domains: 0, resolved: 0, rowsUpdated: 0 };
+
+  // Resolve each domain once, bounded concurrency (each resolve is a few timed-out page reads).
+  const found = new Map<string, { phone: string; display: string; via: string; confidence: number; sourceUrl: string }>();
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < domains.length) {
+      const d = domains[cursor++];
+      try {
+        const hit = await resolveCompanyPhone(d);
+        if (hit) found.set(d, hit);
+      } catch { /* skip: a miss is stamped below so the domain isn't retried every tick */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(Math.max(concurrency, 1), 8) }, worker));
+
+  // Fan the answers out to every prospect at those domains, under the write lock.
+  const attempted = new Set(domains);
+  let rowsUpdated = 0;
+  await withCurationLock(async () => {
+    const current = await load();
+    for (const r of current) {
+      if (!r.domain) continue;
+      const d = r.domain.toLowerCase();
+      if (!attempted.has(d) || !needs(r)) continue;
+      const hit = found.get(d);
+      if (hit) {
+        r.companyPhone = hit.phone;
+        r.companyPhoneDisplay = hit.display;
+        r.companyPhoneVia = hit.via;
+        r.companyPhoneConfidence = hit.confidence;
+        r.companyPhoneSource = hit.sourceUrl;
+        rowsUpdated++;
+      }
+      // Stamp EVERY attempted row (hit or miss) so misses stop qualifying and the pass
+      // converges instead of re-reading the same dead sites every tick.
+      r.companyPhoneAt = nowIso;
+    }
+    await save(current);
+  });
+
+  return { domains: domains.length, resolved: found.size, rowsUpdated };
+}
+
+/** Coverage for the Clients tab header + health board: how much of the book carries a company line. */
+export async function companyPhoneCoverage(): Promise<{ withDomain: number; withPhone: number; tried: number; rate: number }> {
+  const rows = await load();
+  let withDomain = 0, withPhone = 0, tried = 0;
+  for (const r of rows) {
+    if (r.domain) withDomain++;
+    if (r.companyPhone) withPhone++;
+    if (r.companyPhoneAt) tried++;
+  }
+  return { withDomain, withPhone, tried, rate: tried ? Math.round((withPhone / tried) * 100) / 100 : 0 };
 }
 
 /** How long a submitted-but-inconclusive address waits before the backfill re-submits it. */
