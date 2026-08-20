@@ -7,6 +7,17 @@
 
 import { ProviderClient } from "./http";
 
+/** Unipile's post READS want the social_id (`urn:li:activity:<digits>`), while
+ *  the write paths also accept the bare activity id. Role Hunter's indexed
+ *  discovery (Serper/DataForSEO) carries only the digits out of the post URL,
+ *  so its comments posted fine while every reply re-read answered
+ *  `400 invalid post_id` and the thread went permanently unwatched
+ *  (11 of 20 posted comments on prod 2026-08-20). Normalize on the read. */
+function socialId(postId: string): string {
+  const id = String(postId ?? "").trim();
+  return /^\d{10,}$/.test(id) ? `urn:li:activity:${id}` : id;
+}
+
 export class UnipileClient extends ProviderClient {
   id = "unipile";
   label = "Unipile (LinkedIn)";
@@ -139,7 +150,7 @@ export class UnipileClient extends ProviderClient {
    *  post's social_id. Returns { items, cursor } per Unipile's CommentList. */
   listPostComments(accountId: string, postId: string, opts?: { cursor?: string; limit?: number }) {
     return this.request({
-      path: `/api/v1/posts/${encodeURIComponent(postId)}/comments`,
+      path: `/api/v1/posts/${encodeURIComponent(socialId(postId))}/comments`,
       query: {
         account_id: accountId,
         limit: opts?.limit ?? 100,
