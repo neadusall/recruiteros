@@ -127,6 +127,23 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
     "Nothing cold-sends without a verifier verdict; dead, catch-all and role verdicts never send, stale verdicts are re-checked");
 }
 
+// Cold-lane capacity ledger (2026-08-20): the ONE published answer to "what can we send
+// today". Registered here because every capacity surface in the portal now depends on it:
+// if this goes stale or missing, the Senders tab, the Send Queue gauge and the story card
+// all lose their number, and the old failure mode was each of them quietly inventing one.
+{
+  const cc = readJson(`${VOL}/snap_mpc_cold_capacity_v1.json`);
+  const ccAge = cc ? ageMin(cc.at) : null;
+  const lanes = (cc?.lanes || []).map((l) => `${l.lane} ${l.ceiling}`).join(" + ");
+  add(GROUP_SEND, "coldcapacity", "Cold-lane capacity ledger",
+    !cc ? "bad" : ccAge > 60 ? "amber" : cc.ceiling <= 0 ? "bad" : "good",
+    !cc ? "not published" : `${cc.ceiling}/day across ${cc.usableBoxes} usable boxes (${lanes}) · ${cc.sentToday} sent, ${cc.remaining} left · ${fmtAge(ccAge)}`,
+    !cc ? "batch.mjs --capacity has never run; every capacity surface in the portal reads this file and shows nothing without it" :
+    ccAge > 60 ? "The send loop publishes every 20 minutes; this is older than an hour, so the cold lane is not running and the portal is showing history" :
+    cc.ceiling <= 0 ? `Every box is benched or parked: ${cc.benchedBoxes} benched on ${(cc.restingDomains || []).length} resting domains, lanes parked: ${(cc.lanesParked || []).join(", ") || "none"}` :
+    `Published by the sender that enforces the caps, so the log and the portal cannot disagree. ${cc.benchedBoxes} boxes benched holding ${cc.benchedCeiling}/day${(cc.lanesParked || []).length ? `; ${cc.lanesParked.join(", ")} lane parked` : ""}`);
+}
+
 // Google cold lane (Zapmail Gmail boxes): active fleet + today's throughput + failure rate.
 {
   const snd = readJson(`${VOL}/snap_senders_v1.json`);
