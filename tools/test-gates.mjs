@@ -352,4 +352,33 @@ test("transition: the role owner is still preferred (buyerFit rank 0 vs held)", 
   assert.equal(buyerFit({ company: "Upstart", role: "Staff Accountant", managerTitle: "Chief Executive Officer" }, know).ok, false);
 });
 
+
+test("talent leader: must be IN-HOUSE, never an agency or another employer", () => {
+  // The carve-out widened who counts as a buyer, so it must not widen WHICH COMPANY they sit
+  // at. A Head of Talent at a staffing firm is a competitor, and one whose title names a
+  // different employer was never resolved against this req. Both are rejected by gates that
+  // run independently of the carve-out (staffingFirmSignal, foreignAffiliation); this pins
+  // that they still fire for talent titles specifically.
+  const base = () => ({
+    company: "Upstart", role: "Senior Software Engineer", industry: "Financial Services",
+    managerName: "Nina Patel", managerTitle: "Chief People Officer",
+    likelyEmail: "nina.patel@upstart.com", emailValidated: true,
+    jobUrl: "https://upstart.com/careers/1", employeeCount: 400,
+    curatedAt: new Date().toISOString(),
+  });
+  assert.equal(assessProspect(base()).eligible, true, "the in-house talent leader is the whole point");
+
+  for (const [company, email] of [["Vaco Staffing", "n@vaco.com"], ["Robert Half Recruiting", "n@roberthalf.com"], ["Cielo Talent Solutions", "n@cielotalent.com"]]) {
+    const agency = { ...base(), company, likelyEmail: email, managerTitle: "Head of Talent" };
+    const r = assessProspect(agency);
+    assert.equal(r.eligible, false, `${company} is a competitor, never a client`);
+    assert.ok(r.failures.some((f) => /staffing\/recruiting firm/.test(f)), r.failures.join("; "));
+  }
+
+  const elsewhere = { ...base(), managerTitle: "Head of Talent at LGC Group" };
+  const r = assessProspect(elsewhere);
+  assert.equal(r.eligible, false, "a talent leader at another employer is not this req's buyer");
+  assert.ok(r.failures.some((f) => /different company/.test(f)), r.failures.join("; "));
+});
+
 console.log("\n" + passed + " passed");
