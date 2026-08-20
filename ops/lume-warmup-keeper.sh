@@ -97,17 +97,31 @@ else: new_idx=cur_idx
 target=ramp[new_idx]["perDay"]
 
 # --- census + apply
-rows=[]
-for off in range(0,2000,100):
-    j=api(f"/email-accounts/?offset={off}&limit=100")
-    page = j if isinstance(j,list) else (j or {}).get("data",[])
-    if not page: break
-    rows+=page
+# The census is both the keeper's eyes and the evidence the fleet monitor checks a
+# warm-up rung off with, so a transient vendor error must not end the run: retry a
+# few times, and if it still fails, record WHY and publish that instead of dying
+# (a dead keeper looks identical to a healthy one from the app's side otherwise).
+rows=[]; census_error=None
+for attempt in range(3):
+    try:
+        rows=[]
+        for off in range(0,2000,100):
+            j=api(f"/email-accounts/?offset={off}&limit=100")
+            page = j if isinstance(j,list) else (j or {}).get("data",[])
+            if not page: break
+            rows+=page
+        census_error=None
+        break
+    except Exception as e:
+        census_error=f"warm-up vendor census failed: {str(e)[:80]}"
+        log(f"census attempt {attempt+1}/3 failed: {str(e)[:120]}")
+        time.sleep(5*(attempt+1))
+if census_error: log(census_error)
 pat=re.compile(r"@lume(advisor|exec|placements|recruits|recruity|searchco|searchie|searchpartners|sexecutivesearch|shire|spartners|srecruits|ssearchgroup|ssolutions|talentpartner)\.com$")
 internal=[r for r in rows if pat.search(r.get("from_email",""))]
 inactive=[r for r in internal if (r.get("warmup_details") or {}).get("status")!="ACTIVE"]
 offtarget=[r for r in internal if (r.get("warmup_details") or {}).get("max_email_per_day")!=target]
-todo={r["id"]:r for r in inactive+offtarget}
+todo={} if census_error else {r["id"]:r for r in inactive+offtarget}
 log(f"census: {len(internal)} boxes, {len(inactive)} inactive, {len(offtarget)} not at {target}/day | day {days:.1f}, rung {cur_idx}->{new_idx} (due {due_idx}), down={reasons_down or '-'} hold={reasons_hold or '-'}{' [dry-run]' if DRY else ''}")
 done=[]; failed=[]; done_ids=set()
 for id_,r in todo.items():
@@ -135,14 +149,20 @@ at_target={r["id"] for r in internal if wd(r).get("max_email_per_day")==target a
 confirmed=len(at_target|done_ids)
 stamp=now.isoformat(timespec="seconds")+"Z"
 snap={"at":stamp,"lastRun":stamp,"rung":new_idx,"rungs":len(ramp)-1,"target":target,"due":due_idx,
-      "down":reasons_down,"hold":reasons_hold,"boxes":len(internal),"atTarget":confirmed,
-      "active":len(internal)-len(inactive)+len(done_ids),"reenabled":len(done),"failed":failed[:10],
+      "down":reasons_down,"hold":reasons_hold,"reenabled":len(done),"failed":failed[:10],
       "daysSinceCutover":round(days,2)}
-if not DRY:
-    try:
-        pth=os.environ["SNAP"]; tmp=f"{pth}.tmp{os.getpid()}"
-        json.dump(snap, open(tmp,"w"), indent=1); os.replace(tmp,pth); os.chmod(pth,0o644)
-    except Exception as e: log(f"snapshot publish failed: {e}")
+if census_error:
+    # No counts at all rather than zeros: a zero would read as "no box is on the rung",
+    # which is a claim we cannot make when we could not look.
+    snap["error"]=census_error
+else:
+    snap.update({"boxes":len(internal),"atTarget":confirmed,
+                 "active":len(internal)-len(inactive)+len(done_ids)})
+try:
+    pth=os.environ["SNAP"] + (".dryrun" if DRY else "")
+    tmp=f"{pth}.tmp{os.getpid()}"
+    json.dump(snap, open(tmp,"w"), indent=1); os.replace(tmp,pth); os.chmod(pth,0o644)
+except Exception as e: log(f"snapshot publish failed: {e}")
 if done or failed: log(f"applied {target}/day to {len(done)} boxes; failed {len(failed)}: {failed[:5]}")
 if changed and not DRY and os.environ.get("RESEND_KEY"):
     what = "stepped DOWN" if new_idx<cur_idx else "stepped up" if new_idx>cur_idx else "holding"

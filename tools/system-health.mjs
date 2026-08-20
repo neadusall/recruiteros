@@ -222,15 +222,27 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
   const wuAge = wu ? ageMin(wu.lastRun || wu.at) : null;
   const wuStale = !wu || wuAge == null || wuAge > 120;
   const stale = !led || age == null || age > 6 * 60;
-  const st = !led ? "amber" : (s.regressed > 0 || age > 24 * 60) ? "bad" : (s.late > 0 || stale || wuStale) ? "amber" : "good";
+  // A monitor that cannot READ its evidence is a failure of the monitor, not a clean
+  // board: errors and unverified steps are reported here rather than rounding to green.
+  const errs = s.errors ?? 0;
+  const unver = s.unverified ?? 0;
+  const wuErr = wu?.error || null;
+  const st = !led ? "amber"
+    : (s.regressed > 0 || age > 24 * 60) ? "bad"
+    : (s.late > 0 || errs > 0 || stale || wuStale || wuErr) ? "amber"
+    : "good";
   add(GROUP_SEND, "fleetplan", "Fleet plan (milestones verified, not assumed)", st,
     !led ? "watcher has not folded a reading yet" :
-    `${s.done ?? 0} of ${s.milestones ?? 0} verified done, ${s.late ?? 0} late, ${s.regressed ?? 0} went backwards (folded ${fmtAge(age)})`,
+    `${s.done ?? 0} of ${s.milestones ?? 0} verified done, ${s.late ?? 0} late, ${s.regressed ?? 0} went backwards` +
+      `${unver ? `, ${unver} unverifiable` : ""}${errs ? `, ${errs} read errors` : ""} (folded ${fmtAge(age)})`,
     !led ? "The sending cron tick runs the outlook watcher; without it the board still recomputes live on read but keeps no verified dates or slip history" :
     s.regressed > 0 ? "A milestone that had been PROVEN is now contradicted: open Senders > Fleet monitor and read the line marked went backwards" :
     stale ? "The outlook watcher has stopped folding readings: check /api/sending/cron on this host" :
+    errs > 0 ? "The watcher could not read some fleet's evidence this run: the affected lines hold their last state instead of moving" :
+    wuErr ? `The warm-up keeper ran but could not count the boxes (${wuErr}); rungs stay unchecked until it can` :
     wuStale ? `The warm-up keeper's report is ${wu ? fmtAge(wuAge) : "missing"}, so warm-up rungs cannot be checked off; check lume-warmup-keeper.timer` :
     s.late > 0 ? "A milestone is past its forecast with no evidence it happened; the line on the card says what it is waiting on" :
+    unver > 0 ? "Some steps cannot be confirmed from here yet; they stay unchecked rather than being assumed" :
     "Every milestone is either verified done or still inside its forecast");
 }
 

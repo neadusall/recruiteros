@@ -132,11 +132,15 @@ export interface StandingSnap {
   receivers?: { google?: Recv; microsoft?: Recv; other?: Recv };
   dnsbl?: Record<string, string>;
 }
-/** Written by lume-warmup-keeper.sh on ros (host-owned; the app only reads it). */
+/** Written by lume-warmup-keeper.sh on ros (host-owned; the app only reads it).
+ *  Every field is optional on purpose: this is a cross-language contract, and the
+ *  reader treats anything missing as "not proven" rather than trusting a default. */
 export interface KeeperSnap {
   at?: string; lastRun?: string; rung?: number; target?: number; due?: number; rungs?: number;
   down?: string[]; hold?: string[];
   boxes?: number; atTarget?: number; active?: number; reenabled?: number; failed?: string[];
+  /** Set when the keeper ran but could not reach the warm-up vendor to count boxes. */
+  error?: string;
 }
 
 /** Per-domain box facts, straight out of the same per-box math capacity uses. */
@@ -268,22 +272,33 @@ function domainSteps(input: OutlookInput): OutlookStep[] {
     const built = step(input, `domain:${d}`, `${d} back in rotation once its rest is served`, restingNow ? (e.until || null) : (cleared?.at || null), v);
     (restingNow ? out : revived).push(built);
   }
-  // Every domain still resting is part of the plan and stays on the list. Revivals
-  // are only news for a while: keep the recent ones and say plainly how many older
-  // ones were folded away, so a shortened list never reads as a complete one.
-  revived.sort((a, b) => String(b.when || "").localeCompare(String(a.when || "")));
-  const KEEP = 6;
-  out.push(...revived.slice(0, KEEP));
-  const trimmed = revived.length - KEEP;
-  if (trimmed > 0) {
-    out.push(step(
-      input, "domains:older",
-      `${trimmed} more domain${trimmed === 1 ? "" : "s"} came back in the last three weeks`,
-      revived[KEEP].when,
-      { ok: true, proof: revived.slice(KEEP).map((r) => r.id.replace("domain:", "")).join(", ") },
+  // The list is bounded on both sides, and every trim is stated. An unbounded plan
+  // is unreadable (a fleet can hold 70+ domains) and a silently shortened one reads
+  // as a complete one, which is worse than either.
+  const KEEP_RESTING = 12, KEEP_REVIVED = 6;
+  out.sort((a, b) => String(a.when || "9999").localeCompare(String(b.when || "9999")));
+  const restingShown = out.slice(0, KEEP_RESTING);
+  const restingRest = out.slice(KEEP_RESTING);
+  if (restingRest.length) {
+    restingShown.push(step(
+      input, "domains:resting-more",
+      `${restingRest.length} more domain${restingRest.length === 1 ? "" : "s"} are resting behind these`,
+      restingRest[0].when,
+      { ok: false, blocker: `still on the rest ledger: ${restingRest.slice(0, 8).map((r) => r.id.replace("domain:", "")).join(", ")}${restingRest.length > 8 ? ` and ${restingRest.length - 8} more` : ""}` },
     ));
   }
-  return out;
+  revived.sort((a, b) => String(b.when || "").localeCompare(String(a.when || "")));
+  restingShown.push(...revived.slice(0, KEEP_REVIVED));
+  const trimmed = revived.length - KEEP_REVIVED;
+  if (trimmed > 0) {
+    restingShown.push(step(
+      input, "domains:older",
+      `${trimmed} more domain${trimmed === 1 ? "" : "s"} came back in the last three weeks`,
+      revived[KEEP_REVIVED].when,
+      { ok: true, proof: revived.slice(KEEP_REVIVED).map((r) => r.id.replace("domain:", "")).join(", ") },
+    ));
+  }
+  return restingShown;
 }
 
 /** The egress cutover: proven by the host's own view of what leaves the box. */
@@ -368,6 +383,17 @@ function warmupSteps(input: OutlookInput, cutT: number, quietAt: number | null):
   const runAt = k?.lastRun || k?.at;
   const keeperFresh = runAt ? input.now - Date.parse(runAt) <= KEEPER_MAX_AGE_MS : false;
   const held = [...(k?.down || []), ...(k?.hold || [])];
+  // The keeper's report is a cross-language contract (a bash/python script on the host
+  // writing JSON the app reads). Every field it decides a check-off on is validated
+  // here: an unreadable or partial report leaves the rung UNVERIFIED, which is the only
+  // honest reading, and never trips the "went backwards" alarm.
+  const target = typeof k?.target === "number" && Number.isFinite(k.target) ? k.target : null;
+  const boxes = typeof k?.boxes === "number" && k.boxes > 0 ? k.boxes : null;
+  const atTarget = typeof k?.atTarget === "number" && k.atTarget >= 0 ? k.atTarget : null;
+  // A rung is only reached when the boxes are actually ON it. The keeper applies the
+  // rung box by box and can be interrupted (Smartlead 429s, a census that failed), so
+  // a partial roll-out must not read as a completed step.
+  const applied = boxes != null && atTarget != null && atTarget >= Math.ceil(boxes * 0.9);
   for (const r of ramp) {
     const when = Math.max(cutT + r.afterDays * DAY, quietAt ? quietAt - 4 * DAY : 0);
     let v: Verdict;
@@ -375,13 +401,21 @@ function warmupSteps(input: OutlookInput, cutT: number, quietAt: number | null):
       v = { ok: false, unverified: true, blocker: "the host warm-up keeper does not report into the app, so this rung cannot be checked off from here" };
     } else if (!keeperFresh) {
       v = { ok: false, unverified: true, blocker: `the warm-up keeper last reported ${ago(runAt, input.now)}; a rung is never assumed while its report is stale` };
-    } else if ((k.target || 0) >= r.perDay) {
-      const atTarget = k.atTarget != null && k.boxes != null ? `${num(k.atTarget)} of ${num(k.boxes)} boxes confirmed at ` : "boxes confirmed at ";
-      v = { ok: true, proof: `${atTarget}${num(k.target || 0)}/day by the host keeper (${ago(runAt, input.now)})` };
+    } else if (target == null) {
+      v = { ok: false, unverified: true, blocker: `the warm-up keeper's last report is unreadable${k.error ? ` (${k.error})` : ""}; a rung is never assumed from a partial report` };
+    } else if (target >= r.perDay && !applied) {
+      v = {
+        ok: false, unverified: true,
+        blocker: boxes == null || atTarget == null
+          ? `the keeper reports rung ${num(target)}/day but could not count the boxes${k.error ? ` (${k.error})` : ""}, so the rung is not confirmed`
+          : `the keeper is rolling this rung out: ${num(atTarget)} of ${num(boxes)} boxes are at ${num(target)}/day`,
+      };
+    } else if (target >= r.perDay) {
+      v = { ok: true, proof: `${num(atTarget || 0)} of ${num(boxes || 0)} boxes confirmed at ${num(target)}/day by the host keeper (${ago(runAt, input.now)})` };
     } else {
       v = {
         ok: false,
-        blocker: `the keeper is holding at ${num(k.target || 0)}/day per box`
+        blocker: `the keeper is holding at ${num(target)}/day per box`
           + (held.length ? `: ${held.slice(0, 2).join("; ")}` : " until the standing evidence is clean for 24h"),
       };
     }
@@ -478,10 +512,20 @@ export interface OutlookEvent {
   kind: "completed" | "regressed" | "late" | "slipped";
   workspaceId: string; fleet: string; fleetName: string;
   id: string; what: string; detail: string;
+  /** Whether this event may reach a person. Board events (a domain going back to
+   *  rest, a rest window extended) stay on the card; only milestones marked notify
+   *  can page, because a fleet with 18 domains generates board churn every sweep and
+   *  a monitor that emails on all of it gets muted, which is how a real incident is
+   *  missed (the 2026-08-19 warm-up notify flood). */
+  notify: boolean;
 }
 
-/** Fold this run's readings into the ledger. Returns the events worth telling a
- *  person about; the caller decides how to raise them. */
+/** Slips smaller than this are ledger jitter (a sweep re-stamping a window), not a
+ *  change of plan, and never page. */
+const SLIP_NOTIFY_MS = 2 * DAY;
+
+/** Fold this run's readings into the ledger. Returns every event for the board and
+ *  the report; `notify` marks the subset a person may be told about. */
 export function foldOutlook(
   ledger: OutlookLedger,
   input: { workspaceId: string; fleet: string; fleetName: string; now: number },
@@ -504,7 +548,7 @@ export function foldOutlook(
     if (s.verifiedAt) {
       if (!prev.firstDoneAt) {
         rec.firstDoneAt = s.verifiedAt;
-        if (s.notify) events.push({ ...base, kind: "completed", detail: s.proof || "verified" });
+        events.push({ ...base, kind: "completed", detail: s.proof || "verified", notify: s.notify });
       }
       rec.lastDoneAt = s.verifiedAt;
       rec.lateSince = undefined;
@@ -512,12 +556,12 @@ export function foldOutlook(
     }
     if (s.regressed && !prev.regressedAt) {
       rec.regressedAt = nowIso;
-      events.push({ ...base, kind: "regressed", detail: s.blocker || "the evidence that proved this step no longer holds" });
+      events.push({ ...base, kind: "regressed", detail: s.blocker || "the evidence that proved this step no longer holds", notify: s.notify });
     }
     if (s.state === "late") {
       if (!prev.lateSince) {
         rec.lateSince = nowIso;
-        if (s.notify) events.push({ ...base, kind: "late", detail: s.blocker || "past its forecast with no evidence it happened" });
+        events.push({ ...base, kind: "late", detail: s.blocker || "past its forecast with no evidence it happened", notify: s.notify });
       }
     } else if (s.state !== "due") {
       rec.lateSince = undefined;
@@ -525,11 +569,32 @@ export function foldOutlook(
     // A forecast that moves LATER is a slip: the gating ledger pushed the date out,
     // and the board says so instead of quietly redrawing the calendar.
     if (s.when && prev.forecast && s.when > prev.forecast && Date.parse(s.when) - Date.parse(prev.forecast) > 12 * 3_600_000) {
+      const moved = Date.parse(s.when) - Date.parse(prev.forecast);
       rec.slips = (prev.slips || 0) + 1;
       rec.lastSlipAt = nowIso;
-      events.push({ ...base, kind: "slipped", detail: `moved from ${day(prev.forecast)} to ${day(s.when)}` });
+      events.push({
+        ...base, kind: "slipped", detail: `moved from ${day(prev.forecast)} to ${day(s.when)}`,
+        notify: s.notify && moved >= SLIP_NOTIFY_MS,
+      });
     }
     records[key] = rec;
   }
   return { ledger: { at: nowIso, records }, events };
+}
+
+/** Drop records for milestones no fleet reports any more (a domain removed from the
+ *  pool, a receiver block long healed). Without this the ledger only ever grows, and
+ *  a snapshot that grows without bound eventually becomes the outage. Records are
+ *  kept well past the 21-day news window so a revisited milestone still finds its
+ *  history. */
+export function pruneOutlook(ledger: OutlookLedger, seen: Set<string>, now: number, keepDays = 90): { ledger: OutlookLedger; pruned: number } {
+  const records = ledger.records || {};
+  const kept: Record<string, OutlookRecord> = {};
+  let pruned = 0;
+  for (const [k, v] of Object.entries(records)) {
+    const last = Date.parse(v.checkedAt || v.lastDoneAt || v.firstDoneAt || "");
+    if (seen.has(k) || !Number.isFinite(last) || now - last <= keepDays * DAY) kept[k] = v;
+    else pruned++;
+  }
+  return { ledger: { ...ledger, records: kept }, pruned };
 }

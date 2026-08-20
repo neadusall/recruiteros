@@ -23,7 +23,13 @@ COPY . .
 # we are about to ship. That is the exact shape of the 2026-07-30 outage, where an
 # undeclared `undici` import built fine, got pruned, and then 500'd 157 routes
 # (JD Sourcing included) on their first request with a clean-looking image.
-RUN cd integration && npm run build && npm prune --omit=dev \
+# The fleet-plan decision table runs BEFORE the prune, while tsx is still installed.
+# It pins the one promise the sending monitor makes - a milestone checks off on
+# evidence, never because its date arrived - so a change that would let the board
+# claim something it cannot prove fails the deploy instead of shipping quietly.
+RUN cd integration && npm run build \
+ && npx tsx scripts/test-outlook.ts \
+ && npm prune --omit=dev \
  && node scripts/check-bundle-deps.mjs
 
 # ---- runtime image ----

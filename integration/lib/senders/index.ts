@@ -24,7 +24,7 @@ export type { ColdCapacity, ColdLane } from "./coldLane";
 
 export { runOutlookWatch } from "./outlookWatch";
 export type { OutlookWatchReport } from "./outlookWatch";
-export { OUTLOOK_LEDGER_KEY, buildOutlook, foldOutlook, outlookGraceH } from "./outlook";
+export { OUTLOOK_LEDGER_KEY, buildOutlook, foldOutlook, pruneOutlook, ledgerKey, outlookGraceH } from "./outlook";
 export type { OutlookStep, OutlookState, OutlookRecord, OutlookLedger, OutlookEvent } from "./outlook";
 
 export { syncFleetInboxes, maybeAutoFleetSync, buildPortalRouter } from "./fleetSync";
