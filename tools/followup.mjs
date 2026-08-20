@@ -22,6 +22,8 @@ import { loadFuseLedger, loadNdr, ndrAgeHours } from "./fuse.mjs";
 
 const OUT = process.env.MPC_OUT_DIR || "/out";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
+// PER-BOX CAP. Touch 2 spends the same mailbox budget as touch 1; see tools/boxcaps.mjs.
+import { capByEmail, sentTodayByBox } from "./boxcaps.mjs";
 const LUME_WS = process.env.MPC_LUME_WS || "ws_mqf6o989003";
 
 // Domain rest fail-safe (same ledger batch.mjs enforces): a follow-up goes out on the SAME box
@@ -105,6 +107,36 @@ function repliedOrStopped() {
     const n = JSON.parse(readFileSync(process.env.MPC_NDR_FILE || "/data/snap_mpc_ndr_v1.json", "utf8"));
     for (const e of n.bounced || []) stop.add(String(e).toLowerCase());
   } catch { /* no sweep yet */ }
+  // VERDICT GUARD (2026-08-20). The NDR sweep only knows an address is dead once a receiver
+  // has told us so; the verifier and the row store can know it sooner. The cold lane has
+  // refused to send on anything but a `proven` verdict since the belt shipped, and touch 2
+  // must not be the hole that lets a known-dead address through: a follow-up to a dead
+  // mailbox is the same bounce as touch 1, arriving on a domain we just brought back from
+  // rest. Cheap and credit-free — reads verdicts already on file, never verifies live.
+  try {
+    const cur = JSON.parse(readFileSync(process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json", "utf8"));
+    const arrs = []; const walk = (o) => { if (Array.isArray(o)) { if (o.length && typeof o[0] === "object") arrs.push(o); } else if (o && typeof o === "object") for (const v of Object.values(o)) walk(v); };
+    walk(cur);
+    const rows = arrs.sort((a, b) => b.length - a.length)[0] || [];
+    let n = 0;
+    for (const rr of rows) {
+      const r = rr.lead || rr;
+      if (!r?.emailInvalid) continue;
+      const e = String(r.likelyEmail || r.email || "").toLowerCase().trim();
+      if (e && !stop.has(e)) { stop.add(e); n++; }
+    }
+    if (n) console.log(`  verdict guard: ${n} address(es) held as known-invalid on the row (not yet in the bounce sweep)`);
+  } catch { /* no curation store */ }
+  try {
+    const vc = JSON.parse(readFileSync(process.env.MPC_VERIFY_CACHE_FILE || "/data/snap_mpc_verify_cache_v1.json", "utf8"));
+    let n = 0;
+    for (const [e, v] of Object.entries(vc.entries || {})) {
+      if (v?.verdict !== "dead") continue;
+      const k = String(e).toLowerCase();
+      if (!stop.has(k)) { stop.add(k); n++; }
+    }
+    if (n) console.log(`  verdict guard: ${n} address(es) held on a dead verifier verdict`);
+  } catch { /* belt cache not written yet */ }
   return stop;
 }
 
@@ -232,7 +264,26 @@ async function main() {
   const effLimit = SEND ? Math.min(LIMIT, capRemaining) : LIMIT;
   console.log(`prospects emailed: ${byEmail.size} | replied/stopped (excluded): ${[...byEmail.keys()].filter((e) => stop.has(e)).length} | DUE: ${due.length} | sent today ${sentTodayAll}/${OVERALL_CAP}, capacity to fill ${capRemaining}`);
 
-  const batch = sendable.slice(0, effLimit);
+  // PER-BOX DAILY CAP (2026-08-20). Until now this lane had none: it sent as whoever sent
+  // touch 1, bounded only by the global daily number, so follow-up volume alone pushed 12 of
+  // 45 live boxes past their 2/day cap. The queued backlog on the resting domains was worse
+  // (up to 13 waiting on a single mailbox), and all of it fires the day the domain revives —
+  // on a domain that was benched for bouncing. Same ledgers and same cap function the cold
+  // lane uses, so the two can never disagree about what a mailbox has left.
+  const { capOf } = capByEmail();
+  const boxSpend = sentTodayByBox();
+  const capped = [];
+  let heldByBoxCap = 0;
+  for (const t of sendable) {
+    const from = String(t.last?.from || "").toLowerCase();
+    const cap = capOf(from);
+    const used = boxSpend.get(from) || 0;
+    if (used >= cap) { heldByBoxCap++; continue; }
+    boxSpend.set(from, used + 1); // reserve the slot so one run cannot overshoot either
+    capped.push(t);
+  }
+  if (heldByBoxCap) console.log(`  per-box cap: ${heldByBoxCap} follow-up(s) held, their mailbox is at its daily limit (they keep their place for tomorrow)`);
+  const batch = capped.slice(0, effLimit);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const logFile = `${OUT}/followups-${stamp}.jsonl`;
   let sent = 0;

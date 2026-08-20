@@ -117,8 +117,6 @@ const SMTP_LANE = process.env.MPC_SMTP_LANE === "1";
 // health guard + domain-rest breaker veto anything that degrades).
 // MPC_GOOGLE_LANE=0 parks the lane again.
 const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE !== "0";
-const GOOGLE_RAMP = String(process.env.MPC_GOOGLE_RAMP || "8,14,20")
-  .split(",").map((n) => Math.max(1, Number(n) || 0)).filter(Boolean);
 
 // PROVIDER-BLOCK LEDGER -> per-fleet avoid sets. The NDR sweeps detect receiver-side
 // "your server is not welcome" signatures (Gmail's UnsolicitedMessageError, "low
@@ -207,54 +205,13 @@ function recruiterBoxes() {
   return out;
 }
 
-// Domain rest fail-safe. A domain the rest ledger (domain-rest.mjs, daily rota) has benched
-// sends NOTHING from any of its boxes until it revives: cold volume through a domain that is
-// bouncing or reputation-damaged is how a domain gets burned for good. Warm-up keeps running
-// elsewhere, so resting costs days, not the domain. Fail-open by design: a missing or
-// unreadable ledger never stops the engine, it only means no domain is benched.
-const REST_FILE = process.env.MPC_REST_FILE || "/data/snap_mpc_domain_rest_v1.json";
-function restingDomains() {
-  try {
-    const r = JSON.parse(readFileSync(REST_FILE, "utf8"));
-    const now = Date.now();
-    return new Set(Object.entries(r.domains || {})
-      .filter(([, v]) => v && v.state === "resting" && (!v.until || Date.parse(v.until) > now))
-      .map(([d]) => d.toLowerCase()));
-  } catch { return new Set(); }
-}
 
 // When each box made its FIRST cold send ever (from the ledgers). This anchors the Google
 // lane's ramp: a box's cap grows by weeks since ITS OWN first send, so a box added later
 // starts its own gentle curve instead of inheriting the fleet's.
-function firstSendByBox() {
-  const first = new Map();
-  if (!existsSync(OUT)) return first;
-  for (const f of readdirSync(OUT).filter((n) => /^sent-.*\.jsonl$/.test(n))) {
-    for (const line of readFileSync(`${OUT}/${f}`, "utf8").split("\n")) {
-      const s = line.trim(); if (!s) continue;
-      try {
-        const r = JSON.parse(s);
-        if (r && r.from && r.at && (!first.has(r.from) || r.at < first.get(r.from))) first.set(r.from, r.at);
-      } catch { /* skip */ }
-    }
-  }
-  return first;
-}
 
 // How many sends each box has already made TODAY (across all runs + follow-ups), so the
 // rotation can hold every mailbox to a hard per-box daily cap no matter how often runs fire.
-function sentTodayByBox() {
-  const counts = new Map();
-  const today = new Date().toISOString().slice(0, 10);
-  if (!existsSync(OUT)) return counts;
-  for (const f of readdirSync(OUT).filter((n) => /^sent-.*\.jsonl$/.test(n))) {
-    for (const line of readFileSync(`${OUT}/${f}`, "utf8").split("\n")) {
-      const s = line.trim(); if (!s) continue;
-      try { const r = JSON.parse(s); if (r && r.from && (r.at || "").slice(0, 10) === today) counts.set(r.from, (counts.get(r.from) || 0) + 1); } catch { /* skip */ }
-    }
-  }
-  return counts;
-}
 
 // ============================================================================
 // COLD-LANE CAPACITY (single source of truth, owner mandate 2026-08-19/08-20)
@@ -271,24 +228,14 @@ function sentTodayByBox() {
 // same boxes, same per-box caps, same rest ledger, same per-domain ceiling. The app reads
 // the published snapshot; it never recomputes any of this from provider strings.
 // ============================================================================
-const PER_BOX = Number(process.env.MPC_PER_BOX_DAILY || 2);
+// Per-box caps, the ledger scans and the rest ledger live in boxcaps.mjs so the follow-up
+// lane enforces the SAME mailbox budget this one does (it had none until 2026-08-20).
+import { PER_BOX, GOOGLE_RAMP, domOf, restingDomains, sentTodayByBox, firstSendByBox, capForBox } from "./boxcaps.mjs";
 // Per-DOMAIN ceiling for the Google lane (research: keep a domain's total cold volume
 // under ~50-60/day once 2-3 boxes share it; every box on a domain shares its reputation).
 const GOOGLE_DOMAIN_CAP = Number(process.env.MPC_GOOGLE_DOMAIN_DAILY || 50);
-const domOf = (email) => String(String(email).split("@")[1] || "").toLowerCase();
 const COLD_CAP_FILE = process.env.MPC_COLD_CAP_FILE || "/data/snap_mpc_cold_capacity_v1.json";
 
-/** Per-box cold cap, by lane. Google boxes ramp weekly from THEIR OWN first cold send;
- *  Sending.ac and the internal lane sit at the flat per-box number. `firstSend` is the
- *  map from firstSendByBox(), passed in so a caller reads the ledgers once. */
-function capForBox(b, firstSend) {
-  if (b.google) {
-    const at = firstSend.get(b.email);
-    const week = at ? Math.floor(Math.max(0, Date.now() - Date.parse(at)) / (7 * 86_400_000)) : 0;
-    return GOOGLE_RAMP[Math.min(week, GOOGLE_RAMP.length - 1)];
-  }
-  return b.kind === "smtp" ? Math.min(PER_BOX, b.dailyCap || PER_BOX) : PER_BOX;
-}
 
 /**
  * What the cold lane can actually carry today, and how much of it is already spent.
@@ -882,8 +829,8 @@ async function main() {
     return;
   }
 
-  // PER_BOX / GOOGLE_DOMAIN_CAP / capForBox now live at module scope so `--capacity`
-  // publishes the very same numbers this send path enforces (see coldCapacityLedger).
+  // Caps come from boxcaps.mjs, so `--capacity`, this send path and the follow-up lane all
+  // enforce and report the same mailbox budget.
   const firstSend = firstSendByBox();
   const capFor = (b) => capForBox(b, firstSend);
   const domCounts = new Map();
