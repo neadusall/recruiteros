@@ -2862,8 +2862,16 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       // writing on month-end close invents a job that was never mentioned and
       // produces a comment that visibly misreads the post.
       const author = [authorName, title, company ? `at ${company}` : undefined].filter(Boolean).join(", ");
+      // THREE kinds of post reach this point, not two. The growth scenarios
+      // (a raise, a second location, a team doubling) advertise no job either,
+      // and briefing them as "the role they are hiring for is CFO" invents an
+      // opening that was never mentioned - the same misread the industry brief
+      // exists to prevent. dmBank is the honest signal for which is which:
+      // "mpc" scenarios are the ones anchored on an actual role.
       const brief = combo.id === "industry_conversation"
         ? `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`
+        : combo.dmBank === "growth"
+        ? `They are announcing company news here - growth, a new location, a raise - and are NOT advertising a specific job, so do not name a role, a search, or candidates. React to the news itself as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would, and close with a low-pressure invitation to keep in touch on how it goes.`
         : `The role they are hiring for is ${jobTitle}${city ? ` in ${city}` : ""}.`;
       const userMsg = `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId)}`;
       const drafted = await draft(POST_COMMENT_RULES, userMsg);
