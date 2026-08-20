@@ -54,7 +54,26 @@ const ITEM_TTL_DAYS = 21;
 // Market-scan pacing: one keyword search per tick (rotating through the
 // bank), each hit costing a profile read, so the lane trickles steadily.
 const MARKET_RESULTS_PER_SEARCH = 20;
-const POSTER_NEW_PER_TICK = 8;   // DM drafts created per tick
+// Discovery BREADTH (owner mandate 2026-08-20: five seats, 14 to 16 posted
+// comments a day EACH). One search a tick could not feed that. The bank is 20+
+// roles across 7 scenarios, so a single rotating search revisited the same
+// combo several times a day and its results died in the `seen` gate: 8/20 ran
+// 99 searches, screened 792 posts and created 9 drafts, against a desk that
+// needs ~70. Several combos now run per tick, and a combo coming round again
+// asks Google for its NEXT page instead of re-reading the same twenty links.
+const MARKET_SEARCHES_PER_TICK = Math.max(1, Number(process.env.ROLE_HUNTER_SEARCHES_PER_TICK ?? 4));
+const MARKET_PAGE_DEPTH = Math.max(1, Number(process.env.ROLE_HUNTER_PAGE_DEPTH ?? 3));
+// How far back the index is asked to look. The post-age gate below is the real
+// ceiling; this only decides how much corpus Google offers up in the first
+// place, and at one week the narrow site: queries were returning ~8 results.
+const MARKET_TIME_WINDOW = process.env.ROLE_HUNTER_TIME_WINDOW ?? "qdr:m";
+// A reachable poster normally takes the private DM. With this on (the
+// default) they take the comment lane instead whenever the desk is short of
+// comment drafts for the day: the DM bank is not the scarce resource here,
+// drafted comments are. ROLE_HUNTER_COMMENT_FIRST=0 restores DM-first.
+const COMMENT_FIRST = process.env.ROLE_HUNTER_COMMENT_FIRST !== "0";
+const POSTER_NEW_PER_TICK = 8;   // drafts created per combo
+const POSTER_NEW_PER_SCAN = Math.max(POSTER_NEW_PER_TICK, Number(process.env.ROLE_HUNTER_NEW_PER_SCAN ?? 24));
 const POSTER_RECHECK_DAYS = 7;   // never re-message the same author within a week
 const CLOSED_PROFILE_DAYS = 30;  // remember closed profiles; no repeat profile reads
 const MAX_POST_AGE_DAYS = 14;    // hard ceiling: never message about a stale post
@@ -73,7 +92,10 @@ export interface HuntDayStats {
   comments?: number;      // public comments handed to the engine today
   bdHandoffs?: number;    // posters commented on that became BD prospects
 }
-const AUTO_PER_TICK = 10;        // autopilot approvals per tick (engine caps still apply)
+// Five seats each taking their comment slot in one tick, plus the DM, connect
+// and reply approvals that share this budget: at 10 the comment lane was the
+// thing that got cut off (owner mandate 2026-08-20).
+const AUTO_PER_TICK = 18;        // autopilot approvals per tick (engine caps still apply)
 
 /* ---------------- the public-comment lane (owner ask 2026-08-14) ---------
    A closed profile used to end the hunt: one profile read spent, the lead
@@ -105,6 +127,15 @@ const COMMENT_PER_WEEK_DEFAULT = 63;   // hard rolling-7-day ceiling
 const COMMENT_DAY_JITTER = 0.15;       // day allowance varies +/- 15%
 const COMMENT_MIN_GAP_MIN = 24;        // floor of the randomized spacing
 const COMMENT_MAX_GAP_MIN = 95;        // ceiling of the randomized spacing
+// Catch-up floor. The ordinary 24-95 spread averages an hour, which only just
+// fits 14-16 sends into a WHOLE day: a seat that sat idle half of it (nothing
+// queued for it, a late reconnect, an adoption mid-afternoon) could never
+// reach its allowance again, which is exactly what left three of Lume's five
+// seats on zero on 8/20. So the spacing is paced: when what is left of the day
+// no longer fits what is left of the allowance it compresses toward this floor
+// - four an hour at the very hardest, still a cadence a person keeps - and it
+// relaxes the moment the seat is back on pace.
+const COMMENT_CATCHUP_GAP_MIN = Math.max(8, Number(process.env.ROLE_HUNTER_CATCHUP_GAP_MIN ?? 14));
 const COMMENT_QUEUE_MULTIPLE = 2;      // draft at most 2 days of allowance
 const COMMENT_LOG_KEEP_DAYS = 21;      // send log kept for the weekly window
 const COMMENT_DUP_WINDOW = 25;         // recent comments checked for overlap
@@ -130,9 +161,18 @@ const REPLY_REFLEX_CATCHUP_PER_TICK = 3;
 // The desk is CFO / finance (owner decision 2026-08-15). Every keyword here is
 // a finance leadership title, so both the hiring scenarios and the industry
 // scenario below stay inside that market instead of reading as scattershot.
+// Widened 2026-08-20 from seven titles: at seven, three scenarios made 21
+// search combos, which 96 searches a day walked five times over, so nearly
+// every result was one the `seen` gate had already rejected. Every entry is
+// still a finance or accounting seat this desk actually places.
 const DEFAULT_MARKET_KEYWORDS = [
   "CFO", "Chief Financial Officer", "Controller", "VP of Finance",
   "Director of Finance", "Assistant Controller", "FP&A Manager",
+  "Corporate Controller", "Head of Finance", "Finance Director",
+  "VP Finance", "Director of FP&A", "FP&A Director", "Finance Manager",
+  "Chief Accounting Officer", "Accounting Manager", "Accounting Director",
+  "Tax Manager", "Audit Manager", "Treasury Manager",
+  "Senior Accountant", "Revenue Manager",
 ];
 
 /**
@@ -617,6 +657,11 @@ interface WatchState {
    *  that already posted today would start from a zero count and could run
    *  its full fresh allowance on top of what it actually sent. */
   seatLogBuilt: Record<string, boolean>;
+  /** ws -> the exact scenario directive already applied (see
+   *  ROLE_HUNTER_SCENARIOS_MANDATE). Same one-shot-by-stamp contract as the
+   *  limits mandate: it applies once, a later UI edit wins, and a NEW
+   *  directive value applies once again. */
+  scenarioMandate: Record<string, string>;
 }
 
 /** Bumped 2026-08-19: drafts must close with a call to action (owner ask).
@@ -634,7 +679,7 @@ interface WatchState {
 const COMMENT_COPY_EPOCH = 4;
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -717,6 +762,7 @@ async function hydrate(): Promise<void> {
           autopostMandate: snap.autopostMandate ?? {},
           limitsMandate: snap.limitsMandate ?? {},
           seatLogBuilt: snap.seatLogBuilt ?? {},
+          scenarioMandate: snap.scenarioMandate ?? {},
         };
       }
       hydrated = true;
@@ -992,10 +1038,117 @@ function seatLogKey(workspaceId: string, accountId: string): string {
   return `${workspaceId}::${accountId}`;
 }
 
-/** The randomized spacing owed after the comment logged at `lastIso`. */
-function gapMinutesFor(workspaceId: string, lastIso: string): number {
+/** How many comment drafts are queued against each seat right now. */
+function pendingCommentsBySeat(workspaceId: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const i of state.items) {
+    if (i.workspaceId !== workspaceId || i.commentStatus !== "suggested" || !i.accountId) continue;
+    out[i.accountId] = (out[i.accountId] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** What a seat could still post today after what it has already sent and what
+ *  is already waiting on it. */
+function seatRoomToday(workspaceId: string, accountId: string, day: string, pendingBySeat?: Record<string, number>): number {
+  return dayAllowanceFor(workspaceId, day, accountId)
+    - commentUsage(workspaceId, accountId).today
+    - (pendingBySeat?.[accountId] ?? 0);
+}
+
+/**
+ * Which seat a newly captured lead is assigned to. A flat round robin was
+ * fair only if every seat had been connected the whole time: Lume adopted
+ * three seats mid-day on 2026-08-20 and the rota kept handing work to the two
+ * long-seeded ones, which is how the desk finished the day 16/5/0/0/0. The
+ * pick is now the seat with the most unmet allowance left today (sends
+ * already made AND drafts already queued both count against it), starting the
+ * sweep at the rota so equal seats still take turns.
+ */
+function pickSendSeat(
+  workspaceId: string,
+  accounts: LiAccountState[],
+  day: string,
+  pendingBySeat: Record<string, number>,
+  rota: number,
+): LiAccountState {
+  if (accounts.length <= 1) return accounts[0];
+  let best = accounts[rota % accounts.length];
+  let bestRoom = -Infinity;
+  for (let n = 0; n < accounts.length; n++) {
+    const a = accounts[(rota + n) % accounts.length];
+    const room = seatRoomToday(workspaceId, a.accountId, day, pendingBySeat);
+    if (room > bestRoom) { bestRoom = room; best = a; }
+  }
+  return best;
+}
+
+/**
+ * Move waiting comment drafts onto the seats that can still post today.
+ *
+ * A draft is written for a POST, not for a recruiter: nothing in the text
+ * belongs to the seat that happened to scout it, so a backlog stranded on one
+ * capped seat while four others sit idle is pure waste. Run every scan, before
+ * autopilot picks: it is deterministic, it never touches anything already
+ * posted, and it stops as soon as no seat has room left.
+ */
+function rebalanceCommentQueue(workspaceId: string, accounts: LiAccountState[]): number {
+  if (accounts.length <= 1) return 0;
+  const day = nowIso().slice(0, 10);
+  const room: Record<string, number> = {};
+  for (const a of accounts) room[a.accountId] = seatRoomToday(workspaceId, a.accountId, day);
+  const pending = state.items.filter(
+    (i) => i.workspaceId === workspaceId && i.commentStatus === "suggested" && !wallForItem(i),
+  );
+  let moved = 0;
+  for (const item of pending) {
+    let best = "";
+    let bestRoom = -Infinity;
+    for (const a of accounts) {
+      if (room[a.accountId] > bestRoom) { bestRoom = room[a.accountId]; best = a.accountId; }
+    }
+    if (!best || bestRoom <= 0) break;
+    if (item.accountId !== best) { item.accountId = best; item.updatedAt = nowIso(); moved++; }
+    room[best] -= 1;
+  }
+  if (moved) save();
+  return moved;
+}
+
+/** Minutes left in the current UTC day, which is the day the allowance and
+ *  the send log are both counted in. */
+function minutesLeftInDay(): number {
+  const now = Date.now();
+  const d = new Date(now);
+  const end = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+  return Math.max(1, (end - now) / 60_000);
+}
+
+/**
+ * The randomized spacing owed after the comment logged at `lastIso`.
+ *
+ * PACED since 2026-08-20: pass how many sends the seat still owes today and
+ * the window narrows to what actually fits. On pace, nothing changes and the
+ * full 24-95 spread stands. Behind pace, the ceiling drops to the even spacing
+ * that would still land the day, and once even THAT is under the ordinary
+ * floor the range compresses to the catch-up band. Without the argument the
+ * old unpaced spread comes back (kept for the desk-wide display fallback).
+ */
+function gapMinutesFor(workspaceId: string, lastIso: string, remaining?: number): number {
   const r = (seedHash(`${workspaceId}:${lastIso}:gap`) % 1000) / 1000;
-  return Math.round(COMMENT_MIN_GAP_MIN + r * (COMMENT_MAX_GAP_MIN - COMMENT_MIN_GAP_MIN));
+  let lo = COMMENT_MIN_GAP_MIN;
+  let hi = COMMENT_MAX_GAP_MIN;
+  if (remaining !== undefined && remaining > 0) {
+    const even = minutesLeftInDay() / remaining;
+    if (even < hi) {
+      hi = Math.max(lo + 5, Math.round(even));
+      if (even < lo) {
+        lo = COMMENT_CATCHUP_GAP_MIN;
+        hi = Math.max(COMMENT_CATCHUP_GAP_MIN + 6, Math.round(even));
+      }
+    }
+  }
+  return Math.round(lo + r * (hi - lo));
 }
 
 /** Day count, rolling-week count, and the most recent send. With an
@@ -1046,7 +1199,11 @@ export function commentThrottleFor(workspaceId: string, accountId?: string): Com
     return t;
   }
   if (use.last) {
-    const gap = gapMinutesFor(accountId ? seatLogKey(workspaceId, accountId) : workspaceId, use.last);
+    const gap = gapMinutesFor(
+      accountId ? seatLogKey(workspaceId, accountId) : workspaceId,
+      use.last,
+      Math.max(0, allowance - use.today),
+    );
     const readyAt = new Date(use.last).getTime() + gap * 60_000;
     if (Date.now() < readyAt) {
       t.nextSlotAt = new Date(readyAt).toISOString();
@@ -1600,6 +1757,30 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     console.log(`[comment-radar] ${workspaceId}: comment limits set to ${perDay}/day base, ${perWeek}/week (owner mandate via env)`);
   }
 
+  // Owner mandate 2026-08-20: hunt the WHOLE market, not three scenarios.
+  // ROLE_HUNTER_SCENARIOS_MANDATE carries "wsId:id1|id2|id3" directives. Same
+  // one-shot-by-stamp contract as the limits mandate above: it applies once,
+  // a later UI edit wins, and a changed directive applies once again. It is
+  // the supply side of the 14-16-a-day-per-seat ask: three scenarios over a
+  // seven-title bank made 21 search combos, few enough that a day's searches
+  // walked the whole rotation five times and read the same links each pass.
+  for (const m of (process.env.ROLE_HUNTER_SCENARIOS_MANDATE ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+    const at = m.indexOf(":");
+    if (at < 0) continue;
+    const ws = m.slice(0, at);
+    if (ws !== workspaceId || state.scenarioMandate[workspaceId] === m) continue;
+    const ids = m.slice(at + 1).split("|").map((x) => x.trim()).filter(Boolean);
+    if (!ids.length) continue;
+    state.scenarioMandate[workspaceId] = m;
+    try {
+      const cur = scenariosFor(workspaceId);
+      await setScenarios(workspaceId, [...new Set([...cur.presets, ...ids])], cur.custom);
+      console.log(`[comment-radar] ${workspaceId}: scenarios set to ${ids.join(", ")} (owner mandate via env)`);
+    } catch (e) {
+      console.log(`[comment-radar] ${workspaceId}: scenario mandate failed (${e instanceof Error ? e.message : e})`);
+    }
+  }
+
   // One-shot 2026-08-20, the day the throttle went per-seat: rebuild each
   // seat's send log from the posted items that still remember which seat
   // posted them, so a seat that already sent today starts from its true
@@ -1704,6 +1885,18 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
   let dmCreated = 0;
   try { dmCreated = await scanPosters(workspaceId, accounts, adhoc); } catch (e) {
     console.log(`[comment-radar] ${workspaceId}: market scan error (${e instanceof Error ? e.message : e})`);
+  }
+
+  // Every scan, before autopilot picks: move waiting comment drafts onto the
+  // seats that can still post today. Drafts are written for a post, not for a
+  // recruiter, so a backlog stranded on one capped seat is pure waste - and
+  // that is exactly what left three of Lume's five seats on zero the day they
+  // were adopted (owner mandate 2026-08-20).
+  try {
+    const moved = rebalanceCommentQueue(workspaceId, accounts);
+    if (moved) console.log(`[comment-radar] ${workspaceId}: ${moved} waiting comment draft(s) moved onto seats with allowance left`);
+  } catch (e) {
+    console.log(`[comment-radar] ${workspaceId}: queue rebalance error (${e instanceof Error ? e.message : e})`);
   }
 
   // Autopilot: when armed, the fresh drafts go straight out through the engine.
@@ -2258,12 +2451,33 @@ function candidatesFromUnipile(results: Dict[]): MarketCandidate[] {
   return out;
 }
 
+/** "3 days ago" / "2 weeks ago" / "Aug 5, 2026" -> an ISO stamp the post-age
+ *  gate can actually compare. Anything unrecognised comes back undefined,
+ *  which keeps the old behaviour for that result: unknown age, not blocked. */
+function isoFromIndexDate(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const rel = /(\d+)\s*(minute|hour|day|week|month|year)s?\s+ago/i.exec(raw);
+  if (rel) {
+    const n = Number(rel[1]);
+    const unit = rel[2].toLowerCase();
+    const ms = unit === "minute" ? 60_000
+      : unit === "hour" ? 3_600_000
+      : unit === "day" ? 86_400_000
+      : unit === "week" ? 7 * 86_400_000
+      : unit === "month" ? 30 * 86_400_000
+      : 365 * 86_400_000;
+    return new Date(Date.now() - n * ms).toISOString();
+  }
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+}
+
 /** Fallback engine: Google's index of linkedin.com/posts via Serper (the
  *  live Unipile seat's LinkedIn content search returns zero items in every
  *  form - verified 2026-08-12 - while its people search works). Post URLs
  *  carry the author slug and the activity id; profile enrichment and the
  *  send still go through Unipile. */
-async function candidatesFromSerper(query: string): Promise<{ items: MarketCandidate[]; error?: string }> {
+async function candidatesFromSerper(query: string, page = 1): Promise<{ items: MarketCandidate[]; error?: string }> {
   const key = process.env.SERPER_API_KEY;
   if (!key) return { items: [], error: "Serper key not configured on the server." };
   try {
@@ -2273,7 +2487,13 @@ async function candidatesFromSerper(query: string): Promise<{ items: MarketCandi
       // gl/hl pin the index to the US edition (owner mandate 2026-08-15):
       // cheaper than discovering a Manchester poster after a paid profile
       // read. DataForSEO already does this with location_code 2840.
-      body: JSON.stringify({ q: query, num: MARKET_RESULTS_PER_SEARCH, tbs: "qdr:w", gl: "us", hl: "en" }),
+      // `page` walks DEEPER into the same query the next time this combo comes
+      // round, instead of re-reading the first twenty links into the `seen`
+      // gate (2026-08-20).
+      body: JSON.stringify({
+        q: query, num: MARKET_RESULTS_PER_SEARCH, tbs: MARKET_TIME_WINDOW, gl: "us", hl: "en",
+        ...(page > 1 ? { page } : {}),
+      }),
     });
     if (!res.ok) {
       // Break layer: the card must say WHY discovery is dry, e.g. Serper's
@@ -2296,7 +2516,11 @@ async function candidatesFromSerper(query: string): Promise<{ items: MarketCandi
       const text = [afterColon, r.snippet ?? ""].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
       out.push({
         postId: idM[1], postUrl: link, text,
-        postAt: r.date,
+        // Google answers "3 days ago", never an ISO stamp, so the post-age
+        // gate downstream was silently inert on every Serper result: a
+        // `new Date("3 days ago")` is NaN and NaN passes a `> maxAge` test.
+        // Parsed here, which is what lets the index window widen safely.
+        postAt: isoFromIndexDate(r.date),
         authorRef: slugM[1],
         authorName: name || undefined,
       });
@@ -2342,7 +2566,7 @@ async function candidatesFromDataForSeo(query: string): Promise<{ items: MarketC
       const text = [afterColon, r.description ?? ""].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
       out.push({
         postId: idM[1], postUrl: link, text,
-        postAt: r.timestamp,
+        postAt: isoFromIndexDate(r.timestamp),
         authorRef: slugM[1],
         authorName: nameFromSlug(slugM[1]),
       });
@@ -2363,21 +2587,37 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   const recheckCutoff = Date.now() - POSTER_RECHECK_DAYS * 86_400_000;
   const own = state.ownProfile[workspaceId];
 
-  // One search per tick, rotating through the flattened (scenario x role)
-  // combos; 96 ticks/day covers the whole rotation several times over. An
-  // ad-hoc combo (AI Search) runs immediately and leaves the rotation alone.
-  let combo: ScanCombo;
-  if (adhoc) {
-    combo = adhoc;
-  } else {
-    const combos = scanCombos(workspaceId);
-    const idx = (state.keywordCursor[workspaceId] ?? 0) % combos.length;
-    state.keywordCursor[workspaceId] = idx + 1;
-    combo = combos[idx];
-  }
-  const keyword = combo.key;
   const roles = marketKeywordsFor(workspaceId);
-  save();
+  const stats = huntStatsFor(workspaceId);
+  const scanDay = nowIso().slice(0, 10);
+  // Public-comment lane: on/off, and how deep its approval queue may get.
+  // The cap scales with the connected seats: five recruiters each burning
+  // their own daily allowance need five seats' worth of drafts queued.
+  const commentLane = commentLimitsFor(workspaceId).enabled;
+  const commentQueueCap = COMMENT_QUEUE_MULTIPLE * Math.max(
+    dayAllowanceFor(workspaceId, scanDay),
+    accounts.reduce((sum, a) => sum + dayAllowanceFor(workspaceId, scanDay, a.accountId), 0),
+  );
+  let pendingComments = state.items.filter(
+    (i) => i.workspaceId === workspaceId && i.commentStatus === "suggested",
+  ).length;
+  const pendingBySeat = pendingCommentsBySeat(workspaceId);
+  /** Drafts the desk still owes itself today: every seat's unmet allowance,
+   *  less what is already queued. Positive means the comment lane is the
+   *  scarce one and reachable posters should feed it rather than the DM bank. */
+  const commentShortfall = (): number =>
+    accounts.reduce((sum, a) => sum + Math.max(0, seatRoomToday(workspaceId, a.accountId, scanDay)), 0)
+    - pendingComments;
+  let totalCreated = 0;
+
+  /**
+   * One (scenario x role) combo: ask the index, screen what comes back, draft
+   * for whoever survives. Several of these run per tick (see
+   * MARKET_SEARCHES_PER_TICK); `page` walks deeper into the same query each
+   * time the combo comes round again.
+   */
+  const runCombo = async (combo: ScanCombo, page: number): Promise<number> => {
+  const keyword = combo.key;
 
   // Discovery is INDEXED-FIRST (owner ask 2026-08-19): Google's index of
   // linkedin.com/posts via Serper, then DataForSEO, so the connected seat
@@ -2389,9 +2629,17 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   // returned zero items in every request shape since 2026-08-12).
   let source = "serper";
   let candidates: MarketCandidate[] = [];
-  const r = await candidatesFromSerper(combo.serperQ);
+  const r = await candidatesFromSerper(combo.serperQ, page);
   candidates = r.items;
   let engineError = r.error;
+  // A deep page that has run off the end of the index is not an outage: come
+  // back to page one for this combo rather than burning the tick on nothing.
+  if (!candidates.length && page > 1) {
+    state.keywordCursor[`${workspaceId}:pg:${combo.key}`] = 0;
+    const r1 = await candidatesFromSerper(combo.serperQ, 1);
+    candidates = r1.items;
+    if (candidates.length) engineError = undefined; else engineError = engineError ?? r1.error;
+  }
   // Second engine: DataForSEO absorbs the volume when Serper is dry
   // (out of credits, seen live 2026-08-13).
   if (!candidates.length) {
@@ -2424,19 +2672,6 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
   const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0 };
-  const stats = huntStatsFor(workspaceId);
-  // Public-comment lane: on/off, and how deep its approval queue may get.
-  // The cap scales with the connected seats: five recruiters each burning
-  // their own daily allowance need five seats' worth of drafts queued.
-  const commentLane = commentLimitsFor(workspaceId).enabled;
-  const scanDay = nowIso().slice(0, 10);
-  const commentQueueCap = COMMENT_QUEUE_MULTIPLE * Math.max(
-    dayAllowanceFor(workspaceId, scanDay),
-    accounts.reduce((sum, a) => sum + dayAllowanceFor(workspaceId, scanDay, a.accountId), 0),
-  );
-  let pendingComments = state.items.filter(
-    (i) => i.workspaceId === workspaceId && i.commentStatus === "suggested",
-  ).length;
   stats.searches += 1;
   stats.screened += candidates.length;
   for (const c of candidates) {
@@ -2504,7 +2739,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
     // Profile read on the seat that will send. Company pages fail here,
     // which is the point.
-    const sendAccount = accounts[rota % accounts.length];
+    const sendAccount = pickSendSeat(workspaceId, accounts, scanDay, pendingBySeat, rota);
     stats.profileReads += 1;
     const prof = await fetchProfileLite(sendAccount, c.authorRef);
     if (!prof.providerId) { markClosed(); g.profile++; continue; }
@@ -2536,9 +2771,18 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     if (offMarket) { markClosed(prof.providerId); g.offMarket++; continue; }
 
     const firstDegree = prof.networkDistance === "FIRST_DEGREE" || prof.networkDistance === "DISTANCE_1";
-    const direct = prof.openProfile === true || firstDegree;
+    const reachable = prof.openProfile === true || firstDegree;
+    // COMMENT-FIRST (owner mandate 2026-08-20: 14-16 posted comments per seat
+    // per day). A reachable poster still takes the private DM whenever the
+    // desk has its comment drafts covered; when it does not, they take the
+    // comment lane instead. The DM bank is deterministic templates over an
+    // unlimited supply of open profiles, so it is never what runs out - the
+    // drafted comments the five seats spend all day posting are.
+    // Every OTHER one, on the lead rota: the MPC DM lane is worth money too
+    // and must not fall to zero merely because the comment queue is hungry.
+    const direct = reachable && !(COMMENT_FIRST && commentLane && rota % 2 === 0 && commentShortfall() > 0);
     if (!direct) {
-      stats.closedFound += 1;
+      if (!reachable) stats.closedFound += 1;
       if (!commentLane) {
         closedCache[c.authorRef] = nowIso();
         if (prof.providerId) closedCache[prof.providerId] = nowIso();
@@ -2643,6 +2887,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       if (tooSimilar(candidate, priorComments(workspaceId))) { g.commentDupe++; continue; }
       commentDraft = candidate;
       pendingComments++;
+      pendingBySeat[sendAccount.accountId] = (pendingBySeat[sendAccount.accountId] ?? 0) + 1;
     }
 
     state.items.push({
@@ -2680,11 +2925,46 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     save();
   }
 
+  save();
+  console.log(`[comment-radar] market "${keyword}" p${page} via ${source}: results=${candidates.length} created=${created} gates=${JSON.stringify(g)}`);
+  return created;
+  };
+
+  // The rotation itself: MARKET_SEARCHES_PER_TICK combos per tick, each one
+  // picking up where the cursor left off, with a per-combo page cursor so a
+  // repeat visit reads new links. An ad-hoc combo (AI Search) runs once and
+  // leaves both cursors alone.
+  const passes = adhoc ? 1 : MARKET_SEARCHES_PER_TICK;
+  for (let pass = 0; pass < passes; pass++) {
+    if (totalCreated >= POSTER_NEW_PER_SCAN) break;
+    // A full approval queue does not need more searches paid for on top of it.
+    if (pass > 0 && pendingComments >= commentQueueCap) break;
+    let combo: ScanCombo;
+    let page = 1;
+    if (adhoc) {
+      combo = adhoc;
+    } else {
+      const combos = scanCombos(workspaceId);
+      const idx = (state.keywordCursor[workspaceId] ?? 0) % combos.length;
+      state.keywordCursor[workspaceId] = idx + 1;
+      combo = combos[idx];
+      const pageKey = `${workspaceId}:pg:${combo.key}`;
+      const seenTimes = state.keywordCursor[pageKey] ?? 0;
+      page = (seenTimes % MARKET_PAGE_DEPTH) + 1;
+      state.keywordCursor[pageKey] = seenTimes + 1;
+    }
+    save();
+    try {
+      totalCreated += await runCombo(combo, page);
+    } catch (e) {
+      console.log(`[comment-radar] market "${combo.key}" failed (${e instanceof Error ? e.message : e})`);
+    }
+  }
+
   state.keywordCursor[`${workspaceId}:rota`] = rota % 1_000_000;
   if (seenArr.length > SEEN_CAP) state.seen[workspaceId] = seenArr.slice(-SEEN_CAP);
   save();
-  console.log(`[comment-radar] market "${keyword}" via ${source}: results=${candidates.length} created=${created} gates=${JSON.stringify(g)}`);
-  return created;
+  return totalCreated;
 }
 
 /* ------------------------------------------------------------------ */
