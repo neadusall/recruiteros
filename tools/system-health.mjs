@@ -556,7 +556,34 @@ await probe("Smartlead warm-up API", "smartlead", async () => {
   return r.ok ? { status: "good", reading: "reachable, authenticated" } : { status: "bad", reading: `HTTP ${r.status}`, detail: "Warm-up reputation readings depend on this API" };
 });
 
-for (const [key, label] of [["ANTHROPIC_API_KEY", "Anthropic key (email writer)"], ["RESEND_API_KEY", "Resend key (owner alerts)"], ["PORKBUN_API_KEY", "Porkbun key (DNS auto-fix)"]]) {
+/* ---------------- company-size coverage (feeds the 100-1,000 employee send gate) --------------
+ * That gate FAILS CLOSED: a company whose headcount we have not confirmed is held out of the
+ * batch. So coverage of the size cache IS sendable volume, and a stalled resolver looks exactly
+ * like "the pipeline dried up". Watch it directly. */
+{
+  const curated = readJson(`${VOL}/snap_inmarket_curation_v1.json`) || [];
+  const sizes = readJson(`${VOL}/snap_inmarket_company_size_v1.json`) || {};
+  const cache = sizes.data || sizes;
+  const cos = new Set();
+  for (const r of Array.isArray(curated) ? curated : []) {
+    const c = String(r.company || "").toLowerCase().trim();
+    if (c) cos.add(c);
+  }
+  let confirmed = 0, inBand = 0;
+  const MINH = Number(envVal("MPC_MIN_HEADCOUNT") || 100), MAXH = Number(envVal("MPC_MAX_HEADCOUNT") || 1000);
+  for (const c of cos) {
+    const e = cache[c];
+    if (e && typeof e.count === "number" && e.count > 0) { confirmed++; if (e.count >= MINH && e.count <= MAXH) inBand++; }
+  }
+  const covPct = cos.size ? Math.round((100 * confirmed) / cos.size) : 0;
+  // Below ~40% coverage the gate is holding most of the pool for want of a number, not for cause.
+  const status = cos.size === 0 ? "amber" : covPct >= 60 ? "good" : covPct >= 40 ? "amber" : "bad";
+  add(GROUP_SUPPLY, "company-size-coverage", "Company size resolved (100-1,000 gate)", status,
+    `${confirmed}/${cos.size} companies (${covPct}%), ${inBand} in band`,
+    status === "good" ? "" : "The send gate fails closed on unconfirmed size, so low coverage starves volume. Run tools/company-size.mjs (step 0.93 of mpc-daily.sh).");
+}
+
+for (const [key, label] of [["ANTHROPIC_API_KEY", "Anthropic key (email writer)"], ["RESEND_API_KEY", "Resend key (owner alerts)"], ["PORKBUN_API_KEY", "Porkbun key (DNS auto-fix)"], ["SERPER_API_KEY", "Serper key (company-size resolver)"]]) {
   add(GROUP_API, key, label, envVal(key) ? "good" : "amber", envVal(key) ? "configured" : "missing",
     envVal(key) ? "" : "The dependent automation silently skips its job without this");
 }
