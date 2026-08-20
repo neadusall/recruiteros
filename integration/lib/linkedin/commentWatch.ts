@@ -593,6 +593,11 @@ interface WatchState {
    *  been applied once. The stamp, not the setting, is what makes it one-shot:
    *  an owner who later flips the switch off in the UI stays off. */
   autopostMandate: Record<string, boolean>;
+  /** ws -> the exact limits directive already applied (see
+   *  RECRUITEROS_COMMENT_LIMITS_MANDATE). Same one-shot-by-stamp contract:
+   *  a directive applies once, later UI edits win, a NEW directive value
+   *  applies once again. */
+  limitsMandate: Record<string, string>;
 }
 
 /** Bumped 2026-08-19: drafts must close with a call to action (owner ask).
@@ -610,7 +615,7 @@ interface WatchState {
 const COMMENT_COPY_EPOCH = 4;
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -691,6 +696,7 @@ async function hydrate(): Promise<void> {
           lastScan: snap.lastScan ?? {},
           redraftEpoch: snap.redraftEpoch ?? {},
           autopostMandate: snap.autopostMandate ?? {},
+          limitsMandate: snap.limitsMandate ?? {},
         };
       }
       hydrated = true;
@@ -1528,6 +1534,22 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     state.autopostMandate[workspaceId] = true;
     await setCommentLimits(workspaceId, { autoPost: true });
     console.log(`[comment-radar] ${workspaceId}: comment auto-posting enabled (owner mandate via env)`);
+  }
+
+  // Owner mandate 2026-08-20: hold the lane at 12-15 posted comments a day.
+  // RECRUITEROS_COMMENT_LIMITS_MANDATE carries comma-separated
+  // "wsId:perDay:perWeek" directives. One-shot per directive VALUE: the stamp
+  // remembers exactly what was applied, so the same directive never fights a
+  // later UI edit, while a changed directive applies once on its next scan.
+  for (const m of (process.env.RECRUITEROS_COMMENT_LIMITS_MANDATE ?? "").split(",").map((s) => s.trim()).filter(Boolean)) {
+    const [ws, dayStr, weekStr] = m.split(":");
+    if (ws !== workspaceId || state.limitsMandate[workspaceId] === m) continue;
+    const perDay = Number(dayStr);
+    const perWeek = Number(weekStr);
+    if (!Number.isFinite(perDay) || !Number.isFinite(perWeek)) continue;
+    state.limitsMandate[workspaceId] = m;
+    await setCommentLimits(workspaceId, { perDay, perWeek });
+    console.log(`[comment-radar] ${workspaceId}: comment limits set to ${perDay}/day base, ${perWeek}/week (owner mandate via env)`);
   }
 
   const scanned = 0;
