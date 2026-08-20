@@ -122,7 +122,14 @@ function fromLine(workspaceId: string, userId?: string): string | null {
 async function alert(workspaceId: string, item: RepliedThread, seat: Seat): Promise<void> {
   const who = [item.authorName, [item.title, item.company].filter(Boolean).join(" at ")]
     .filter(Boolean).join(", ");
-  const app = process.env.RECRUITEROS_APP_URL ?? "https://app.lumesp.com";
+  // The tenant's own portal, never the house one: a Lume recruiter following
+  // this link must land on Lume's host (see the workspace brand resolver).
+  let app = process.env.RECRUITEROS_APP_URL ?? "https://recruitersos.co";
+  try {
+    const { notifyBrand } = await import("../outbound/brand");
+    const brand = await notifyBrand(workspaceId);
+    if (brand?.appUrl) app = brand.appUrl;
+  } catch { /* house url still reaches a working login */ }
 
   const to: string[] = [];
   if (seat.email && seat.email !== "(unknown)") to.push(seat.email);
