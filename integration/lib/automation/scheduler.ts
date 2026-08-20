@@ -113,6 +113,13 @@ async function tickSending(): Promise<void> {
     const { runSenderHealthGuard } = await import("../senders");
     await runSenderHealthGuard();
   } catch { /* guard is best-effort per tick */ }
+  // Fleet outlook: re-verify each milestone on the fleet monitor against the ledger
+  // that gates it, so the board keeps checking itself off even when the host cron is
+  // not reaching this instance.
+  try {
+    const { runOutlookWatch } = await import("../senders");
+    await runOutlookWatch();
+  } catch { /* the board still recomputes live on read */ }
 }
 
 /** Reply sync: pull replies + DSN bounces off our own pool inboxes over IMAP.

@@ -67,6 +67,16 @@ async function run(req: Request) {
     guard = await runSenderHealthGuard();
   } catch (e: any) { guard = { error: e?.message ?? "health_guard_failed" }; }
 
+  // Fleet outlook watcher: re-verify every milestone on the fleet monitor against the
+  // ledger that gates it, stamp the check-offs that earned themselves this tick, and
+  // raise the ones that went backwards or ran late. Runs after the guard so a
+  // graduation stamped a moment ago is already visible as evidence.
+  let outlook: unknown = null;
+  try {
+    const { runOutlookWatch } = await import("../../../../lib/senders");
+    outlook = await runOutlookWatch();
+  } catch (e: any) { outlook = { error: e?.message ?? "outlook_watch_failed" }; }
+
   // Reconcile inboxes stuck in error each tick, hands-off: clear false errors on
   // credential-less upstream senders (nothing to verify from here) and re-verify
   // real SMTP logins, flipping error->warming on success so a just-fixed
@@ -179,7 +189,7 @@ async function run(req: Request) {
     jobBlasts = await runJobBlastTickAll();
   } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, ipReputation, variants, bounceFeedback, verdictSync, staffSuppression, replies, jobBlasts });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, outlook, revive, onboarding, ipReputation, variants, bounceFeedback, verdictSync, staffSuppression, replies, jobBlasts });
 }
 
 export const GET = run;

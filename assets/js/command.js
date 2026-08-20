@@ -9724,6 +9724,10 @@
     loadInfra();
     loadSenders();
     loadSendStory();
+    // The fleet monitor is a live board, not a page you re-open: milestones
+    // re-verify server-side on every read, so a rejection or a graduation shows
+    // up here within the minute. Stops with the view.
+    viewTimers.push(setInterval(function () { loadSenders(); loadSendStory(); }, 60000));
   }
 
   // ── The sending story: why volume is what it is today ─────────────────────
@@ -9824,6 +9828,80 @@
     return '<span class="snd-prov" style="border-color:' + e[1] + ';color:' + e[1] + '">' + esc(e[0]) + '</span>';
   }
 
+  // ── The living plan: milestones that check themselves off ─────────────────
+  // Each line is a milestone the server re-verifies against the ledger that gates
+  // it (rest ledger, provider-block ledger, the host's standing monitor and warm-up
+  // keeper, the app's own capacity math). A line is ticked only when that evidence
+  // says it happened, so the proof sits under it; a line whose date passed without
+  // its evidence goes LATE and says what it is waiting on; a line that was proven
+  // and is now contradicted goes BACKWARDS, which is the one worth reading first.
+  var OUT_MARK = {
+    done: ["✓", "#1a7f37"],
+    due: ["◔", "#b26a00"],
+    late: ["!", "#b42318"],
+    blocked: ["◌", "#b26a00"],
+    unverified: ["?", "#b26a00"],
+    waiting: ["○", "var(--muted)"],
+  };
+  function outDay(iso) {
+    var d = new Date(iso); if (isNaN(d)) return String(iso || "").slice(0, 10);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function outAgo(iso) {
+    var t = Date.parse(iso || ""); if (!isFinite(t)) return "";
+    var m = Math.round((Date.now() - t) / 60000);
+    if (m < 2) return "just now";
+    if (m < 60) return m + "m ago";
+    if (m < 2880) return Math.round(m / 60) + "h ago";
+    return Math.round(m / 1440) + "d ago";
+  }
+  function renderOutlook(f) {
+    var steps = f.outlook || [];
+    if (!steps.length) return "";
+    var p = f.outlookProgress || { done: 0, total: steps.length, late: 0, regressed: 0 };
+    var pctDone = p.total ? Math.round((p.done / p.total) * 100) : 0;
+    var checkedAt = steps[0] && steps[0].checkedAt;
+    var head =
+      '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+        '<span class="muted" style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase">The plan, checked against reality</span>' +
+        '<span style="font-size:11.5px;font-weight:600">' + p.done + ' of ' + p.total + ' verified done</span>' +
+        (p.late ? '<span style="font-size:11.5px;font-weight:600;color:#b42318">' + p.late + ' late</span>' : '') +
+        (p.regressed ? '<span style="font-size:11.5px;font-weight:600;color:#b42318">' + p.regressed + ' went backwards</span>' : '') +
+        '<span class="muted" style="margin-left:auto;font-size:11px">checked ' + esc(outAgo(checkedAt) || "just now") + '</span>' +
+      '</div>' +
+      '<div style="height:4px;border-radius:3px;background:var(--border);overflow:hidden;margin-bottom:8px">' +
+        '<div style="height:100%;width:' + pctDone + '%;background:#1a7f37"></div>' +
+      '</div>';
+    var rows = steps.map(function (s) {
+      var state = s.regressed ? "late" : (s.state || (s.done ? "done" : "waiting"));
+      var mk = OUT_MARK[state] || OUT_MARK.waiting;
+      var when = s.when ? outDay(s.when) : "when quiet";
+      // The date column tells the truth about the date: green when the evidence
+      // landed, red when it passed without any.
+      var whenColor = s.done && !s.regressed ? "#1a7f37" : (state === "late" ? "#b42318" : "inherit");
+      var tag = s.regressed ? '<span style="color:#b42318;font-weight:600"> went backwards</span>'
+        : s.done ? '<span style="color:#1a7f37;font-weight:600"> done' + (s.firstVerifiedAt ? ' ' + esc(outDay(s.firstVerifiedAt)) : '') + '</span>'
+        : state === "late" ? '<span style="color:#b42318;font-weight:600"> late</span>'
+        : state === "unverified" ? '<span style="color:#b26a00;font-weight:600"> cannot be confirmed from here</span>'
+        : '';
+      var slip = s.slippedFrom ? '<span class="muted"> (moved from ' + esc(outDay(s.slippedFrom)) + ')</span>' : '';
+      // A step that is done shows the evidence that closed it. If its re-check could
+      // not run this time (a monitor went quiet), the tick stands on the older proof
+      // and says so, rather than passing a stale reading off as a fresh one.
+      var why = s.done && !s.regressed
+        ? [(s.proof ? 'Proof: ' + s.proof : ''), (s.blocker ? 'Re-check pending: ' + s.blocker : '')].filter(Boolean).join(' · ')
+        : (s.blocker ? 'Waiting on: ' + s.blocker : '');
+      return '<div style="display:flex;gap:9px;align-items:baseline;font-size:12.5px;margin-top:5px">' +
+          '<span style="flex:0 0 12px;font-weight:700;color:' + mk[1] + '">' + mk[0] + '</span>' +
+          '<span style="flex:0 0 58px;font-weight:600;font-variant-numeric:tabular-nums;color:' + whenColor + '">' + esc(when) + '</span>' +
+          '<span style="min-width:0">' + esc(s.what) + tag + slip +
+            (why ? '<div class="muted" style="font-size:11.5px;margin-top:1px">' + esc(why) + '</div>' : '') +
+          '</span>' +
+        '</div>';
+    }).join("");
+    return '<div style="margin-top:9px;padding:9px 11px;border:1px solid var(--border);border-radius:8px">' + head + rows + '</div>';
+  }
+
   /** Fleet monitor: every sending infrastructure (Sending.ac, Google/Zapmail, the
    *  internal server) reports in one place - usable capacity today, what's benched,
    *  warming clocks, bounce pressure, and each fleet's known caveats. */
@@ -9833,7 +9911,12 @@
     if (!fleets.length) { box.innerHTML = ""; return; }
     function fmt(n) { return Number(n || 0).toLocaleString(); }
     function pillFor(f) {
+      var p = f.outlookProgress || {};
+      // A step that had been proven and is now contradicted outranks every other
+      // reading: it means the machinery moved backwards while nobody was looking.
+      if (p.regressed > 0) return ["Went backwards", "#b42318"];
       if (f.boxes.error > 0 || (f.warmupBounces7d || 0) > 50) return ["Attention", "#b42318"];
+      if (p.late > 0) return ["Behind plan", "#b26a00"];
       if (f.boxes.benched > (f.boxes.active + f.boxes.warming) / 2) return ["Mostly benched", "#b26a00"];
       if (f.boxes.warming > f.boxes.active) return ["Warming", "#2e5bd7"];
       return ["Healthy", "#1a7f37"];
@@ -9858,24 +9941,7 @@
       var notes = (f.notes || []).map(function (t) {
         return '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(t) + '</div>';
       }).join("");
-      // "What to expect": the server computes each date from the ledger that gates
-      // that step, so this list is a forecast the machinery will actually keep.
-      function fmtDay(iso) {
-        var d = new Date(iso); if (isNaN(d)) return String(iso).slice(0, 10);
-        return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-      }
-      var outlook = (f.outlook && f.outlook.length)
-        ? '<div style="margin-top:9px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">' +
-            '<div class="muted" style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px">What to expect</div>' +
-            f.outlook.map(function (s) {
-              var when = s.when ? fmtDay(s.when) : "when quiet";
-              return '<div style="display:flex;gap:10px;align-items:baseline;font-size:12.5px;margin-top:3px' + (s.done ? ';opacity:.6' : '') + '">' +
-                '<span style="flex:0 0 60px;font-weight:600;font-variant-numeric:tabular-nums;color:' + (s.done ? '#1a7f37' : 'inherit') + '">' + esc(when) + '</span>' +
-                '<span style="min-width:0">' + esc(s.what) + (s.done ? ' <span class="muted">(done)</span>' : '') + '</span>' +
-              '</div>';
-            }).join("") +
-          '</div>'
-        : '';
+      var outlook = renderOutlook(f);
       return '<div style="padding:10px 0;border-top:1px solid var(--border)">' +
         '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
           '<b>' + esc(f.name) + '</b>' +

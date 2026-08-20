@@ -11,19 +11,13 @@
 
 import { loadSnapshot } from "../db";
 import { listInboxes } from "./store";
-import { coldCapFor, coldMaxPerInbox, RAMP_BY_WEEK, SENDING_AC_PER_INBOX } from "./limits";
+import { coldCapFor, coldMaxPerInbox, SENDING_AC_PER_INBOX } from "./limits";
 import { activeBlocks } from "./recipientGuard";
+import { buildOutlook, OUTLOOK_LEDGER_KEY, RECEIVER_LABEL } from "./outlook";
+import type {
+  BlocksSnap, DomainBoxes, EgressSnap, KeeperSnap, OutlookLedger, OutlookStep, Recv, RestSnap, StandingSnap,
+} from "./outlook";
 import type { SenderInbox } from "./types";
-
-// Receiver names for the fleet note, keyed the way the provider-block ledger keys them.
-const RECEIVER_LABEL: Record<string, string> = {
-  google: "Gmail / Google Workspace",
-  microsoft: "Outlook / Microsoft 365",
-  mailspamprotection: "mailspamprotection.com",
-  proofpoint: "Proofpoint",
-  mimecast: "Mimecast",
-  barracuda: "Barracuda",
-};
 
 export type FleetKey = "sendingac" | "google" | "internal" | "other";
 
@@ -43,29 +37,18 @@ export interface FleetCard {
   warmupBounces7d: number | null;  // internal lane only: NDRs on warm-up traffic = provider-side rejection pressure
   graduation: { warming: number; eligibleAt: string | null } | null;
   notes: string[];
-  /** Internal fleet only: the dated path from "recovering" to "fully sending",
-   *  computed from the same ledgers that gate each step (rest ledger, block
-   *  ledger, graduation clock, ramp constants) so the card never promises a date
-   *  the machinery will not keep. null for fleets without a recovery story. */
+  /** The dated path this fleet is on, every step carrying the evidence that closes
+   *  it (lib/senders/outlook). Every date comes from the ledger that gates the
+   *  step, and every check-off comes from that ledger saying it happened, never
+   *  from the date arriving. null for fleets with nothing pending. */
   outlook: OutlookStep[] | null;
+  /** Rollup for the card header: how much of the path is verified done. */
+  outlookProgress: { done: number; total: number; late: number; regressed: number; nextAt: string | null; nextWhat: string | null } | null;
 }
 
-export interface OutlookStep {
-  when: string | null;   // ISO date the step is expected; null = waits on a condition with no clock
-  what: string;
-  done: boolean;
-}
+export type { OutlookStep } from "./outlook";
 
-interface RestSnap { domains?: Record<string, { state?: string; until?: string }> }
 interface NdrSnap { perDomain?: Record<string, { bounces?: number }>; warmupNdrs?: number; generatedAt?: string }
-interface BlocksSnap { blocks?: Record<string, { fleet?: string; provider?: string; count?: number; lastSeen?: string }> }
-interface EgressSnap { cutoverAt?: string; egressIp?: string; warmupRamp?: { afterDays: number; perDay: number }[] }
-interface Recv { accepted: number; rejected: number; deferred: number; rateLimited?: number }
-interface StandingSnap {
-  at?: string; newIp?: string; rulePos1?: boolean; egressSeen?: string; oldIpMentions?: number;
-  receivers?: { google?: Recv; microsoft?: Recv; other?: Recv };
-  dnsbl?: Record<string, string>;
-}
 
 function fleetOf(m: SenderInbox): FleetKey {
   if (m.provider === "sending-ac") return "sendingac";
@@ -87,7 +70,7 @@ const FLEET_NAMES: Record<FleetKey, string> = {
 };
 
 export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
-  const [inboxes, rest, ndr, ndrImap, blocks, blocksSnap, egress, standing] = await Promise.all([
+  const [inboxes, rest, ndr, ndrImap, blocks, blocksSnap, egress, standing, keeper, outlookLedger] = await Promise.all([
     listInboxes(workspaceId),
     loadSnapshot<RestSnap>("mpc_domain_rest_v1"),
     loadSnapshot<NdrSnap>("mpc_ndr_v1"),
@@ -96,6 +79,8 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
     loadSnapshot<BlocksSnap>("provider_blocks_v1"),
     loadSnapshot<EgressSnap>("internal_egress_v1"),
     loadSnapshot<StandingSnap>("internal_egress_status_v1"),
+    loadSnapshot<KeeperSnap>("internal_warmup_v1"),
+    loadSnapshot<OutlookLedger>(OUTLOOK_LEDGER_KEY),
   ]);
 
   const now = Date.now();
@@ -109,7 +94,11 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
       ? Number(process.env.SENDER_GRADUATE_DAYS_INTERNAL || 30)
       : Number(process.env.SENDER_GRADUATE_DAYS || 14);
 
-  const cards = new Map<FleetKey, FleetCard & { _domains: Set<string>; _gradAts: number[] }>();
+  type Working = FleetCard & {
+    _domains: Set<string>; _gradAts: number[];
+    _domainBoxes: Map<string, DomainBoxes>; _sentToday: number; _activated: number;
+  };
+  const cards = new Map<FleetKey, Working>();
   const card = (k: FleetKey) => {
     let c = cards.get(k);
     if (!c) {
@@ -120,7 +109,9 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
         capacity: { today: 0, benched: 0, atFullRamp: 0 },
         coldToday: 0,
         bounces7d: 0, warmupBounces7d: null, graduation: null, notes: [],
+        outlook: null, outlookProgress: null,
         _domains: new Set<string>(), _gradAts: [],
+        _domainBoxes: new Map<string, DomainBoxes>(), _sentToday: 0, _activated: 0,
       };
       cards.set(k, c);
     }
@@ -142,8 +133,19 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
     const cap = coldCapFor(m);
     const mature = m.provider === "sending-ac" ? SENDING_AC_PER_INBOX : coldMaxPerInbox();
     c.capacity.atFullRamp += mature;
+    c._sentToday += Number(m.sentToday || 0);
+    if (m.activatedAt) c._activated++;
     if (dom && resting.has(dom)) { c.boxes.benched++; c.capacity.benched += cap; }
-    else c.capacity.today += cap;
+    else {
+      c.capacity.today += cap;
+      // Per-domain contribution to TODAY's capacity: a revival is only real when
+      // the domain's boxes are drawing again, and this is the number that proves it.
+      if (dom) {
+        const d = c._domainBoxes.get(dom) || { boxes: 0, cap: 0 };
+        d.boxes++; d.cap += cap;
+        c._domainBoxes.set(dom, d);
+      }
+    }
 
     // Sending.ac boxes never graduate (externally warmed, flat cap; the health
     // guard skips them) - a graduation clock on that fleet would be fiction.
@@ -187,7 +189,7 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
         warmupBounces7d: c.key === "internal" ? (ndrImap?.warmupNdrs ?? null) : null,
         graduation: c.boxes.warming ? { warming: c.boxes.warming, eligibleAt: grad ? new Date(grad).toISOString() : null } : null,
         notes: [],
-        outlook: null,
+        outlook: null, outlookProgress: null,
       };
       if (c.key === "internal") {
         // Routing truth comes from the SAME source the sender rotation reads (the
@@ -220,55 +222,37 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
         }
         if ((out.warmupBounces7d || 0) > 50) out.notes.push(`${(out.warmupBounces7d || 0).toLocaleString()} bounce notices on warm-up traffic in the 7-day sweep window - provider-side rejection pressure; the window needs 7 quiet days to clear and graduation waits for it.`);
 
-        // WHAT TO EXPECT: every date below is derived from the ledger that gates the
-        // step, with the same constants the gate uses, so the list moves when reality
-        // moves (a new rejection pushes every downstream date out by itself).
-        const DAY = 86_400_000;
-        const iso = (t: number) => new Date(t).toISOString();
-        const steps: OutlookStep[] = [];
-        const cut = egress?.cutoverAt ? Date.parse(egress.cutoverAt) : NaN;
-        if (Number.isFinite(cut)) steps.push({ when: iso(cut), what: `Outbound moved to the clean IP ${egress?.egressIp || ""}; receivers now judge this server on fresh history`, done: cut <= now });
-        for (const d of restingMine) {
-          const u = resting.get(d);
-          steps.push({ when: u || null, what: `${d} back in rotation once its rest is served`, done: false });
+      }
+      // WHAT TO EXPECT, and what has actually HAPPENED. lib/senders/outlook builds the
+      // dated path from the ledgers that gate each step, and checks a step off only when
+      // that same ledger proves it happened - never because the date arrived.
+      {
+        const built = buildOutlook({
+          now, workspaceId, fleet: c.key, fleetName: c.name,
+          domains: c._domains, domainBoxes: c._domainBoxes,
+          boxes: c.boxes, capacity: c.capacity, coldToday,
+          sentToday: c._sentToday, activatedBoxes: c._activated,
+          graduationAt: c.boxes.warming && grad ? grad : null,
+          rest, blocking: [...(blocks.get(c.key) || [])].sort(), blocks: blocksSnap,
+          egress, standing, keeper,
+          records: outlookLedger?.records || {},
+        });
+        if (built.steps.length) {
+          out.outlook = built.steps;
+          const late = built.steps.filter((s) => s.state === "late").length;
+          const next = built.steps.find((s) => !s.done && s.when) || built.steps.find((s) => !s.done) || null;
+          out.outlookProgress = {
+            done: built.steps.filter((s) => s.done && !s.regressed).length,
+            total: built.steps.length,
+            late,
+            regressed: built.steps.filter((s) => s.regressed).length,
+            nextAt: next?.when || null,
+            nextWhat: next?.what || null,
+          };
         }
-        // Block ledger: a pair stays live 7 days after its last notice (recipientGuard
-        // ACTIVE_WINDOW); the latest live pair sets when routing reopens.
-        const blockMin = Number(process.env.SENDER_BLOCK_MIN) > 0 ? Number(process.env.SENDER_BLOCK_MIN) : 20;
-        let quietAt: number | null = null;
-        for (const b of Object.values(blocksSnap?.blocks || {})) {
-          if (b?.fleet !== "internal" || (b.count || 0) < blockMin || !b.lastSeen) continue;
-          const t = Date.parse(b.lastSeen) + 7 * DAY;
-          if (t > now && (quietAt == null || t > quietAt)) quietAt = t;
-        }
-        if (rejecting.length) {
-          const names = rejecting.map((p) => RECEIVER_LABEL[p] || p).join(", ");
-          steps.push({ when: quietAt ? iso(quietAt) : null, what: `${names} recipients return to this fleet after 7 days without a rejection`, done: false });
-        }
-        // Warm-up ramp (lume-warmup-keeper on the host): step N days after the cutover,
-        // and only once no receiver has rejected us for 3 days.
-        if (Number.isFinite(cut)) {
-          for (const r of egress?.warmupRamp || []) {
-            if (!(r.afterDays > 0)) continue;
-            const t = Math.max(cut + r.afterDays * DAY, quietAt ? quietAt - 4 * DAY : 0);
-            steps.push({ when: iso(t), what: `Warm-up steps up to ${r.perDay}/day per box (automatic; climbs only on clean standing, steps back to 8 on trouble)`, done: t <= now });
-          }
-        }
-        // Graduation: the age clock AND a 7-day sweep window under the bounce ceiling.
-        const fleetBoxes = c.boxes.active + c.boxes.warming;
-        if (c.boxes.warming && grad) {
-          const g = Math.max(grad, quietAt || 0);
-          // The header's "auto-activate" date must be the same gated date, not the bare clock.
-          if (out.graduation) out.graduation.eligibleAt = iso(g);
-          steps.push({ when: iso(g), what: `${c.boxes.warming} warming boxes activate (30-day clock plus 7 quiet days); app lane starts at ${(fleetBoxes * RAMP_BY_WEEK[0]).toLocaleString()}/day`, done: false });
-          for (let w = 1; w <= RAMP_BY_WEEK.length; w++) {
-            const per = w < RAMP_BY_WEEK.length ? RAMP_BY_WEEK[w] : coldMaxPerInbox();
-            steps.push({ when: iso(g + w * 7 * DAY), what: `App lane ramps to ${(fleetBoxes * per).toLocaleString()}/day (${per} per box)${w === RAMP_BY_WEEK.length ? ", full capacity" : ""}`, done: false });
-          }
-          if (coldToday === 0) steps.push({ when: iso(g + 14 * DAY), what: "Cold outreach lane stays parked until opened by hand; earliest sensible date, after a clean week of app-lane sends", done: false });
-        }
-        steps.sort((a, b) => (a.when || "9999").localeCompare(b.when || "9999"));
-        out.outlook = steps;
+        // The header's "auto-activate" date must be the same gated date the outlook uses,
+        // not the bare age clock.
+        if (out.graduation && built.graduationAt) out.graduation.eligibleAt = built.graduationAt;
       }
       if (c.key === "sendingac" && out.domains.resting > 0 && out.domains.nextRevival) {
         out.notes.push(`${out.domains.resting} domain${out.domains.resting === 1 ? "" : "s"} resting after bounce trouble; next revival ${out.domains.nextRevival.slice(0, 10)}.`);

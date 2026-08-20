@@ -656,7 +656,9 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .cl-fully { font-size: 11px; font-weight: 600; color: var(--ok); padding: 4px 4px; margin-left: 4px; white-space: nowrap; }
 /* Clients · spreadsheet grid: dense, sortable, sticky header, both-axis scroll. */
 .cl-sheet-wrap { overflow: auto; max-height: calc(100vh - 300px); }
-.cl-sheet { min-width: 1760px; font-size: 12.5px; }
+/* 1910 not 1760: the Company phone column added ~150px. Without the bump the sheet squeezes the
+   existing cells instead of scrolling, which is what the wrap is there for. */
+.cl-sheet { min-width: 1910px; font-size: 12.5px; }
 .cl-sheet thead th { position: sticky; top: 0; z-index: 2; background: var(--bg-soft); cursor: pointer; white-space: nowrap; user-select: none; }
 .cl-sheet thead th:hover { color: var(--text); }
 .cl-sheet thead th.cl-th-active { color: var(--brand); }
@@ -717,6 +719,12 @@ body.has-imp-banner .shell { height: calc(100vh - 40px); margin-top: 40px; }
 .crm-sub a:hover { color: var(--brand); }
 .crm-mono { font-family: var(--mono, ui-monospace, "SF Mono", Menlo, monospace); font-size: 12px; font-variant-numeric: tabular-nums; }
 .crm-c-signal .crm-id-t { max-width: 320px; }
+/* Company main line: tabular digits so the column scans vertically, and a fixed width so a
+   present number and an absent one occupy the same space. */
+.crm-c-cphone { white-space: nowrap; }
+.crm-c-cphone .crm-id-t { max-width: 150px; }
+.crm-c-cphone a { color: var(--text); text-decoration: none; }
+.crm-c-cphone a:hover { color: var(--brand); text-decoration: underline; }
 .crm-sig { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
 .crm-c-num { text-align: center; }
 .crm-li { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; background: #0a66c2; color: #fff !important; font-size: 9px; font-weight: 600; text-decoration: none; vertical-align: middle; }

@@ -9724,6 +9724,10 @@
     loadInfra();
     loadSenders();
     loadSendStory();
+    // The fleet monitor is a live board, not a page you re-open: milestones
+    // re-verify server-side on every read, so a rejection or a graduation shows
+    // up here within the minute. Stops with the view.
+    viewTimers.push(setInterval(function () { loadSenders(); loadSendStory(); }, 60000));
   }
 
   // ── The sending story: why volume is what it is today ─────────────────────
@@ -9824,6 +9828,80 @@
     return '<span class="snd-prov" style="border-color:' + e[1] + ';color:' + e[1] + '">' + esc(e[0]) + '</span>';
   }
 
+  // ── The living plan: milestones that check themselves off ─────────────────
+  // Each line is a milestone the server re-verifies against the ledger that gates
+  // it (rest ledger, provider-block ledger, the host's standing monitor and warm-up
+  // keeper, the app's own capacity math). A line is ticked only when that evidence
+  // says it happened, so the proof sits under it; a line whose date passed without
+  // its evidence goes LATE and says what it is waiting on; a line that was proven
+  // and is now contradicted goes BACKWARDS, which is the one worth reading first.
+  var OUT_MARK = {
+    done: ["✓", "#1a7f37"],
+    due: ["◔", "#b26a00"],
+    late: ["!", "#b42318"],
+    blocked: ["◌", "#b26a00"],
+    unverified: ["?", "#b26a00"],
+    waiting: ["○", "var(--muted)"],
+  };
+  function outDay(iso) {
+    var d = new Date(iso); if (isNaN(d)) return String(iso || "").slice(0, 10);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function outAgo(iso) {
+    var t = Date.parse(iso || ""); if (!isFinite(t)) return "";
+    var m = Math.round((Date.now() - t) / 60000);
+    if (m < 2) return "just now";
+    if (m < 60) return m + "m ago";
+    if (m < 2880) return Math.round(m / 60) + "h ago";
+    return Math.round(m / 1440) + "d ago";
+  }
+  function renderOutlook(f) {
+    var steps = f.outlook || [];
+    if (!steps.length) return "";
+    var p = f.outlookProgress || { done: 0, total: steps.length, late: 0, regressed: 0 };
+    var pctDone = p.total ? Math.round((p.done / p.total) * 100) : 0;
+    var checkedAt = steps[0] && steps[0].checkedAt;
+    var head =
+      '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+        '<span class="muted" style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase">The plan, checked against reality</span>' +
+        '<span style="font-size:11.5px;font-weight:600">' + p.done + ' of ' + p.total + ' verified done</span>' +
+        (p.late ? '<span style="font-size:11.5px;font-weight:600;color:#b42318">' + p.late + ' late</span>' : '') +
+        (p.regressed ? '<span style="font-size:11.5px;font-weight:600;color:#b42318">' + p.regressed + ' went backwards</span>' : '') +
+        '<span class="muted" style="margin-left:auto;font-size:11px">checked ' + esc(outAgo(checkedAt) || "just now") + '</span>' +
+      '</div>' +
+      '<div style="height:4px;border-radius:3px;background:var(--border);overflow:hidden;margin-bottom:8px">' +
+        '<div style="height:100%;width:' + pctDone + '%;background:#1a7f37"></div>' +
+      '</div>';
+    var rows = steps.map(function (s) {
+      var state = s.regressed ? "late" : (s.state || (s.done ? "done" : "waiting"));
+      var mk = OUT_MARK[state] || OUT_MARK.waiting;
+      var when = s.when ? outDay(s.when) : "when quiet";
+      // The date column tells the truth about the date: green when the evidence
+      // landed, red when it passed without any.
+      var whenColor = s.done && !s.regressed ? "#1a7f37" : (state === "late" ? "#b42318" : "inherit");
+      var tag = s.regressed ? '<span style="color:#b42318;font-weight:600"> went backwards</span>'
+        : s.done ? '<span style="color:#1a7f37;font-weight:600"> done' + (s.firstVerifiedAt ? ' ' + esc(outDay(s.firstVerifiedAt)) : '') + '</span>'
+        : state === "late" ? '<span style="color:#b42318;font-weight:600"> late</span>'
+        : state === "unverified" ? '<span style="color:#b26a00;font-weight:600"> cannot be confirmed from here</span>'
+        : '';
+      var slip = s.slippedFrom ? '<span class="muted"> (moved from ' + esc(outDay(s.slippedFrom)) + ')</span>' : '';
+      // A step that is done shows the evidence that closed it. If its re-check could
+      // not run this time (a monitor went quiet), the tick stands on the older proof
+      // and says so, rather than passing a stale reading off as a fresh one.
+      var why = s.done && !s.regressed
+        ? [(s.proof ? 'Proof: ' + s.proof : ''), (s.blocker ? 'Re-check pending: ' + s.blocker : '')].filter(Boolean).join(' · ')
+        : (s.blocker ? 'Waiting on: ' + s.blocker : '');
+      return '<div style="display:flex;gap:9px;align-items:baseline;font-size:12.5px;margin-top:5px">' +
+          '<span style="flex:0 0 12px;font-weight:700;color:' + mk[1] + '">' + mk[0] + '</span>' +
+          '<span style="flex:0 0 58px;font-weight:600;font-variant-numeric:tabular-nums;color:' + whenColor + '">' + esc(when) + '</span>' +
+          '<span style="min-width:0">' + esc(s.what) + tag + slip +
+            (why ? '<div class="muted" style="font-size:11.5px;margin-top:1px">' + esc(why) + '</div>' : '') +
+          '</span>' +
+        '</div>';
+    }).join("");
+    return '<div style="margin-top:9px;padding:9px 11px;border:1px solid var(--border);border-radius:8px">' + head + rows + '</div>';
+  }
+
   /** Fleet monitor: every sending infrastructure (Sending.ac, Google/Zapmail, the
    *  internal server) reports in one place - usable capacity today, what's benched,
    *  warming clocks, bounce pressure, and each fleet's known caveats. */
@@ -9833,7 +9911,12 @@
     if (!fleets.length) { box.innerHTML = ""; return; }
     function fmt(n) { return Number(n || 0).toLocaleString(); }
     function pillFor(f) {
+      var p = f.outlookProgress || {};
+      // A step that had been proven and is now contradicted outranks every other
+      // reading: it means the machinery moved backwards while nobody was looking.
+      if (p.regressed > 0) return ["Went backwards", "#b42318"];
       if (f.boxes.error > 0 || (f.warmupBounces7d || 0) > 50) return ["Attention", "#b42318"];
+      if (p.late > 0) return ["Behind plan", "#b26a00"];
       if (f.boxes.benched > (f.boxes.active + f.boxes.warming) / 2) return ["Mostly benched", "#b26a00"];
       if (f.boxes.warming > f.boxes.active) return ["Warming", "#2e5bd7"];
       return ["Healthy", "#1a7f37"];
@@ -9858,6 +9941,7 @@
       var notes = (f.notes || []).map(function (t) {
         return '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(t) + '</div>';
       }).join("");
+      var outlook = renderOutlook(f);
       return '<div style="padding:10px 0;border-top:1px solid var(--border)">' +
         '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
           '<b>' + esc(f.name) + '</b>' +
@@ -9866,7 +9950,7 @@
         '</div>' +
         '<div class="muted" style="font-size:12.5px;margin-top:4px">' + fmt(f.boxes.active) + ' active' + grad + benched + resting +
           ' · bounces last sweep: ' + fmt(f.bounces7d) + (f.warmupBounces7d != null ? ' campaign / ' + fmt(f.warmupBounces7d) + ' on warm-up traffic' : '') +
-        '</div>' + notes +
+        '</div>' + notes + outlook +
       '</div>';
     }).join("");
     box.innerHTML = '<div class="snd-story" style="margin-top:14px">' +
@@ -10290,6 +10374,14 @@
         jobLocation: r.jobLocation || "",  // where the JOB is based (posting location)
         jobPostedAt: r.jobPostedAt || "",  // when the role went up ("open N days" hook)
         email: r.likelyEmail || "",
+        // The EMPLOYER's published main line (free rung: read from the company's own site).
+        // Deliberately kept in its own field and NEVER mapped into phone/mobilePhone: those feed
+        // the dialer and OS Text SMS, and a switchboard must never be texted or auto-dialed.
+        companyPhone: r.companyPhone || "",
+        companyPhoneDisplay: r.companyPhoneDisplay || r.companyPhone || "",
+        companyPhoneVia: r.companyPhoneVia || "",
+        companyPhoneConfidence: r.companyPhoneConfidence || 0,
+        companyPhoneSource: r.companyPhoneSource || "",
         emailVerification: ev,
         emailSource: r.emailSource || "",      // how the email was obtained (guess | site_direct | reoon_validated | …)
         industry: r.industry || "",
@@ -10454,6 +10546,25 @@
           return '<td class="crm-c-email"><div class="crm-id-t"><span class="crm-mono">' +
             (p.email ? '<a href="mailto:' + esc(p.email) + '"' + stop + ">" + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</span>" +
             '<span class="crm-sub">' + vBadge(p) + "</span></div></td>"; } },
+      // The EMPLOYER's main published line. Free rung: read from the company's own site
+      // (schema.org markup > tel: link > labelled contact page), so every number is auditable
+      // back to the page it came from. This is a switchboard, not the prospect's own line: it is
+      // for calling the business, and is never used by the dialer or by SMS.
+      { key: "company_phone", label: "Company phone", get: function (p) { return p.companyPhone || ""; },
+        sort: function (p) { return p.companyPhone ? 0 : 1; },
+        render: function (p) {
+          if (!p.companyPhone) return '<td class="crm-c-cphone"><span class="pr-na">-</span></td>';
+          var viaLabel = { schema_org: "published by the company in its site markup", tel_link: "a click-to-call link on the company site", labeled: "listed next to a phone label on the company site" };
+          var tip = "Company main line · " + (viaLabel[p.companyPhoneVia] || "from the company site") +
+            (p.companyPhoneSource ? " · " + p.companyPhoneSource : "");
+          // Weak-evidence numbers are flagged so a recruiter knows to confirm before dialing.
+          var weak = p.companyPhoneVia === "labeled";
+          return '<td class="crm-c-cphone"><div class="crm-id-t">' +
+            '<span class="crm-mono"><a href="tel:' + esc(p.companyPhone) + '"' + stop + ' title="' + esc(tip) + '">' +
+            esc(p.companyPhoneDisplay || p.companyPhone) + "</a></span>" +
+            '<span class="crm-sub">' + (weak
+              ? '<span class="cl-vb cl-vb-risky" title="Read from page text next to a phone label. Confirm before dialing.">~ check</span>'
+              : '<span class="cl-vb cl-vb-ok" title="' + esc(tip) + '">main line</span>') + "</span></div></td>"; } },
       { key: "signal", label: "Why hiring", get: function (p) { return p.signalReason || ""; }, render: function (p) {
           return '<td class="crm-c-signal"><div class="crm-id-t">' +
             (p.signalReason ? '<span class="crm-sig">' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') +
@@ -10486,7 +10597,13 @@
       ["company_size", function (p) { return p.companySize || ""; }], ["company_location", function (p) { return p.location || ""; }],
       ["industry", function (p) { return p.industry || ""; }], ["desk", function (p) { return p["function"] || ""; }],
       ["email", function (p) { return p.email || ""; }], ["email_status", vStatus], ["email_source", function (p) { return p.emailSource || ""; }],
-      ["phone", phoneOf], ["found_via", function (p) { return p.via || ""; }], ["confidence_tier", function (p) { return p.tier || ""; }],
+      ["phone", phoneOf],
+      // The employer's main line, kept as its OWN merge field so a sequence can never dial or
+      // text it as if it were the prospect's personal number.
+      ["company_phone", function (p) { return p.companyPhone || ""; }],
+      ["company_phone_display", function (p) { return p.companyPhoneDisplay || ""; }],
+      ["company_phone_source", function (p) { return p.companyPhoneSource || ""; }],
+      ["found_via", function (p) { return p.via || ""; }], ["confidence_tier", function (p) { return p.tier || ""; }],
       ["stage", clStatusLabel], ["sequence", function (p) { return p.sequenceName || ""; }],
       ["watch_url", function (p) { return (videoFor(p) || {}).watch || ""; }], ["video_gif_url", function (p) { return (videoFor(p) || {}).gif || ""; }],
       ["verified_at", function (p) { return (p.emailVerification && p.emailVerification.checkedAt) || ""; }]
@@ -10542,7 +10659,10 @@
       var hay = ((p.fullName || "") + " " + (p.title || "") + " " + (p.company || "") + " " +
         (p.email || "") + " " + (p.location || "") + " " + (p.jobLocation || "") + " " +
         (p.signalReason || "") + " " + (p.openRole || "") + " " + (p.industry || "") + " " +
-        (p["function"] || "")).toLowerCase();
+        (p["function"] || "") + " " +
+        // Searchable by company phone in both the stored and the displayed form, so pasting
+        // either "(415) 926-0123" or "4159260123" finds the row.
+        (p.companyPhone || "") + " " + (p.companyPhoneDisplay || "")).toLowerCase();
       return clFilter.split(/\s+/).every(function (t) { return hay.indexOf(t) >= 0; });
     }
 
@@ -11050,6 +11170,13 @@
             dRow("Company", p.company ? esc(p.company) : "") +
             dRow("Domain", p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener">' + esc(p.companyDomain) + "</a>" : "") +
             dRow("Headcount", n > 0 ? esc(n.toLocaleString()) : "") +
+            // The employer's main line, with the page it came from so it can be checked in one click.
+            dRow("Main line", p.companyPhone
+              ? '<a href="tel:' + esc(p.companyPhone) + '">' + esc(p.companyPhoneDisplay || p.companyPhone) + "</a>" +
+                (p.companyPhoneVia === "labeled" ? ' <span class="cl-vb cl-vb-risky" title="Read from page text next to a phone label. Confirm before dialing.">~ check</span>' : "")
+              : "") +
+            dRow("Line source", p.companyPhoneSource
+              ? '<a href="' + esc(p.companyPhoneSource) + '" target="_blank" rel="noopener">' + esc(p.companyPhoneSource) + "</a>" : "") +
             dRow("Location", p.location ? esc(p.location) : "") +
             dRow("Industry", p.industry ? esc(p.industry) : "") +
             dRow("Desk", p["function"] ? esc(p["function"]) : "")) +
