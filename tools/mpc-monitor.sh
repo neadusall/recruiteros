@@ -47,6 +47,15 @@ docker run --rm -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:r
 docker run --rm -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro -v /opt/recruiteros/mpc-out:/out \
   --env-file /tmp/send.env -e MPC_DAILY_CAP="${MPC_DAILY_CAP:-1500}" --entrypoint node recruiteros-app \
   /tools/followup.mjs --send >> "$LOG" 2>&1 || true
+
+# PUBLISH TODAY'S COLD CEILING (read-only, spends nothing). The portal's Senders tab, Send
+# Queue gauge and story card all read this ledger, so the number a person sees is the number
+# the sender just enforced. Runs AFTER the senders so it also captures this tick's sends;
+# running it here (not only inside a send) keeps the figure fresh on a tick that had nothing
+# to send, instead of going stale and reading as "the lane stopped".
+docker run --rm -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro -v /opt/recruiteros/mpc-out:/out \
+  --env-file /tmp/send.env --entrypoint node recruiteros-app \
+  /tools/batch.mjs --capacity >> "$LOG" 2>&1 || true
 rm -f /tmp/send.env
 
 # One reply monitor at a time: a fixed container name makes a still-running

@@ -19,7 +19,7 @@
 //
 // Read-only against the curated store; writes ONLY its own files under /out.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync, renameSync } from "node:fs";
 import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, roleFamily, roleFunctionGroup, buildCompanyKnowledge, buyerFit, companyKeyOf, isSeniorHire } from "./gates.mjs";
 import { writeEmail, signature, footer, greetingName, recruiterFor } from "./writer.mjs";
 import { pickVariant } from "./variants.mjs";
@@ -57,6 +57,10 @@ const MAILBOX_BASE = (process.env.SENDINGAC_MAILBOX_API_BASE || "https://api.cus
 
 const args = process.argv.slice(2);
 const SEND = args.includes("--send");
+// Read-only capacity readout. Publishes the cold-lane ledger the portal reads and exits
+// before any curation, drafting or API call, so the monitor can refresh the number every
+// tick for free. `--capacity --json` prints the ledger for scripts.
+const CAPACITY_ONLY = args.includes("--capacity");
 const LIMIT = Number((args.find(a => a.startsWith("--limit")) || "").split(/[=\s]/)[1] || (args.includes("--limit") ? args[args.indexOf("--limit") + 1] : "")) || (SEND ? 20 : 10);
 
 function loadArray(file) {
@@ -252,6 +256,120 @@ function sentTodayByBox() {
   return counts;
 }
 
+// ============================================================================
+// COLD-LANE CAPACITY (single source of truth, owner mandate 2026-08-19/08-20)
+//
+// These caps used to live inside main()'s send path, so the ONLY way to know what
+// the fleet could carry today was to run a send. Every other surface (the Senders
+// tab, the Send Queue gauge, the story card) re-derived it from the senders store's
+// provider labels and got a different, much larger number: on 2026-08-20 the portal
+// advertised 1,422 cold sends/day against a fleet whose real ceiling was ~800, because
+// 54 Zapmail boxes carried provider:"other" and were run up the generic 15/day warm-up
+// ramp, and 60 internal boxes were counted while their lane was parked.
+//
+// Hoisted to module scope so `--capacity` can publish exactly what the sender enforces:
+// same boxes, same per-box caps, same rest ledger, same per-domain ceiling. The app reads
+// the published snapshot; it never recomputes any of this from provider strings.
+// ============================================================================
+const PER_BOX = Number(process.env.MPC_PER_BOX_DAILY || 2);
+// Per-DOMAIN ceiling for the Google lane (research: keep a domain's total cold volume
+// under ~50-60/day once 2-3 boxes share it; every box on a domain shares its reputation).
+const GOOGLE_DOMAIN_CAP = Number(process.env.MPC_GOOGLE_DOMAIN_DAILY || 50);
+const domOf = (email) => String(String(email).split("@")[1] || "").toLowerCase();
+const COLD_CAP_FILE = process.env.MPC_COLD_CAP_FILE || "/data/snap_mpc_cold_capacity_v1.json";
+
+/** Per-box cold cap, by lane. Google boxes ramp weekly from THEIR OWN first cold send;
+ *  Sending.ac and the internal lane sit at the flat per-box number. `firstSend` is the
+ *  map from firstSendByBox(), passed in so a caller reads the ledgers once. */
+function capForBox(b, firstSend) {
+  if (b.google) {
+    const at = firstSend.get(b.email);
+    const week = at ? Math.floor(Math.max(0, Date.now() - Date.parse(at)) / (7 * 86_400_000)) : 0;
+    return GOOGLE_RAMP[Math.min(week, GOOGLE_RAMP.length - 1)];
+  }
+  return b.kind === "smtp" ? Math.min(PER_BOX, b.dailyCap || PER_BOX) : PER_BOX;
+}
+
+/**
+ * What the cold lane can actually carry today, and how much of it is already spent.
+ * Read-only: touches no API and spends nothing, so it is safe to run every tick.
+ *
+ * `ceiling` is the honest number for the UI: the sum of each usable box's own cap,
+ * clamped by the Google lane's per-domain ceiling. Boxes on resting domains and boxes
+ * in a parked lane are reported separately and NEVER folded into it.
+ */
+function coldCapacityLedger() {
+  const firstSend = firstSendByBox();
+  const boxCounts = sentTodayByBox();
+  const resting = restingDomains();
+  const allBoxes = recruiterBoxes();
+  const byLane = new Map();
+  const lane = (k) => {
+    let l = byLane.get(k);
+    if (!l) { l = { lane: k, boxes: 0, usableBoxes: 0, benchedBoxes: 0, ceiling: 0, benchedCeiling: 0, sentToday: 0, boxesWithHeadroom: 0 }; byLane.set(k, l); }
+    return l;
+  };
+  // Per-domain spend so the Google lane's shared-reputation ceiling clamps the total the
+  // same way it clamps the sender's own pick list.
+  const domSpent = new Map();
+  for (const [from, n] of boxCounts) { const d = domOf(from); if (d) domSpent.set(d, (domSpent.get(d) || 0) + n); }
+  const domRoom = new Map();
+
+  let ceiling = 0, benchedCeiling = 0, sentToday = 0, usableBoxes = 0, benchedBoxes = 0, withHeadroom = 0;
+  for (const b of allBoxes) {
+    const l = lane(b.fleet || "other");
+    const cap = capForBox(b, firstSend);
+    const used = boxCounts.get(b.email) || 0;
+    const d = domOf(b.email);
+    l.boxes++;
+    l.sentToday += used; sentToday += used;
+    if (resting.has(d)) { l.benchedBoxes++; l.benchedCeiling += cap; benchedBoxes++; benchedCeiling += cap; continue; }
+    // The Google lane's per-domain ceiling is a real limit on the fleet's total, not just
+    // on box selection: three 20/day boxes on one domain carry 50/day, not 60.
+    let eff = cap;
+    if (b.google) {
+      const room = domRoom.has(d) ? domRoom.get(d) : Math.max(0, GOOGLE_DOMAIN_CAP - (domSpent.get(d) || 0));
+      eff = Math.min(cap, room);
+      domRoom.set(d, Math.max(0, room - eff));
+    }
+    l.usableBoxes++; usableBoxes++;
+    l.ceiling += eff; ceiling += eff;
+    if (used < cap) { l.boxesWithHeadroom++; withHeadroom++; }
+  }
+  const lanes = [...byLane.values()].sort((a, b) => b.ceiling - a.ceiling);
+  return {
+    version: 1,
+    at: new Date().toISOString(),
+    workspaceId: LUME_WS,
+    perBox: PER_BOX,
+    googleRamp: GOOGLE_RAMP,
+    googleDomainCap: GOOGLE_DOMAIN_CAP,
+    lanesParked: [...(SMTP_LANE ? [] : ["internal"]), ...(GOOGLE_LANE ? [] : ["google"])],
+    boxes: allBoxes.length,
+    usableBoxes,
+    benchedBoxes,
+    boxesWithHeadroom: withHeadroom,
+    restingDomains: [...resting].sort(),
+    ceiling,
+    sentToday,
+    remaining: Math.max(0, ceiling - sentToday),
+    benchedCeiling,
+    lanes,
+  };
+}
+
+/** Publish the ledger where the app reads it. Best-effort: a failed write must never
+ *  stop a send run, it only leaves the UI showing the previous tick's number. */
+function publishColdCapacity() {
+  const led = coldCapacityLedger();
+  try {
+    const tmp = `${COLD_CAP_FILE}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(led));
+    renameSync(tmp, COLD_CAP_FILE);
+  } catch (e) { console.log(`  cold-capacity snapshot not written: ${e?.message || e}`); }
+  return led;
+}
+
 // Ariel's SMTP lane. Passwords sit AES-256-GCM-encrypted in the senders store (same scheme as
 // the app's lib/senders/crypto.ts: scrypt key from SENDERS_ENCRYPTION_KEY/APP_ENCRYPTION_KEY,
 // falling back to the app's built-in default when neither is set, which matches this prod box).
@@ -306,6 +424,26 @@ async function sendViaMailboxApi(fromEmail, to, subject, body) {
 async function main() {
   mkdirSync(OUT, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+  // ===== CAPACITY READOUT (read-only; nothing below this point runs) =====
+  // The portal's cold-send numbers come from HERE, not from the senders store's provider
+  // labels, so "what can we send today" has exactly one answer across the log, the Senders
+  // tab, the Send Queue gauge and the story card.
+  if (CAPACITY_ONLY) {
+    const led = publishColdCapacity();
+    if (args.includes("--json")) { console.log(JSON.stringify(led, null, 1)); return; }
+    console.log(`cold ceiling today : ${led.ceiling}/day`);
+    console.log(`already sent       : ${led.sentToday}`);
+    console.log(`remaining          : ${led.remaining}`);
+    console.log(`usable boxes       : ${led.usableBoxes} of ${led.boxes} (${led.boxesWithHeadroom} still under their own cap)`);
+    console.log(`benched            : ${led.benchedBoxes} boxes on ${led.restingDomains.length} resting domains, holding ${led.benchedCeiling}/day`);
+    if (led.lanesParked.length) console.log(`parked lanes       : ${led.lanesParked.join(", ")} (contribute 0)`);
+    for (const l of led.lanes) {
+      console.log(`  ${l.lane.padEnd(10)} ${String(l.ceiling).padStart(5)}/day across ${l.usableBoxes} usable (${l.sentToday} sent, ${l.benchedBoxes} benched holding ${l.benchedCeiling}/day)`);
+    }
+    console.log(`snapshot           : ${COLD_CAP_FILE}`);
+    return;
+  }
 
   // ===== SEND FUSE + BOUNCE VISIBILITY (evaluated before a single credit or token is spent) =====
   // Fail-CLOSED by design (owner mandate 2026-08-20): without fresh bounce data the fleet is
@@ -740,19 +878,11 @@ async function main() {
     return;
   }
 
-  const PER_BOX = Number(process.env.MPC_PER_BOX_DAILY || 2);
+  // PER_BOX / GOOGLE_DOMAIN_CAP / capForBox now live at module scope so `--capacity`
+  // publishes the very same numbers this send path enforces (see coldCapacityLedger).
   const firstSend = firstSendByBox();
-  const googleCapFor = (b) => {
-    const at = firstSend.get(b.email);
-    const week = at ? Math.floor(Math.max(0, Date.now() - Date.parse(at)) / (7 * 86_400_000)) : 0;
-    return GOOGLE_RAMP[Math.min(week, GOOGLE_RAMP.length - 1)];
-  };
-  const capFor = (b) => (b.google ? googleCapFor(b) : b.kind === "smtp" ? Math.min(PER_BOX, b.dailyCap || PER_BOX) : PER_BOX);
-  // Per-DOMAIN ceiling for the Google lane (research: keep a domain's total cold volume
-  // under ~50-60/day once 2-3 boxes share it; every box on a domain shares its reputation).
-  const GOOGLE_DOMAIN_CAP = Number(process.env.MPC_GOOGLE_DOMAIN_DAILY || 50);
+  const capFor = (b) => capForBox(b, firstSend);
   const domCounts = new Map();
-  const domOf = (email) => String(String(email).split("@")[1] || "").toLowerCase();
   const allBoxes = recruiterBoxes();
   if (!allBoxes.length) { console.log("no recruiter sending boxes found; aborting send"); return; }
   const resting = restingDomains();
@@ -763,7 +893,12 @@ async function main() {
   for (const [from, n] of boxCounts) { const d = domOf(from); if (d) domCounts.set(d, (domCounts.get(d) || 0) + n); }
   const avail = fleet.filter(b => (boxCounts.get(b.email) || 0) < capFor(b) && !(b.google && (domCounts.get(domOf(b.email)) || 0) >= GOOGLE_DOMAIN_CAP));
   const apiBoxes = fleet.filter(b => b.kind !== "smtp").length;
-  console.log(`\n[SEND] fleet ${fleet.length} boxes (api ${apiBoxes} + smtp ${fleet.length - apiBoxes}${SMTP_LANE ? "" : "; own-SMTP lane parked"}${GOOGLE_LANE ? "" : "; google lane parked"}) | under per-box cap (${PER_BOX}/day): ${avail.length}`);
+  // The ceiling THIS fleet carries today, from the same ledger the portal reads, so the
+  // log line and the UI can never tell two stories. Printing one flat "(2/day)" here was
+  // how the Google lane's own 8-20/day ramp stayed invisible.
+  const coldCap = publishColdCapacity();
+  console.log(`\n[SEND] fleet ${fleet.length} boxes (api ${apiBoxes} + smtp ${fleet.length - apiBoxes}${SMTP_LANE ? "" : "; own-SMTP lane parked"}${GOOGLE_LANE ? "" : "; google lane parked"}) | with headroom: ${avail.length}`);
+  console.log(`  cold ceiling today: ${coldCap.ceiling}/day across ${coldCap.usableBoxes} usable boxes (${coldCap.lanes.map((l) => `${l.lane} ${l.ceiling}`).join(" + ")}) | ${coldCap.sentToday} spent, ${coldCap.remaining} left | ${coldCap.benchedBoxes} boxes benched holding ${coldCap.benchedCeiling}/day`);
   const logFile = `${OUT}/sent-${stamp}.jsonl`;
   // Provider-compatible routing: a recipient must never be assigned to a box whose fleet
   // the recipient's mail host is currently rejecting (every attempt is a burned send AND

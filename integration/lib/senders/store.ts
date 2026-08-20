@@ -11,6 +11,7 @@ import { rid, nowIso } from "../core/ids";
 import { loadSnapshot, debouncedSaver } from "../db";
 import { encryptSecret, decryptSecret } from "./crypto";
 import { COLD_PER_INBOX, SENDING_AC_PER_INBOX, WARMING_PER_INBOX, INBOXES_PER_DOMAIN, coldCapFor, coldMaxPerInbox } from "./limits";
+import { coldCapacity as coldLaneLedger, type ColdCapacity } from "./coldLane";
 import type { SenderInbox, SenderInboxPublic, SenderProvider, SenderStatus, RecruiterPool } from "./types";
 
 interface SendersState { inboxes: SenderInbox[]; lastResetDay?: string; }
@@ -527,6 +528,15 @@ export interface ProviderCapacity {
 }
 
 export interface SendCapacity {
+  /**
+   * THE cold-outreach number, published by the sender that actually applies the caps
+   * (tools/batch.mjs --capacity). Every surface that answers "what can we send today"
+   * reads this, NOT the app-lane fields below: those describe the app's own warm-up ramp
+   * over the whole pool and knowingly count boxes the cold lane cannot use (a parked
+   * internal lane, Zapmail boxes still warming). null when the sender has not published
+   * yet, in which case a surface must say so rather than show the app-lane sum instead.
+   */
+  cold: ColdCapacity | null;
   coldPerInbox: number;
   warmingPerInbox: number;
   inboxesPerDomain: number;
@@ -552,7 +562,7 @@ export interface SendCapacity {
  */
 export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
   await hydrate();
-  const resting = await restingDomainsNow();
+  const [resting, cold] = await Promise.all([restingDomainsNow(), coldLaneLedger(workspaceId).catch(() => null)]);
   const mine = state.inboxes.filter(
     (m) => m.workspaceId === workspaceId && (m.status === "active" || m.status === "warming"),
   );
@@ -625,6 +635,7 @@ export async function sendCapacity(workspaceId: string): Promise<SendCapacity> {
     }))
     .sort((a, b) => (b.inboxes + b.benchedInboxes) - (a.inboxes + a.benchedInboxes));
   return {
+    cold,
     coldPerInbox: coldMaxPerInbox(), warmingPerInbox: WARMING_PER_INBOX, inboxesPerDomain: INBOXES_PER_DOMAIN,
     inboxes, domains: domains.size,
     coldCapacity, coldUsedToday, coldRemaining: Math.max(0, coldCapacity - coldUsedToday),

@@ -18,7 +18,7 @@
 
 import { requireSession, ok } from "../../../../lib/api";
 import { loadSnapshot } from "../../../../lib/db";
-import { fleetOverview } from "../../../../lib/senders";
+import { fleetOverview, coldCapacity } from "../../../../lib/senders";
 import type { FleetCard } from "../../../../lib/senders";
 
 interface MpcStats {
@@ -114,25 +114,33 @@ export async function GET(req: Request) {
   // rotation (Sending.ac + the Google lane; internal stays 0 while parked): when
   // Sending.ac went fully benched the evening of 8/19, a Sending.ac-only ceiling
   // showed "cap 0" while the Google lane was live and sending.
+  // Fleet truth: the ledger the SENDER publishes (batch.mjs --capacity). Box counts and the
+  // ceiling come from the same object, so the headline and the fleet cards cannot drift.
   let fleetBoxes = 0, usableBoxes = 0, benchedBoxes = 0, fleetCeiling = 0, perBox = 2;
   let fleetCards: FleetCard[] = [];
+  let coldLedger: Awaited<ReturnType<typeof coldCapacity>> = null;
   try {
-    fleetCards = await fleetOverview(g.ctx.workspace.id);
-    for (const f of fleetCards) fleetCeiling += f.coldToday;
-    for (const f of fleetCards) {
-      if (f.key !== "sendingac" && f.key !== "google") continue; // the cold rotation
-      const usable = Math.max(0, f.boxes.active + f.boxes.warming - f.boxes.benched);
-      usableBoxes += usable;
-      benchedBoxes += f.boxes.benched;
+    [fleetCards, coldLedger] = await Promise.all([
+      fleetOverview(g.ctx.workspace.id),
+      coldCapacity(g.ctx.workspace.id).catch(() => null),
+    ]);
+    if (coldLedger) {
+      fleetCeiling = coldLedger.ceiling;
+      usableBoxes = coldLedger.usableBoxes;
+      benchedBoxes = coldLedger.benchedBoxes;
+      fleetBoxes = coldLedger.boxes;
+      perBox = coldLedger.perBox;
     }
-    fleetBoxes = usableBoxes + benchedBoxes;
-    const sac = fleetCards.find((f) => f.key === "sendingac");
-    const sacUsable = sac ? Math.max(0, sac.boxes.active + sac.boxes.warming - sac.boxes.benched) : 0;
-    if (sac && sacUsable > 0) perBox = Math.max(1, Math.round(sac.capacity.today / sacUsable));
   } catch { /* fleet math is best-effort; the ramp cap still renders */ }
-  const capToday = fleetBoxes > 0 ? Math.min(ramp.cap, fleetCeiling) : ramp.cap;
-  const remaining = Math.max(0, capToday - sentToday);
-  const fleetLimited = fleetBoxes > 0 && fleetCeiling < ramp.cap;
+  // Both ceilings bind: reputation says how much we are ALLOWED to send, the fleet says how
+  // much it can physically carry. Whichever is lower is the real number. When the sender has
+  // not published, the ramp stands alone and the card says the fleet figure is unknown.
+  const capToday = coldLedger ? Math.min(ramp.cap, fleetCeiling) : ramp.cap;
+  // Sends today come from the ledger too when we have it: `stats.sentToday` counts the app
+  // lane's own counters, which the MPC sender never writes, so it reads 0 on a busy day.
+  const coldSentToday = coldLedger ? Math.max(sentToday, coldLedger.sentToday) : sentToday;
+  const remaining = Math.max(0, capToday - coldSentToday);
+  const fleetLimited = !!coldLedger && fleetCeiling < ramp.cap;
 
   const pl = placementStatus(placement);
 
@@ -162,9 +170,9 @@ export async function GET(req: Request) {
   narrative.push(
     fleetLimited
       ? `Reputation allows ${ramp.cap.toLocaleString()} cold emails today (ramp: ${ramp.base}/day base, growing toward ${ramp.ceiling.toLocaleString()}), but ${benchedBoxes.toLocaleString()} of the fleet's ${fleetBoxes.toLocaleString()} mailboxes sit on resting domains, so the real ceiling right now is ${capToday.toLocaleString()} across ${usableBoxes.toLocaleString()} usable mailboxes. ` +
-        `${sentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
+        `${coldSentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
       : `The fleet can send up to ${capToday.toLocaleString()} cold emails today (reputation ramp: ${ramp.base}/day base, growing toward ${ramp.ceiling.toLocaleString()}). ` +
-        `${sentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
+        `${coldSentToday.toLocaleString()} went out so far, leaving room for ${remaining.toLocaleString()}.`
   );
   if (verdict === "fleet") {
     narrative.push(
@@ -206,7 +214,8 @@ export async function GET(req: Request) {
     verdict, headline, narrative: narrative.filter(Boolean),
     capacity: {
       capToday, rampCap: ramp.cap, base: ramp.base, ceiling: ramp.ceiling, growthUnlocked: ramp.growthUnlocked,
-      sentToday, remaining, fleetBoxes, usableBoxes, benchedBoxes, perBox,
+      sentToday: coldSentToday, remaining, fleetBoxes, usableBoxes, benchedBoxes, perBox,
+      cold: coldLedger,
     },
     // Per-infrastructure capacity for the Dashboard's real-time card: what each
     // fleet can feed the COLD lane today (rest-aware; the same coldToday summed
