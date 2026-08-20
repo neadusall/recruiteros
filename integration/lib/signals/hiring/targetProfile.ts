@@ -268,6 +268,7 @@ export function hiringManagerTarget(
   const base = baseRungForRole(intel.seniority);
   const { shift, stage } = orgCompression(opts?.companySize);
   const ownerRung = Math.min(3, base + shift);
+  const execHire = base >= 2; // a director+ req is itself a leadership hire owned by an exec
 
   // Candidate titles: the owner rung first, then up the chain of command (2 titles/rung keeps the
   // findable seniors inside the first few — which is what the search queries use). Founder tail for
@@ -276,7 +277,13 @@ export function hiringManagerTarget(
   for (let r = ownerRung; r <= 3; r++) {
     for (const t of ladder[r].slice(0, 2)) if (!titles.includes(t)) titles.push(t);
   }
-  if (stage === "flat / founder-led" || ownerRung >= 3) {
+  // FOUNDER TAIL: only for a req that is itself a leadership hire, where the founder/CEO genuinely
+  // IS the decision-maker. It used to be appended whenever the company merely looked FLAT, which
+  // made the resolver go hunting for founders on ordinary IC reqs — and since the owner-only
+  // mandate (2026-08-20) the send gate holds every one of those, so that behaviour now spends
+  // naming budget producing contacts that can never be mailed. At a flat company the compression
+  // above has already lifted the target to the Head/VP rung, which is the right person there.
+  if (execHire) {
     for (const t of FOUNDER_TAIL) if (!titles.includes(t)) titles.push(t);
   }
 
@@ -285,7 +292,6 @@ export function hiringManagerTarget(
   const floorRung = Math.max(0, ownerRung - 1);
   const seniorityFloor = RUNG_SENIORITY[floorRung];
 
-  const execHire = base >= 2; // a director+ req is itself a leadership hire owned by an exec
   const ownerLabel = titles[0] ?? RUNG_SENIORITY[ownerRung];
   const rationale = execHire
     ? `"${roleTitle}" is a ${intel.seniority}-level ${fn} leadership hire at a ${stage} company — owned by the ${fn} exec (${ownerLabel}) or a founder.`
