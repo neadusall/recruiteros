@@ -254,12 +254,13 @@ export function assessProspect(p) {
     const strictOwner = (process.env.MPC_TARGETING_MODE || "transition").toLowerCase() === "strict";
     const isOwner = !!(dmFn && dmFn !== "universal" && dmFn === roleFn);
     if (execReq) {
-      // A leadership hire: the whole-company exec or that function's own exec both qualify.
-      if (dmFn && dmFn !== "universal" && dmFn !== roleFn) {
+      // A leadership hire: the whole-company exec or that function's own exec both qualify,
+      // and so does the talent leader, who typically runs executive search at that company.
+      if (dmFn && dmFn !== "universal" && dmFn !== roleFn && !isTalentBuyer(p.managerTitle)) {
         failures.push(`decision-maker "${p.managerTitle}" owns ${dmFn}, not the ${roleFn} function this leadership role sits in`);
       }
-    } else if (isOwner) {
-      /* the person who owns the req: always the right target, in either mode */
+    } else if (isOwner || isTalentBuyer(p.managerTitle)) {
+      /* the owner of the req, or the talent leader who buys hiring for every function */
     } else if (!strictOwner) {
       // Transition: everything except a clearly different-function exec.
       if (dmFn && dmFn !== "universal" && dmFn !== roleFn) {
@@ -459,6 +460,40 @@ export function dmFunction(title) {
   return null;
 }
 
+/**
+ * TALENT BUYER (owner call 2026-08-20).
+ *
+ * What this desk sells is recruiting, and hiring is the People/HR function's OWN remit whatever
+ * function the req sits in: a CHRO or Head of Talent signs search agreements for engineering and
+ * finance reqs alike, in a way a CFO signing off on an engineering hire does not. So a People/HR
+ * leader is a legitimate buyer for ANY req, rather than being held for "owning the wrong
+ * function". This was the single largest recoverable pool in the gate: on 2026-08-20, 7,772 of
+ * 12,104 curated rows were held on decision-maker mismatch and People/HR titles led every one of
+ * the top rejection reasons.
+ *
+ * This does NOT weaken the rule the gate exists for. The 2026-08-12 leak was a Founder & CEO
+ * receiving a Lead Accountant pitch, and a CEO is still held. The function owner is still
+ * PREFERRED wherever the pool knows one: buyerFit ranks the owner above the talent leader and
+ * batch.mjs sends in rank order, so this only stops the talent leader being discarded when they
+ * are the best contact actually available for that req.
+ *
+ * Deliberately narrow, in two ways. It requires dmFunction's "People / HR" verdict, and it
+ * requires the person to be a LEADER who carries budget. In-house practitioners are excluded
+ * on purpose: an HR business partner, TA partner, specialist, generalist or coordinator does
+ * not sign a search agreement, and in-house talent acquisition staff in particular are usually
+ * measured on REDUCING agency spend, so they are the worst audience for this pitch, not the
+ * best. Without that guard "Talent Acquisition Partner" qualified, because VALID_DM_TITLE
+ * matches the bare word "partner".
+ */
+const TALENT_PRACTITIONER = /\b(business partner|hrbp|partner|specialist|generalist|coordinator|associate|assistant|consultant|analyst|administrator|advisor|recruiter|sourcer)\b/;
+const TALENT_LEADER = /\b(chro|chief|vp|svp|evp|vice president|head of|director|officer)\b/;
+export function isTalentBuyer(managerTitle) {
+  const t = String(managerTitle || "").toLowerCase();
+  if (dmFunction(t) !== "People / HR") return false;
+  if (TALENT_PRACTITIONER.test(t)) return false;
+  return TALENT_LEADER.test(t);
+}
+
 /* ------------------------------------------------------------------------------------------
  * BUYER CORRELATION (title-to-title): the job title determines who the legitimate buyer is.
  * The 2026-08-12 Ping Identity leak (Founder & CEO emailed a Lead Accountant pitch) happened
@@ -514,7 +549,7 @@ export function buyerFit(p, know, opts = {}) {
 
   if (roleFn === "Executive" || isSeniorHire(p.role)) {
     // Leadership hire: the whole-company exec IS the decision-maker for this particular role.
-    if (fn && fn !== "universal" && fn !== roleFn) {
+    if (fn && fn !== "universal" && fn !== roleFn && !isTalentBuyer(p.managerTitle)) {
       return { ok: false, why: `"${p.managerTitle}" owns ${fn}, not the ${roleFn} function this leadership role sits in` };
     }
     return { ok: true, rank: 0 };
@@ -523,6 +558,9 @@ export function buyerFit(p, know, opts = {}) {
     return { ok: false, why: `"${p.managerName}" is a company-level buyer row, never resolved against the "${p.role}" req` };
   }
   if (fn && fn !== "universal" && fn === roleFn) return { ok: true, rank: 0 };
+  // The talent leader buys hiring for every function, so they are a valid buyer for any req --
+  // but rank 1, BELOW the function owner, so a req that knows its real owner still goes there.
+  if (isTalentBuyer(p.managerTitle)) return { ok: true, rank: 1 };
   if (fn === "universal") {
     return {
       ok: false,

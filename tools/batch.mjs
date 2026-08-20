@@ -20,7 +20,7 @@
 // Read-only against the curated store; writes ONLY its own files under /out.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync, renameSync } from "node:fs";
-import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, roleFamily, roleFunctionGroup, buildCompanyKnowledge, buyerFit, companyKeyOf, isSeniorHire } from "./gates.mjs";
+import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, roleFamily, roleFunctionGroup, buildCompanyKnowledge, buyerFit, companyKeyOf, isSeniorHire, isTalentBuyer } from "./gates.mjs";
 import { writeEmail, signature, footer, greetingName, recruiterFor } from "./writer.mjs";
 import { pickVariant } from "./variants.mjs";
 import { classifyEmails } from "./mxclass.mjs";
@@ -597,9 +597,13 @@ async function main() {
   const dmRank = (p) => {
     const fn = dmFunction(p.managerTitle);
     if (fn && fn !== "universal" && fn === roleFunctionGroup(roleFamily(p.role))) return 0;
-    if (fn === null) return 1;
-    if (fn === "universal") return 2;
-    return 3;
+    // The talent leader owns hiring for every function, so they outrank an ambiguous senior
+    // and a whole-company exec for a recruiting pitch, while never displacing the req's own
+    // function owner above (gates.isTalentBuyer, owner call 2026-08-20).
+    if (isTalentBuyer(p.managerTitle)) return 1;
+    if (fn === null) return 2;
+    if (fn === "universal") return 3;
+    return 4;
   };
   const bestByReq = new Map();
   for (const p of gated) {
