@@ -20,6 +20,7 @@
 //   node /opt/recruiteros/tools/numbers-audit.mjs
 
 import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, renameSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const VOL = process.env.ROS_VOLUME || "/var/lib/docker/volumes/recruiteros_app_data/_data";
 const MPC_OUT = process.env.MPC_OUT_DIR || "/opt/recruiteros/mpc-out";
@@ -180,29 +181,41 @@ if (stats) {
 }
 
 /* =========================================================================
-   5. TOOL DRIFT — the mechanism behind fault #2. Every MPC tool exists twice:
-   integration/scripts/mpc/<x> in the repo, and tools/<x>, which is the copy
-   systemd actually runs. When they differ, a shipped feature may never have
-   run in production. Cheap to check, and it is exactly what went unnoticed.
+   5. ONE COPY OF EACH TOOL. The mechanism behind fault #2 was that every MPC
+   tool existed twice: integration/scripts/mpc/<x> in the repo, and tools/<x>,
+   which is the copy systemd actually runs. Both carried "keep both in sync"
+   comments, and they were not in sync: the stale copy silently unshipped the
+   Dashboard motion split for two days. That tree was deleted on 2026-08-20 and
+   tools/ is now the only copy. This check keeps it that way, because the
+   cheapest moment to stop it coming back is the day someone recreates it.
+
+   It also catches the other half of the same fault: a tool RUNNING in prod that
+   no commit has ever captured, which any rebuild would silently lose.
    ========================================================================= */
 {
-  const A = `${REPO}/tools`, B = `${REPO}/integration/scripts/mpc`;
-  const drifted = [];
-  let compared = 0;
+  const ghost = `${REPO}/integration/scripts/mpc`;
+  let ghostFiles = [];
+  try { ghostFiles = readdirSync(ghost); } catch { /* correctly absent */ }
+  add("toolcopies", "Engine · one copy of each tool, and it is the one that runs",
+    ghostFiles.length ? "bad" : "ok",
+    ghostFiles.length ? `a second tool tree is back (${ghostFiles.length} files)` : "single tree",
+    ghostFiles.length
+      ? "integration/scripts/mpc/ has returned. Only tools/ is ever executed, so a change landing in that tree ships nothing. Delete it and make the change in tools/."
+      : "");
+
+  // Untracked-but-running: a tool systemd invokes that git has never seen.
+  let untracked = [];
   try {
-    for (const f of readdirSync(B)) {
-      const a = `${A}/${f}`, b = `${B}/${f}`;
-      if (!existsSync(a)) continue;
-      compared++;
-      try { if (readFileSync(a, "utf8") !== readFileSync(b, "utf8")) drifted.push(f); } catch { /* unreadable */ }
-    }
-  } catch { /* one of the trees is absent */ }
-  // Drift is not automatically wrong (tools/ is usually the newer, live copy), but every
-  // instance is a place where "shipped" and "running" can quietly diverge.
-  const status = !compared ? "warn" : drifted.length === 0 ? "ok" : "warn";
-  add("tooldrift", "Engine · the tool that runs vs the tool in the repo", status,
-    compared ? `${drifted.length} of ${compared} duplicated tools differ` : "could not compare the two trees",
-    drifted.length ? `Only tools/ runs. Check the direction of each difference before trusting a feature to be live: ${drifted.slice(0, 8).join(", ")}${drifted.length > 8 ? `, +${drifted.length - 8} more` : ""}` : "");
+    untracked = execFileSync("git", ["-C", REPO, "ls-files", "--others", "--exclude-standard", "tools/"], { encoding: "utf8" })
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => /^tools[/][^/]+[.](mjs|sh)$/.test(l));
+  } catch { /* not a checkout, or git unavailable */ }
+  add("toolstracked", "Engine · every running tool is in the repo", untracked.length ? "bad" : "ok",
+    untracked.length ? `${untracked.length} untracked` : "all tracked",
+    untracked.length
+      ? `These run in production but no commit contains them, so a rebuild loses them: ${untracked.slice(0, 6).join(", ")}${untracked.length > 6 ? `, +${untracked.length - 6} more` : ""}`
+      : "");
 }
 
 /* =========================================================================

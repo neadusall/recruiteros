@@ -10,10 +10,11 @@
 #     their service is running, so the next tick is last-trigger + the cadence.
 #   - mpc-daily.timer    = the once-a-day supply run (search seeding + full send).
 #
-# Runs on the HOST (it needs systemctl) at the end of every mpc-monitor tick —
-# see /opt/recruiteros/tools/mpc-monitor.sh — so the snapshot is at most one
-# tick stale. Deployed copy lives in /opt/recruiteros/tools/ (untracked there;
-# this file is the tracked source — keep both in sync when editing).
+# Runs on the HOST (it needs systemctl) at the end of every mpc-monitor tick,
+# so the snapshot is at most one tick stale. This file IS the deployed copy:
+# /opt/recruiteros/tools/ is what systemd runs, and a git pull updates it in
+# place. There is no second copy to keep in sync -- that arrangement is what
+# silently unshipped the Dashboard motion split on 2026-08-18.
 #
 # Output: /data snapshot `mpc_schedule_v1`, read by GET /api/in-market/track
 # (the `sending` block). The app only ever READS this key, so a host write
@@ -23,7 +24,6 @@ set -euo pipefail
 SNAP=/var/lib/docker/volumes/recruiteros_app_data/_data/snap_mpc_schedule_v1.json
 DRAIN_MIN="${MPC_DRAIN_EVERY_MIN:-20}"
 
-# systemd "Wed 2026-08-12 16:16:00 UTC" (or empty / "n/a" / "infinity") -> ISO-8601 or "".
 iso() {
   local v="${1:-}"
   case "$v" in ""|n/a|infinity) echo ""; return;; esac
