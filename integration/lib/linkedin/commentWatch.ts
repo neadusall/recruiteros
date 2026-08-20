@@ -598,6 +598,11 @@ interface WatchState {
    *  a directive applies once, later UI edits win, a NEW directive value
    *  applies once again. */
   limitsMandate: Record<string, string>;
+  /** ws -> the per-seat send logs were rebuilt once from posted items when
+   *  the throttle went per-seat (2026-08-20). Without this backfill a seat
+   *  that already posted today would start from a zero count and could run
+   *  its full fresh allowance on top of what it actually sent. */
+  seatLogBuilt: Record<string, boolean>;
 }
 
 /** Bumped 2026-08-19: drafts must close with a call to action (owner ask).
@@ -615,7 +620,7 @@ interface WatchState {
 const COMMENT_COPY_EPOCH = 4;
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -697,6 +702,7 @@ async function hydrate(): Promise<void> {
           redraftEpoch: snap.redraftEpoch ?? {},
           autopostMandate: snap.autopostMandate ?? {},
           limitsMandate: snap.limitsMandate ?? {},
+          seatLogBuilt: snap.seatLogBuilt ?? {},
         };
       }
       hydrated = true;
@@ -834,6 +840,7 @@ async function autoExecute(workspaceId: string): Promise<number> {
         || i.commentStatus === "suggested"))
     .sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt));
   let sent = 0;
+  const commentedSeats = new Set<string>();
   for (const item of open) {
     if (sent >= AUTO_PER_TICK) break;
     try {
@@ -847,12 +854,17 @@ async function autoExecute(workspaceId: string): Promise<number> {
         // for this workspace, however wide open the rest of autopilot is. The
         // draft simply stays on the card waiting for a one-tap approval.
         if (!commentLimitsFor(workspaceId).autoPost) continue;
-        // The throttle is re-read every time: one comment per tick at most,
-        // and the spacing gate means the rest of a tick's backlog waits.
+        // The throttle is per SEAT (owner mandate 2026-08-20: every recruiter
+        // runs the lane on their own walls): the item's assigned seat is the
+        // one gated, so five connected recruiters can each take their slot in
+        // the same tick while any one seat still posts at most once per tick,
+        // and its spacing gate holds the rest of that seat's backlog.
         // A refusal leaves the draft open for the next slot.
-        if (commentThrottleFor(workspaceId).blockedReason) continue;
+        const seatId = item.accountId;
+        if (!seatId || commentedSeats.has(seatId)) continue;
+        if (commentThrottleFor(workspaceId, seatId).blockedReason) continue;
         const r = await approvePostComment(workspaceId, "", APPROVER, item.id);
-        if (r.accepted) sent++;
+        if (r.accepted) { sent++; commentedSeats.add(seatId); }
         continue;
       }
       if (item.connectStatus === "suggested" && sent < AUTO_PER_TICK) {
@@ -889,6 +901,9 @@ export interface CommentThrottle {
   nextSlotAt?: string;
   /** Set when a comment right now would be refused, and why. */
   blockedReason?: string;
+  /** Aggregate view only: how many connected seats the totals span. The
+   *  perDay/perWeek fields stay the PER-SEAT configuration. */
+  seats?: number;
 }
 
 function seedHash(s: string): number {
@@ -942,13 +957,25 @@ export async function setCommentLimits(
  * date so it is stable all day (the number on the card does not flap) and
  * different tomorrow: a desk that posts exactly 8 comments every single day
  * is a pattern, and patterns are what get looked at.
+ *
+ * PER SEAT since 2026-08-20 (owner mandate: every recruiter runs the lane):
+ * pass the seat's accountId and the limits, allowance, and jitter seed are
+ * that RECRUITER's, so five connected seats each carry their own 12-16/day
+ * rather than splitting one workspace budget. Without an accountId the
+ * legacy workspace-wide numbers come back (kept for display fallback and
+ * old tests; the posting gates always pass the seat).
  */
-function dayAllowanceFor(workspaceId: string, day: string): number {
+function dayAllowanceFor(workspaceId: string, day: string, accountId?: string): number {
   const { perDay } = commentLimitsFor(workspaceId);
   if (perDay <= 0) return 0;
-  const r = (seedHash(`${workspaceId}:${day}:allow`) % 1000) / 1000;
+  const r = (seedHash(`${workspaceId}:${accountId ? `${accountId}:` : ""}${day}:allow`) % 1000) / 1000;
   const factor = 1 - COMMENT_DAY_JITTER + r * 2 * COMMENT_DAY_JITTER;
   return Math.max(1, Math.round(perDay * factor));
+}
+
+/** Per-seat send-log key. The bare workspace key stays the all-seats log. */
+function seatLogKey(workspaceId: string, accountId: string): string {
+  return `${workspaceId}::${accountId}`;
 }
 
 /** The randomized spacing owed after the comment logged at `lastIso`. */
@@ -957,9 +984,10 @@ function gapMinutesFor(workspaceId: string, lastIso: string): number {
   return Math.round(COMMENT_MIN_GAP_MIN + r * (COMMENT_MAX_GAP_MIN - COMMENT_MIN_GAP_MIN));
 }
 
-/** Day count, rolling-week count, and the most recent send. */
-function commentUsage(workspaceId: string): { today: number; week: number; last?: string } {
-  const log = state.commentLog[workspaceId] ?? [];
+/** Day count, rolling-week count, and the most recent send. With an
+ *  accountId the counts are that seat's own; without, the whole desk's. */
+function commentUsage(workspaceId: string, accountId?: string): { today: number; week: number; last?: string } {
+  const log = state.commentLog[accountId ? seatLogKey(workspaceId, accountId) : workspaceId] ?? [];
   const day = nowIso().slice(0, 10);
   const weekCutoff = Date.now() - 7 * 86_400_000;
   let today = 0;
@@ -977,11 +1005,11 @@ function commentUsage(workspaceId: string): { today: number; week: number; last?
  * the randomized spacing. The engine's own `interactions` cap sits above all
  * of this and can still refuse after we say yes.
  */
-export function commentThrottleFor(workspaceId: string): CommentThrottle {
+export function commentThrottleFor(workspaceId: string, accountId?: string): CommentThrottle {
   const limits = commentLimitsFor(workspaceId);
   const day = nowIso().slice(0, 10);
-  const allowance = dayAllowanceFor(workspaceId, day);
-  const use = commentUsage(workspaceId);
+  const allowance = dayAllowanceFor(workspaceId, day, accountId);
+  const use = commentUsage(workspaceId, accountId);
   const t: CommentThrottle = {
     enabled: limits.enabled,
     autoPost: limits.autoPost,
@@ -1004,7 +1032,7 @@ export function commentThrottleFor(workspaceId: string): CommentThrottle {
     return t;
   }
   if (use.last) {
-    const gap = gapMinutesFor(workspaceId, use.last);
+    const gap = gapMinutesFor(accountId ? seatLogKey(workspaceId, accountId) : workspaceId, use.last);
     const readyAt = new Date(use.last).getTime() + gap * 60_000;
     if (Date.now() < readyAt) {
       t.nextSlotAt = new Date(readyAt).toISOString();
@@ -1015,10 +1043,16 @@ export function commentThrottleFor(workspaceId: string): CommentThrottle {
   return t;
 }
 
-/** Log a comment that the engine accepted. Only accepted sends count. */
-function recordComment(workspaceId: string, text: string): void {
+/** Log a comment that the engine accepted. Only accepted sends count. The
+ *  send lands in the desk-wide log (stats, dup window) AND the posting
+ *  seat's own log (the per-recruiter day/week/spacing walls). */
+function recordComment(workspaceId: string, text: string, accountId?: string): void {
   const log = state.commentLog[workspaceId] ?? (state.commentLog[workspaceId] = []);
   log.push(nowIso());
+  if (accountId) {
+    const seatLog = state.commentLog[seatLogKey(workspaceId, accountId)] ?? (state.commentLog[seatLogKey(workspaceId, accountId)] = []);
+    seatLog.push(nowIso());
+  }
   const recent = state.commentRecent[workspaceId] ?? (state.commentRecent[workspaceId] = []);
   recent.push(text);
   if (recent.length > COMMENT_DUP_WINDOW) state.commentRecent[workspaceId] = recent.slice(-COMMENT_DUP_WINDOW);
@@ -1550,6 +1584,26 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     state.limitsMandate[workspaceId] = m;
     await setCommentLimits(workspaceId, { perDay, perWeek });
     console.log(`[comment-radar] ${workspaceId}: comment limits set to ${perDay}/day base, ${perWeek}/week (owner mandate via env)`);
+  }
+
+  // One-shot 2026-08-20, the day the throttle went per-seat: rebuild each
+  // seat's send log from the posted items that still remember which seat
+  // posted them, so a seat that already sent today starts from its true
+  // count instead of zero (and cannot run a fresh full allowance on top of
+  // what its profile actually did). The desk-wide log stays untouched.
+  if (!state.seatLogBuilt[workspaceId]) {
+    state.seatLogBuilt[workspaceId] = true;
+    const cutoff = Date.now() - COMMENT_LOG_KEEP_DAYS * 86_400_000;
+    const rebuilt: Record<string, string[]> = {};
+    for (const i of state.items) {
+      if (i.workspaceId !== workspaceId || i.kind !== "poster" || i.commentStatus !== "approved" || !i.accountId) continue;
+      const at = i.commentPostedAt ?? i.updatedAt;
+      if (!at || new Date(at).getTime() < cutoff) continue;
+      (rebuilt[seatLogKey(workspaceId, i.accountId)] ??= []).push(at);
+    }
+    for (const [k, arr] of Object.entries(rebuilt)) state.commentLog[k] = arr.sort();
+    save();
+    console.log(`[comment-radar] ${workspaceId}: per-seat send logs rebuilt (${Object.keys(rebuilt).length} seats)`);
   }
 
   const scanned = 0;
@@ -2248,8 +2302,14 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0 };
   const stats = huntStatsFor(workspaceId);
   // Public-comment lane: on/off, and how deep its approval queue may get.
+  // The cap scales with the connected seats: five recruiters each burning
+  // their own daily allowance need five seats' worth of drafts queued.
   const commentLane = commentLimitsFor(workspaceId).enabled;
-  const commentQueueCap = COMMENT_QUEUE_MULTIPLE * dayAllowanceFor(workspaceId, nowIso().slice(0, 10));
+  const scanDay = nowIso().slice(0, 10);
+  const commentQueueCap = COMMENT_QUEUE_MULTIPLE * Math.max(
+    dayAllowanceFor(workspaceId, scanDay),
+    accounts.reduce((sum, a) => sum + dayAllowanceFor(workspaceId, scanDay, a.accountId), 0),
+  );
   let pendingComments = state.items.filter(
     (i) => i.workspaceId === workspaceId && i.commentStatus === "suggested",
   ).length;
@@ -2570,6 +2630,32 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
     .filter((i) => i.workspaceId === workspaceId && i.kind === "poster" && i.commentStatus === "approved")
     .sort((a, b) => trackRank(a) - trackRank(b)
       || (b.commentPostedAt ?? b.updatedAt).localeCompare(a.commentPostedAt ?? a.updatedAt));
+  // The card's throttle: per-seat since 2026-08-20 (owner mandate: every
+  // recruiter runs the lane on their own walls). The panel shows the DESK's
+  // day - the sum of every connected seat's jittered allowance and usage -
+  // while perDay/perWeek stay the per-seat configuration the inputs edit.
+  // Blocked only when EVERY seat is walled; the next slot is the earliest
+  // any seat frees up.
+  const seatAccounts = await connectedAccounts(workspaceId);
+  const seatThrottles = seatAccounts.map((a) => commentThrottleFor(workspaceId, a.accountId));
+  const baseThrottle = commentThrottleFor(workspaceId);
+  const allSeatsBlocked = seatThrottles.length > 0 && seatThrottles.every((t) => t.blockedReason);
+  const commentThrottle: CommentThrottle = seatThrottles.length
+    ? {
+        enabled: baseThrottle.enabled,
+        autoPost: baseThrottle.autoPost,
+        perDay: baseThrottle.perDay,
+        perWeek: baseThrottle.perWeek,
+        todayAllowance: seatThrottles.reduce((s, t) => s + t.todayAllowance, 0),
+        todayUsed: seatThrottles.reduce((s, t) => s + t.todayUsed, 0),
+        weekUsed: seatThrottles.reduce((s, t) => s + t.weekUsed, 0),
+        nextSlotAt: allSeatsBlocked
+          ? seatThrottles.map((t) => t.nextSlotAt).filter((s): s is string => !!s).sort()[0]
+          : undefined,
+        blockedReason: allSeatsBlocked ? seatThrottles.find((t) => t.blockedReason)?.blockedReason : undefined,
+        seats: seatThrottles.length,
+      }
+    : baseThrottle;
   return {
     status, autopilot,
     keywords: marketKeywordsFor(workspaceId),
@@ -2587,7 +2673,7 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
     },
     autoIndustries: autoIndustriesFor(workspaceId),
     industryOptions: INDUSTRY_MATCHERS.map((m) => ({ key: m.key, label: m.label })),
-    commentThrottle: commentThrottleFor(workspaceId),
+    commentThrottle,
     tracked,
     trackedTally: {
       postedTotal: (state.commentLog[workspaceId] ?? []).length,
@@ -2954,12 +3040,6 @@ export async function approvePostComment(
   }
   if (editedText && scrub(editedText).length >= 2) item.commentDraft = scrub(editedText).slice(0, MAX_COMMENT_CHARS);
 
-  // The throttle. Refusals do NOT consume the draft: it stays in the list and
-  // can go out in the next slot.
-  const throttle = commentThrottleFor(workspaceId);
-  if (throttle.blockedReason) {
-    return { item, accepted: false, reason: throttle.blockedReason };
-  }
   if (tooSimilar(item.commentDraft, state.commentRecent[workspaceId] ?? [])) {
     return { item, accepted: false, reason: "This reads too close to a comment already posted from this account. Edit it before approving." };
   }
@@ -2973,6 +3053,14 @@ export async function approvePostComment(
   if (!account) {
     item.commentStatus = "blocked"; item.reason = "No connected LinkedIn account."; item.updatedAt = nowIso(); save();
     return { item, accepted: false, reason: item.reason };
+  }
+
+  // The throttle, on the SEAT that will post (owner mandate 2026-08-20:
+  // every recruiter runs their own day/week/spacing walls). Refusals do NOT
+  // consume the draft: it stays in the list and can go out in the next slot.
+  const throttle = commentThrottleFor(workspaceId, account.accountId);
+  if (throttle.blockedReason) {
+    return { item, accepted: false, reason: throttle.blockedReason };
   }
 
   try {
@@ -3000,8 +3088,9 @@ export async function approvePostComment(
       // checker learns the comment actually posted (and its provider id).
       item.commentActionId = result.record?.id;
       item.responseStatus = "pending";
-      // Only an accepted action counts against the day and the week.
-      recordComment(workspaceId, item.commentDraft);
+      // Only an accepted action counts against the day and the week, on the
+      // seat that actually posted.
+      recordComment(workspaceId, item.commentDraft, account.accountId);
     } else {
       item.commentStatus = "blocked"; item.reason = result.reason || "The engine declined this action.";
     }
