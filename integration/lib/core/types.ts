@@ -254,6 +254,20 @@ export interface Prospect {
    *  dial ONLY these — never a personal or residential line. Cached from the
    *  line-type + caller-name lookup so it's determined once. */
   phoneBusinessLine?: boolean;
+  /** The EMPLOYER's main published business line (switchboard / HQ / front desk),
+   *  resolved free from the company's own website by the Hire Signals company-phone
+   *  rung (inmarket/companyPhone.ts). E.164.
+   *
+   *  DELIBERATELY ITS OWN FIELD, never folded into phone / mobilePhone / landlinePhone:
+   *   - `phone` and `mobilePhone` are SMS-reachable, and texting a corporate landline is
+   *     both useless and a 10DLC problem;
+   *   - `landlinePhone` is dialed by the nurture motion as the person's OWN direct line,
+   *     which would leave a person-directed voicemail on a company front desk.
+   *  Only Phone Intel consumes this, because it is the one engine built to CALL a
+   *  switchboard and navigate the IVR to reach the decision maker. */
+  companyPhone?: string;
+  /** How the switchboard was evidenced: schema_org | tel_link | labeled. */
+  companyPhoneVia?: string;
   company?: string;
   /** The prospect's company domain — pairs the person to their company so the
    *  enrichment waterfall can resolve a company email + phone for outreach. */

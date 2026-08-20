@@ -940,6 +940,11 @@ export async function enrollToBulk(
         company: r.company,
         companyDomain: r.domain,
         title: r.managerTitle,
+        // The employer's main line, carried across the Hire Signals -> Pipeline handoff so
+        // Voice Drops / Phone Intel can dial the switchboard and navigate to this person.
+        // Its own field on purpose: never SMS-reachable, never mistaken for a direct line.
+        companyPhone: r.companyPhone,
+        companyPhoneVia: r.companyPhoneVia,
         location: r.jobLocation,        // where the role is based — template personalization
         category: "in_market",
         motion: "bd",
@@ -1665,15 +1670,29 @@ export async function enrichCompanyPhones(
     return Date.now() - Date.parse(r.companyPhoneAt) > STALE_MS;  // tried long ago, retry
   };
 
-  // Group by domain, carrying the best hiring-intent score so the hottest companies resolve first.
-  const byDomain = new Map<string, number>();
+  // Group by domain, carrying the best hiring-intent score AND how recently this company
+  // arrived in the book.
+  const FRESH_MS = 6 * 60 * 60 * 1000;   // curated within 6h counts as a new arrival
+  const freshCut = Date.now() - FRESH_MS;
+  const byDomain = new Map<string, { score: number; newest: number }>();
   for (const r of rows) {
     if (!needs(r)) continue;
     const d = r.domain!.toLowerCase();
-    byDomain.set(d, Math.max(byDomain.get(d) ?? 0, r.score || 0));
+    const at = Date.parse(r.curatedAt || "") || 0;
+    const cur = byDomain.get(d);
+    if (cur) { cur.score = Math.max(cur.score, r.score || 0); cur.newest = Math.max(cur.newest, at); }
+    else byDomain.set(d, { score: r.score || 0, newest: at });
   }
+  // NEW ARRIVALS JUMP THE QUEUE. A pure score sort would park every freshly-sourced company
+  // behind a five-thousand-company backlog, so a prospect landing in the pipeline today would
+  // wait days for its switchboard — and Voice Drops needs that number when the prospect is
+  // NEW, not eventually. Fresh companies go first, each tier by hiring intent. The backlog
+  // still drains, because fresh arrivals are a small slice of any tick.
   const domains = [...byDomain.entries()]
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => {
+      const af = a[1].newest >= freshCut ? 0 : 1, bf = b[1].newest >= freshCut ? 0 : 1;
+      return af - bf || b[1].score - a[1].score;
+    })
     .slice(0, Math.max(0, limit))
     .map(([d]) => d);
   if (!domains.length) return { domains: 0, resolved: 0, rowsUpdated: 0, timedOut: false };
@@ -1729,6 +1748,53 @@ export async function enrichCompanyPhones(
   });
 
   return { domains: attempted.size, resolved: found.size, rowsUpdated, timedOut };
+}
+
+/**
+ * PROPAGATE the resolved switchboard from the curated book onto the PIPELINE prospect.
+ *
+ * Why this exists as its own pass rather than only at enrollment: a prospect enrolls the
+ * moment their EMAIL is good, which is usually BEFORE their employer's phone has been
+ * resolved (different rungs, different speeds). So enrollment alone would strand the number
+ * on the curated row forever, and Voice Drops would never see it. This closes the loop in
+ * both directions: rows enriched before enrolling get it at enrollment, rows enriched after
+ * get it here, on the very next tick.
+ *
+ * Matching is by EMAIL, the one identifier both stores agree on. Writes ONLY companyPhone
+ * (never phone / mobilePhone / landlinePhone), and never overwrites a value already there.
+ * Bounded per tick and fail-soft: a prospect store hiccup just retries next tick.
+ */
+export async function syncCompanyPhonesToPipeline(
+  limit = 400,
+  workspaceId?: string,
+): Promise<{ checked: number; updated: number; reason?: string }> {
+  let ws = (workspaceId || "").trim();
+  if (!ws) {
+    // Same workspace the in-market -> pipeline enrollment uses, so the two never disagree.
+    try {
+      const { getAutofillSettings } = await import("../sending/autofill");
+      ws = (await getAutofillSettings()).workspaceId || "";
+    } catch { /* fall through */ }
+  }
+  if (!ws) return { checked: 0, updated: 0, reason: "no_workspace" };
+
+  const { getCore } = await import("../core/repository");
+  const core = getCore();
+  const rows = (await load()).filter((r) => r.companyPhone && r.likelyEmail);
+  let checked = 0, updated = 0;
+  for (const r of rows) {
+    if (updated >= Math.max(0, limit)) break;
+    checked++;
+    try {
+      const p = await core.findProspectByEmail(ws, r.likelyEmail!);
+      if (!p || p.companyPhone) continue;      // not in the pipeline yet, or already carries it
+      p.companyPhone = r.companyPhone;
+      p.companyPhoneVia = r.companyPhoneVia;
+      await core.saveProspect(p);
+      updated++;
+    } catch { /* skip this one; the next tick retries */ }
+  }
+  return { checked, updated };
 }
 
 /** Coverage for the Clients tab header + health board: how much of the book carries a company line. */

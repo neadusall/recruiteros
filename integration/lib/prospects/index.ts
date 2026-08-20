@@ -39,6 +39,12 @@ export interface NewProspectInput {
   phone?: string;
   /** Which rung produced `phone` (phone-accuracy provenance; travels with the number). */
   phoneSource?: string;
+  /** The EMPLOYER's main published business line (switchboard), free-resolved from the
+   *  company's own site. Its own field: never SMS-reachable, never treated as this
+   *  person's direct line. Consumed by Phone Intel, which navigates the IVR from it. */
+  companyPhone?: string;
+  /** Evidence tier behind companyPhone: schema_org | tel_link | labeled. */
+  companyPhoneVia?: string;
   company?: string;
   /** Pairs the person to their company so outreach enrichment can resolve contact. */
   companyDomain?: string;
@@ -94,6 +100,9 @@ export async function addProspect(input: NewProspectInput): Promise<Prospect> {
       ? input.phoneSource ?? (input.phone === p.phone ? p.phoneSource : undefined)
       : p.phoneSource,
     company: input.company ?? p.company,
+    // Never clobber a switchboard we already resolved for this person.
+    companyPhone: input.companyPhone ?? p.companyPhone,
+    companyPhoneVia: input.companyPhoneVia ?? p.companyPhoneVia,
     companyDomain: input.companyDomain ?? p.companyDomain,
     title: input.title ?? p.title,
     photoUrl: input.photoUrl ?? p.photoUrl,

@@ -69,7 +69,12 @@ export function wasEmailed(p: Prospect): boolean {
  *  else the primary number. Mobiles are never used here (the switchboard path is
  *  for corporate lines; a mobile would just ring the person and isn't our motion). */
 export function corporateNumber(p: Prospect): string {
-  return toE164(p.landlinePhone || p.phone || "");
+  // companyPhone LAST, as the fallback: an enriched direct line always beats the front
+  // desk, because it reaches the person without an IVR to navigate. But when there is no
+  // direct line — the common case, since direct dials are paid and switchboards are free —
+  // the employer's published main line is exactly what this engine is built to work with:
+  // call the switchboard once, learn the route, reuse it for every prospect there.
+  return toE164(p.landlinePhone || p.phone || p.companyPhone || "");
 }
 
 /**

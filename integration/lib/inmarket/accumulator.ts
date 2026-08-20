@@ -86,6 +86,8 @@ const COMPANY_PHONE_CONCURRENCY = envNum("INMARKET_COMPANY_PHONE_CONCURRENCY", 4
 // Hard ceiling on how long the free phone rung may hold the tick. It runs AHEAD of the SMTP and
 // residual email finders, so it must never spend their headroom: email supply outranks a phone number.
 const COMPANY_PHONE_BUDGET_MS = envNum("INMARKET_COMPANY_PHONE_BUDGET_SEC", 120) * 1000;
+// Prospects whose pipeline record gets the switchboard copied onto it per tick (local writes).
+const COMPANY_PHONE_SYNC_BATCH = envNum("INMARKET_COMPANY_PHONE_SYNC_BATCH", 400);
 // FAST INFLOW — brand-new hiring companies/postings flow in on their OWN fast tick (every few
 // minutes) so prospects appear as they're posted, not once an hour. It runs ONLY the cheap,
 // high-yield breadth vacuum (+ a couple of rotating sectors) — never the expensive board
@@ -581,8 +583,14 @@ async function runCurationTickInner(): Promise<void> {
   // published number just carries no number. Off-switch: INMARKET_COMPANY_PHONE=0.
   try {
     if (COMPANY_PHONE_ENABLED) {
-      const { enrichCompanyPhones } = await import("./curation");
+      const { enrichCompanyPhones, syncCompanyPhonesToPipeline } = await import("./curation");
       await enrichCompanyPhones(COMPANY_PHONE_BATCH, new Date().toISOString(), COMPANY_PHONE_CONCURRENCY, COMPANY_PHONE_BUDGET_MS);
+      // Push newly-resolved switchboards onto the PIPELINE prospects so Voice Drops / Phone
+      // Intel can dial them. Separate from enrollment on purpose: a prospect enrolls when its
+      // EMAIL is good, typically before its employer's phone resolves, so without this the
+      // number would be stranded on the curated row and never reach the dialer. Local store
+      // writes only, no network — cheap enough to run every tick.
+      await syncCompanyPhonesToPipeline(COMPANY_PHONE_SYNC_BATCH);
     }
   } catch { /* best-effort; the next tick retries */ }
 
