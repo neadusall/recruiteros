@@ -2727,6 +2727,10 @@ export interface CommentWatchView {
     /** Poster replies still waiting for the owner's own answer. */
     followUpsOpen: number;
   };
+  /** accountId -> the recruiter that seat belongs to. An admin watching five
+   *  seats needs to know whose voice a thread is in before answering it, and
+   *  the answer posts from the commenting seat whoever clicks the button. */
+  seatNames: Record<string, string>;
 }
 
 const TIER_RANK: Record<CommentTier, number> = { hot: 0, warm: 1, community: 2 };
@@ -2808,7 +2812,28 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
       noResponse: tracked.filter((i) => i.responseStatus === "no_response").length,
       followUpsOpen: tracked.filter(awaitingAnswer).length,
     },
+    seatNames: await seatNamesFor(workspaceId, seatAccounts),
   };
+}
+
+/** accountId -> recruiter name, for the seat label on every tracked thread.
+ *  Engine accounts registered before seats carried an owner have only a
+ *  provider id for a display name, so those fall back to the seat store the
+ *  same way the reply alert does. */
+async function seatNamesFor(workspaceId: string, accounts: LiAccountState[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  let members: ReturnType<typeof listMembers> = [];
+  let seats: Awaited<ReturnType<typeof seatsForWorkspace>> = [];
+  try { members = listMembers(workspaceId); } catch { /* names degrade below */ }
+  try { seats = await seatsForWorkspace(workspaceId); } catch { /* legacy accounts keep their display name */ }
+  for (const a of accounts) {
+    const provider = a.providerAccountId || a.accountId;
+    const userId = a.ownerUserId || seats.find((s) => s.accountId === provider)?.userId;
+    const name = userId ? members.find((m) => m.userId === userId)?.name : undefined;
+    // Never label a seat with a raw provider id: an unnamed seat says so.
+    out[a.accountId] = name || (a.displayName && a.displayName !== a.accountId ? a.displayName : "Unassigned seat");
+  }
+  return out;
 }
 
 function findItem(workspaceId: string, id: string): CommentLeadItem | undefined {

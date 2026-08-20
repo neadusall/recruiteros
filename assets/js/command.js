@@ -3982,6 +3982,14 @@
       if (t.responseStatus === "failed") return '<span class="lie-chip bad">Did not post</span>';
       return '<span class="lie-chip mut">Posted</span>';
     }
+    // Whose seat a thread belongs to. An admin watching the whole desk has to
+    // know whose voice they are about to answer in: the reply always posts
+    // from the seat that made the comment, whoever clicks the button.
+    var trackSeats = {};
+    function seatLabel(t) {
+      var name = t.accountId && trackSeats[t.accountId];
+      return name ? ' <span class="lie-chip mut">' + esc(name) + "'s seat</span>" : "";
+    }
     function trackRow(t) {
       // A reply you have not answered or dismissed stays "open": their words
       // on top, an EMPTY box below. Nothing is drafted for you here; what you
@@ -3991,7 +3999,7 @@
         (t.title || t.company ? ' <span class="muted">' + esc([t.title, t.company].filter(Boolean).join(" · ")) + "</span>" : "");
       var postLink = t.postUrl ? ' · <a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener">View the post</a>' : "";
       var out = '<div class="lie-row' + (open ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
-        '<div class="lie-who">' + who + " " + trackChip(t) + "</div>" +
+        '<div class="lie-who">' + who + " " + trackChip(t) + seatLabel(t) + "</div>" +
         '<div class="lie-post muted">Commented ' + esc(trackDay(t.commentPostedAt || t.updatedAt)) + ': "' +
           esc((t.commentDraft || "").slice(0, 200)) + '"' + postLink + "</div>";
       if (t.responseStatus === "responded") {
@@ -4032,6 +4040,7 @@
     function trackerCard(d) {
       var tr = (d && d.tracked) || [];
       var tally = (d && d.trackedTally) || {};
+      trackSeats = (d && d.seatNames) || {};
       if (!tr.length && !(tally.postedTotal > 0)) return "";
       return '<div class="card liops-card">' +
         '<div class="liops-head"><div><b>Comments posted</b>' +
@@ -25866,6 +25875,28 @@
     if (em) { em.value = ""; em.focus(); }
   }
 
+  /* Mint a per-tab session for one recruiter and open their portal in its own
+     tab. Shared by the account-menu roster and the picker modal: the token is
+     handed over in the fragment (never a query string, which would land in
+     server logs), and each recruiter gets their own named tab so an admin can
+     keep several open side by side. */
+  function enterRecruiterPortal(userId, onFail, onDone) {
+    return send("/team/impersonate", "POST", { userId: userId }).then(function (r) {
+      if (!r.ok || !r.data || !r.data.token) {
+        if (onFail) onFail();
+        toast("Could not open portal (" + ((r.data && r.data.error) || r.status) + ")");
+        return;
+      }
+      var handoff = {
+        token: r.data.token,
+        ctx: { user: r.data.user, workspace: r.data.workspace, role: r.data.role, capabilities: r.data.capabilities, session: r.data.session }
+      };
+      var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(handoff))));
+      if (onDone) onDone();
+      window.open("/recruiter#imp=" + encodeURIComponent(b64), "ros-rec-" + userId);
+    }).catch(function () { if (onFail) onFail(); toast("Could not reach the server."); });
+  }
+
   /* Admin "view as recruiter": pick a recruiter and drop straight into their
      Recruiter Portal, exactly what they see, no password. Lists the workspace's
      members (recruiters only) and mints a per-tab impersonation session for the
@@ -25896,20 +25927,9 @@
           btn.addEventListener("click", function () {
             var uid = btn.getAttribute("data-uid");
             btn.disabled = true; btn.style.opacity = ".6";
-            send("/team/impersonate", "POST", { userId: uid }).then(function (r) {
-              if (!r.ok || !r.data || !r.data.token) {
-                btn.disabled = false; btn.style.opacity = "";
-                toast("Could not open portal (" + ((r.data && r.data.error) || r.status) + ")");
-                return;
-              }
-              var handoff = {
-                token: r.data.token,
-                ctx: { user: r.data.user, workspace: r.data.workspace, role: r.data.role, capabilities: r.data.capabilities, session: r.data.session }
-              };
-              var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(handoff))));
-              close();
-              window.open("/recruiter#imp=" + encodeURIComponent(b64), "ros-rec-" + uid);
-            }).catch(function () { btn.disabled = false; btn.style.opacity = ""; toast("Could not reach the server."); });
+            enterRecruiterPortal(uid, function () {
+              btn.disabled = false; btn.style.opacity = "";
+            }, close);
           });
         });
       }).catch(function () { var l = root.querySelector("#rpList"); if (l) l.innerHTML = needsSetup(); });
@@ -29093,6 +29113,30 @@
       if (openAdmin) openAdmin.addEventListener("click", function () { window.open("/admin", "ros-admin"); });
       // Pick WHICH recruiter to dive into (view-as), no password needed.
       if (openRecruiter) openRecruiter.addEventListener("click", function () { setOpen(false); openRecruiterPicker(); });
+      // The desk itself, one row per recruiter, right here in the toolbar
+      // (owner ask 2026-08-20). One click lands in their portal as them, so
+      // answering a comment thread in their voice never costs a sign-out. The
+      // picker above stays for the empty-portal preview.
+      var people = $("#portalSwitchPeople");
+      if (people) {
+        apiQuiet("/team").then(function (d) {
+          var mates = ((d && d.members) || []).filter(function (m) { return m.role === "member"; });
+          if (!mates.length) return;
+          people.innerHTML = mates.map(function (m) {
+            return '<button type="button" class="acct-item" role="menuitem" data-enter-uid="' + esc(m.userId) + '">' +
+              '<span class="acct-avatar" style="width:20px;height:20px;font-size:9px;background:' + colorFor(m.name) + '">' +
+                esc(initials(m.name)) + "</span> " + esc(m.name) + "</button>";
+          }).join("");
+          Array.prototype.forEach.call(people.querySelectorAll("[data-enter-uid]"), function (btn) {
+            btn.addEventListener("click", function () {
+              btn.disabled = true; btn.style.opacity = ".6";
+              enterRecruiterPortal(btn.getAttribute("data-enter-uid"), function () {
+                btn.disabled = false; btn.style.opacity = "";
+              }, function () { setOpen(false); });
+            });
+          });
+        });
+      }
     }
     var so = $("#acctSignOut");
     if (so) so.addEventListener("click", signOut);
