@@ -151,6 +151,22 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
     "Sweeps scan every bounce notice (campaign + warm-up) for IP/reputation block signatures");
 }
 
+// Email IDs that cannot send at all: their own server refuses to relay for them
+// (SendAs permission missing / relay auth wrong). The sweeps deliberately keep these
+// OFF the reputation books, because no message ever left the building and the
+// recipient is unproven - which also made them invisible. They are pure lost capacity
+// and they never self-heal, so they need a person, not a timer.
+{
+  const infra = ndr?.perBoxInfra || {};
+  const boxes = Object.keys(infra);
+  const st = boxes.length >= 5 ? "bad" : boxes.length ? "amber" : "good";
+  add(GROUP_SEND, "cannotsend", "Email IDs refused by their own server", st,
+    boxes.length ? `${boxes.length} cannot send` : "every Email ID is accepted by its own server",
+    boxes.length
+      ? `Authorization refused for: ${boxes.slice(0, 4).join(", ")}${boxes.length > 4 ? ` +${boxes.length - 4} more` : ""}. Fix the SendAs / relay permission for these addresses at the mail provider; they burn no reputation but they send nothing either.`
+      : "");
+}
+
 // Sending IP reputation. Receivers name the IP they refused and the public blocklist
 // they consulted; that is ground truth about our own infrastructure and beats a
 // self-probe (public resolvers refuse Spamhaus queries outright). A public listing is
