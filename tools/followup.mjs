@@ -24,6 +24,26 @@ const OUT = process.env.MPC_OUT_DIR || "/out";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
 // PER-BOX CAP. Touch 2 spends the same mailbox budget as touch 1; see tools/boxcaps.mjs.
 import { capByEmail, sentTodayByBox } from "./boxcaps.mjs";
+import { tierOf } from "./fuse.mjs";
+// Guessed addresses do not send, on any touch. Off by default; the cold lane carries the
+// bounce evidence (found 1.4% vs pattern 21.6% across every send the fleet has made).
+const PATTERN_LANE = process.env.MPC_PATTERN_LANE === "1";
+
+/** emailSource per address, for threads whose send row predates provenance logging. */
+function sourceByEmail() {
+  const m = new Map();
+  try {
+    const cur = JSON.parse(readFileSync(process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json", "utf8"));
+    const arrs = []; const walk = (o) => { if (Array.isArray(o)) { if (o.length && typeof o[0] === "object") arrs.push(o); } else if (o && typeof o === "object") for (const v of Object.values(o)) walk(v); };
+    walk(cur);
+    for (const rr of (arrs.sort((a, b) => b.length - a.length)[0] || [])) {
+      const r = rr.lead || rr;
+      const e = String(r.likelyEmail || r.email || "").toLowerCase().trim();
+      if (e && r.emailSource) m.set(e, r.emailSource);
+    }
+  } catch { /* no curation store */ }
+  return m;
+}
 const LUME_WS = process.env.MPC_LUME_WS || "ws_mqf6o989003";
 
 // Domain rest fail-safe (same ledger batch.mjs enforces): a follow-up goes out on the SAME box
@@ -270,6 +290,24 @@ async function main() {
   // (up to 13 waiting on a single mailbox), and all of it fires the day the domain revives —
   // on a domain that was benched for bouncing. Same ledgers and same cap function the cold
   // lane uses, so the two can never disagree about what a mailbox has left.
+  // NO GUESSED ADDRESSES ON TOUCH 2 EITHER (owner mandate 2026-08-20). Touch 1 having been
+  // accepted is not proof the mailbox exists: a catch-all domain accepts anything, and the
+  // catch-all rungs are exactly where the derived addresses live. Same rule as the cold lane,
+  // read off the provenance touch 1 recorded (email_source), so a thread that started on a
+  // guess stops rather than spending another send on it. Rows are HELD, not dropped: when the
+  // finder returns a real record for that person the sequence resumes.
+  const patternHeld = [];
+  const srcByEmail = PATTERN_LANE ? new Map() : sourceByEmail();
+  if (!PATTERN_LANE) {
+    for (let i = sendable.length - 1; i >= 0; i--) {
+      const src = sendable[i].last?.email_source;
+      // Threads that predate provenance logging carry no source. They are NOT assumed clean:
+      // the curated row is consulted, and an unknown row is treated as derived.
+      const resolved = src || srcByEmail.get(String(sendable[i].email || "").toLowerCase()) || "";
+      if (tierOf(resolved) !== "found") patternHeld.push(...sendable.splice(i, 1));
+    }
+  }
+  if (patternHeld.length) console.log(`  no-guessing: ${patternHeld.length} follow-up(s) held, touch 1 went to a derived address (MPC_PATTERN_LANE=1 re-opens the rung)`);
   const { capOf } = capByEmail();
   const boxSpend = sentTodayByBox();
   const capped = [];

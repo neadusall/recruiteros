@@ -31,7 +31,7 @@ import { classifyTitle, type JobFunction } from "../signals";
 export type CurationStatus =
   | "sourced"       // signal + owning TITLE known; no name yet
   | "named"         // a real decision-maker resolved by free research
-  | "contactable"   // named + a best-guess email built
+  | "contactable"   // named + an address on file (only a FOUND address can enroll; see isFoundAddress)
   | "queued"        // approved in the review gate, pending enrollment
   | "enrolled"      // pushed into the BD Bulk MPC sender
   | "suppressed";   // skipped (dupe / opted-out / unusable)
@@ -937,6 +937,37 @@ export function requireValidatedEmail(): boolean {
   return ["1", "true", "yes", "on"].includes((process.env.INMARKET_REQUIRE_VALIDATED || "").toLowerCase());
 }
 
+/**
+ * Rungs where a finder record actually returned this address FOR THIS PERSON. Everything else
+ * is a syntax we derived from a name and a domain, however many validators later blessed it.
+ * Mirrors FOUND_SOURCES in tools/fuse.mjs — the sender and the app must not disagree about
+ * what counts as a guess.
+ */
+export const FOUND_SOURCES = new Set(["koldinfo", "reoon_found", "smtp_found", "site_direct"]);
+
+/** A found address, not a derived one. */
+export function isFoundAddress(r: { emailSource?: string }): boolean {
+  return FOUND_SOURCES.has(String(r.emailSource || ""));
+}
+
+/**
+ * NO GUESSED ADDRESSES (owner mandate 2026-08-20). Measured across every send the fleet had
+ * made when this landed:
+ *
+ *     found     140 sent    2 bounced    1.4%
+ *     pattern  1246 sent  269 bounced   21.6%
+ *
+ * Derived addresses produced 269 of the fleet's 271 bounces, so no lane may mail one. The
+ * cold sender enforces the same rule (tools/batch.mjs, tools/followup.mjs); this closes the
+ * APP lane, whose enroll gate previously let syntax guesses into a BD Bulk campaign by
+ * DEFAULT — INMARKET_REQUIRE_VALIDATED was off, and even switched on it only asked for
+ * `emailValidated`, the very flag that was being stamped on guesses.
+ * MPC_PATTERN_LANE=1 re-opens the rung; that is a deliberate act, not a default.
+ */
+export function patternLaneOpen(): boolean {
+  return process.env.MPC_PATTERN_LANE === "1";
+}
+
 /** Mark a set of curated prospects approved (queued) in the daily review gate. Requires a real
  *  person + a non-dead email; validation is required only when INMARKET_REQUIRE_VALIDATED is set. */
 export async function approveForBulk(ids: string[]): Promise<number> {
@@ -947,7 +978,8 @@ export async function approveForBulk(ids: string[]): Promise<number> {
     let n = 0;
     for (const r of rows) {
       if (set.has(r.id) && r.status === "contactable" && !!r.likelyEmail && !r.emailInvalid
-        && (!needValid || r.emailValidated === true)) {
+        && (!needValid || r.emailValidated === true)
+        && (patternLaneOpen() || isFoundAddress(r))) {
         r.status = "queued"; n++;
       }
     }
@@ -1007,6 +1039,8 @@ export async function enrollToBulk(
     // INMARKET_REQUIRE_VALIDATED=1 (SMTP/paid validator live) only validated addresses enroll.
     if (!r.managerName || !r.likelyEmail || r.emailInvalid) { skipped++; continue; }
     if (needValid && r.emailValidated !== true) { skipped++; continue; }
+    // A derived address never enrolls, whatever the validation flag says (see patternLaneOpen).
+    if (!patternLaneOpen() && !isFoundAddress(r)) { skipped++; continue; }
     try {
       await addProspect({
         workspaceId,

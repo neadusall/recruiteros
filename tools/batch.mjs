@@ -117,6 +117,9 @@ const SMTP_LANE = process.env.MPC_SMTP_LANE === "1";
 // health guard + domain-rest breaker veto anything that degrades).
 // MPC_GOOGLE_LANE=0 parks the lane again.
 const GOOGLE_LANE = process.env.MPC_GOOGLE_LANE !== "0";
+// GUESSED ADDRESSES DO NOT SEND (owner mandate 2026-08-20). Off by default; see the
+// no-guessing gate in main(), where the bounce evidence for it is recorded.
+const PATTERN_LANE = process.env.MPC_PATTERN_LANE === "1";
 
 // PROVIDER-BLOCK LEDGER -> per-fleet avoid sets. The NDR sweeps detect receiver-side
 // "your server is not welcome" signatures (Gmail's UnsolicitedMessageError, "low
@@ -581,6 +584,7 @@ async function main() {
   let skippedUnvalidated = 0;
   let skippedBounced = 0;
   let skippedSourcePaused = 0;
+  let skippedPattern = 0;
   // VALIDATION BELT (2026-08-12 deliverability audit). The app-side enroll gate requires a
   // Reoon-validated address, but curated rows reach this lane directly, so the same rule holds
   // here: a known-invalid address never sends, and an unvalidated one waits for the nightly
@@ -595,9 +599,25 @@ async function main() {
     if (p.emailInvalid || (REQUIRE_VALIDATED && p.emailValidated !== true)) { skippedUnvalidated++; continue; }
     if (pausedSources.size && pausedSources.has(p.emailSource || "guess")) { skippedSourcePaused++; continue; } // that rung is bouncing: held, not dropped
     runSeen.add(e);
+    // NO GUESSED ADDRESSES (owner mandate 2026-08-20). A "pattern" address is one we DERIVED
+    // — a syntax guessed from a name and a domain — however many validators later blessed it.
+    // A "found" address is one a finder record actually returned for that person. Measured
+    // across every send the fleet has ever made:
+    //
+    //     found     140 sent    2 bounced    1.4%
+    //     pattern  1246 sent  269 bounced   21.6%
+    //
+    // Pattern rungs produced 269 of the fleet's 271 bounces. The slice below used to contain
+    // that damage to 25% of the domains; containing it is not the same as not doing it, and
+    // a 21.6% rung has no business on any domain. Guessing is now OUT of the send path
+    // entirely: these rows are HELD, not dropped, and the KoldInfo finder converts them into
+    // found-tier addresses that come back through this gate legitimately.
+    // MPC_PATTERN_LANE=1 re-opens it; that is a deliberate act, not a default.
+    if (!PATTERN_LANE && tierOf(p.emailSource) !== "found") { skippedPattern++; continue; }
     fresh.push(p);
   }
-  console.log(`already emailed: ${seen.size} | known-bounced suppressed: ${skippedBounced} | blocked-cohort skipped: ${skippedBlocked} | unvalidated/invalid held: ${skippedUnvalidated} | paused-source held: ${skippedSourcePaused} | fresh & ready: ${fresh.length}`);
+  console.log(`already emailed: ${seen.size} | known-bounced suppressed: ${skippedBounced} | blocked-cohort skipped: ${skippedBlocked} | unvalidated/invalid held: ${skippedUnvalidated} | paused-source held: ${skippedSourcePaused}${skippedPattern ? ` | GUESSED addresses held: ${skippedPattern}` : ""} | fresh & ready: ${fresh.length}`);
+  if (skippedPattern) console.log(`  no-guessing: ${skippedPattern} row(s) held because their address was derived, not found. They wait for the KoldInfo finder to return a real record (MPC_PATTERN_LANE=1 re-opens the rung).`);
 
   // PROVIDER-AWARE ORDERING + SEG PHASE (the enterprise-deliverability layer, mxclass.mjs).
   // All MPC volume leaves Azure/Outlook infrastructure, so Outlook-hosted recipients are our
@@ -867,10 +887,14 @@ async function main() {
   // never migrates onto clean domains as others rest. Found-tier addresses (a finder returned a
   // record) prefer the other 75% and borrow slice boxes only when nothing else is free
   // (MPC_STRICT_SLICE=1 forbids even that). A rung that goes bad can burn the slice, never the fleet.
+  // With the pattern rung closed, nothing reaches here that needs containing — the slice
+  // stays wired so that re-opening MPC_PATTERN_LANE restores the blast-radius limit with it,
+  // rather than letting guessed volume loose across the whole fleet.
   const SLICE_PCT = Number(process.env.MPC_PATTERN_SLICE_PCT || 25);
   const slice = canarySlice(allBoxes.map((b) => domOf(b.email)), SLICE_PCT);
   const sliceLive = [...new Set(fleet.map((b) => domOf(b.email)))].filter((d) => slice.has(d));
-  console.log(`  blast-radius slice: ${slice.size} domain(s) carry pattern-tier sends (${sliceLive.length} of them not resting: ${sliceLive.join(", ") || "none; pattern-tier drafts wait"})`);
+  if (PATTERN_LANE) console.log(`  blast-radius slice: ${slice.size} domain(s) carry pattern-tier sends (${sliceLive.length} of them not resting: ${sliceLive.join(", ") || "none; pattern-tier drafts wait"})`);
+  else console.log(`  no-guessing: every draft in this run carries a FOUND address (derived addresses never reach the fleet)`);
   const pickBox = (d) => {
     const fam = famOf(d.to_email);
     const ok = (b) => !boxAvoids(b, fam);
