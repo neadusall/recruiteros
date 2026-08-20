@@ -46,6 +46,28 @@ export async function mergeIntoPool(leads: InMarketLead[]): Promise<void> {
   // persistent pool can never hold an agency regardless of which path wrote it.
   leads = leads.filter((l) => !isStaffingFirm(l.company));
   if (!leads.length) return;
+
+  // SIZE GATE (write side, 2026-08-20). The pool holds at most MAX_POOL companies, and 62% of that
+  // cap was occupied by companies outside the 100-1,000 employee band — companies the sender is not
+  // allowed to mail, crowding out the ones it is. Filtering at the READ end (curation) stopped us
+  // paying to enrich them but still let them consume the slot. This stops them taking the slot.
+  //
+  // Fails OPEN, like the curation filter: a company with no confirmed headcount is still stored,
+  // because a company we have not sized yet is a company we might want. Only a POSITIVELY CONFIRMED
+  // out-of-band company is refused, and the background size pass purges any that slip in before
+  // their size resolves.
+  try {
+    const { outOfBandCompanyKeys } = await import("./companySize");
+    const outOfBand = await outOfBandCompanyKeys();
+    if (outOfBand.size) {
+      const before = leads.length;
+      leads = leads.filter((l) => !outOfBand.has((l.company || "").toLowerCase().trim()));
+      const refused = before - leads.length;
+      if (refused) console.log(`[inmarket] pool intake refused ${refused} companies confirmed outside the target headcount band`);
+      if (!leads.length) return;
+    }
+  } catch { /* size cache unreadable: store everything, exactly as before */ }
+
   const now = Date.now();
   const byKey = new Map<string, PoolEntry>();
   for (const e of await load()) {

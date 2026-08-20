@@ -117,12 +117,44 @@ export async function oversizedCompanyKeys(max = MAX_EMPLOYEES): Promise<Set<str
 /** Company keys AUTHORITATIVELY confirmed OUTSIDE the target band [min, max] — too small
  *  (<100) OR too big (>5,000). The accumulator purges these so the pool stays 100-5,000.
  *  Heuristic estimates are never included; only real Wikidata counts. */
-export async function outOfBandCompanyKeys(min = MIN_EMPLOYEES, max = MAX_EMPLOYEES): Promise<Set<string>> {
+export async function outOfBandCompanyKeys(min = poolBandMin(), max = poolBandMax()): Promise<Set<string>> {
   const cache = await loadCache().catch(() => ({} as SizeMap));
   const out = new Set<string>();
   for (const k of Object.keys(cache)) {
     const e = cache[k];
-    if (e && e.src === "wikidata" && typeof e.count === "number" && (e.count < min || e.count > max)) out.add(k);
+    if (e && AUTHORITATIVE.has(e.src) && typeof e.count === "number" && (e.count < min || e.count > max)) out.add(k);
+  }
+  return out;
+}
+
+/**
+ * THE POOL'S OWN TARGET BAND (2026-08-20), separate from MIN/MAX_EMPLOYEES above.
+ *
+ * MIN/MAX_EMPLOYEES (25-5,000) describe what the Hire Signals READ path is willing to show. This
+ * pair describes what we are willing to STORE and spend enrichment on, and it tracks the sender's
+ * mandate: 62% of the pool was at companies outside 100-1,000, which meant the 15,000-company cap
+ * was mostly occupied by companies we are not allowed to mail, crowding out the ones we are.
+ * Driven by the same env the sender uses, so the two can never drift apart.
+ */
+export function poolBandMin(): number { return Number(process.env.MPC_MIN_HEADCOUNT) || 100; }
+export function poolBandMax(): number { return Number(process.env.MPC_MAX_HEADCOUNT) || 1000; }
+
+/**
+ * Sources trusted to EVICT a company from the pool. Wikidata was alone here because it was the only
+ * authoritative source; `linkedin` joins it now that it resolves ~90% of the pool against 2.4% and
+ * carries its own cross-check (see company-size.mjs: a self-reported band above the profile count
+ * wins, so non-desk workforces are not undercounted into the band). Heuristic estimates are still
+ * never eligible: a guess must never delete real pool data.
+ */
+const AUTHORITATIVE = new Set<SizeEntry["src"]>(["wikidata", "linkedin"]);
+
+/** Companies confirmed to sit INSIDE the pool's target band, for the intake filter. */
+export async function inBandCompanyKeys(min = poolBandMin(), max = poolBandMax()): Promise<Set<string>> {
+  const cache = await loadCache().catch(() => ({} as SizeMap));
+  const out = new Set<string>();
+  for (const k of Object.keys(cache)) {
+    const e = cache[k];
+    if (e && typeof e.count === "number" && e.count >= min && e.count <= max) out.add(k);
   }
   return out;
 }
