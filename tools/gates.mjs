@@ -253,13 +253,19 @@ export function assessProspect(p) {
     // Flip with MPC_TARGETING_MODE=strict in .env.production. No code change needed.
     const strictOwner = (process.env.MPC_TARGETING_MODE || "transition").toLowerCase() === "strict";
     const isOwner = !!(dmFn && dmFn !== "universal" && dmFn === roleFn);
+    // The talent leader buys hiring for every function (see isTalentBuyer). STRICT mode still
+    // holds a company-level buyer row, because strict exists to demand a buyer resolved against
+    // THIS req and those rows never were: they are the CHRO mined once per company carrying
+    // whatever req happened to be in hand, and 45.7% of the store looks like that. In transition
+    // mode, which is what runs today, they send, and that is where the unlocked volume comes from.
+    const talentBuyer = isTalentBuyer(p.managerTitle) && !(strictOwner && p.companyBuyerRow);
     if (execReq) {
       // A leadership hire: the whole-company exec or that function's own exec both qualify,
       // and so does the talent leader, who typically runs executive search at that company.
-      if (dmFn && dmFn !== "universal" && dmFn !== roleFn && !isTalentBuyer(p.managerTitle)) {
+      if (dmFn && dmFn !== "universal" && dmFn !== roleFn && !talentBuyer) {
         failures.push(`decision-maker "${p.managerTitle}" owns ${dmFn}, not the ${roleFn} function this leadership role sits in`);
       }
-    } else if (isOwner || isTalentBuyer(p.managerTitle)) {
+    } else if (isOwner || talentBuyer) {
       /* the owner of the req, or the talent leader who buys hiring for every function */
     } else if (!strictOwner) {
       // Transition: everything except a clearly different-function exec.

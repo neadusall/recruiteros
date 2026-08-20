@@ -1,6 +1,6 @@
 // Tests for the MPC quality gates. Plain node: node scripts/mpc/test-gates.mjs
 import assert from "node:assert/strict";
-import { assessProspect, foreignAffiliation, metroOf, checkRenderedEmail, roleFamily, roleFunctionGroup, dmFunction, buyerFit, buildCompanyKnowledge } from "./gates.mjs";
+import { assessProspect, foreignAffiliation, metroOf, checkRenderedEmail, roleFamily, roleFunctionGroup, dmFunction, buyerFit, buildCompanyKnowledge, isTalentBuyer } from "./gates.mjs";
 
 let passed = 0;
 function test(name, fn) {
@@ -288,12 +288,52 @@ test("transition: a CEO may send when nobody better is known", () => {
   assert.equal(assessProspect(p).eligible, true, assessProspect(p).failures.join("; "));
 });
 test("transition: a DIFFERENT-function exec is STILL rejected", () => {
-  // The one thing that was never defensible stays rejected in both modes.
-  const p = base(); p.managerName = "Nina Patel"; p.managerTitle = "Chief People Officer";
+  // The one thing that was never defensible stays rejected in both modes. The example used to
+  // be a Chief People Officer; that became a VALID buyer on 2026-08-20 (owner call: we sell
+  // recruiting, so the talent leader buys hiring for every function), so this now uses a
+  // marketing exec, who genuinely does not own an accounting hire.
+  const p = base(); p.managerName = "Nina Patel"; p.managerTitle = "Chief Marketing Officer";
   p.likelyEmail = "nina.patel@upstart.com";
   const r = assessProspect(p);
   assert.equal(r.eligible, false);
-  assert.ok(r.failures.some(f => /owns People \/ HR, not the Finance/.test(f)), r.failures.join("; "));
+  assert.ok(r.failures.some(f => /owns Marketing, not the Finance/.test(f)), r.failures.join("; "));
+});
+test("talent leader: a CHRO IS a buyer for another function's req", () => {
+  // Owner call 2026-08-20. Hiring is the People/HR function's own remit whatever the req is.
+  const p = base(); p.managerName = "Nina Patel"; p.managerTitle = "Chief People Officer";
+  p.likelyEmail = "nina.patel@upstart.com";
+  const r = assessProspect(p);
+  assert.equal(r.eligible, true, r.failures.join("; "));
+});
+test("talent leader: in-house practitioners never get the talent-buyer carve-out", () => {
+  // They do not sign search agreements, and in-house talent staff are measured on REDUCING
+  // agency spend. "Partner" alone must not qualify them: VALID_DM_TITLE matches the bare word,
+  // which is how "Talent Acquisition Partner" first slipped through. Asserted on isTalentBuyer
+  // itself rather than eligibility, because transition mode separately lets an ambiguous-function
+  // senior through when nobody better is known, and that rule is not what this carve-out governs.
+  for (const title of ["Talent Acquisition Partner", "HR Business Partner", "People Operations Specialist",
+    "Talent Acquisition Coordinator", "Senior Technical Recruiter"]) {
+    assert.equal(isTalentBuyer(title), false, `${title} must not count as a talent buyer`);
+  }
+  for (const title of ["Chief People Officer", "CHRO", "VP of Human Resources", "Head of Talent"]) {
+    assert.equal(isTalentBuyer(title), true, `${title} should count as a talent buyer`);
+  }
+});
+test("talent leader: strict mode still holds a company-level buyer row", () => {
+  // Strict exists to demand a buyer resolved against THIS req, and the per-company CHRO row
+  // never was. The carve-out must not become a back door for 45.7% of the store.
+  const prev = process.env.MPC_TARGETING_MODE;
+  process.env.MPC_TARGETING_MODE = "strict";
+  try {
+    const p = base(); p.managerName = "Nina Patel"; p.managerTitle = "Chief People Officer";
+    p.likelyEmail = "nina.patel@upstart.com"; p.companyBuyerRow = true;
+    assert.equal(assessProspect(p).eligible, false);
+    const resolved = base(); resolved.managerName = "Nina Patel"; resolved.managerTitle = "Chief People Officer";
+    resolved.likelyEmail = "nina.patel@upstart.com";
+    assert.equal(assessProspect(resolved).eligible, true, "a req-resolved talent leader still sends in strict mode");
+  } finally {
+    if (prev === undefined) delete process.env.MPC_TARGETING_MODE; else process.env.MPC_TARGETING_MODE = prev;
+  }
 });
 test("transition: unconfirmed size sends with a warning, confirmed-out-of-band still does not", () => {
   const unknown = base(); delete unknown.employeeCount;
