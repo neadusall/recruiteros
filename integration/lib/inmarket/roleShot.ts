@@ -444,21 +444,46 @@ async function resolveTarget(
   // (d) Tier 2 — the harvested URL is an ATS host. Find this role on the company's own
   //     careers pages. Best-effort, strictly verified; if nothing matches we capture nothing.
   const found = await discoverOnCompanySite(browser, dom.domain, req);
-  if (found) return { url: found, companyDomain: dom.domain, via: "careers_discovery" };
+  if (found) return found;
 
   if (atsFallback) return atsFallback;
-  return { status: "no_company_page", reason: "role not found on the company's own careers site" };
+
+  // (e) Tier 3 — the company's OWN public ATS board, read as JSON (Greenhouse/Lever/Ashby/
+  //     Workable/SmartRecruiters/Recruitee). No browser, no key, and already cached per company
+  //     by the "what else are they hiring for" resolver, so this is close to free.
+  //
+  //     This matters more than it looks. Real page captures have only ever succeeded ~11% of
+  //     the time (56 of 518 shots to 2026-08-06) because most of the pool's harvested URLs are
+  //     job aggregators, which we refuse to screenshot — they bot-wall and are not brand-safe.
+  //     The synthetic role card used to cover the gap; it became opt-in on 2026-08-14 by owner
+  //     mandate (recipient-facing video uses REAL captures only), so the only honest way to get
+  //     output back is to find more REAL pages. A company's own board is exactly that: the
+  //     genuine branded posting, which resolveTarget already accepts when it arrives as the
+  //     harvested URL. Reaching it deliberately instead of by luck is the whole change.
+  const board = await findOnCompanyBoard(req);
+  if (board) return board;
+
+  return {
+    status: "no_company_page",
+    reason: "role not found on the company's own careers site or public job board",
+  };
 }
 
 /**
- * Probe the company's careers pages for a link matching the role title. Only accepts a
- * destination that stays on the company's own domain (not a click-through to the ATS).
+ * Probe the company's careers pages for a link matching the role title.
+ *
+ * Prefers a destination on the company's own domain. A link that leaves for a CLEAN ATS host
+ * (Greenhouse/Lever/Ashby/Workday/…) is now kept rather than discarded: that page is the real
+ * branded posting, and resolveTarget already accepts exactly such a URL when it happens to be
+ * the harvested one. Rejecting it here and accepting it there was an inconsistency that threw
+ * away good captures — most companies host their board on an ATS and link out to it from
+ * /careers, so this was the common case, not the edge case. Aggregators stay excluded.
  */
 async function discoverOnCompanySite(
   browser: import("playwright").Browser,
   companyDomain: string,
   req: ShotRequest,
-): Promise<string | null> {
+): Promise<Target | null> {
   const want = tokens(req.roleTitle);
   if (!want.length) return null;
   const root = domainRoot(companyDomain);
@@ -489,10 +514,10 @@ async function discoverOnCompanySite(
           await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)).catch(() => {});
           await page.waitForTimeout(900);
           // Match on anchor TEXT or the href SLUG (role titles often live only in the URL).
-          const links: Array<{ href: string; score: number }> = await page.evaluate(
-            ({ want, root }: { want: string[]; root: string }) => {
+          const links: Array<{ href: string; onDomain: boolean; score: number }> = await page.evaluate(
+            ({ want, root, atsRoots }: { want: string[]; root: string; atsRoots: string[] }) => {
               const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ");
-              const out: Array<{ href: string; score: number }> = [];
+              const out: Array<{ href: string; onDomain: boolean; score: number }> = [];
               for (const a of Array.from(document.querySelectorAll("a[href]"))) {
                 let href = "";
                 try { href = new URL((a as HTMLAnchorElement).href, location.href).href; } catch { continue; }
@@ -502,26 +527,70 @@ async function discoverOnCompanySite(
                   want.filter((w: string) => slug.includes(w)).length,
                 );
                 if (hit === 0) continue;
+                let onDomain = false;
                 try {
                   const h = new URL(href).hostname.replace(/^www\./, "");
                   const parts = h.split(".").filter(Boolean);
-                  if ((parts[parts.length - 2] || "") !== root) continue; // stay on the company's domain
+                  onDomain = (parts[parts.length - 2] || "") === root;
+                  // Off the company's domain is only interesting if it is a clean ATS board.
+                  if (!onDomain && !atsRoots.includes(parts[parts.length - 2] || "")) continue;
                 } catch { continue; }
                 const looksJob = /\/(jobs?|positions?|openings?|careers?)\/|[0-9]{4,}/.test(href);
-                out.push({ href, score: hit / want.length + (looksJob ? 0.15 : 0) });
+                // The company's own domain still wins a tie: it is the most on-brand capture.
+                out.push({ href, onDomain, score: hit / want.length + (looksJob ? 0.15 : 0) + (onDomain ? 0.2 : 0) });
               }
               return out.sort((x, y) => y.score - x.score).slice(0, 8);
             },
-            { want, root },
+            { want, root, atsRoots: [...ATS_HOSTS] },
           );
           const best = links.find((l) => l.score >= 0.5);
-          if (best) return best.href;
+          if (best) {
+            if (best.onDomain) return { url: best.href, companyDomain, via: "careers_discovery" };
+            // An ATS board is verified against ITS OWN host, the same way a harvested ATS URL is.
+            return { url: best.href, companyDomain: registrableDomain(hostOf(best.href)), via: "careers_ats" };
+          }
         } catch { /* try the next base/path */ }
       }
     }
     return null;
   } finally {
     await ctx.close().catch(() => {});
+  }
+}
+
+/**
+ * Last real-capture chance: the company's OWN public ATS board, fetched as JSON.
+ *
+ * resolveCompanyRoles already knows how to find a company's Greenhouse/Lever/Ashby/Workable/
+ * SmartRecruiters/Recruitee board from its name and domain, and caches the result — so this
+ * costs one cached lookup and no browser work. We take the best title match and hand back its
+ * posting URL, which is the genuine branded job page.
+ *
+ * Deliberately strict about WHICH role: a board answer is a title match, not the exact posting
+ * we harvested, so a weak match would put the wrong job in front of the recipient. Two thirds
+ * of the title tokens must line up, and verifyPage still has to agree afterwards.
+ */
+async function findOnCompanyBoard(req: ShotRequest): Promise<Target | null> {
+  const want = tokens(req.roleTitle);
+  if (!want.length) return null;
+  try {
+    const { resolveCompanyRoles } = await import("./companyRoles");
+    const res = await resolveCompanyRoles(req.company, req.domain);
+    let best: { url: string; score: number } | null = null;
+    for (const role of res.roles || []) {
+      if (!role.url) continue;
+      const host = hostOf(role.url);
+      // The board's own postings only. An aggregator link on a board is not brand-safe.
+      if (!host || isAggregatorHost(host)) continue;
+      const have = tokens(role.title);
+      if (!have.length) continue;
+      const hit = want.filter((w) => have.includes(w)).length / want.length;
+      if (hit >= 0.66 && (!best || hit > best.score)) best = { url: role.url, score: hit };
+    }
+    if (!best) return null;
+    return { url: best.url, companyDomain: registrableDomain(hostOf(best.url)), via: "company_board" };
+  } catch {
+    return null; // the board resolver is best-effort; never let it fail a capture run
   }
 }
 

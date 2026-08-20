@@ -233,15 +233,55 @@ if (stats) {
 }
 
 /* =========================================================================
-   6. VIDEO ENGAGEMENT — PiP Studio's numbers are event-driven, so a quiet spell
-   is legitimate. Long silence usually means renders stopped, not that nobody
-   watched, so it is reported rather than assumed.
+   6. VIDEO. Two different numbers that are easy to confuse, so both are here.
+
+   PRODUCTION is whether the engine can still make a video at all. Every video
+   needs a REAL capture of the role's own posting — the synthetic role card was
+   made opt-in on 2026-08-14 by owner mandate, so a page it cannot reach is a
+   video that does not get made. Real captures have only ever succeeded ~11% of
+   attempts, so this can quietly fall to zero without anything erroring.
+
+   ENGAGEMENT is whether anyone watched. A quiet spell there is legitimate; a
+   quiet spell that is really a production stoppage is not, and the two look
+   identical from the engagement number alone. That is why production is read
+   first: an empty board with nothing being produced is a supply problem.
    ========================================================================= */
 {
+  const since = new Date(now - 7 * 86400000).toISOString();
+  const fails = readJson(`${VOL}/snap_inmarket_autovideo_fails_v1.json`) || {};
+  const vids = readJson(`${VOL}/snap_inmarket_videos_v1.json`) || {};
+  const failRecent = Object.values(fails).filter((v) => String((v || {}).at || "") >= since).length;
+  const madeRecent = Object.values(vids).filter((v) => String((v || {}).at || "") >= since).length;
+  const attempts = failRecent + madeRecent;
+  const pct = attempts ? Math.round((100 * madeRecent) / attempts) : 0;
+  // Reasons matter: a wall of "role not found" is a reachability problem worth acting on,
+  // where scattered failures are just the long tail of the open web.
+  const reasons = {};
+  for (const v of Object.values(fails)) {
+    if (String((v || {}).at || "") < since) continue;
+    const r = String((v || {}).reason || "unknown").slice(0, 60);
+    reasons[r] = (reasons[r] || 0) + 1;
+  }
+  const top = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0];
+  const prodStatus = !attempts ? "warn" : madeRecent === 0 ? "bad" : pct < 10 ? "warn" : "ok";
+  add("videoproduction", "PiP Studio · videos actually being produced", prodStatus,
+    attempts ? `${madeRecent} made of ${attempts} attempts (${pct}%) in 7d` : "no attempts in 7d",
+    prodStatus === "ok" ? ""
+      : !attempts ? "The video engine has not tried to build anything this week."
+      : `Every attempt failed. Videos require a real capture of the role's own posting (the synthetic role card is opt-in since 2026-08-14), so a pool of aggregator links produces nothing.${top ? ` Leading reason: ${top[0]} (${top[1]}).` : ""}`);
+
   const age = mtimeMin(`${VOL}/snap_inmarket_video_stats_v1.json`);
-  const status = age == null ? "warn" : age <= 3 * 1440 ? "ok" : "warn";
-  add("videostats", "PiP Studio · video opens, visits, watchers", status, `last engagement event ${fmtAge(age)}`,
-    status === "ok" ? "" : "No video engagement recorded for days. Check whether video emails are still rendering and going out before reading this as low interest.");
+  // Engagement can only be judged when something was actually sent to be watched.
+  // Judge engagement only once enough videos went out to expect a watch. Three videos in a
+  // week producing no opens says nothing, and reporting it as a tracking fault would send the
+  // reader hunting a broken beacon when the real story is upstream in production.
+  const enoughToJudge = madeRecent >= 10;
+  const engStatus = !enoughToJudge ? "ok" : age == null ? "warn" : age <= 3 * 1440 ? "ok" : "warn";
+  add("videostats", "PiP Studio · video opens, visits, watchers", engStatus,
+    `last engagement event ${fmtAge(age)}`,
+    engStatus === "ok"
+      ? (enoughToJudge ? "" : `Only ${madeRecent} video${madeRecent === 1 ? "" : "s"} went out this week, too few to read anything into the silence. The production row above is the one to act on.`)
+      : "Videos are going out but nothing is being watched. Check that the watch links and the tracking beacon still resolve.");
 }
 
 /* ---------------- verdict, snapshot, edge-triggered owner alert ---------------- */
