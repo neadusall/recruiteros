@@ -424,6 +424,43 @@ if [ "$LOCAL" = "$REMOTE" ] && [ -f "$DIR/.ostext-cutover-v1" ]; then
   exit 0
 fi
 
+# QUIET-PERIOD DEBOUNCE (2026-08-20). Build only once a push burst has SETTLED.
+#
+# Why: this box has TWO cores and a full `next build` saturates them for 10-16 min,
+# and the swap at the end REPLACES the app container. The Hire Signals curation tick
+# needs ~13 uninterrupted minutes. With several agents/sessions pushing to main
+# independently, commits landed every 10-16 min all day, so the engine was killed
+# mid-tick every single time and never completed one: `phases: {}` at the 900s
+# watchdog, the whole supply pipeline (research, email verify, residual finder,
+# company phones) making zero progress for hours.
+#
+# Building on EVERY commit is what made a burst of N pushes cost N full builds.
+# Waiting for the newest commit to be at least DEPLOY_QUIET_SEC old coalesces that
+# burst into ONE build, which is the difference between the engine never running and
+# running most of the time. Nothing is skipped: the newest commit still ships, just
+# once the pushes stop. A deploy already in flight is unaffected (it holds the lock).
+#
+# Tunable; 0 restores the old build-on-every-commit behaviour. An urgent fix can
+# bypass the wait entirely:  touch /opt/recruiteros/.deploy-now
+QUIET_SEC="${DEPLOY_QUIET_SEC:-600}"
+if [ "$QUIET_SEC" -gt 0 ] && [ ! -f "$DIR/.deploy-now" ]; then
+  # Force to a plain integer. An empty/garbled value would make the [ -gt ] test throw
+  # "integer expression expected", and under `set -e` that would kill the deploy script
+  # outright — a debounce must never be able to stop deploys. Unparseable => 0 => build now.
+  COMMIT_TS=$(git log -1 --format=%ct "$REMOTE" 2>/dev/null | head -1 | tr -cd "0-9")
+  [ -n "$COMMIT_TS" ] || COMMIT_TS=0
+  AGE=$(( $(date +%s) - COMMIT_TS ))
+  if [ "$COMMIT_TS" -gt 0 ] && [ "$AGE" -lt "$QUIET_SEC" ]; then
+    # Log once per commit, not every 2-min tick, so the log stays readable.
+    if [ "$(cat "$DIR/.deploy-waiting" 2>/dev/null)" != "$REMOTE" ]; then
+      echo "$(date -u) new commit $REMOTE — holding for the push burst to settle (${QUIET_SEC}s quiet period)" >> "$LOG"
+      echo "$REMOTE" > "$DIR/.deploy-waiting"
+    fi
+    exit 0
+  fi
+fi
+rm -f "$DIR/.deploy-waiting" "$DIR/.deploy-now"
+
 echo "$(date -u) new commit $REMOTE (was $LOCAL), deploying..." >> "$LOG"
 
 # DISK FAIL-SAFE. Every `up -d --build` leaves the previous image dangling (~3GB
