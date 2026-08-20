@@ -18379,9 +18379,11 @@
         isAdmin ? api("/phone-intel/queue").catch(function () { return null; }) : Promise.resolve(null),
         api("/phone-intel/companies").catch(function () { return null; }),
         isAdmin ? api("/phone-intel/queue/start").catch(function () { return null; }) : Promise.resolve(null),
+        api("/phone-intel/phone-stats?motion=" + motion).catch(function () { return null; }),
       ]).then(function (res) {
         if (!document.body.contains(body)) return;
         var callsD = res[0] || {}, queueD = res[1] || {}, compD = res[2] || {}, runD = res[3] || {};
+        var pstat = (res[4] && res[4].stats) || {};
         var dash = callsD.dashboard || {}, out = callsD.outreach || {};
         var calls = callsD.calls || [], queue = queueD.queue || [], companies = compD.companies || [];
         var run = runD.run || { running: false };
@@ -18402,6 +18404,26 @@
           kpi(out.liveAnswers || 0, "live answers (numbers rotated)") +
           kpi(dash.totalCalls || 0, "calls total") +
           "</div></div>" +
+
+          // Phone reachability monitor: line-check the pipeline, business lines only.
+          '<div class="card" style="margin-top:14px"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">' +
+          '<div><h3 style="margin:0">Phone reachability (' + esc(motion === "bd" ? "Business Dev" : "Recruiting") + ' pipeline)</h3>' +
+          '<p class="muted" style="font-size:12.5px;margin:4px 0 0;max-width:640px">We line-check every number and dial <b>only confirmed business landline / VoIP lines</b>. Mobiles, personal and residential numbers are found and skipped. "Ready to drop" is emailed + a business line + a role.</p></div>' +
+          (isAdmin ? '<div style="text-align:right"><button class="btn btn-sm btn-primary" id="piClassify">Line-check numbers</button>' +
+          '<div class="muted" id="piClassifyOut" style="font-size:11.5px;margin-top:6px;max-width:260px"></div></div>' : "") +
+          "</div>" +
+          '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:14px">' +
+          kpi((pstat.droppableNow || 0), "ready to drop now", "var(--ok)") +
+          kpi((pstat.businessLines || 0), "business lines found", "var(--ok)") +
+          kpi((pstat.withNumber || 0), "have a number") +
+          kpi((pstat.classified || 0), "line-checked") +
+          kpi((pstat.unclassifiedWithNumber || 0), "not checked yet", "var(--warn)") +
+          kpi((pstat.mobiles || 0), "mobile (skipped)") +
+          kpi((pstat.personalOrResidential || 0), "personal/residential (skipped)") +
+          kpi((pstat.emailed || 0), "emailed") +
+          "</div>" +
+          (pstat.withNumber === 0 ? '<div class="muted" style="font-size:12px;margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--surface-2)">No phone numbers on prospects in this tab. Your enriched numbers may be in the other pipeline, switch the Business dev / Recruiting toggle at the top.</div>' : "") +
+          "</div>" +
 
           (isAdmin
             ? '<div class="card" style="margin-top:14px;border-color:var(--brand-2)"><h3>Pull from pipeline (voicemail on the role you emailed)</h3>' +
@@ -18487,6 +18509,20 @@
             toast("Queued " + ((r.data && r.data.added) || 0) + ((r.data && r.data.rejected && r.data.rejected.length) ? " · rejected " + r.data.rejected.length : ""));
             paintIntel(body);
           });
+        });
+        var clsB = $("#piClassify");
+        if (clsB) clsB.addEventListener("click", function () {
+          clsB.disabled = true;
+          var out = $("#piClassifyOut"); if (out) out.textContent = "Line-checking numbers (business vs mobile/residential)…";
+          send("/phone-intel/classify-phones", "POST", { motion: motion, emailedOnly: true }).then(function (r) {
+            clsB.disabled = false;
+            if (!r.ok) { if (out) out.textContent = (r.data && r.data.detail) || "Line-check failed."; return; }
+            var x = (r.data && r.data.result) || {};
+            if (x.dryRun) { if (out) out.textContent = "Telnyx isn't connected for this workspace yet, so nothing could be checked. Connect it in Setup."; return; }
+            if (out) out.innerHTML = "Checked <b>" + (x.classified || 0) + "</b> · <b>" + (x.businessFound || 0) + "</b> business, " +
+              (x.mobiles || 0) + " mobile, " + (x.personalOrResidential || 0) + " personal · " + (x.remaining || 0) + " left · ~$" + (x.spentUsd || 0).toFixed(2);
+            paintIntel(body);
+          }).catch(function () { clsB.disabled = false; if (out) out.textContent = "Could not reach the server."; });
         });
         var pullB = $("#piPull");
         if (pullB) pullB.addEventListener("click", function () {

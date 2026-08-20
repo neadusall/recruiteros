@@ -104,8 +104,18 @@ export interface EnqueueResult {
  * + caller-name lookup once and persists the result onto the prospect so we never
  * re-pay. Returns true only for a confirmed business landline/VoIP.
  */
-async function ensureBusinessLine(workspaceId: string, p: Prospect, motion?: Motion): Promise<boolean> {
-  if (typeof p.phoneBusinessLine === "boolean") return p.phoneBusinessLine;
+interface ClassifyOutcome { businessLine: boolean; lineType?: string; looked: boolean; cached: boolean; costUsd: number; }
+
+/**
+ * Determine + PERSIST whether a prospect's number is an actual business line, once.
+ * Uses the cached verdict if present; otherwise runs the Telnyx line-type +
+ * caller-name (CNAM) lookup, routes the number into landline/mobile, and stores
+ * phoneLineType + phoneBusinessLine on the prospect so we never re-pay.
+ */
+async function classifyAndPersist(workspaceId: string, p: Prospect, motion?: Motion): Promise<ClassifyOutcome> {
+  if (typeof p.phoneBusinessLine === "boolean") {
+    return { businessLine: p.phoneBusinessLine, lineType: p.phoneLineType, looked: false, cached: true, costUsd: 0 };
+  }
   const cls = await classifyLine(corporateNumber(p) || p.phone || "", {
     workspaceId, motion: motion ?? p.motion, business: true,
   });
@@ -114,7 +124,7 @@ async function ensureBusinessLine(workspaceId: string, p: Prospect, motion?: Mot
   try {
     const fresh = await getCore().getProspect(p.id);
     if (fresh) {
-      fresh.phoneLineType = cls.lineType;
+      fresh.phoneLineType = cls.looked ? cls.lineType : fresh.phoneLineType;
       fresh.phoneBusinessLine = cls.looked ? business : undefined;
       if (cls.landlinePhone && !fresh.landlinePhone) fresh.landlinePhone = cls.landlinePhone;
       if (cls.mobilePhone && !fresh.mobilePhone) fresh.mobilePhone = cls.mobilePhone;
@@ -123,7 +133,107 @@ async function ensureBusinessLine(workspaceId: string, p: Prospect, motion?: Mot
       p.phoneLineType = fresh.phoneLineType;
     }
   } catch { /* best-effort persist */ }
-  return business;
+  return { businessLine: business, lineType: cls.lineType, looked: cls.looked, cached: false, costUsd: cls.costUsd };
+}
+
+async function ensureBusinessLine(workspaceId: string, p: Prospect, motion?: Motion): Promise<boolean> {
+  return (await classifyAndPersist(workspaceId, p, motion)).businessLine;
+}
+
+const validNum = (n?: string) => /^\+?[1-9]\d{7,14}$/.test(toE164(n || ""));
+
+/* --------------------------- reachability monitor --------------------------- */
+
+export interface PhoneReachabilityStats {
+  totalProspects: number;
+  withNumber: number;
+  withRole: number;
+  emailed: number;
+  /** Numbers we've run the line-type + business check on. */
+  classified: number;
+  /** Confirmed ACTUAL business landline/VoIP lines — the droppable universe. */
+  businessLines: number;
+  /** Classified but a mobile/cell (never dialed). */
+  mobiles: number;
+  /** Classified landline/VoIP but consumer/residential (never dialed). */
+  personalOrResidential: number;
+  /** Has a number but not line-checked yet. */
+  unclassifiedWithNumber: number;
+  /** READY TO DROP NOW: emailed + confirmed business line + a role. */
+  droppableNow: number;
+  /** Confirmed business line + a role, not yet emailed (needs the email first). */
+  businessNotYetEmailed: number;
+}
+
+/** Live phone-reachability rollup for a motion's pipeline, read from the cached
+ *  per-prospect classification. Fast (no lookups); the "Classify" action fills it. */
+export async function phoneReachabilityStats(workspaceId: string, motion?: Motion): Promise<PhoneReachabilityStats> {
+  const all = await getCore().listProspects(workspaceId);
+  const prospects = motion ? all.filter((p) => (p.motion ?? "bd") === motion) : all;
+  const s: PhoneReachabilityStats = {
+    totalProspects: prospects.length, withNumber: 0, withRole: 0, emailed: 0,
+    classified: 0, businessLines: 0, mobiles: 0, personalOrResidential: 0,
+    unclassifiedWithNumber: 0, droppableNow: 0, businessNotYetEmailed: 0,
+  };
+  for (const p of prospects) {
+    const hasNum = validNum(p.landlinePhone) || validNum(p.phone);
+    if (hasNum) s.withNumber++;
+    if (roleForProspect(p) && roleForProspect(p) !== "open role") s.withRole++;
+    const em = wasEmailed(p);
+    if (em) s.emailed++;
+    const done = typeof p.phoneBusinessLine === "boolean";
+    if (done) {
+      s.classified++;
+      if (p.phoneBusinessLine === true) {
+        s.businessLines++;
+        if (em) s.droppableNow++; else s.businessNotYetEmailed++;
+      } else if (p.phoneLineType === "mobile" || p.phoneLineType === "toll_free") s.mobiles++;
+      else s.personalOrResidential++;
+    } else if (hasNum) s.unclassifiedWithNumber++;
+  }
+  return s;
+}
+
+export interface ClassifyBatchResult {
+  classified: number;
+  businessFound: number;
+  mobiles: number;
+  personalOrResidential: number;
+  remaining: number;
+  spentUsd: number;
+  dryRun: boolean;
+}
+
+/**
+ * Line-check a batch of the pipeline's numbers (line-type + business CNAM),
+ * persisting each verdict. `emailedOnly` (default true) checks only prospects
+ * we've emailed — the droppable candidates — to keep spend tight; pass false to
+ * classify the whole pool. Bounded by `limit`. Safe to call repeatedly (cached
+ * verdicts are skipped, so it never re-pays).
+ */
+export async function classifyPipelinePhones(
+  workspaceId: string, opts: { motion?: Motion; limit?: number; emailedOnly?: boolean } = {},
+): Promise<ClassifyBatchResult> {
+  const all = await getCore().listProspects(workspaceId);
+  const pool = (opts.motion ? all.filter((p) => (p.motion ?? "bd") === opts.motion) : all)
+    .filter((p) => (validNum(p.landlinePhone) || validNum(p.phone)) && typeof p.phoneBusinessLine !== "boolean")
+    .filter((p) => (opts.emailedOnly === false ? true : wasEmailed(p)));
+  const cap = Math.max(1, opts.limit ?? 300);
+  const res: ClassifyBatchResult = { classified: 0, businessFound: 0, mobiles: 0, personalOrResidential: 0, remaining: 0, spentUsd: 0, dryRun: false };
+  let done = 0;
+  for (const p of pool) {
+    if (done >= cap) break;
+    const out = await classifyAndPersist(workspaceId, p, opts.motion);
+    if (!out.looked && !out.cached) { res.dryRun = true; break; } // Telnyx unconfigured — stop, charge nothing
+    done++;
+    res.classified++;
+    res.spentUsd += out.costUsd;
+    if (out.businessLine) res.businessFound++;
+    else if (out.lineType === "mobile" || out.lineType === "toll_free") res.mobiles++;
+    else res.personalOrResidential++;
+  }
+  res.remaining = Math.max(0, pool.length - done);
+  return res;
 }
 
 /**

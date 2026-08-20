@@ -15,7 +15,8 @@ export { startQueueRun, stopQueueRun, queueRunState } from "./runner";
 export {
   pullRoleVoicemailsFromPipeline, enqueueRoleVoicemail, assembleRoleVoicemail,
   roleForProspect, wasEmailed, corporateNumber, roleVoicemailOnSendEnabled,
-  DEFAULT_ROLE_VM_TEMPLATE, type PullSummary,
+  phoneReachabilityStats, classifyPipelinePhones,
+  DEFAULT_ROLE_VM_TEMPLATE, type PullSummary, type PhoneReachabilityStats, type ClassifyBatchResult,
 } from "./roleVoicemail";
 export { planIvrMove, alternateDirectorySpec, type IvrMove, type NavTarget } from "./navigation";
 export { aiPlanMove, mapAiAction } from "./aiNavigator";
