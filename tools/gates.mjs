@@ -618,9 +618,11 @@ const LOCAL_CLAIM = /\blocal to (?:your|the)\b|\byour (?:local )?(?:market|area|
 // LENGTH IS A DELIVERABILITY AND REPLY-RATE FEATURE, so it is enforced, not suggested. The MPC
 // format is three short paragraphs: who you represent, two proof facts, one question. Body is
 // measured BEFORE the greeting, confidentiality line and signature are appended, so the cap is
-// on the pitch alone. Tunable per box, but the defaults are the format.
-const MAX_BODY_WORDS = Number(process.env.MPC_MAX_BODY_WORDS || 70);
-const MAX_SENTENCE_WORDS = Number(process.env.MPC_MAX_SENTENCE_WORDS || 28);
+// on the pitch alone. Tunable per box, but the defaults are the format. Tightened 2026-08-20
+// (70/28 -> 55/18) on the owner read that the first pass was still doing too much work per
+// sentence: the sentence cap is what actually forces two clipped facts instead of one clause pile.
+const MAX_BODY_WORDS = Number(process.env.MPC_MAX_BODY_WORDS || 55);
+const MAX_SENTENCE_WORDS = Number(process.env.MPC_MAX_SENTENCE_WORDS || 18);
 
 // The recruiter-filler that made the pre-2026-08-20 emails read as a wall of text: sentences
 // that tell a hiring manager about their own req, their own market, or their own team's pain.
@@ -632,6 +634,13 @@ const LECTURE = [
   ["scale/stage flattery", /\bat your scale\b|\bat your stage\b|\bgiven (?:your|the) (?:growth|trajectory|scale)\b/i],
   ["defending the candidates instead of naming facts", /\bthese are ?n'?t generic candidates\b|\bnot your typical\b|\bnot generic\b|\bthe infrastructure you need\b/i],
 ];
+
+// NUMBERS ARE ONLY EVER REAL. The writer knows a candidate at the capability level unless a
+// record in the candidate bank supplies proof lines, so ANY quantity it produces on its own is
+// invented ("1,200+ accounts", "ten-figure transactions", both seen on 2026-08-20). Standard
+// form and standard names carry digits without being quantities, so they are stripped first.
+const FORM_TOKEN = /\b(401\s*\(?k\)?|403\s*\(?b\)?|1099s?|w-?2s?|w-?9s?|k-?1s?|10-?[kq]s?|8-?k|s-?1|409a|asc\s*\d{3}|ifrs\s*\d+|sox\s*\d{3}|section\s*\d{3}[a-z]?|form\s*\d+|soc\s*[12]|type\s*(?:i|ii)|iso\s*\d+|24\/7)\b/gi;
+const QUANTITY = /\b\d+\b|\$\s*\d|\b(?:six|seven|eight|nine|ten)[- ]figure\b|\bmulti-?million\b|\b(?:dozens|hundreds|thousands|millions)\s+of\b/i;
 
 // The render gate. A written email may be QUEUED only if this passes. Pass { remote: true }
 // when the role has no metro so local-market claims are rejected.
@@ -661,6 +670,16 @@ export function checkRenderedEmail(subject, body, opts = {}) {
   // "here is why this seat is hard" is the exact filler that makes these read like a campaign.
   for (const [label, re] of LECTURE) {
     if (re.test(b)) { problems.push(`lectures the reader: ${label}`); break; }
+  }
+  // A number the writer invented is worse than a vague email: it is a claim about a person we
+  // cannot back. Pass allowNumbers when a candidate-bank record actually supplied the proof.
+  if (opts.shape !== false && !opts.allowNumbers && QUANTITY.test(b.replace(FORM_TOKEN, " "))) {
+    problems.push("a quantity we cannot back (no candidate record supplied it)");
+  }
+  // One recruiter is writing, not a firm. "we just closed a search" turns a personal note into
+  // a company blast, which is the exact tone this format exists to avoid.
+  if (opts.shape !== false && /\b(we|we'?re|we'?ve|our|ours)\b/i.test(b)) {
+    problems.push("first person plural (we/our) instead of I");
   }
   // WHITE SPACE IS THE FORMAT. The same 45 words in one block reads as a wall on a phone and as
   // three lines with air between them reads as a note from a person. Enforce the shape: who /

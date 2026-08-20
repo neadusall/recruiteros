@@ -816,7 +816,7 @@ async function main() {
     let email;
     try { email = await writeEmail(p, { metro, variant }); }
     catch (e) { console.log(`  SKIP (writer) ${p.company}: ${e.message}`); continue; }
-    const check = checkRenderedEmail(email.subject, email.body, { remote: !metro });
+    const check = checkRenderedEmail(email.subject, email.body, { remote: !metro, allowNumbers: email.sourcedProof });
     if (!check.ok) { console.log(`  SKIP (render gate) ${p.company}: ${check.problems.join(", ")}`); continue; }
     // Greeting built deterministically: "Hi <Capitalized First Name>," then a blank line, then the
     // message, then the fixed confidentiality close (the MPC promise, never AI-varied, and true

@@ -151,8 +151,26 @@ test("render gate holds a one-block email that is otherwise short and clean", ()
 });
 test("render gate passes the new MPC format", () => {
   const r = checkRenderedEmail("vp of sales, quietly looking",
-    "I'm representing a VP of Sales in Denver.\n\nGrew a portfolio from $12M to $40M, built the team from 3 to 22 reps.\n\nThey're exploring their next move confidentially. Worth a look at their profile?");
+    "I'm representing a VP of Sales in Denver.\n\nBuilt the enterprise team from scratch. Owned the cycle from pipeline to close.\n\nThey're looking quietly. Worth a look?");
   assert.equal(r.ok, true, r.problems.join("; "));
+});
+test("render gate holds a number the writer invented, allows one a record supplied", () => {
+  const withNumbers = "I'm representing a VP of Sales in Denver.\n\nGrew a portfolio from $12M to $40M, built the team from 3 to 22 reps.\n\nThey're looking quietly. Worth a look?";
+  assert.equal(checkRenderedEmail("vp of sales, quietly looking", withNumbers).ok, false);
+  assert.equal(checkRenderedEmail("vp of sales, quietly looking", withNumbers, { allowNumbers: true }).ok, true);
+  // The two live 2026-08-20 leaks: a count and a magnitude the writer had no record for.
+  const shell = (proof) => "I'm representing a Senior Accountant in your space.\n\n" + proof + "\n\nThey're looking quietly. Worth a look?";
+  assert.equal(checkRenderedEmail("senior accountant, quietly looking", shell("Owned daily reconciliations across 1,200+ accounts. Built monthly reporting.")).ok, false);
+  assert.equal(checkRenderedEmail("manager, off market", shell("Owned due diligence on ten-figure transactions. Led the modeling.")).ok, false);
+  // Standard forms and standards carry digits without being quantities.
+  assert.equal(checkRenderedEmail("senior accountant, quietly looking", shell("Owned 401(k) administration and reporting. Managed the annual audit.")).ok, true);
+  assert.equal(checkRenderedEmail("senior accountant, quietly looking", shell("Owned ASC 606 revenue recognition. Managed the monthly close.")).ok, true);
+});
+test("render gate holds first person plural", () => {
+  const r = checkRenderedEmail("design engineer, off market",
+    "I'm representing a Design Engineer in your space, runner-up on a search we just closed.\n\nOwned firmware architecture for grid infrastructure.\n\nThey're available now. Want their profile?");
+  assert.equal(r.ok, false);
+  assert.ok(r.problems.some((x) => /first person plural/.test(x)), r.problems.join("; "));
 });
 test("render gate passes a clean email", () => {
   const r = checkRenderedEmail("your assistant controller search, Vernon",
