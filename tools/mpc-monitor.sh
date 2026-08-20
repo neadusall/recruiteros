@@ -58,71 +58,17 @@ docker run --rm -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:r
   /tools/batch.mjs --capacity >> "$LOG" 2>&1 || true
 rm -f /tmp/send.env
 
-# One reply monitor at a time: a fixed container name makes a still-running
-# previous sweep visible, so this tick skips instead of stacking a second
-# 900-box read against a rate-limited Mailbox API. Non-fatal: a bad sweep
-# must not kill the stats/deliverability steps below.
-if docker ps -q --filter name='^mpc-reply-monitor$' | grep -q .; then
-  echo "$(date -u +%FT%TZ) reply monitor still running from a previous tick; skipping this pass" >> "$LOG"
-else
-  grep -E '^(SENDINGAC_MAILBOX_API_KEY)=' .env.production > /tmp/mon.env
-  docker run --rm --name mpc-reply-monitor \
-    -v recruiteros_app_data:/data \
-    -v /opt/recruiteros/tools:/tools:ro \
-    -v /opt/recruiteros/mpc-out:/out \
-    --env-file /tmp/mon.env --entrypoint node recruiteros-app \
-    /tools/monitor.mjs >> "$LOG" 2>&1 || true
-  rm -f /tmp/mon.env
-fi
-
-# Refresh the BD cockpit stats (sent, reply rate by variant, replies by sentiment, supply, boards).
-docker run --rm \
-  -v recruiteros_app_data:/data \
-  -v /opt/recruiteros/tools:/tools:ro \
-  -v /opt/recruiteros/mpc-out:/out \
-  --entrypoint node recruiteros-app \
-  /tools/mpc-stats.mjs >> "$LOG" 2>&1 || true
-
-# Growth Engine: idle demand + capacity gap + campaign proposals (the push-more-outbound layer).
-docker run --rm \
-  -v recruiteros_app_data:/data \
-  -v /opt/recruiteros/tools:/tools:ro \
-  -v /opt/recruiteros/mpc-out:/out \
-  --entrypoint node recruiteros-app \
-  /tools/growth-engine.mjs >> "$LOG" 2>&1 || true
-
-# Sent-message feed for the "Sent" audit view (the real emails + bodies the engine sent).
-docker run --rm \
-  -v recruiteros_app_data:/data \
-  -v /opt/recruiteros/tools:/tools:ro \
-  -v /opt/recruiteros/mpc-out:/out \
-  --entrypoint node recruiteros-app \
-  /tools/mpc-sent-log.mjs >> "$LOG" 2>&1 || true
-
-# DELIVERABILITY tracker: real, documented numbers on whether mail is landing (acceptance,
-# hard-fail, bounce, complaint per sending domain + live Smartlead inbox-placement/warm-up
-# reputation), appended to a 30-day history the cockpit reads. Needs the Smartlead key.
-grep -E '^(SMARTLEAD_API_KEY)=' .env.production > /tmp/dl.env
-docker run --rm \
-  -v recruiteros_app_data:/data \
-  -v /opt/recruiteros/tools:/tools:ro \
-  -v /opt/recruiteros/mpc-out:/out \
-  --env-file /tmp/dl.env --entrypoint node recruiteros-app \
-  /tools/mpc-deliverability.mjs >> "$LOG" 2>&1 || true
-rm -f /tmp/dl.env
-
-# WHO IS ON YOUR SITE: resolve new lumesp.com visitors (Caddy access log) into
-# companies, matched against the send ledger -> Dashboard card + connect list.
-docker run --rm \
-  -v recruiteros_app_data:/data \
-  -v /opt/recruiteros/tools:/tools:ro \
-  -v /opt/recruiteros/mpc-out:/out \
-  -v recruiteros_caddy_data:/caddylog:ro \
-  --entrypoint node recruiteros-app \
-  /tools/site-visitors.mjs >> "$LOG" 2>&1 || true
-
-# (watch -> connect pipeline runs at the TOP of this script, before the slow inbox monitor)
-
-# Publish the send schedule for the portal (PiP performance header): next drain
-# tick + next daily run, straight from systemd. Last so it reflects this tick.
-bash /opt/recruiteros/tools/publish-send-schedule.sh || true
+# ============================================================================
+# THE SLOW HALF MOVED OUT (2026-08-20). Everything below the send steps — the
+# 900-mailbox reply sweep and the stats/deliverability/site-visitor refreshes —
+# now runs from mpc-replies.sh on its own timer.
+#
+# WHY. This script is the continuous SENDER, and the reply sweep sits after the
+# send steps in the same tick, so a slow sweep pushes the NEXT tick's sends back
+# with it. The sweep runs against a rate-limited Mailbox API and grinds in partial
+# throttle, so ticks were taking ~55 min against a 20-min timer. Measured on
+# 2026-08-20 the send lane fired at 11:52, 12:47, 13:41, 14:42, 15:39, 16:56,
+# 18:25, 19:30, 20:25, 21:21 — roughly hourly, a third of the intended cadence,
+# on a day the fleet had 700+/day of unused headroom. Reads and writes are
+# independent here, so they no longer share a clock.
+# ============================================================================
