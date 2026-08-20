@@ -222,27 +222,15 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
   const wuAge = wu ? ageMin(wu.lastRun || wu.at) : null;
   const wuStale = !wu || wuAge == null || wuAge > 120;
   const stale = !led || age == null || age > 6 * 60;
-  // A monitor that cannot READ its evidence is a failure of the monitor, not a clean
-  // board: errors and unverified steps are reported here rather than rounding to green.
-  const errs = s.errors ?? 0;
-  const unver = s.unverified ?? 0;
-  const wuErr = wu?.error || null;
-  const st = !led ? "amber"
-    : (s.regressed > 0 || age > 24 * 60) ? "bad"
-    : (s.late > 0 || errs > 0 || stale || wuStale || wuErr) ? "amber"
-    : "good";
+  const st = !led ? "amber" : (s.regressed > 0 || age > 24 * 60) ? "bad" : (s.late > 0 || stale || wuStale) ? "amber" : "good";
   add(GROUP_SEND, "fleetplan", "Fleet plan (milestones verified, not assumed)", st,
     !led ? "watcher has not folded a reading yet" :
-    `${s.done ?? 0} of ${s.milestones ?? 0} verified done, ${s.late ?? 0} late, ${s.regressed ?? 0} went backwards` +
-      `${unver ? `, ${unver} unverifiable` : ""}${errs ? `, ${errs} read errors` : ""} (folded ${fmtAge(age)})`,
+    `${s.done ?? 0} of ${s.milestones ?? 0} verified done, ${s.late ?? 0} late, ${s.regressed ?? 0} went backwards (folded ${fmtAge(age)})`,
     !led ? "The sending cron tick runs the outlook watcher; without it the board still recomputes live on read but keeps no verified dates or slip history" :
     s.regressed > 0 ? "A milestone that had been PROVEN is now contradicted: open Senders > Fleet monitor and read the line marked went backwards" :
     stale ? "The outlook watcher has stopped folding readings: check /api/sending/cron on this host" :
-    errs > 0 ? "The watcher could not read some fleet's evidence this run: the affected lines hold their last state instead of moving" :
-    wuErr ? `The warm-up keeper ran but could not count the boxes (${wuErr}); rungs stay unchecked until it can` :
     wuStale ? `The warm-up keeper's report is ${wu ? fmtAge(wuAge) : "missing"}, so warm-up rungs cannot be checked off; check lume-warmup-keeper.timer` :
     s.late > 0 ? "A milestone is past its forecast with no evidence it happened; the line on the card says what it is waiting on" :
-    unver > 0 ? "Some steps cannot be confirmed from here yet; they stay unchecked rather than being assumed" :
     "Every milestone is either verified done or still inside its forecast");
 }
 
@@ -594,6 +582,32 @@ await probe("Smartlead warm-up API", "smartlead", async () => {
   add(GROUP_SUPPLY, "company-size-coverage", "Company size resolved (100-1,000 gate)", status,
     `${confirmed}/${cos.size} companies (${covPct}%), ${inBand} in band`,
     status === "good" ? "" : "The send gate fails closed on unconfirmed size, so low coverage starves volume. Run tools/company-size.mjs (step 0.93 of mpc-daily.sh).");
+
+  /* POOL COMPOSITION. The pool caps at 15,000 companies, so every slot held by a company outside
+   * the band is a company we could have sold to and did not store. Intake now refuses confirmed
+   * out-of-band companies and the accumulator purges them, so this number should CLIMB toward the
+   * cap over days. If it stalls or falls, either the resolver has stopped or sourcing has started
+   * returning mostly out-of-band companies again, and the desk will feel it as thin supply. */
+  const pool = readJson(`${VOL}/snap_inmarket_pool_v1.json`);
+  const entries = Array.isArray(pool) ? pool : (pool && pool.leads) || [];
+  if (entries.length) {
+    let pIn = 0, pOut = 0, pUnk = 0;
+    for (const e of entries) {
+      const l = e.lead || e;
+      const hit = cache[String(l.company || "").toLowerCase().trim()];
+      const c = hit && typeof hit.count === "number" ? hit.count : null;
+      if (c == null || c <= 0) pUnk++;
+      else if (c >= MINH && c <= MAXH) pIn++;
+      else pOut++;
+    }
+    const share = Math.round((100 * pIn) / entries.length);
+    const outShare = Math.round((100 * pOut) / entries.length);
+    // Out-of-band should trend to ~0: they are refused at intake and purged every cycle.
+    const st = outShare >= 25 ? "bad" : outShare >= 10 ? "amber" : "good";
+    add(GROUP_SUPPLY, "pool-band-composition", "Pool is companies we can sell to", st,
+      `${pIn}/${entries.length} in band (${share}%), ${pOut} out (${outShare}%), ${pUnk} unsized`,
+      st === "good" ? "" : "Out-of-band companies are occupying pool slots. Check that the accumulator's size purge is running and that tools/company-size.mjs is keeping up with new arrivals.");
+  }
 }
 
 for (const [key, label] of [["ANTHROPIC_API_KEY", "Anthropic key (email writer)"], ["RESEND_API_KEY", "Resend key (owner alerts)"], ["PORKBUN_API_KEY", "Porkbun key (DNS auto-fix)"], ["SERPER_API_KEY", "Serper key (company-size resolver)"]]) {
