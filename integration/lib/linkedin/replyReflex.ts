@@ -27,7 +27,6 @@
 
 import { listMembers } from "../auth/team";
 import { workspaceOwner } from "../auth";
-import { notifyOwner } from "../owner/ownerNotice";
 import { numberForUser } from "../phone/store";
 import { requestLinkedInAction } from "./os/engine";
 import type { LiAccountState } from "./os/types";
@@ -153,8 +152,15 @@ async function alert(workspaceId: string, item: RepliedThread, seat: Seat): Prom
     "Your answer posts in your own words, under their reply. Nothing is drafted for you.",
   ].filter(Boolean).join("\n");
 
-  if (to.length) {
-    await notifyOwner({ subject: `${item.authorName} replied to your comment`, body, to });
+  // sendWorkspaceEmail, never the house Resend sender: a white-label desk's
+  // recruiters must be mailed from THEIR domain (permanent owner mandate
+  // 2026-07-20). It fails closed on a tenant with no mailbox creds, which is
+  // the correct failure: the text below still goes, and the tracker still has
+  // the reply.
+  const { sendWorkspaceEmail } = await import("../auth");
+  const subject = `${item.authorName} replied to your comment`;
+  for (const address of to) {
+    try { await sendWorkspaceEmail(address, subject, body, workspaceId); } catch { /* the text still carries it */ }
   }
 
   // The text: the interruption. No links and no product names, exactly like
