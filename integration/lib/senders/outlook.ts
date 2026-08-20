@@ -454,8 +454,15 @@ export function buildOutlook(input: OutlookInput): OutlookResult {
     steps.push(...blocked);
     const cutT = input.egress?.cutoverAt ? Date.parse(input.egress.cutoverAt) : NaN;
     if (Number.isFinite(cutT)) steps.push(...warmupSteps(input, cutT, quietAt));
-    if (input.graduationAt) {
-      const g = Math.max(input.graduationAt, quietAt || 0);
+    // The graduation clock is the median age of the WARMING boxes, so it disappears
+    // the moment they all activate. The ledger remembers the date this plan was drawn
+    // to, which is what keeps the finished tail of the plan on the board instead of
+    // deleting it at the exact moment it is achieved.
+    const remembered = input.records[ledgerKey(input.workspaceId, input.fleet, "graduation")];
+    const rememberedAt = Date.parse(remembered?.firstForecast || remembered?.forecast || "");
+    const gradClock = input.graduationAt || (Number.isFinite(rememberedAt) ? rememberedAt : null);
+    if (gradClock) {
+      const g = input.graduationAt ? Math.max(gradClock, quietAt || 0) : gradClock;
       graduationAt = iso(g);
       steps.push(...rampSteps(input, g));
     }
