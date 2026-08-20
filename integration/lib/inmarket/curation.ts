@@ -528,6 +528,32 @@ function inFocus(fn: string): boolean {
   return FOCUS_FUNCTIONS.length === 0 || FOCUS_FUNCTIONS.includes(fn);
 }
 
+/**
+ * Reqs we will NEVER pitch, filtered BEFORE any enrichment spend (2026-08-20).
+ *
+ * The send gate has always rejected these, but it runs at the very END of the pipeline — after we
+ * have resolved a domain, scraped a team page, named a decision-maker and validated an email for
+ * the req. Every one of those steps costs money or rate budget. Rejecting the same rows here, at
+ * the point that CHOOSES what to research, keeps the spend on reqs that can actually be mailed.
+ *
+ * Deliberately narrow: only the unambiguous never-hires. A role we merely cannot CLASSIFY is still
+ * researched, because misclassification is our problem, not a reason to discard a real req.
+ */
+const NEVER_PITCH_ROLE =
+  /\b(intern|internship|trainee|volunteer|seasonal|apprentice|co-?op student|work study|shadow(?:ing)?|fellowship)\b/i;
+
+/** A "role" string that is really scraped page furniture, not a job. */
+const NOT_A_ROLE =
+  /^(careers?|jobs?|apply|open positions?|view all|search|home|about|contact|benefits|culture|life at .*|join us|our team|see more|load more|submit|next|previous)$/i;
+
+export function isResearchableRole(role: string): boolean {
+  const r = (role || "").trim();
+  if (r.length < 3 || r.length > 160) return false;
+  if (NOT_A_ROLE.test(r)) return false;
+  if (NEVER_PITCH_ROLE.test(r)) return false;
+  return true;
+}
+
 function rolesByFunction(l: PoolLeadLite, max: number): string[] {
   const primary = topRole(l);
   if (!primary) return [];
@@ -537,6 +563,7 @@ function rolesByFunction(l: PoolLeadLite, max: number): string[] {
   // (FOCUS_FUNCTIONS set) off-target functions are skipped so their DMs are never researched.
   for (const r of [primary, ...roles]) {
     if (byFn.size >= max) break;
+    if (!isResearchableRole(r)) continue;   // never-pitch reqs cost nothing to enrich now
     const fn = classifyTitle(r).function;
     if (!inFocus(fn)) continue;
     if (!byFn.has(fn)) byFn.set(fn, r);

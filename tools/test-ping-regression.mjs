@@ -18,21 +18,39 @@ const base = {
 const bigCeo = assessProspect({ ...base, managerName: "Andre Durand", managerTitle: "Founder & CEO, Ping Identity", employeeCount: 3800 });
 t("CEO at 3800-person company is held for IC role", !bigCeo.eligible && bigCeo.failures.some((f) => /whole-company exec/.test(f)), JSON.stringify(bigCeo.failures));
 
-// 2) Same CEO, size unknown -> passes (small-biz default) but carries the verify warning.
+// 2) Same CEO, size unknown -> HELD twice over under the 2026-08-20 mandate: a whole-company exec
+//    is never the buyer for an IC req, and an unconfirmed headcount fails closed.
 const unkCeo = assessProspect({ ...base, managerName: "Andre Durand", managerTitle: "Founder & CEO, Ping Identity" });
-t("CEO with unknown size passes with warning", unkCeo.eligible && unkCeo.warnings.some((w) => /company size unknown/.test(w)), JSON.stringify(unkCeo));
+t("CEO with unknown size is held (owner-only + confirmed-size)",
+  !unkCeo.eligible && unkCeo.failures.some((f) => /whole-company exec/.test(f)) && unkCeo.failures.some((f) => /unconfirmed/.test(f)),
+  JSON.stringify(unkCeo.failures));
 
-// 3) CEO at a genuinely small shop -> still a legit buyer.
+// 3) CEO at a genuinely small shop -> held: 40 employees is below the 100-1,000 band, and the CEO
+//    is not the owner of an accounting req regardless.
 const smallCeo = assessProspect({ ...base, company: "Riverbend Books", domain: "riverbendbooks.com", likelyEmail: "amy@riverbendbooks.com", managerName: "Amy Chen", managerTitle: "Owner & CEO", employeeCount: 40 });
-t("CEO at 40-person company still passes", smallCeo.eligible, JSON.stringify(smallCeo.failures));
+t("CEO at 40-person company is now held (below the 100-1,000 band)",
+  !smallCeo.eligible && smallCeo.failures.some((f) => /outside the 100-1000/.test(f)), JSON.stringify(smallCeo.failures));
 
-// 4) CEO for an EXECUTIVE role at a big company -> still fine (CEOs do hire executives).
+// 4) CEO for an EXECUTIVE role: still the right BUYER, but 3,800 heads is outside the band, so the
+//    row is held on SIZE only. The buyer half of the gate must stay silent here.
 const execRole = assessProspect({ ...base, role: "President, Managing Director", managerName: "Andre Durand", managerTitle: "Founder & CEO, Ping Identity", employeeCount: 3800 });
-t("CEO buying an executive role at a big company passes", execRole.eligible, JSON.stringify(execRole.failures));
+t("CEO on an executive req is held on SIZE only, never on the buyer",
+  !execRole.eligible && execRole.failures.some((f) => /outside the 100-1000/.test(f)) && !execRole.failures.some((f) => /decision-maker/.test(f)),
+  JSON.stringify(execRole.failures));
 
-// 5) Function leader at a big company -> unaffected by the headcount gate.
-const cfoBig = assessProspect({ ...base, likelyEmail: "cfo@pingidentity.com".replace("cfo", "jane.doe"), managerName: "Jane Doe", managerTitle: "Chief Financial Officer", employeeCount: 3800 });
-t("CFO at 3800-person company passes", cfoBig.eligible, JSON.stringify(cfoBig.failures));
+// 4b) ...and the same executive req INSIDE the band passes cleanly.
+const execRoleInBand = assessProspect({ ...base, role: "President, Managing Director", managerName: "Andre Durand", managerTitle: "Founder & CEO, Ping Identity", employeeCount: 600 });
+t("CEO on an executive req inside the band passes", execRoleInBand.eligible, JSON.stringify(execRoleInBand.failures));
+
+// 5) Function leader at a big company -> held on SIZE only (the CFO IS the right buyer).
+const cfoBig = assessProspect({ ...base, likelyEmail: "jane.doe@pingidentity.com", managerName: "Jane Doe", managerTitle: "Chief Financial Officer", employeeCount: 3800 });
+t("CFO at 3800-person company is held on size, not on the buyer",
+  !cfoBig.eligible && cfoBig.failures.some((f) => /outside the 100-1000/.test(f)) && !cfoBig.failures.some((f) => /decision-maker/.test(f)),
+  JSON.stringify(cfoBig.failures));
+
+// 5b) The same CFO at an in-band company is exactly who we want to mail.
+const cfoInBand = assessProspect({ ...base, likelyEmail: "jane.doe@pingidentity.com", managerName: "Jane Doe", managerTitle: "Chief Financial Officer", employeeCount: 600 });
+t("CFO at a 600-person company passes (the target case)", cfoInBand.eligible, JSON.stringify(cfoInBand.failures));
 
 // 6) Render gate: remote role claiming local candidates -> rejected.
 const remoteLocal = checkRenderedEmail("lead accountant bench", "Just wrapped a search and have strong people local to your market ready to move.", { remote: true });
@@ -76,21 +94,27 @@ t("Ping CEO row held (finance leader known to exist)", !ceoFit.ok && /Finance le
 
 // 12) The Chief-of-Staff row is HELD for the same reason (ambiguous title, better buyer exists).
 const cosFit = buyerFit(pingPool[1], know);
-t("Ping Chief-of-Staff row held too", !cosFit.ok && /Finance leader/.test(cosFit.why), JSON.stringify(cosFit));
+t("Ping Chief-of-Staff row held too", !cosFit.ok && /Finance leader|names no function/.test(cosFit.why), JSON.stringify(cosFit));
 
 // 13) Once the Director of Finance is NAMED, their row is rank-0 (the right person wins).
 const dofFit = buyerFit({ company: "Ping Identity", role: "Lead Accountant", managerName: "Pat Doe", managerTitle: "Director of Finance" }, know);
 t("named Director of Finance is rank-0", dofFit.ok && dofFit.rank === 0, JSON.stringify(dofFit));
 
-// 14) Small shop, nobody better known: CEO is a legitimate buyer (rank 2), plain VP rank 1.
+// 14) OWNER-ONLY (2026-08-20): a CEO is no longer a fallback buyer even at a tiny shop where
+//     nobody better is known. The row is held and the reason says what to go find.
 const smallKnow = buildCompanyKnowledge([{ company: "Riverbend Books", role: "Staff Accountant", managerName: "Amy Chen", managerTitle: "Owner & CEO" }]);
 const smallFit = buyerFit({ company: "Riverbend Books", role: "Staff Accountant", managerTitle: "Owner & CEO" }, smallKnow);
-t("small-shop CEO still a legit buyer", smallFit.ok && smallFit.rank === 2, JSON.stringify(smallFit));
+t("small-shop CEO is held: find the Finance owner instead",
+  !smallFit.ok && /hold until the Finance owner/.test(smallFit.why), JSON.stringify(smallFit));
 
-// 15) Bigness inferred from open-req count alone (no headcount data needed).
+// 15) A CEO row is held whether or not the company looks big; when the right owner IS already
+//     named in the pool the reason says so, because that is recoverable work.
 const bigPool = Array.from({ length: 9 }, (_, i) => ({ company: "MegaCorp", role: `Role ${i}`, managerTitle: "Hiring Manager" }));
 const bigFit = buyerFit({ company: "MegaCorp", role: "Staff Accountant", managerTitle: "Founder & CEO", employeeCount: undefined }, buildCompanyKnowledge(bigPool));
-t("9 open reqs = too big for a CEO send on an IC role", !bigFit.ok && /too big/.test(bigFit.why), JSON.stringify(bigFit));
+t("CEO row on an IC req is held", !bigFit.ok, JSON.stringify(bigFit));
+const knownOwnerFit = buyerFit({ company: "MegaCorp", role: "Staff Accountant", managerTitle: "Founder & CEO" },
+  buildCompanyKnowledge([{ company: "MegaCorp", role: "Financial Analyst", managerTitle: "VP of Finance" }]));
+t("CEO row names the owner we already have", !knownOwnerFit.ok && /already names a Finance leader/.test(knownOwnerFit.why), JSON.stringify(knownOwnerFit));
 
 // 16) Senior-leadership hires: the CEO is the RIGHT buyer at any size.
 t("isSeniorHire: VP of Sales yes, Lead Accountant no", isSeniorHire("VP of Sales") && !isSeniorHire("Lead Accountant"));
@@ -100,7 +124,9 @@ t("CEO is rank-0 buyer for a VP hire at a big company", vpHireFit.ok && vpHireFi
 // 17) A C-suite REQ is an executive search: CFO role maps to Executive, CEO buyer passes gates at size.
 t("CFO req classifies as Executive family", roleFamily("Chief Financial Officer") === "Executive");
 const cfoHire = assessProspect({ company: "Pingidentity", domain: "pingidentity.com", role: "Chief Financial Officer", likelyEmail: "andredurand@pingidentity.com", emailValidated: true, jobLocation: "Denver, Colorado, United States", managerName: "Andre Durand", managerTitle: "Founder & CEO, Ping Identity", employeeCount: 3800 });
-t("CEO passes gates as buyer for a CFO search at 3800 heads", cfoHire.eligible, JSON.stringify(cfoHire.failures));
+t("CEO on a CFO search is held on SIZE only at 3800 heads",
+  !cfoHire.eligible && cfoHire.failures.some((f) => /outside the 100-1000/.test(f)) && !cfoHire.failures.some((f) => /decision-maker/.test(f)),
+  JSON.stringify(cfoHire.failures));
 
 // 18) Function families unaffected by the executive re-mapping.
 t("role families stay intact", roleFamily("Lead Accountant") === "Accounting" && roleFamily("VP of Sales") === "Sales" && roleFamily("Tax Manager") === "Tax" && roleFamily("Assistant to the CFO") !== "Executive");
@@ -108,10 +134,12 @@ t("role families stay intact", roleFamily("Lead Accountant") === "Accounting" &&
 // 19) The 2026-08-12 "Hi Dedicated," leak: an org string in the name field is not a person,
 //     even when the real person's name hides in the title field.
 const orgName = assessProspect({ company: "MMD Services", domain: "mmdtech.com", role: "Director of Finance And Accounting", likelyEmail: "dedicated.advocates@mmdtech.com", emailValidated: true, managerName: "Dedicated Advocates.", managerTitle: "Maria Dubov, Founder (a.k.a. The Queen of Staffing)" });
-t("org-string name rejected", !orgName.eligible && orgName.failures.some((f) => /organization, not a person/.test(f)), JSON.stringify(orgName.failures));
+// (assertion widened 2026-08-20: the row IS rejected, but JUNK_TOKEN fires on "Dedicated" before
+//  ORG_NAME can, so the reason is "parsed artifact". Either is a correct name-level rejection.)
+t("org-string name rejected", !orgName.eligible && orgName.failures.some((f) => /organization, not a person|looks like a parsed artifact, not a person/.test(f)), JSON.stringify(orgName.failures));
 
 // 20) Real people with suffixes/initials still pass the name gates.
-const realName = assessProspect({ company: "Acme Manufacturing", domain: "acmemfg.com", role: "Staff Accountant", likelyEmail: "bill.hughes@acmemfg.com", emailValidated: true, managerName: "Bill Hughes Jr.", managerTitle: "Chief Financial Officer" });
+const realName = assessProspect({ company: "Acme Manufacturing", domain: "acmemfg.com", role: "Staff Accountant", likelyEmail: "bill.hughes@acmemfg.com", emailValidated: true, managerName: "Bill Hughes Jr.", managerTitle: "Chief Financial Officer", employeeCount: 400 });
 t("'Bill Hughes Jr.' still passes", realName.eligible, JSON.stringify(realName.failures));
 
 // ---- Competitor gate + decision-maker rescue (the 2026-08-12 MMD Services send) ----

@@ -13,11 +13,43 @@ const ACCOUNTING_ROLE = /\b(controller|comptroller|cpa|certified public accounta
 // A senior buyer for ANY function Lume recruits: C-level, President/VP/SVP/EVP, Head of X,
 // Director of X, Managing Director/Partner, Founder/Owner, GM. The decision-maker resolver already
 // targets the OPEN ROLE's owning function, so this just confirms the person is senior enough to buy.
-const VALID_DM_TITLE = /\b(c[efoimrph]o|chief\s+(?:executive|financial|accounting|operating|revenue|marketing|technology|technical|product|people|human|legal|information)\w*|president|vice\s+president|\bvp\b|\bsvp\b|\bevp\b|head\s+of\s+\w+|director\s+of\s+\w+|managing\s+(?:director|partner)|\bpartner\b|founder|co-?founder|owner|general\s+manager|\bgm\b)\b/i;
+// NOTE the acronym class: it was `c[efoimrph]o`, which has no "t" — so a decision-maker titled
+// plainly "CTO" was rejected as "not a senior buyer", losing the single most correct owner of every
+// engineering req. "t" and "s" (CTO, CSO) added 2026-08-20. Bare "director" stays out on purpose:
+// "Board Director" is not a hiring buyer, while "Director of X" is.
+const VALID_DM_TITLE = /\b(c[efoimrphts]o|chief\s+(?:executive|financial|accounting|operating|revenue|marketing|technology|technical|product|people|human|legal|information|nursing|medical|clinical|data|customer)\w*|president|vice\s+president|\bvp\b|\bsvp\b|\bevp\b|head\s+of\s+\w+|director\s+of\s+\w+|managing\s+(?:director|partner)|\bpartner\b|founder|co-?founder|owner|general\s+manager|\bgm\b|plant\s+manager|nurse\s+manager|practice\s+(?:manager|administrator))\b/i;
 
 // "Controller" titles that are NOT accounting: document/quality/inventory control etc. (the
 // 2026-08-11 "EPC Document Controller" leak). Rejected unless the role is otherwise clearly finance.
 const NON_FINANCE_CONTROLLER = /\b(document|doc|quality|inventory|materials?|production|stock|warehouse|traffic|pest|project|export|logistics)\s+control/i;
+
+/* ------------------------------------------------------------------------------------------
+ * NON-DESK PROFESSIONAL FAMILIES (added 2026-08-20). Before this, roleFamily() knew only the
+ * office functions, so every clinical, trades, construction and insurance req fell through to
+ * "Other" and was hard-rejected by assessProspect — AFTER the pipeline had already paid to
+ * resolve a domain, name a decision-maker and validate an email for it. 35.7% of the curated
+ * pool (6,361 of 17,833 rows) was landing there. These four patterns give those reqs a real
+ * family, which means a real owning function, which means a real decision-maker to target.
+ * ---------------------------------------------------------------------------------------- */
+
+// Clinical + allied health. "counselor" is qualified on purpose: a bare match would swallow
+// "Financial Counselor" / "Admissions Counselor", which are not clinical hires.
+const CLINICAL_ROLE = /\b(registered nurse|\brn\b|\blpn\b|\blvn\b|\bcna\b|nurse practitioner|nursing|nurse|physician assistant|physician|surgeon|medical assistant|medical technologist|clinical (?:director|manager|supervisor|specialist|coordinator|research|liaison|pharmacist)|physical therap(?:y|ist)|occupational therap(?:y|ist)|speech(?:[- ]language)? patholog(?:y|ist)|respiratory therap(?:y|ist)|radiolog(?:y|ic|ist)|sonographer|ultrasound tech\w*|phlebotom(?:y|ist)|pharmacist|pharmacy tech\w*|dental (?:hygienist|assistant)|dentist|optometrist|veterinar(?:y|ian)|behavior(?:al)? (?:technician|analyst)|\bbcba\b|\brbt\b|social worker|\blcsw\b|(?:mental health|behavioral|clinical|substance abuse|school|guidance) counselor|therapist|dietitian|paramedic|\bemt\b|surgical tech\w*|medical (?:coder|biller|records)|patient care|caregiver|home health aide|\bhha\b|certified nursing assistant)\b/i;
+
+// Licensed trades + plant floor. Deliberately below the Engineering pattern above, so an
+// "HVAC Service Engineer" still reads as engineering.
+const TRADES_ROLE = /\b(welder|welding|machinist|\bcnc\b|fabricator|millwright|electrician|plumber|pipefitter|steamfitter|hvac|refrigeration|diesel mechanic|automotive technician|maintenance (?:technician|mechanic|supervisor)|industrial maintenance|assembler|assembly (?:technician|operator)|machine operator|forklift|warehouse associate|production (?:associate|operator|technician|supervisor)|quality (?:inspector|technician)|tool and die|sheet metal|boilermaker|lineman|cdl|truck driver|delivery driver)\b/i;
+
+// Construction / field trades leadership.
+const CONSTRUCTION_ROLE = /\b(construction|superintendent|estimator|foreman|general contractor|carpenter|mason|roofer|glazier|concrete|drywall|heavy equipment operator|crane operator|safety (?:manager|coordinator|officer))\b/i;
+
+// Insurance underwriting, claims and actuarial: these roll up the finance leadership chain.
+const INSURANCE_ROLE = /\b(underwrit(?:er|ing)|claims (?:adjuster|examiner|specialist|manager|representative)|actuar(?:y|ial|ies)|loss control|risk analyst|insurance (?:agent|producer))\b/i;
+
+// A department / function / region name, as it appears in the TAIL of a title ("Director of
+// Nursing", "VP, Supply Chain", "Head of Revenue Operations - EMEA"). Used by foreignAffiliation
+// to tell a title's own department from a different employer's name.
+const FUNCTION_TAIL = /\b(financ\w*|accounting|tax|audit\w*|treasury|payroll|operations|ops|sales|marketing|growth|communications|engineering|technolog\w*|technical|software|product|design|data|analytics|strategy|talent|people|human resources|\bhr\b|legal|counsel|compliance|risk|nursing|clinical|medical|quality|safety|manufacturing|production|supply chain|logistics|procurement|purchasing|facilities|maintenance|construction|field|customer|support|business development|partnerships|underwriting|claims|admissions|education|research|training|administration|program\w*|project\w*|retail|ecommerce|digital|content|brand|public relations|investor relations|development|services|affairs|success|experience|acquisition|planning|management|excellence|innovation|transformation|infrastructure|security|revenue|corporate|global|north america|americas|\bemea\b|\bapac\b|east|west|central|region\w*)\b/i;
 
 // A "name" that is actually an organization (the "Hispanic Chamber of Commerce" leak): org words,
 // or any parenthetical/@ in the name field. Real people's names carry none of these.
@@ -134,18 +166,29 @@ function normCompany(s) {
 export function foreignAffiliation(managerTitle, company) {
   const t = (managerTitle || "").replace(/&#0?38;|&amp;/g, "&").trim();
   const co = normCompany(company);
+  // Pairs of [pattern, isTitleGrammar]. "of X" / ", X" / "- X" are how a title names its own
+  // DEPARTMENT ("Director of Nursing", "Director, Finance"), so those get the full function-word
+  // check below. "at X" / "@ X" almost always name a real employer, so they keep the strict read.
+  //
+  // THE BUG THIS FIXES (found 2026-08-20): the skip list here was six words long
+  // (finance|accounting|operations|strategy|talent|people), so "Director of Nursing", "VP of
+  // Manufacturing", "Head of Engineering" and every other function tail were being reported as a
+  // DIFFERENT EMPLOYER and rejected. Titles with no "of" tail — "Chief Executive Officer" — were
+  // never touched, so this quietly deleted the function owners and kept the founders. It is a
+  // direct contributor to the CEO-heavy send mix the 08-20 audit measured.
   const patterns = [
-    /@\s*([A-Za-z][\w.&' -]{1,50})$/,
-    /\bat\s+([A-Z][\w.&' -]{1,50})$/,
-    /\s[-–]\s*([A-Z][\w.&' -]{1,50})$/,
-    /,\s*([A-Z][\w.&' -]{1,50})$/,
-    /\bof\s+([A-Z][\w.&' -]{1,50})$/,
+    [/@\s*([A-Za-z][\w.&' -]{1,50})$/, false],
+    [/\bat\s+([A-Z][\w.&' -]{1,50})$/, false],
+    [/\s[-–]\s*([A-Z][\w.&' -]{1,50})$/, true],
+    [/,\s*([A-Z][\w.&' -]{1,50})$/, true],
+    [/\bof\s+([A-Z][\w.&' -]{1,50})$/, true],
   ];
-  for (const re of patterns) {
+  for (const [re, titleGrammar] of patterns) {
     const m = t.match(re);
     if (m) {
       const raw = m[1].trim();
       if (/^(finance|accounting|operations|strategy|talent|people)$/i.test(raw)) continue;
+      if (titleGrammar && FUNCTION_TAIL.test(raw)) continue;
       const claimed = normCompany(raw);
       if (claimed && co && claimed !== co && !claimed.includes(co) && !co.includes(claimed)) return raw;
     }
@@ -188,29 +231,46 @@ export function assessProspect(p) {
   } else if (!VALID_DM_TITLE.test(p.managerTitle || "")) {
     failures.push(`decision-maker title "${p.managerTitle || "?"}" is not a senior buyer`);
   } else {
-    // Function alignment: the buyer must OWN the role's function (a CFO can't be the buyer for a
-    // sales role). Universal buyers (CEO/founder/owner) hire across everything, so they always pass;
-    // ambiguous titles (a plain VP/Director) pass since the resolver targeted them for this role.
-    const roleFn = roleFunctionGroup(roleFamily(p.role));
+    // ROLE-OWNER ONLY (owner mandate 2026-08-20). The audit of the live store found 68.5% of
+    // sendable rows pointed at a CEO/founder rather than the person who owns the open req, and
+    // in 48.7% of those the pool ALREADY named the right function leader at that same company.
+    // The rule is now absolute: for a normal req we mail the leader of the function the role sits
+    // in, and nobody else. The only carve-out is an executive search (a VP+/C-suite req), where
+    // the CEO/President genuinely IS the hiring decision-maker for that particular role.
+    const fam = roleFamily(p.role);
+    const roleFn = roleFunctionGroup(fam);
     const dmFn = dmFunction(p.managerTitle);
-    if (dmFn && dmFn !== "universal" && roleFn !== "Executive" && dmFn !== roleFn) {
+    const execReq = roleFn === "Executive" || isSeniorHire(p.role);
+    if (execReq) {
+      // A leadership hire: the whole-company exec or that function's own exec both qualify.
+      if (dmFn && dmFn !== "universal" && dmFn !== roleFn) {
+        failures.push(`decision-maker "${p.managerTitle}" owns ${dmFn}, not the ${roleFn} function this leadership role sits in`);
+      }
+    } else if (p.companyBuyerRow) {
+      // A company-level buyer row (the Head of People / C-suite mined once per company by the
+      // curation pass). Those people were never resolved against THIS req, so they are not the
+      // owner of it. 45.7% of the curated store is these rows.
+      failures.push(`decision-maker "${p.managerName}" is a company-level buyer, not the owner of the "${p.role}" req`);
+    } else if (dmFn === "universal") {
+      failures.push(`decision-maker "${p.managerTitle}" is a whole-company exec; this ${fam} req is owned by the ${roleFn} function, re-target the owner`);
+    } else if (dmFn === null) {
+      failures.push(`decision-maker title "${p.managerTitle}" names no function, so it cannot be confirmed as the owner of a ${roleFn} req`);
+    } else if (dmFn !== roleFn) {
       failures.push(`decision-maker "${p.managerTitle}" owns ${dmFn}, not the ${roleFn} function this role sits in`);
     }
-    // Seniority fit for universal buyers (the 2026-08-12 Ping Identity leak: the FOUNDER & CEO of a
-    // ~3,800-person company got the Lead Accountant pitch). At a small company the CEO genuinely is
-    // the buyer for every seat, and for a senior-leadership hire (VP+/C-suite) the CEO is the buyer
-    // at ANY size; past a few hundred heads an IC/manager hire never reaches that desk, and mailing
-    // it reads as a blast and burns the domain. Fail closed with the reason, so the record is held
-    // and the resolver can re-target the function that owns the role.
-    const maxUniversalHeads = Number(process.env.MPC_UNIVERSAL_DM_MAX_HEADCOUNT || 500);
-    if (dmFn === "universal" && roleFn !== "Executive" && !isSeniorHire(p.role)) {
-      const heads = Number(p.employeeCount);
-      if (Number.isFinite(heads) && heads >= maxUniversalHeads) {
-        failures.push(`decision-maker "${p.managerTitle}" is a whole-company exec at a ${heads}-person company; a ${roleFamily(p.role)} hire there is owned by the ${roleFn} function, re-target the buyer`);
-      } else if (!Number.isFinite(heads) || heads <= 0) {
-        warnings.push(`CEO/founder buyer accepted with company size unknown (verify ${p.company} is small enough for a whole-company buyer)`);
-      }
-    }
+  }
+
+  // HEADCOUNT BAND (owner mandate 2026-08-20): only companies of 100-1,000 employees. This is a
+  // CONFIRMED-size gate and it fails closed — an unconfirmed company is held, never mailed on a
+  // guess. tools/company-size.mjs resolves real LinkedIn headcounts into the shared size cache,
+  // and batch.mjs attaches them to the prospect before this runs.
+  const minHeads = Number(process.env.MPC_MIN_HEADCOUNT || 100);
+  const maxHeads = Number(process.env.MPC_MAX_HEADCOUNT || 1000);
+  const heads = Number(p.employeeCount);
+  if (!Number.isFinite(heads) || heads <= 0) {
+    failures.push(`company size for ${p.company} is unconfirmed; the ${minHeads}-${maxHeads} employee mandate needs a verified headcount`);
+  } else if (heads < minHeads || heads > maxHeads) {
+    failures.push(`${p.company} has ${heads} employees, outside the ${minHeads}-${maxHeads} employee target band`);
   }
   const foreign = foreignAffiliation(p.managerTitle || "", p.company);
   if (foreign) failures.push(`decision-maker works at a different company ("${foreign}"), not ${p.company}`);
@@ -267,10 +327,39 @@ export function roleFamily(role) {
   if (/\b(marketing|demand gen(?:eration)?|growth marketing|brand manager|content marketing|\bseo\b|\bcmo\b|communications manager|social media manager)\b/.test(r)) return "Marketing";
   if (/\b(software engineer|engineer|engineering|developer|full[- ]?stack|back[- ]?end|front[- ]?end|devops|\bsre\b|data scientist|data engineer|machine learning|\bml\b|\bcto\b|solutions architect|platform architect)\b/.test(r)) return "Engineering";
   if (/\b(product manager|product owner|head of product|vp,? product|\bcpo\b|director of product)\b/.test(r)) return "Product";
+  // GTM / revenue operations sits with Sales: the CRO owns the number these seats serve.
+  if (/\b(revenue operations|revops|sales operations|gtm operations|deal desk|sales enablement)\b/.test(r)) return "Sales";
   if (/\b(operations manager|head of operations|supply chain|logistics|procurement|\bcoo\b|director of operations|ops manager)\b/.test(r)) return "Operations";
   if (/\b(human resources|people operations|\bchro\b|head of people|vp,? people|talent acquisition (?:manager|director|lead)|hr (?:manager|director|business partner))\b/.test(r)) return "People / HR";
   if (/\b(general counsel|corporate counsel|attorney|associate general counsel|compliance officer|chief legal)\b/.test(r)) return "Legal";
+  if (/\b(customer success|customer experience|client success|client services|account management|customer support manager|implementation manager|onboarding manager)\b/.test(r)) return "Customer Success";
+  if (/\b(data analyst|data scien\w*|analytics|business intelligence|\bbi\b|data engineer\w*|reporting analyst)\b/.test(r)) return "Data";
+  // ---- Non-desk professional hires (added 2026-08-20). These were ALL falling into "Other" and
+  // being hard-rejected after we had already paid to name a decision-maker for them.
+  // Clinical / allied health: owned by the nursing, medical or clinical leader, never the CEO.
+  if (CLINICAL_ROLE.test(r)) return "Healthcare";
+  // Licensed skilled trades + plant floor: owned by the plant/production/operations leader.
+  if (TRADES_ROLE.test(r)) return "Skilled Trades";
+  // Construction / field: owned by the operations or construction leader.
+  if (CONSTRUCTION_ROLE.test(r)) return "Construction";
+  // Insurance underwriting/claims/actuarial: sits under the finance leadership chain.
+  if (INSURANCE_ROLE.test(r)) return "Insurance";
   if (/\b(chief executive|\bceo\b|\bpresident\b|general manager|managing director|executive director)\b/.test(r)) return "Executive";
+  // LAST RESORT: the req names a function, but in a phrasing none of the patterns above cover
+  // ("VP of Finance", "Head of Manufacturing", "Financial Systems Analyst", "Director of Nursing
+  // Services"). Recall matters more than precision at this point: an unrecognised family is
+  // hard-rejected downstream, so every miss here throws away a req we already paid to enrich.
+  if (/\b(financ\w*|accounting|treasury|payroll)\b/.test(r)) return "Finance";
+  if (/\b(sales|revenue|business development)\b/.test(r)) return "Sales";
+  if (/\b(marketing|brand|communications)\b/.test(r)) return "Marketing";
+  if (/\b(engineering|software|technology)\b/.test(r)) return "Engineering";
+  if (/\bproduct\b/.test(r)) return "Product";
+  if (/\b(operations|manufacturing|production|warehouse|supply chain|logistics|project manager|program manager|facilities|procurement|sourcing manager|vendor management|inventory|fulfillment|dispatch|scheduler)\b/.test(r)) return "Operations";
+  if (/\b(people|talent|human resources|training|learning and development)\b/.test(r)) return "People / HR";
+  if (/\b(legal|counsel|compliance)\b/.test(r)) return "Legal";
+  if (/\b(clinical|nursing|patient|health)\b/.test(r)) return "Healthcare";
+  if (/\b(customer|client|account manager)\b/.test(r)) return "Customer Success";
+  if (/\b(data|analytics|reporting)\b/.test(r)) return "Data";
   return "Other";
 }
 
@@ -287,31 +376,58 @@ export function candidateType(role) {
     case "People / HR": return "HR and people";
     case "Legal": return "legal";
     case "Executive": return "executive and leadership";
+    case "Healthcare": return "clinical and allied health";
+    case "Skilled Trades": return "skilled trades and production";
+    case "Construction": return "construction and field";
+    case "Insurance": return "insurance and underwriting";
+    case "Customer Success": return "customer success and account management";
+    case "Data": return "data and analytics";
     default: return "";
   }
 }
 
-// Collapse the finance-ish families into one "Finance" function group, so a CFO counts as the buyer
-// for any accounting/finance/tax/audit role. Other families map to themselves.
+// Collapse families into the FUNCTION GROUP that owns them, so the buyer check compares like with
+// like: a CFO is the buyer for any accounting/finance/tax/audit/insurance role, and a plant or
+// operations leader is the buyer for trades and construction. Everything else maps to itself.
 export function roleFunctionGroup(fam) {
-  return (fam === "Accounting" || fam === "Finance" || fam === "Tax" || fam === "Audit") ? "Finance" : fam;
+  if (fam === "Accounting" || fam === "Finance" || fam === "Tax" || fam === "Audit" || fam === "Insurance") return "Finance";
+  if (fam === "Skilled Trades" || fam === "Construction") return "Operations";
+  if (fam === "Healthcare") return "Clinical";
+  if (fam === "Data") return "Engineering";
+  return fam;
 }
 
 // The function a decision-maker OWNS, inferred from their title. "universal" = a whole-company buyer
 // (CEO/founder/owner/president) who hires across every function. null = ambiguous (a plain VP/Director/
-// Head with no clear function) which we allow, since the resolver targeted them for the role. A
-// CLEAR, different-function exec (a CFO on a sales role) is what we want to catch and reject.
+// Head with no clear function).
+//
+// RECALL MATTERS (owner mandate 2026-08-20: pitch ONLY the owner of the open role). Once a null
+// function means "held", every function word this misses throws away a REAL owner: "Director of
+// Accounting", "Tax Partner", "VP of Manufacturing" all returned null before, so the strict rule
+// would have binned the exact people we want. Each branch below therefore carries the whole
+// vocabulary of its function, not just the C-suite acronym. Order is deliberate: "universal" wins
+// over everything, and Sales runs before Engineering so "business development" never reads as dev.
 export function dmFunction(title) {
   const t = (title || "").toLowerCase();
-  if (/\b(ceo|chief executive|founder|co-?founder|owner|president|general manager|\bgm\b|managing director|managing partner)\b/.test(t)) return "universal";
-  if (/\b(cfo|chief financial|chief accounting|controller|comptroller)\b/.test(t) || /\bfinance\b/.test(t)) return "Finance";
-  if (/\b(cro|chief revenue)\b/.test(t) || /\bsales\b/.test(t)) return "Sales";
-  if (/\b(cmo|chief marketing)\b/.test(t) || /\bmarketing\b/.test(t)) return "Marketing";
-  if (/\b(cto|chief technology|chief technical)\b/.test(t) || /\bengineering\b/.test(t)) return "Engineering";
+  // "president" carries a negative lookbehind: a VICE president is not a whole-company buyer, and
+  // without the guard "Vice President of Finance" read as "universal" and was held.
+  if (/\b(ceo|chief executive|founder|co-?founder|owner|(?<!vice )president|general manager|\bgm\b|managing director|managing partner)\b/.test(t)) return "universal";
+  // Clinical runs first: "Director of Clinical Operations" is a clinical leader, not an ops one.
+  // "medical" is only matched as "medical director" / "chief medical" so a Medical Device SALES
+  // Director stays with Sales.
+  if (/\b(cno|chief nursing|chief medical|chief clinical|director of nursing|clinical|nurs(?:e|ing)|medical director|practice (?:manager|administrator))\b/.test(t)) return "Clinical";
+  if (/\b(cfo|chief financial|chief accounting|controller|comptroller)\b/.test(t)
+    || /\b(finance|financial|accounting|accountant|tax|audit(?:or|ing)?|treasur\w*|payroll|bookkeep\w*|fp&a)\b/.test(t)) return "Finance";
+  if (/\b(chief customer|customer success|customer experience|client success|client services|account management)\b/.test(t)) return "Customer Success";
+  if (/\b(cro|chief revenue|chief commercial)\b/.test(t) || /\b(sales|revenue|business development|commercial)\b/.test(t)) return "Sales";
+  if (/\b(cmo|chief marketing)\b/.test(t) || /\b(marketing|demand gen(?:eration)?|brand|communications)\b/.test(t)) return "Marketing";
+  // Data/analytics leaders sit in the Engineering group (see roleFunctionGroup), so a Head of Data
+  // and a CTO are both legitimate owners of a data req.
+  if (/\b(cto|chief technology|chief technical|chief data)\b/.test(t) || /\b(engineering|technology|software|data|analytics)\b/.test(t)) return "Engineering";
   if (/\b(cpo|chief product)\b/.test(t) || /\bproduct\b/.test(t)) return "Product";
-  if (/\b(coo|chief operating)\b/.test(t) || /\boperations\b/.test(t) || /supply chain/.test(t)) return "Operations";
-  if (/\b(chro|chief people|chief human)\b/.test(t) || /\bpeople\b/.test(t) || /human resources/.test(t) || /\btalent\b/.test(t)) return "People / HR";
-  if (/chief legal|general counsel/.test(t) || /\blegal\b/.test(t)) return "Legal";
+  if (/\b(coo|chief operating)\b/.test(t) || /\b(operations|manufacturing|production|logistics|procurement|fulfillment|warehouse|plant manager|plant director|maintenance manager)\b/.test(t) || /supply chain/.test(t)) return "Operations";
+  if (/\b(chro|chief people|chief human)\b/.test(t) || /\b(people|talent)\b/.test(t) || /human (?:resources|capital)/.test(t)) return "People / HR";
+  if (/chief legal|general counsel/.test(t) || /\b(legal|counsel)\b/.test(t)) return "Legal";
   return null;
 }
 
@@ -353,37 +469,43 @@ export function buildCompanyKnowledge(rows) {
 }
 
 // Does this buyer's TITLE correlate with this ROLE? Returns { ok, rank, why }.
-//   rank 0 — owns the role's function (CFO for an accounting req), or the CEO on an
-//            executive/senior-leadership hire: always the right person.
-//   rank 1 — ambiguous senior (a plain VP / Chief of Staff the resolver targeted): acceptable
-//            only when the pool knows of nobody better at this company.
-//   rank 2 — whole-company exec (CEO/founder/owner) on a non-senior role: right at a small
-//            company, HELD (ok:false, with the reason) when the company demonstrably has a
-//            leader for the role's function or looks too big for a founder-buys-everything shop.
+//
+// OWNER-ONLY as of 2026-08-20. This used to accept a CEO/founder as a fallback buyer whenever the
+// pool could not prove somebody better existed, which is how two thirds of the send volume ended up
+// on founders' desks. It now agrees exactly with assessProspect: the owner of the role's function,
+// or nobody. `know` is still consulted, but only to write a SHARPER hold reason — whether the right
+// person is already named at that company (recoverable today) or has yet to be found.
+//   rank 0 — owns the role's function, or the CEO/President on an executive-search req.
+//   held   — everything else, with the reason recorded.
 export function buyerFit(p, know, opts = {}) {
   const fam = roleFamily(p.role);
   const roleFn = roleFunctionGroup(fam);
   const fn = dmFunction(p.managerTitle);
-  if (roleFn === "Executive" || isSeniorHire(p.role)) {
-    return { ok: true, rank: fn === "universal" || fn === roleFn ? 0 : 1 };
-  }
-  if (fn && fn !== "universal" && fn === roleFn) return { ok: true, rank: 0 };
   const k = know ? know.get(companyKeyOf(p.company)) : null;
   const hasLeader = !!(k && k.fnLeaders.has(roleFn));
-  const maxHeads = Number(opts.maxUniversalHeads || process.env.MPC_UNIVERSAL_DM_MAX_HEADCOUNT || 500);
-  const bigReqs = Number(opts.bigReqs || process.env.MPC_BIG_COMPANY_REQS || 8);
-  const heads = Number(p.employeeCount);
-  const looksBig = (Number.isFinite(heads) && heads >= maxHeads) || !!(k && k.reqs.size >= bigReqs);
+
+  if (roleFn === "Executive" || isSeniorHire(p.role)) {
+    // Leadership hire: the whole-company exec IS the decision-maker for this particular role.
+    if (fn && fn !== "universal" && fn !== roleFn) {
+      return { ok: false, why: `"${p.managerTitle}" owns ${fn}, not the ${roleFn} function this leadership role sits in` };
+    }
+    return { ok: true, rank: 0 };
+  }
+  if (p.companyBuyerRow) {
+    return { ok: false, why: `"${p.managerName}" is a company-level buyer row, never resolved against the "${p.role}" req` };
+  }
+  if (fn && fn !== "universal" && fn === roleFn) return { ok: true, rank: 0 };
   if (fn === "universal") {
-    if (hasLeader) return { ok: false, why: `${p.company} has a ${roleFn} leader in the pool; hold the CEO/founder row until that person is named` };
-    if (looksBig) return { ok: false, why: `${p.company} looks too big (${Number.isFinite(heads) && heads > 0 ? heads + " heads" : (k ? k.reqs.size : "?") + " open reqs"}) for a whole-company buyer on a ${fam} hire` };
-    return { ok: true, rank: 2 };
+    return {
+      ok: false,
+      why: hasLeader
+        ? `${p.company} already names a ${roleFn} leader in the pool; that person owns this req, not "${p.managerTitle}"`
+        : `"${p.managerTitle}" is a whole-company exec; hold until the ${roleFn} owner at ${p.company} is named`,
+    };
   }
   if (fn === null) {
-    if (hasLeader) return { ok: false, why: `${p.company} has a ${roleFn} leader in the pool; hold the ambiguous-title ("${p.managerTitle}") row` };
-    return { ok: true, rank: 1 };
+    return { ok: false, why: `"${p.managerTitle}" names no function, so it cannot be confirmed as the ${roleFn} owner` };
   }
-  // A clear different-function exec: assessProspect rejects these already; belt and suspenders.
   return { ok: false, why: `"${p.managerTitle}" owns ${fn}, not the ${roleFn} function this role sits in` };
 }
 

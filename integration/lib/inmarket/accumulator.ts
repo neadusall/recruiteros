@@ -13,7 +13,7 @@
  */
 
 import { collectLeads } from "./index";
-import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool, purgeStaffingFromPool, reclassifyHiringIntent, recomputePoolMetrics, poolCompaniesMissingDomain, updateDomainsBatch } from "./pool";
+import { mergeIntoPool, poolCompanySlugs, poolCompanyNames, purgeNonUsFromPool, poolCompaniesToExpand, updateExpandedRolesBatch, purgeOversizedFromPool, purgeStaffingFromPool, reclassifyHiringIntent, recomputePoolMetrics, poolCompaniesMissingDomain, updateDomainsBatch, updateSizesFromCache } from "./pool";
 import { enrichSizesBatch, outOfBandCompanyKeys } from "./companySize";
 import { resolveCompanyRoles } from "./companyRoles";
 import { resolveCompanyDomain } from "./domain";
@@ -451,6 +451,18 @@ async function runCycleInner(): Promise<void> {
       sizeCursor = total ? (sizeCursor + names.length) % total : 0;
       await enrichSizesBatch(names, SIZE_BATCH);
     }
+    // BACK-FILL the resolved counts onto the pool rows themselves (2026-08-20). Sizes resolve on
+    // this rotating cursor AFTER a lead has already been merged, and nothing ever wrote the number
+    // back — so `lead.employeeCount` was undefined on all 15,000 pool rows, curation copied that
+    // undefined into every curated row, and resolveDecisionMaker() therefore ran with
+    // companySize: undefined FOREVER. That is why the org-depth model in targetProfile.ts always
+    // assumed "mid-market" and never targeted a flat company's founder or an enterprise's line
+    // manager. One cheap pass over the size cache fixes the whole chain.
+    try {
+      const { loadSizeMap } = await import("./companySize");
+      const filled = await updateSizesFromCache(await loadSizeMap());
+      if (filled) console.log(`[inmarket] size back-fill: stamped ${filled} pool rows with a confirmed headcount`);
+    } catch { /* best-effort */ }
     // Enforce the target band [MIN_EMPLOYEES, MAX_EMPLOYEES] = 100-5,000: drop any pool
     // company Wikidata has now confirmed is below 100 OR above 5,000. Re-read the set so it
     // includes companies resolved THIS cycle. Authoritative counts only — heuristic

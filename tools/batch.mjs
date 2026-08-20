@@ -20,7 +20,7 @@
 // Read-only against the curated store; writes ONLY its own files under /out.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync } from "node:fs";
-import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, roleFamily, roleFunctionGroup } from "./gates.mjs";
+import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, roleFamily, roleFunctionGroup, buildCompanyKnowledge, buyerFit } from "./gates.mjs";
 import { writeEmail, signature, footer, greetingName, recruiterFor } from "./writer.mjs";
 import { pickVariant } from "./variants.mjs";
 import { classifyEmails } from "./mxclass.mjs";
@@ -354,11 +354,22 @@ async function main() {
   } catch { /* cache absent: sizes stay unknown */ }
   if (sizeByName.size) console.log(`company-size cache: ${sizeByName.size} known headcounts`);
 
-  // Stage 1-3: role + decision-maker + email gates.
+  // COMPANY KNOWLEDGE (restored 2026-08-20; it was wired in on 08-12 and lost in the block-ledger
+  // rewrite). Built from EVERY curated row, including ungated and unnamed ones, so a hold can say
+  // whether the right owner is already named at that company or has yet to be found. buyerFit reads
+  // it below to write the hold reasons.
+  const know = buildCompanyKnowledge(curated.map((r) => r.lead || r));
+
+  // Stage 1-3: role + decision-maker + size + email gates.
   const gated = [];
-  const rejected = { role: 0, dm: 0, email: 0, other: 0 };
+  const rejected = { role: 0, dm: 0, size: 0, email: 0, other: 0 };
+  const buyerHolds = [];
   for (const r of curated) {
     const p = r.lead || r;
+    // A company-level buyer row (id "cp_<company>_buyer_<person>") is the Head of People / C-suite
+    // the curation pass mines ONCE per company. Those people were never resolved against this req,
+    // so under the owner-only mandate they are not a legitimate target for it.
+    p.companyBuyerRow = /_buyer_/.test(String(r.id || p.id || ""));
     if (p.employeeCount == null) {
       const c = sizeByName.get(normCoName(p.company));
       if (c != null) p.employeeCount = c;
@@ -366,13 +377,25 @@ async function main() {
     const res = assessProspect(p);
     if (res.eligible) { gated.push(p); continue; }
     const f = res.failures.join(" ");
-    if (/accounting\/finance hire/.test(f)) rejected.role++;
+    if (/is not a professional hire|accounting\/finance hire/.test(f)) rejected.role++;
+    else if (/employee target band|size for .* is unconfirmed/.test(f)) rejected.size++;
     else if (/decision-maker|different company/.test(f)) rejected.dm++;
     else if (/email/.test(f)) rejected.email++;
     else rejected.other++;
+    // Record WHY a buyer was held, so the misses are recoverable work rather than silent loss.
+    if (p.managerName && /decision-maker/.test(f)) {
+      const bf = buyerFit(p, know);
+      if (!bf.ok) buyerHolds.push({ company: p.company, role: p.role, held: p.managerName, title: p.managerTitle, why: bf.why });
+    }
   }
   console.log(`curated: ${curated.length} | passed all gates: ${gated.length}`);
-  console.log(`rejected -> role:${rejected.role} decision-maker:${rejected.dm} email:${rejected.email} other:${rejected.other}`);
+  console.log(`rejected -> role:${rejected.role} decision-maker:${rejected.dm} size:${rejected.size} email:${rejected.email} other:${rejected.other}`);
+  if (buyerHolds.length) {
+    const f = `${OUT}/buyer-holds-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    try { writeFileSync(f, JSON.stringify(buyerHolds, null, 1)); console.log(`buyer holds written: ${buyerHolds.length} -> ${f}`); } catch {}
+    const knownOwner = buyerHolds.filter((h) => /already names a/.test(h.why || "")).length;
+    if (knownOwner) console.log(`  of those, ${knownOwner} are companies where the right function owner is ALREADY named (re-target, do not re-source)`);
+  }
 
   // ONE BUYER PER REQ (the 2026-08-12 Ping Identity leak: the same Lead Accountant req carried
   // both a FOUNDER & CEO row and a VP row, and the CEO row got the email). When several curated

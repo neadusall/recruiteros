@@ -142,6 +142,54 @@ const LADDER: Record<JobFunction, [string[], string[], string[], string[]]> = {
   ],
 };
 
+/**
+ * LADDERS THAT THE FUNCTION CLASSIFIER CANNOT REACH (added 2026-08-20).
+ *
+ * classifyTitle() knows the office functions only, so a "Registered Nurse", a "CNC Machinist" and a
+ * "Construction Superintendent" all land in `other` and inherit the generic Manager/Director/VP
+ * ladder. Searching a people graph for a bare "VP" is close to useless, so those reqs produced no
+ * named owner and fell back to whoever else was on the team page — usually the founder.
+ *
+ * Widening the JobFunction union itself would mean touching six exhaustive Record<JobFunction,…>
+ * maps across the app, so these are keyed on the ROLE TITLE and consulted before the map. Same
+ * targeting benefit, no blast radius. Ordered most-specific first; clinical is checked before
+ * trades because "Pharmacy Technician" and "Surgical Technician" are clinical, not plant floor.
+ */
+const TITLE_LADDERS: Array<[RegExp, [string[], string[], string[], string[]]]> = [
+  [
+    /\b(registered nurse|\brn\b|\blpn\b|\blvn\b|\bcna\b|nurse|nursing|physician|clinical|patient care|medical assistant|physical therap|occupational therap|speech.language|respiratory therap|radiolog|sonographer|phlebotom|pharmacist|pharmacy tech|dental|behavior(?:al)? (?:technician|analyst)|\bbcba\b|\brbt\b|social worker|therapist|dietitian|paramedic|\bemt\b|surgical tech)\b/i,
+    [
+      ["Nurse Manager", "Clinical Manager", "Practice Manager"],
+      ["Director of Nursing", "Clinical Director", "Director of Clinical Services"],
+      ["VP of Clinical Services", "Chief Nursing Officer", "Head of Clinical Operations"],
+      ["Chief Medical Officer", "Chief Nursing Officer", "Medical Director"],
+    ],
+  ],
+  [
+    /\b(welder|machinist|\bcnc\b|fabricator|millwright|electrician|plumber|pipefitter|hvac|diesel mechanic|maintenance technician|industrial maintenance|assembler|machine operator|forklift|production (?:associate|operator|technician)|tool and die|sheet metal|boilermaker)\b/i,
+    [
+      ["Production Supervisor", "Maintenance Supervisor", "Shop Foreman"],
+      ["Plant Manager", "Production Manager", "Maintenance Manager"],
+      ["Director of Manufacturing", "Director of Operations", "VP of Manufacturing"],
+      ["COO", "Chief Operating Officer", "VP of Operations"],
+    ],
+  ],
+  [
+    /\b(construction|superintendent|estimator|foreman|carpenter|mason|roofer|concrete|drywall|heavy equipment operator|crane operator)\b/i,
+    [
+      ["Project Superintendent", "Construction Manager", "Field Supervisor"],
+      ["Project Manager", "Director of Construction", "Senior Project Manager"],
+      ["VP of Construction", "VP of Operations", "Head of Field Operations"],
+      ["COO", "Chief Operating Officer", "President"],
+    ],
+  ],
+];
+
+function titleLadder(roleTitle: string): [string[], string[], string[], string[]] | null {
+  for (const [re, ladder] of TITLE_LADDERS) if (re.test(roleTitle)) return ladder;
+  return null;
+}
+
 /** The founder/owner tail — appended for flat, founder-led companies where the top signs off and
  *  is the most findable person on the team page. */
 const FOUNDER_TAIL = ["Founder", "Co-Founder", "CEO", "Owner", "President"];
@@ -211,7 +259,10 @@ export function hiringManagerTarget(
 ): HiringManagerTarget {
   const intel = classifyTitle(roleTitle);
   const fn = intel.function;
-  const ladder = LADDER[fn] ?? LADDER.other;
+  // A clinical / trades / construction req gets its own chain of command; everything else uses the
+  // function map. Checked first so a title the classifier dumped into `other` still targets a real
+  // owner instead of a bare "VP".
+  const ladder = titleLadder(roleTitle) ?? LADDER[fn] ?? LADDER.other;
 
   // Owner rung = where the role sits in a deep org, shifted UP by how flat this company is.
   const base = baseRungForRole(intel.seniority);

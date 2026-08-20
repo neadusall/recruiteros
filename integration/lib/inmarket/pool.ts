@@ -447,6 +447,36 @@ export async function updateDomainsBatch(
   return touched;
 }
 
+/**
+ * Stamp CONFIRMED headcounts from the size cache onto the pool rows (2026-08-20).
+ *
+ * Sizes are resolved on a rotating cursor AFTER a lead is merged, and until now nothing wrote the
+ * number back onto the row. The result: `employeeCount` was undefined on every pool row, curation
+ * copied that undefined onto every curated row, and the whole size-aware layer downstream —
+ * hiringManagerTarget()'s org-depth model, the send-side 100-1,000 employee band — had nothing to
+ * read. Only AUTHORITATIVE entries (a real resolved count) are stamped; heuristic bands are never
+ * written here, because a guess must never look like a confirmed size.
+ */
+export async function updateSizesFromCache(
+  cache: Record<string, { count?: number; band?: string | null }>,
+): Promise<number> {
+  if (!cache || typeof cache !== "object") return 0;
+  const pool = await load();
+  let touched = 0;
+  for (const e of pool) {
+    const key = (e.lead.company || "").toLowerCase().trim();
+    if (!key) continue;
+    const hit = cache[key];
+    const count = hit && typeof hit.count === "number" ? hit.count : undefined;
+    if (!count || count <= 0) continue;
+    if (e.lead.employeeCount === count) continue;      // already current
+    e.lead.employeeCount = count;
+    touched++;
+  }
+  if (touched) await saveSnapshot(KEY, pool);
+  return touched;
+}
+
 /** A rotating slice of company slugs from the pool, to seed the watchlist-driven sources
  *  (ATS boards, GitHub orgs) so they deepen role coverage for known companies. Highest-
  *  scored first; `offset` rotates through the whole pool over successive cycles. */

@@ -35,7 +35,17 @@ export const MAX_EMPLOYEES = 5_000;
  *  25 so funded/early SMBs (where the CEO/Head of People IS the recruiting-services buyer) are in. */
 export const MIN_EMPLOYEES = 25;
 
-interface SizeEntry { band: Band | null; count?: number; src: "wikidata" | "none"; at: number }
+// `src` records WHERE a size came from, and that provenance is load-bearing:
+//   wikidata — the original free source. Authoritative but covers only established/public
+//              companies: it resolved 278 of 11,380 attempts (2.4%) against this pool.
+//   linkedin — written by tools/company-size.mjs, which reads the company's own LinkedIn page
+//              (profile count + self-reported band) through the Serper SERP API. Resolves ~96%,
+//              which is what makes a real headcount gate possible at all.
+//   none     — negative cache: looked up, nothing found.
+// The pool-purge helpers below deliberately still act on `wikidata` ONLY. A parse mistake there
+// deletes a real company from the pool, so LinkedIn counts are trusted to FILTER a send (holding
+// a row costs nothing and is reversible) but not to DESTROY pool data.
+interface SizeEntry { band: Band | null; count?: number; src: "wikidata" | "linkedin" | "none"; at: number; via?: string; selfReported?: string }
 type SizeMap = Record<string, SizeEntry>;
 
 function nameKey(name: string): string { return (name || "").toLowerCase().trim(); }
