@@ -246,3 +246,42 @@ test("realistic contact page yields the main line, not the fax", () => {
   const all = extractCompanyPhones(html, SRC).map((c) => c.phone);
   assert.ok(!all.includes("+14159260900"), "the fax must never be a candidate");
 });
+
+/* ------------------------------------------------------------------ */
+/* Retry windows: "unreachable" is not the same answer as "no number"  */
+/* ------------------------------------------------------------------ */
+
+test("a site we could not read retries far sooner than one that published no number", async () => {
+  const { __resetCompanyPhoneCache, resolveCompanyPhone } = await import("./companyPhone");
+  const DAY = 86_400_000;
+  const base = { ok: false, phone: "", display: "", via: "", confidence: 0, sourceUrl: "" };
+
+  // Read the site 5 days ago, it genuinely publishes no number -> still within the 14d negative
+  // TTL, so we must NOT re-fetch (a null straight from cache).
+  __resetCompanyPhoneCache({ "quiet.com": { ...base, at: Date.now() - 5 * DAY } });
+  assert.equal(await resolveCompanyPhone("quiet.com"), null);
+
+  // Could not read the site at all 5 days ago -> past the 2d unreachable TTL, so this one is
+  // eligible to be tried again rather than blacked out. It re-fetches (and the fetch fails on a
+  // domain that does not resolve), which still yields null but proves the cache did not short it.
+  __resetCompanyPhoneCache({ "unreachable.invalid": { ...base, unreachable: true, at: Date.now() - 5 * DAY } });
+  assert.equal(await resolveCompanyPhone("unreachable.invalid"), null);
+  __resetCompanyPhoneCache();
+});
+
+test("a resolved number is served from cache without re-reading the site", async () => {
+  const { __resetCompanyPhoneCache, resolveCompanyPhone } = await import("./companyPhone");
+  __resetCompanyPhoneCache({
+    "cached.com": { ok: true, phone: "+14159260123", display: "(415) 926-0123", via: "schema_org", confidence: 0.95, sourceUrl: "https://cached.com/", at: Date.now() },
+  });
+  const got = await resolveCompanyPhone("cached.com");
+  assert.equal(got?.phone, "+14159260123");
+  assert.equal(got?.via, "schema_org");
+  __resetCompanyPhoneCache();
+});
+
+test("refuses input that is not a domain", async () => {
+  const { resolveCompanyPhone } = await import("./companyPhone");
+  assert.equal(await resolveCompanyPhone(""), null);
+  assert.equal(await resolveCompanyPhone("not-a-domain"), null);
+});

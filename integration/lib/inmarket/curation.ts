@@ -1647,8 +1647,16 @@ export async function enrichCompanyPhones(
   const { resolveCompanyPhone } = await import("./companyPhone");
   const rows = await load();
 
-  // Re-check a row only if it has never been enriched, or the cached verdict has aged out.
-  const STALE_MS = 90 * 24 * 60 * 60 * 1000;
+  // Re-check a row only if it has never been enriched, or its stamp has aged out.
+  //
+  // 21 days, NOT 90: this stamp is what decides whether a domain gets SELECTED at all, so it
+  // silently overrides companyPhone.ts's own TTLs — a domain nothing selects is never re-read. At
+  // 90 days a company that was merely bot-blocking us for a minute, or that added a phone number
+  // to its site next month, would sit blacked out for a quarter. 21 days sits just past the
+  // resolver's 14-day "read the site, no number published" TTL, so a re-selected row actually
+  // triggers a fresh read instead of returning the same cached miss. Re-reads are cheap: the
+  // resolver answers instantly from cache whenever its own TTL has NOT expired.
+  const STALE_MS = 21 * 24 * 60 * 60 * 1000;
   const needs = (r: CuratedProspect): boolean => {
     if (!r.domain) return false;                       // no verified domain = nothing to read
     if (r.companyPhone) return false;                  // already have the company's line

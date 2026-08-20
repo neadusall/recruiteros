@@ -46,7 +46,11 @@ import { loadSnapshot, debouncedSaver } from "../db";
 
 const CACHE_KEY = "inmarket_company_phone_v1";
 const POS_TTL_MS = 90 * 24 * 60 * 60 * 1000;  // a company's main line is stable — re-check quarterly
-const NEG_TTL_MS = 14 * 24 * 60 * 60 * 1000;  // no number found: retry in two weeks (sites get redesigned)
+const NEG_TTL_MS = 14 * 24 * 60 * 60 * 1000;  // site READ fine, no number published: retry in two weeks
+// UNREACHABLE is not the same answer as "publishes no number". A 403 bot-block, a TLS failure, or a
+// timeout tells us nothing about the company — punishing it with the full negative TTL would blackout
+// a perfectly good company for two weeks over one bad minute. Retry those in two days.
+const UNREACHABLE_TTL_MS = 2 * 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 8_000;
 const MAX_PAGES = 5;              // per company, ever (then cached 90d): a homepage attempt, its
                                   // www fallback, and up to 3 contact-ish pages
@@ -85,6 +89,10 @@ interface CacheRow {
   confidence: number;
   sourceUrl: string;
   at: number;
+  /** True when we could not read a single page (bot-block / TLS / timeout / DNS). Distinguishes
+   *  "we learned nothing" from "we looked and they publish no number", so the two get different
+   *  retry windows. Absent on rows written before this field existed — read as false. */
+  unreachable?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -449,7 +457,8 @@ export async function resolveCompanyPhone(
   const cache = await ensureCache();
   const hit = cache.get(d);
   if (hit && !opts?.force) {
-    const fresh = Date.now() - hit.at < (hit.ok ? POS_TTL_MS : NEG_TTL_MS);
+    const ttl = hit.ok ? POS_TTL_MS : hit.unreachable ? UNREACHABLE_TTL_MS : NEG_TTL_MS;
+    const fresh = Date.now() - hit.at < ttl;
     if (fresh) {
       return hit.ok
         ? { phone: hit.phone, display: hit.display, via: hit.via as CompanyPhoneVia, confidence: hit.confidence, sourceUrl: hit.sourceUrl }
@@ -461,11 +470,14 @@ export async function resolveCompanyPhone(
   const visited = new Set<string>();
   const pending: string[] = [];   // contact links the homepage advertises (declared before readPage closes over it)
 
+  let pagesRead = 0;   // how many pages we actually got bytes from (0 = the site told us nothing)
+
   const readPage = async (url: string, isHome = false): Promise<string | null> => {
     if (visited.has(url) || visited.size >= MAX_PAGES) return null;
     visited.add(url);
     const html = await fetchText(url);
     if (!html) return null;
+    pagesRead++;
     cands.push(...extractCompanyPhones(html, url));
     // The homepage tells us where its own contact page is — better than guessing paths.
     if (isHome) for (const link of contactLinksFrom(html, d)) pending.push(link);
@@ -512,7 +524,8 @@ export async function resolveCompanyPhone(
   try {
     cache.set(d, result
       ? { ok: true, phone: result.phone, display: result.display, via: result.via, confidence: result.confidence, sourceUrl: result.sourceUrl, at: Date.now() }
-      : { ok: false, phone: "", display: "", via: "", confidence: 0, sourceUrl: "", at: Date.now() });
+      // pagesRead === 0 means every fetch failed, so this is "unreachable", not "no number".
+      : { ok: false, phone: "", display: "", via: "", confidence: 0, sourceUrl: "", at: Date.now(), unreachable: pagesRead === 0 });
     scheduleSave();
   } catch { /* best-effort cache */ }
 
