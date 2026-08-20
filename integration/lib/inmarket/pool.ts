@@ -300,7 +300,17 @@ export async function purgeOversizedFromPool(oversizedKeys: Set<string>): Promis
   if (!oversizedKeys.size) return 0;
   const pool = await load();
   if (!pool.length) return 0;
-  const kept = pool.filter((e) => !oversizedKeys.has(keyOf(e.lead)));
+  // TWO KEY SPACES, and this function straddles them. Pool keys are NORMALIZED by companyKey()
+  // ("Stripe, Inc." -> "stripe"); the size cache keys on the RAW lowercased name ("stripe, inc.").
+  // Comparing a normalized pool key against a set of raw cache keys only ever matched companies
+  // whose names were already clean, so every company carrying a suffix, comma or "Group" survived
+  // a purge it should not have. That was invisible while Wikidata resolved 2.4% of the pool; at the
+  // ~89% coverage the LinkedIn resolver reaches it stranded 2,409 companies (28% of the pool) that
+  // the purge reported as done. Check BOTH forms: the caller may legitimately hand us either.
+  const kept = pool.filter((e) => {
+    const raw = (e.lead.company || "").toLowerCase().trim();
+    return !oversizedKeys.has(raw) && !oversizedKeys.has(keyOf(e.lead));
+  });
   const removed = pool.length - kept.length;
   if (removed > 0) {
     await saveSnapshot(KEY, kept);
