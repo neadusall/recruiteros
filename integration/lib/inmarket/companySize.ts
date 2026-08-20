@@ -97,8 +97,19 @@ async function loadCache(): Promise<SizeMap> {
 }
 
 /** The current size cache (company → band/count), for the search path to apply synchronously. */
+// The cache blob is ~2.5 MB and, since the band filters landed, it is read on hot paths: once per
+// curation tick and once per research-worker poll. Re-parsing it every time is pure waste, so hold
+// it briefly in memory. A 60s TTL is far shorter than anything that changes a headcount (the
+// resolver re-checks a company every 90 days), and short enough that a fresh sweep is picked up
+// within a minute. Deliberately NOT used by the writer paths, which always read from disk.
+let sizeMemo: { at: number; map: SizeMap } | null = null;
+const SIZE_MEMO_MS = 60_000;
+
 export async function loadSizeMap(): Promise<SizeMap> {
-  return loadCache().catch(() => ({}));
+  if (sizeMemo && Date.now() - sizeMemo.at < SIZE_MEMO_MS) return sizeMemo.map;
+  const map = await loadCache().catch(() => ({} as SizeMap));
+  sizeMemo = { at: Date.now(), map };
+  return map;
 }
 
 /** Company keys (lowercased names) we've AUTHORITATIVELY confirmed exceed the employee cap,
