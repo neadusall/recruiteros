@@ -128,6 +128,26 @@ test("render gate catches token/empty/hole/em-dash/placeholder", () => {
   assert.equal(checkRenderedEmail("subj", "worth a chat — really?").ok, false);
   assert.equal(checkRenderedEmail("subj", "leftover [role] here").ok, false);
 });
+test("render gate holds the wordy pre-MPC copy (length, run-on, lecture)", () => {
+  // The two live 2026-08-20 sends that started this rewrite. Both must now be HELD.
+  const northwood = checkRenderedEmail("community operations lead bench for northwood ravin",
+    "We keep an active bench of Community Operations Leads, and a couple from our current list map cleanly to what you're hiring for. These are people who've run resident experience workflows and owned the financial operations side of community management in tandem, which is the real constraint in this role. Since it's rare to find someone comfortable bridging both the resident-facing work and the back-office finance discipline, we've banked a few strong fits as they come through the market. Worth a quick call to walk through who we have?");
+  assert.equal(northwood.ok, false);
+  const tonal = checkRenderedEmail("strategic finance leader for tonal, shortlist ready",
+    "Every week this seat stays empty, your finance team is stretched thinner: someone's covering FP&A while another handles month-end close and a third patches together spreadsheets instead of owning automation. At your scale, that's a compounding cost. We just wrapped a search for a similar hardware/fitness company and have a few strong finance leaders who own the full stack, FP&A, accounting ops, and the systems work that actually scales a finance function. These aren't generic candidates; they've built the infrastructure you need. Worth a quick call to walk through who we have?");
+  assert.equal(tonal.ok, false);
+});
+test("render gate holds a short email that hides a run-on sentence", () => {
+  const r = checkRenderedEmail("controller, quietly looking",
+    "I'm representing a Controller in Denver who has owned the monthly close, run the audit, rebuilt the chart of accounts, managed a team of six, and reported straight to the CFO for the last several years. Worth a look?");
+  assert.equal(r.ok, false);
+  assert.ok(r.problems.some((x) => /sentence runs/.test(x)), r.problems.join("; "));
+});
+test("render gate passes the new MPC format", () => {
+  const r = checkRenderedEmail("vp of sales, quietly looking",
+    "I'm representing a VP of Sales in Denver.\n\nGrew a portfolio from $12M to $40M, built the team from 3 to 22 reps.\n\nThey're exploring their next move confidentially. Worth a look at their profile?");
+  assert.equal(r.ok, true, r.problems.join("; "));
+});
 test("render gate passes a clean email", () => {
   const r = checkRenderedEmail("your assistant controller search, Vernon",
     "Hi Hali, saw Reformation's opening for an Assistant Controller in Vernon. worth a quick call? Best, Ryan");

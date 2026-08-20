@@ -615,6 +615,24 @@ const SPAM_TRIGGERS = [
 // a legit named metro ("local to Denver") on a metro'd role never false-positives.
 const LOCAL_CLAIM = /\blocal to (?:your|the)\b|\byour (?:local )?(?:market|area|metro|backyard)\b|\bin your (?:city|area|market|region)\b|\bnear you\b/i;
 
+// LENGTH IS A DELIVERABILITY AND REPLY-RATE FEATURE, so it is enforced, not suggested. The MPC
+// format is three short paragraphs: who you represent, two proof facts, one question. Body is
+// measured BEFORE the greeting, confidentiality line and signature are appended, so the cap is
+// on the pitch alone. Tunable per box, but the defaults are the format.
+const MAX_BODY_WORDS = Number(process.env.MPC_MAX_BODY_WORDS || 70);
+const MAX_SENTENCE_WORDS = Number(process.env.MPC_MAX_SENTENCE_WORDS || 28);
+
+// The recruiter-filler that made the pre-2026-08-20 emails read as a wall of text: sentences
+// that tell a hiring manager about their own req, their own market, or their own team's pain.
+// Every one of these is deletable without losing a fact, which is exactly why it is banned.
+const LECTURE = [
+  ["cost-of-vacancy sermon", /\bevery (?:week|day|month) (?:this|the) (?:seat|role|req|position)\b|\bwhile (?:this|the) (?:seat|role) (?:stays|sits|remains) (?:open|empty|unfilled)\b|\bcompounding cost\b|\bcost of (?:leaving )?(?:this|the) (?:seat|role) open\b/i],
+  ["telling them their own team is stretched", /\b(?:your|the) (?:team|function|department) is (?:stretched|stretched thinner|strained|under (?:water|strain))\b|\bstretched thinner\b|\bpatches together\b/i],
+  ["explaining why the role is hard to fill", /\bwhich is the real constraint\b|\bthat'?s the real constraint\b|\b(?:since |because )?it'?s rare to find\b|\bhard to find someone\b|\bthe hardest part of this (?:role|seat|search)\b/i],
+  ["scale/stage flattery", /\bat your scale\b|\bat your stage\b|\bgiven (?:your|the) (?:growth|trajectory|scale)\b/i],
+  ["defending the candidates instead of naming facts", /\bthese are ?n'?t generic candidates\b|\bnot your typical\b|\bnot generic\b|\bthe infrastructure you need\b/i],
+];
+
 // The render gate. A written email may be QUEUED only if this passes. Pass { remote: true }
 // when the role has no metro so local-market claims are rejected.
 export function checkRenderedEmail(subject, body, opts = {}) {
@@ -634,7 +652,16 @@ export function checkRenderedEmail(subject, body, opts = {}) {
     if (re.test(s) || re.test(b)) { problems.push(`spam-filter trigger: ${label}`); break; }
   }
   const words = b.split(/\s+/).filter(Boolean).length;
-  if (words > 130) problems.push(`body too long for cold (${words} words)`);
+  if (words > MAX_BODY_WORDS) problems.push(`body too long for cold (${words} words)`);
+  // One long sentence is how a short email still reads as a wall: the writer stacks three
+  // clauses instead of cutting an idea. Cap the SENTENCE, not just the email.
+  const longest = b.split(/(?<=[.!?])\s+/).reduce((m, s) => Math.max(m, s.split(/\s+/).filter(Boolean).length), 0);
+  if (longest > MAX_SENTENCE_WORDS) problems.push(`a sentence runs ${longest} words (max ${MAX_SENTENCE_WORDS})`);
+  // Explaining their own situation back to them. They wrote the job posting; a paragraph of
+  // "here is why this seat is hard" is the exact filler that makes these read like a campaign.
+  for (const [label, re] of LECTURE) {
+    if (re.test(b)) { problems.push(`lectures the reader: ${label}`); break; }
+  }
   // Exactly ONE soft CTA: a second question is the writer stacking closes ("Worth a call?
   // Open to a sync this week?"), which reads as pushy template output.
   const questions = (b.match(/\?/g) || []).length;

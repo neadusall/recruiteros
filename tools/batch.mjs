@@ -21,7 +21,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync, renameSync } from "node:fs";
 import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, roleFamily, roleFunctionGroup, buildCompanyKnowledge, buyerFit, companyKeyOf, isSeniorHire, isTalentBuyer } from "./gates.mjs";
-import { writeEmail, signature, footer, greetingName, recruiterFor } from "./writer.mjs";
+import { writeEmail, signature, footer, greetingName, recruiterFor, confidentiality } from "./writer.mjs";
 import { pickVariant } from "./variants.mjs";
 import { classifyEmails } from "./mxclass.mjs";
 // VERIFICATION BELT + SEND FUSE (owner mandate 2026-08-20, after the 8/19 fleet burn): every
@@ -819,9 +819,10 @@ async function main() {
     const check = checkRenderedEmail(email.subject, email.body, { remote: !metro });
     if (!check.ok) { console.log(`  SKIP (render gate) ${p.company}: ${check.problems.join(", ")}`); continue; }
     // Greeting built deterministically: "Hi <Capitalized First Name>," then a blank line, then the
-    // message. Signature + footer are appended at SEND time, once we know which recruiter's box
-    // the email leaves from, so every send signs as its actual sender.
-    const baseBody = `Hi ${greetingName(p.managerName)},\n\n${email.body}`;
+    // message, then the fixed confidentiality close (the MPC promise, never AI-varied, and true
+    // of every one of these: we name nobody). Signature + footer are appended at SEND time, once
+    // we know which recruiter's box the email leaves from, so every send signs as its sender.
+    const baseBody = `Hi ${greetingName(p.managerName)},\n\n${email.body}` + confidentiality();
     // Provenance travels with the send: which rung produced the address, what the verifier said and
     // when. The NDR sweep joins bounces back to these fields (per-source breakers) and the tier
     // decides which slice of the fleet may carry it.

@@ -1,49 +1,106 @@
 // RecruitersOS · MPC · per-prospect email writer (Haiku).
-// Writes ONE hyper-personalized cold BD email from ONLY the verified facts of a gated
-// prospect. Truth-locked: the model is told it may use nothing beyond the facts given, so
-// it cannot invent a candidate, metric, or competitor. The batch appends a fixed signature
-// + CAN-SPAM footer afterward, so those never vary. Returns { subject, body } (pitch only).
+//
+// Writes ONE cold MPC email: you represent a candidate, you are marketing them to a company
+// hiring that exact title. The whole design goal is BREVITY WITH BANG. Three short paragraphs,
+// 35-55 words, one idea per line, one question at the end. A decision-maker reads it in six
+// seconds without scrolling on a phone.
+//
+// Truth-locked: the model may use nothing beyond the facts given, so it cannot invent a
+// candidate, a metric or a competitor. Hard numbers ("$12M to $40M", "3 to 22 reps") are only
+// ever possible when a REAL candidate record supplies them (see the candidate bank below);
+// with no record the writer stays at the capability level, which is honest and still specific.
+//
+// The batch appends greeting, the confidentiality line, signature and CAN-SPAM footer, so those
+// never vary. Returns { subject, body } (pitch only).
 
-import { candidateType } from "./gates.mjs";
+import { readFileSync } from "node:fs";
+import { candidateType, roleFamily } from "./gates.mjs";
 
 const MODEL = process.env.MPC_WRITER_MODEL || "claude-haiku-4-5";
 
-function firstName(full) {
-  return (full || "").trim().split(/\s+/)[0] || "there";
+/* ── The candidate bank ─────────────────────────────────────────────────────────────────────
+ * Optional. A JSON array of the REAL people currently being marketed. When one matches the open
+ * role, its proof lines go into the email VERBATIM, which is the only way an email is allowed to
+ * carry hard numbers. With no bank (or no match) the writer falls back to capability-level proof
+ * drawn from the job posting, which is truthful and still concrete.
+ *
+ *   [{ "title": "VP of Sales",
+ *      "family": "Sales",                       // optional; inferred from title when absent
+ *      "metro": "Denver", "remoteOk": true,     // optional
+ *      "status": "exploring quietly",           // optional
+ *      "proof": ["Grew a portfolio from $12M to $40M",
+ *                "Built the team from 3 to 22 reps"] }]
+ */
+const BANK_PATH = process.env.MPC_CANDIDATE_BANK || "/data/mpc-candidates.json";
+let BANK_CACHE = null;
+
+export function loadCandidateBank(path = BANK_PATH) {
+  if (BANK_CACHE) return BANK_CACHE;
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    const list = (Array.isArray(raw) ? raw : raw.candidates || []).filter(
+      (c) => c && c.title && Array.isArray(c.proof) && c.proof.length,
+    );
+    BANK_CACHE = list;
+  } catch {
+    BANK_CACHE = [];
+  }
+  return BANK_CACHE;
+}
+
+/** The real candidate we are marketing into this req, or null. Family match, then metro if the
+ *  record is pinned to one, so a Denver-only person is never pitched into a Tampa seat. */
+export function matchCandidate(role, metro, bank = loadCandidateBank()) {
+  if (!bank.length) return null;
+  const fam = roleFamily(role);
+  if (!fam) return null;
+  const sameFamily = bank.filter((c) => (c.family || roleFamily(c.title)) === fam);
+  if (!sameFamily.length) return null;
+  const placed = sameFamily.find((c) => {
+    if (!c.metro) return true;
+    if (!metro) return c.remoteOk === true;
+    return String(c.metro).toLowerCase() === String(metro).toLowerCase();
+  });
+  return placed || null;
 }
 
 const SYSTEM = [
-  "You are a senior recruiter at Lume Search Partners, a specialist search firm. You place strong candidates for the EXACT role each company is hiring, across functions (accounting/finance, sales, marketing, engineering, product, operations, people, legal, and leadership). The facts name the open role and its candidate_type; your whole email is about THAT function's talent, never a different one. You write cold BD emails to the hiring decision-maker that prove, in a few sentences, that you actually understand THEIR specific situation, so they read as a sharp operator, not a mass blast.",
+  "You are a recruiter at Lume Search Partners. You write ONE cold MPC email: you represent a candidate and you are marketing that person to a company hiring their exact title. You are not selling a search, not selling your firm, and not explaining their own job to them.",
   "",
-  "THE LEAD IS THE WATERING HOLE. The email's hook, up front, is that you ALREADY HAVE PEOPLE for this: you recently ran a search for a similar company in their space (an industry peer / competitor) and came away with a few strong candidates for exactly this title, local to their market. You are not asking to start a search, you are offering to hand them a shortlist you already have. That is the reason for them to reply now. Lead with it, make it concrete to the TITLE + METRO + INDUSTRY.",
+  "THE FORMAT IS FIXED. Three short paragraphs, in this order, nothing else:",
+  "  1. WHO. One sentence. You are representing a <exact open title> in their space. If a metro is given, put the metro in this sentence. Stop there.",
+  "  2. PROOF. One sentence. Exactly TWO concrete things this person has done, joined by a comma. Nothing else in this paragraph.",
+  "  3. CLOSE. Two short sentences: their situation in one clause, then ONE question. Nothing after the question.",
   "",
-  "DEPTH IS THE WHOLE POINT. A shallow email like 'Saw <Company> is hiring for <role>. We work with vetted candidates.' is a FAILURE. Every email must earn attention with real, specific insight. Weave in, naturally (not as a checklist):",
-  "  1. THE WATERING-HOLE LEAD (above): a recent search for a comparable company in their industry left you with a few strong <exact title> candidates in/near their metro. Offer to share them. You may spin this several honest ways across emails: 'just wrapped a search for a company in your space', 'have a shortlist of <title> people from a recent <industry> search', 'placed a <title> recently and have strong runners-up in <metro>'. Rotate the framing so emails do not read identical.",
-  "  2. A pointed read on THEIR situation: connect the hiring signal (many open roles / fast scaling) to the real strain it puts on the team this role sits on, and what that means for THIS role specifically.",
-  "  3. The actual role and what it truly takes. Use the job-posting excerpt when given: name a concrete responsibility or skill IT calls for (whatever the posting emphasizes for this function), so it is unmistakably about THIS req and matches the candidates you are offering.",
-  "  4. If a metro is given, real local-market nuance, not just 'around <metro>': speak to how tight/competitive that specific market is for this KIND of talent (the candidate_type), and that your candidates are local to it. If the role is remote, speak to the remote/national talent angle instead. NEVER drop the metro when one is provided.",
-  "  5. One soft CTA that invites a CONVERSATION, never a profile dump. Ask for a quick call or reply to talk through who you have (e.g. 'Worth a quick call?', 'Open to a quick chat this week?', 'Happy to walk you through a couple, worth 10 minutes?'). Do NOT offer to send, attach, or 'send over' profiles or resumes.",
+  "LENGTH IS THE FEATURE. 35 to 55 words of body, total, across all three paragraphs. At 60 words you have failed. Cut whole ideas, do not compress them into longer sentences. Every sentence stays under 18 words.",
   "",
-  "VOICE. Write like one busy operator texting another, not like a formal letter. Contractions ('I've', 'they're', 'we'd') are good. Short sentences. Plain words. If a sentence would fit in ANY company's email, cut it: no 'what you're building', 'I hope this finds you well', 'I wanted to reach out', 'aligns with', 'the rigor X demands', 'exciting opportunity', 'I came across'. A hiring manager should feel a specific person wrote this about their specific req in under two minutes.",
+  "THE CARDINAL SIN IS EXPLAINING THEIR SITUATION BACK TO THEM. They wrote the job posting. Never tell them what the role requires, why it is hard to fill, what their market is like, what the seat costs them while it is open, what strain their team is under, or why this profile is rare. Every one of those sentences is deletable, and every one of them is why an email gets ignored. Delete them before you write them.",
   "",
-  "BE FALSIFIABLE, ABOUT THE ROLE. Concreteness comes from THE ROLE and THE POSTING: name the metro (when given), the industry, the exact title, and a real responsibility or system the posting calls for. 'A few strong candidates' is the MOST vague you may ever be about supply, and never stack two vague claims back to back. Generic flattery about their company is a failure.",
+  "BANNED, ALWAYS:",
+  "  - Empty adjectives: strong, sharp, seasoned, proven, solid, exceptional, top-tier, high-caliber, rare, unique, dynamic.",
+  "  - Setup phrases: 'I wanted to reach out', 'I came across', 'I hope this finds you well', 'just wanted to', 'as you know', 'at your scale', 'that is a compounding cost', 'which is the real constraint', 'these are not generic candidates', 'worth flagging'.",
+  "  - Any sentence that would fit in ANY company's email. If it is not about this person or this title, cut it.",
+  "  - Lists of three or more skills. Two facts, that is the ceiling.",
+  "  - Selling the candidate twice. Say it once and stop.",
   "",
-  "NEVER INVENT CANDIDATE RESUMES. You know your candidates only at the category level (title + function + market). NEVER assert a count or specific credential you cannot know: no 'one carries a CPA', no 'two have NetSuite experience', no years-of-experience numbers. Instead, tie category-level candidates to the posting's demands: 'people who've owned the close cycle and deferred revenue' is fine; 'a couple have OneStream experience' is a fabrication and a hard failure.",
+  "THE PROOF LINE IS THE WHOLE EMAIL. Two facts, concrete, past tense, no adjectives.",
+  "  - If CANDIDATE PROOF lines are given in the facts, use them VERBATIM (you may join them with a comma and fix tense or capitalization, nothing more). Those are the only hard numbers you may ever write.",
+  "  - If no candidate proof is given, you know this person only at the capability level. Write two things the job posting itself demands, phrased as work this person has owned: 'Owned the close cycle and deferred revenue' is fine. NEVER invent a number, a year count, a certification, an employer, a system, or a headcount. Inventing one is a hard failure.",
+  "",
+  "VOICE. One busy operator writing to another. Contractions. Plain words. Normal capitalization. Never an em-dash, use a comma or a period. No hype, no buzzwords, no sign-off, no P.S.",
   "",
   "HARD RULES:",
-  "- The email must match the OPEN ROLE's function. If it's a sales role, pitch sales candidates; a software role, engineering candidates; a finance role, finance candidates. NEVER pitch a candidate type that doesn't match the role.",
-  "- If a 'LEAD with:' instruction is given, THAT is the hook of this specific email, make it the opening angle. It only steers the lead, every other rule below still holds.",
-  "- If metro is null (a remote/national role): NEVER claim the candidates are 'local to your market' or local to anything, even if the LEAD mentions local. Pitch remote-ready candidates for a remote role instead. When a metro IS given, name it (say 'Denver', never 'your market').",
-  "- Use ONLY the facts and the job-posting excerpt provided. Never invent a metric, a number, or a role detail not given. If the excerpt is thin, lean on the role title, industry and signal, do not fabricate specifics.",
-  "- The watering-hole angle is honest AT THE CATEGORY LEVEL: you genuinely run searches for this function and have candidates for this title/market. So you MAY say you recently searched for 'a similar company in your space' / 'another <industry> company' and have a few <title> candidates. You must NOT name a specific competitor company (never say 'your competitor Acme'), and you must NOT claim one specific named individual, invent their employer, or cite fake numbers. Keep it 'a few candidates' / 'a shortlist'.",
-  "- Write ONLY the message body: NO greeting, NO 'Hi <name>', NO name (a greeting is added separately). Start with a CAPITAL letter.",
-  "- 45 to 70 words. Human, specific, confident; normal capitalization and punctuation. Exactly ONE soft CTA.",
-  "- No hype, no buzzwords, no filler sentences, NEVER an em-dash (comma or period instead), no sign-off, no clickbait subject.",
-  "Return STRICT JSON only: {\"subject\": string, \"body\": string}. Subject short, lowercase, specific to this role/company. Body is the message only.",
+  "- The candidate's function must match the OPEN ROLE. A sales req gets a sales candidate, a finance req gets a finance candidate. Never pitch a different function.",
+  "- Refer to the candidate as 'they' throughout. Never a name, never a current employer, never a named competitor.",
+  "- If an ANGLE instruction is given, it steers ONE sentence of paragraph 1 or 3. It never adds a sentence and never buys extra words.",
+  "- If metro is null (a remote or national role), never claim they are local to anything. Say they are remote-ready or drop location entirely.",
+  "- Exactly ONE question mark in the whole body, at the very end. The close is a question about seeing the person: 'Worth a look?', 'Want their profile?', 'Worth a quick call?'. Do not ask for a meeting time and do not offer to attach or send a resume.",
+  "- Subject: lowercase, 3 to 6 words, the title plus their state. Examples of the shape: 'vp of sales, quietly looking', 'controller, off market', 'director of nursing, ready now'. No company name, no clickbait, no question mark.",
+  "Return STRICT JSON only: {\"subject\": string, \"body\": string}. Body is the message only: NO greeting, NO name, NO sign-off. Start with a capital letter.",
 ].join("\n");
 
-/** Best-effort pull of the real job-posting text, so the email is grounded in the actual role
- *  (the depth the merge-fields alone can't give). Never throws; returns "" on any failure. */
+/** Best-effort pull of the real job-posting text, so the proof line is grounded in the actual
+ *  role (the depth the merge-fields alone can't give). Never throws; returns "" on any failure. */
 async function fetchJobExcerpt(url) {
   if (!url) return "";
   try {
@@ -77,28 +134,33 @@ function deDash(s) {
 export async function writeEmail(p, opts = {}) {
   const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY not set");
+  const metro = opts.metro || null;
+  const candidate = opts.candidate !== undefined ? opts.candidate : matchCandidate(p.role, metro);
   const facts = {
-    company: p.company,
     open_role: p.role,
     candidate_type: candidateType(p.role) || null,
     decision_maker_title: p.managerTitle,
-    metro: opts.metro || null,
+    metro,
     industry: p.industry || null,
-    hiring_signal: p.signalReason || null,
+    // Real proof, verbatim, when we actually hold this person. Absent = capability level only.
+    candidate_proof: candidate ? candidate.proof : null,
+    candidate_status: candidate ? candidate.status || null : null,
   };
   const excerpt = await fetchJobExcerpt(p.jobUrl);
   const variantLead = opts.variant && opts.variant.lead ? opts.variant.lead : null;
   const userMsg =
     "Facts:\n" + JSON.stringify(facts, null, 2) +
     (variantLead ? "\n\n" + variantLead : "") +
-    (excerpt ? "\n\nActual job-posting excerpt (use it for real specifics about the role):\n" + excerpt : "\n\n(No job-posting text available; lean on the role title and signal, do not fabricate.)") +
-    "\n\nWrite the deep, situation-aware email as strict JSON.";
+    (excerpt
+      ? "\n\nActual job-posting excerpt. Use it ONLY to ground the two proof facts in what this role really does. Do not describe the role back to them:\n" + excerpt
+      : "\n\n(No job-posting text available; lean on the title, do not fabricate.)") +
+    "\n\nWrite the email as strict JSON. Three short paragraphs, 35 to 55 words, one question at the end.";
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 500,
+      max_tokens: 400,
       system: SYSTEM,
       messages: [{ role: "user", content: userMsg }],
     }),
@@ -127,6 +189,14 @@ export function recruiterFor(ownerName) {
   for (const [key, rec] of Object.entries(RECRUITERS)) if (o.includes(key)) return rec;
   return RECRUITERS.ryan;
 }
+
+// The MPC close. Fixed, never AI-varied, and literally true of every one of these emails: we
+// name nobody and we never say where they work now. It also answers, before it is asked, the
+// only objection a hiring manager has to a confidential candidate pitch.
+export function confidentiality() {
+  return "\n\nNo names. No current employer. Fully confidential.";
+}
+
 export function signature(rec = RECRUITERS.ryan) {
   return `\n\nBest,\n${rec.name}\nLume Search Partners\n${rec.phone}`;
 }

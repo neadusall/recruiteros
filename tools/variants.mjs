@@ -1,39 +1,40 @@
 // RecruitersOS · MPC · the variant catalog (the A/B/n test bank).
 //
-// The "watering hole" is the CATEGORY of hook (you already have people from a recent search).
-// WHICH spin of it actually makes a decision-maker reply is an empirical question, so we treat
-// the lead angle as a tracked variable: each email is assigned ONE variant, that id rides along
-// on the send log, and monitor.mjs reads the inbox back to show reply-rate PER VARIANT. Add or
-// retire variants here and the whole loop (send -> tag -> measure) follows automatically.
+// Every variant is the SAME motion: you represent a real person, you are marketing them to a
+// company hiring that exact title. What changes is the ANGLE on that person, one line of it.
+// Each email is assigned ONE variant, the id rides along on the send log, and monitor.mjs reads
+// the inbox back to show reply-rate PER VARIANT. Add or retire variants here and the whole loop
+// (send -> tag -> measure) follows automatically.
 //
-// Every variant still obeys the writer's hard rules (truth-locked, 45-70 words, no named
-// competitor, no named individual). A variant only steers the LEAD, not the honesty.
+// A variant steers ONE sentence. It never buys extra words, never adds a second idea, and never
+// loosens the writer's hard rules (truth-locked, 35-55 words, no named competitor, no named
+// individual, no market lecture).
 
 export const VARIANTS = [
   {
-    id: "peer_search",
-    label: "just wrapped a peer search",
-    lead: "LEAD with: you just wrapped a search for a comparable company in THEIR industry and came away with a few strong candidates for exactly this title. If a metro is given, say they are local to THAT metro by name; if the role is remote, they are remote-ready, never 'local to your market'. You are not pitching a new search, you already have the people. Close by inviting a quick conversation to walk through who you have.",
+    id: "quietly_looking",
+    label: "quietly looking",
+    lead: "ANGLE: they are looking quietly, still employed, not on any job board. State it flat in the close. Do not dramatize it.",
   },
   {
     id: "runner_up",
-    label: "placed one, have runners-up",
-    lead: "LEAD with: you recently PLACED someone in this exact title for a peer company in their space, and have strong runner-up candidates still available right now (name their metro if one is given; if the role is remote, they are remote-ready, never 'local to your market'). Close by inviting a quick call to talk them through.",
+    label: "runner-up from a search you closed",
+    lead: "ANGLE: you just placed this exact title for another company in their space and this person was the one you could not place. Say that in five words in the first sentence, then go straight to proof.",
   },
   {
-    id: "market_scarcity",
-    label: "local market is tight",
-    lead: "LEAD with: how tight and competitive the market is for this specific profile (the good ones get locked up fast). If a metro is given, make it about THAT metro by name and say your people are local to it; if the role is remote, make it about the national market for this title instead, never 'local to your market'. Then: you already hold vetted people for this title. Close by inviting a short conversation.",
+    id: "ready_now",
+    label: "available now",
+    lead: "ANGLE: they are ready to move now, not in six months. One clause in the close, no elaboration.",
   },
   {
-    id: "speed_fill",
-    label: "seat open while scaling costs you",
-    lead: "LEAD with: the real cost of leaving THIS seat open while they are scaling (the strain it puts on the finance team), then that you can move fast because you already hold a shortlist for this exact title. Close by inviting a quick call.",
+    id: "off_market",
+    label: "never hit the market",
+    lead: "ANGLE: this person never reached the open market, you have them because of the search you just ran. Compress it to one clause in the first sentence.",
   },
   {
-    id: "industry_bench",
-    label: "active bench in your industry",
-    lead: "LEAD with: you keep an active, current bench of this exact title within THEIR industry (and their metro, named, when one is given; a remote/national bench when the role is remote), and a couple of those people map cleanly to this req right now. Close by inviting a short conversation about them.",
+    id: "exact_title",
+    label: "same title, same size company",
+    lead: "ANGLE: they are doing this exact title right now at a company the same size, in the same industry. First sentence only, then proof.",
   },
 ];
 
