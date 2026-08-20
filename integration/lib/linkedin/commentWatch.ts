@@ -497,6 +497,13 @@ export interface CommentLeadItem {
   responseCommentId?: string;
   /** Round-robin cursor so each tick polls the stalest threads first. */
   responseCheckedAt?: string;
+  /** Stamped the first time a reply is seen, which is also the only time the
+   *  recruiter is told about it. Its presence is what makes the alert
+   *  once-ever rather than once-per-tick. */
+  replyAlertAt?: string;
+  /** The invitation this reply triggered, from the seat that commented. */
+  replyConnectStatus?: "queued" | "skipped";
+  replyConnectReason?: string;
   /** The owner's OWN in-thread reply once the poster responds. Never
    *  machine-drafted (owner ask 2026-08-19); "suggested" only survives on
    *  legacy items staged before that decision and is ignored by the UI. */
@@ -1877,6 +1884,13 @@ async function checkCommentResponses(workspaceId: string): Promise<number> {
       // their exact words and answer in their own. The tracker shows the
       // reply with an empty compose box; nothing is written for them.
       console.log(`[comment-radar] ${workspaceId}: ${item.authorName} replied to our comment on their post`);
+      // The two things that must happen without anyone watching the card
+      // (owner ask 2026-08-20): tell the recruiter whose seat drew the reply,
+      // and ask to connect from that same seat while the thread is live.
+      // Both are once-ever and neither can throw into the scan.
+      const { posterReplyReflex } = await import("./replyReflex");
+      await posterReplyReflex(workspaceId, item, accounts);
+      save();
     } catch (e) {
       console.log(`[comment-radar] ${workspaceId}: thread check failed for ${item.authorName} (${e instanceof Error ? e.message : e})`);
     }

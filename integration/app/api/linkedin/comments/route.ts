@@ -52,7 +52,14 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request): Promise<Response> {
   const g = requireCapability(req, "outreach:send");
   if ("response" in g) return g.response;
-  return ok(await commentWatchView(g.ctx.workspace.id));
+  const view = await commentWatchView(g.ctx.workspace.id);
+  // ?summary=1: just the tallies, for the nav badge that lights the LinkedIn
+  // tab when a poster is waiting on an answer. The badge polls in the
+  // background and has no business shipping the whole feed to do it.
+  if (new URL(req.url).searchParams.get("summary") === "1") {
+    return ok({ trackedTally: view.trackedTally });
+  }
+  return ok(view);
 }
 
 export async function POST(req: Request): Promise<Response> {

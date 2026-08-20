@@ -3337,20 +3337,36 @@
   // LinkedIn Daily Ops: the daily non-negotiables behind the LinkedIn tabs.
   // Open tasks light up the LinkedIn and LinkedIn Poster nav items (red count)
   // until the day's work is done; the panels inside both tabs carry the list.
+  // Two independent counts share the LinkedIn tab's badge: the day's open
+  // touches, and posters who replied to one of our comments and are waiting on
+  // an answer (owner ask 2026-08-20 — a live conversation must not sit unseen
+  // behind a tab). Each poller caches its own number so the slower one never
+  // wipes the faster one's.
+  var liOpsOpen = 0, liReplyOpen = 0, liPosterOpen = 0;
+  function setB(name, n) {
+    Array.prototype.forEach.call(document.querySelectorAll('.ni-badge[data-badge="' + name + '"]'), function (bd) {
+      bd.textContent = n > 0 ? String(n) : "";
+      bd.classList.add("due");
+      bd.classList.toggle("show", n > 0);
+    });
+  }
+  function liPaintBadges() {
+    setB("linkedin", liOpsOpen + liReplyOpen);
+    setB("linkedinposter", liPosterOpen);
+  }
   function liOpsSetBadges(d) {
-    function setB(name, n) {
-      Array.prototype.forEach.call(document.querySelectorAll('.ni-badge[data-badge="' + name + '"]'), function (bd) {
-        bd.textContent = n > 0 ? String(n) : "";
-        bd.classList.add("due");
-        bd.classList.toggle("show", n > 0);
-      });
-    }
-    setB("linkedin", (d && d.openOutreach) || 0);
-    setB("linkedinposter", (d && d.openContent) || 0);
+    liOpsOpen = (d && d.openOutreach) || 0;
+    liPosterOpen = (d && d.openContent) || 0;
+    liPaintBadges();
   }
   function liOpsRefreshBadges() {
     if (!can("outreach:send")) return;
     apiQuiet("/linkedin/dailyops").then(function (d) { if (d) liOpsSetBadges(d); });
+    apiQuiet("/linkedin/comments?summary=1").then(function (d) {
+      if (!d) return; // a count we cannot fetch is not worth a red notice
+      liReplyOpen = (d.trackedTally && d.trackedTally.followUpsOpen) || 0;
+      liPaintBadges();
+    });
   }
   liOpsRefreshBadges();
   setInterval(liOpsRefreshBadges, 180000);
@@ -3981,6 +3997,14 @@
       if (t.responseStatus === "responded") {
         out += '<div class="lie-post"><b>' + esc((t.authorName || "").split(/\s+/)[0] || "They") + ' replied' +
           (t.responseAt ? " " + esc(trackDay(t.responseAt)) : "") + ':</b> "' + esc((t.responseText || "").slice(0, 400)) + '"</div>';
+        // What the desk already did about it, without being asked: the
+        // invitation goes out from the same seat the moment they answer.
+        if (t.replyConnectStatus === "queued") {
+          out += '<div><span class="lie-chip ok">Connection request sent from your account</span>' +
+            (t.replyConnectReason ? ' <span class="muted">' + esc(t.replyConnectReason) + "</span>" : "") + "</div>";
+        } else if (t.replyConnectStatus === "skipped") {
+          out += '<div><span class="lie-chip mut">No invitation: ' + esc(t.replyConnectReason || "skipped") + "</span></div>";
+        }
         if (open) {
           if (t.followUpStatus === "blocked") {
             out += '<div><span class="lie-chip bad">' + esc(t.reason || "Reply blocked") + "</span></div>";
@@ -4011,7 +4035,7 @@
       if (!tr.length && !(tally.postedTotal > 0)) return "";
       return '<div class="card liops-card">' +
         '<div class="liops-head"><div><b>Comments posted</b>' +
-          '<div class="muted liops-sub">Every comment that went out, tallied and watched. Each thread is re-checked around the clock; when the poster replies, their exact words land here with a space for you to answer in your own. Nothing is drafted for you. Quiet threads move to the email follow-up campaign automatically.</div></div>' +
+          '<div class="muted liops-sub">Every comment that went out, tallied and watched. Each thread is re-checked around the clock; when the poster replies, their exact words land here with a space for you to answer in your own. Nothing is drafted for you. You also get an email the moment they reply (and a text where your cell is set), and a connection request goes out from the same account while the thread is live. Quiet threads move to the email follow-up campaign automatically.</div></div>' +
           (tally.followUpsOpen ? '<span class="liops-progress">' + tally.followUpsOpen + (tally.followUpsOpen === 1 ? " reply" : " replies") + " to answer</span>" : "") +
         "</div>" +
         '<div class="lie-actions">' +
