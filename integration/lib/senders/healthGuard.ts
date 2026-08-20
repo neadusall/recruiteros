@@ -372,6 +372,7 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
           gradDeferred.push({ workspaceId: ws, email: m.email, action: "held", reason: `graduation deferred: ${pressure} bounce notices in the sweep window (max ${gradMaxNdr})`, at });
         } else {
           m.status = "active";
+          m.activatedAt = at; // own-smtp cold ramp (limits.coldCapFor) counts from here
           m.guardBaseSent = m.sent || 0;
           m.guardBaseBounced = m.bounced || 0;
           dirty = true;

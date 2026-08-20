@@ -159,6 +159,35 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
     st === "good" ? "" : "Without this sweep, bounces landing in Gmail/Mailcow inboxes are invisible to the stop-list and the domain breaker");
 }
 
+// Internal server egress canary. On 2026-08-20 ALL outbound from mail.lumesp.com was found
+// leaving as 192.3.221.194 (Spamhaus-listed, Gmail 550 since 08-02) although postfix was
+// configured for a two-IP split: the container cannot bind host IPs, so the binds failed
+// silently for 24 days. Egress is now pinned by a host SNAT rule to 173.254.242.194.
+// The receivers' own rejection text names the IP they saw, so a rejection dated after the
+// cutover that names the OLD IP means the pin is gone (Docker re-ordered nat rules, rule
+// deleted, box rebuilt). Rejections naming the NEW IP are a different story (reputation
+// building), reported amber so they are seen but not confused with a leak.
+{
+  const im = readJson(`${VOL}/snap_mpc_ndr_imap_v1.json`);
+  const markerPath = "/var/lib/recruiteros/internal-egress-cutover-at";
+  const cutoverAt = existsSync(markerPath) ? readFileSync(markerPath, "utf8").trim() : null;
+  const NEW_IP = "173.254.242.194";
+  const ips = Object.entries(im?.egressIps || {});
+  const since = (iso) => cutoverAt && iso && iso > cutoverAt;
+  const leak = ips.filter(([ip, v]) => ip !== NEW_IP && since(v?.lastSeen));
+  const fresh = ips.filter(([ip, v]) => ip === NEW_IP && since(v?.lastSeen));
+  const st = !cutoverAt ? "amber" : leak.length ? "bad" : fresh.length ? "amber" : "good";
+  add(GROUP_SEND, "internalegress", "Internal server egress IP (mail.lumesp.com)", st,
+    !cutoverAt ? "no cutover marker on this host" :
+    leak.length ? `receivers named ${leak.map(([ip, v]) => `${ip} (${v.count}, last ${fmtAge(ageMin(v.lastSeen))})`).join(", ")} AFTER the cutover` :
+    fresh.length ? `${fresh[0][1].count} rejections name the new IP ${NEW_IP} (last ${fmtAge(ageMin(fresh[0][1].lastSeen))})` :
+    `no rejection has named any of our IPs since the cutover (${cutoverAt.slice(0, 10)})`,
+    !cutoverAt ? "Write the cutover timestamp to /var/lib/recruiteros/internal-egress-cutover-at" :
+    leak.length ? "The SNAT pin on the Mailcow host is not in effect: run /usr/local/sbin/lume-smtp-snat.sh there and check `iptables -t nat -S POSTROUTING` (our rule must be first)" :
+    fresh.length ? "The new IP is being rejected by someone: read providerBlocks in the IMAP sidecar for the receiver and reason before ramping warm-up" :
+    "Egress pinned to the clean primary IP; warm-up ramp 8 -> 20 -> 35 is gated on this staying quiet");
+}
+
 // Provider-block radar: fleet x receiving-provider pairs currently rejecting our servers.
 // An active pair is NOT itself an alarm (routing already steers around it); the alarm is
 // a MISSING or stale ledger, which would mean the radar went blind like pre-2026-08-19.

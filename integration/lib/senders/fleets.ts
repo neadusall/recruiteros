@@ -12,7 +12,18 @@
 import { loadSnapshot } from "../db";
 import { listInboxes } from "./store";
 import { coldCapFor, coldMaxPerInbox, SENDING_AC_PER_INBOX } from "./limits";
+import { activeBlocks } from "./recipientGuard";
 import type { SenderInbox } from "./types";
+
+// Receiver names for the fleet note, keyed the way the provider-block ledger keys them.
+const RECEIVER_LABEL: Record<string, string> = {
+  google: "Gmail / Google Workspace",
+  microsoft: "Outlook / Microsoft 365",
+  mailspamprotection: "mailspamprotection.com",
+  proofpoint: "Proofpoint",
+  mimecast: "Mimecast",
+  barracuda: "Barracuda",
+};
 
 export type FleetKey = "sendingac" | "google" | "internal" | "other";
 
@@ -57,11 +68,12 @@ const FLEET_NAMES: Record<FleetKey, string> = {
 };
 
 export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
-  const [inboxes, rest, ndr, ndrImap] = await Promise.all([
+  const [inboxes, rest, ndr, ndrImap, blocks] = await Promise.all([
     listInboxes(workspaceId),
     loadSnapshot<RestSnap>("mpc_domain_rest_v1"),
     loadSnapshot<NdrSnap>("mpc_ndr_v1"),
     loadSnapshot<NdrSnap>("mpc_ndr_imap_v1"),
+    activeBlocks().catch(() => new Map<string, Set<string>>()),
   ]);
 
   const now = Date.now();
@@ -155,10 +167,18 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
         notes: [],
       };
       if (c.key === "internal") {
-        // Behavior encoded in the cold sender (batch.mjs noGoogle routing, 2026-08-19):
-        // stated here so the operator sees WHY this fleet's reachable audience differs.
-        out.notes.push("Gmail-hosted recipients are routed to other fleets: Gmail rejects this server's IP (UnsolicitedMessageError). Outlook and custom-hosted recipients send normally.");
-        if ((out.warmupBounces7d || 0) > 50) out.notes.push(`${(out.warmupBounces7d || 0).toLocaleString()} bounce notices on warm-up traffic this week - provider-side rejection pressure; the IP heals only through clean behavior.`);
+        // Routing truth comes from the SAME source the sender rotation reads (the
+        // provider-block ledger via recipientGuard.activeBlocks), never from prose:
+        // on 2026-08-20 a hardcoded "Outlook sends normally" line sat on this card
+        // while Microsoft was rejecting 100% of the server's mail.
+        const rejecting = [...(blocks.get("internal") || [])].sort();
+        if (rejecting.length) {
+          const names = rejecting.map((p) => RECEIVER_LABEL[p] || p).join(", ");
+          out.notes.push(`${names} recipients are routed to other fleets while the bounce sweeps still see those hosts rejecting this server; the block clears by itself after 7 quiet days.`);
+        } else {
+          out.notes.push("No receiving host is currently rejecting this server; every recipient type sends from this fleet.");
+        }
+        if ((out.warmupBounces7d || 0) > 50) out.notes.push(`${(out.warmupBounces7d || 0).toLocaleString()} bounce notices on warm-up traffic in the 7-day sweep window - provider-side rejection pressure; the window needs 7 quiet days to clear and graduation waits for it.`);
       }
       if (c.key === "sendingac" && out.domains.resting > 0 && out.domains.nextRevival) {
         out.notes.push(`${out.domains.resting} domain${out.domains.resting === 1 ? "" : "s"} resting after bounce trouble; next revival ${out.domains.nextRevival.slice(0, 10)}.`);

@@ -69,6 +69,7 @@ export interface SenderInbox {
   healthCheckedAt?: string;
   guardBaseSent?: number;     // bounce window baseline (reset on each revive)
   guardBaseBounced?: number;
+  activatedAt?: string;       // stamped at warm graduation; own-smtp cold ramp counts from here, not from createdAt
 
   // Onboarding audit (set ONLY by lib/senders/onboarding): every imported Email ID
   // is vetted (SMTP login, DNS posture, blocklists) within one maintenance tick.

@@ -103,7 +103,7 @@ export async function recipientProviders(email: string): Promise<string[]> {
 }
 
 /** Fleet -> providers currently rejecting it: fresh + material ledger pairs, plus the seed. */
-async function activeBlocks(): Promise<Map<string, Set<string>>> {
+export async function activeBlocks(): Promise<Map<string, Set<string>>> {
   if (ledgerCache && Date.now() - ledgerCache.at < LEDGER_TTL_MS) return ledgerCache.byFleet;
   const byFleet = new Map<string, Set<string>>();
   try {

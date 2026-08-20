@@ -157,6 +157,7 @@ const OUR_IP_PATTERNS = [
 const BLOCKLIST_RE = /\b(spamhaus|barracuda|spamcop|sorbs|psbl|uceprotect|invaluement|senderscore)\b/i;
 function ourIpIn(text) { for (const re of OUR_IP_PATTERNS) { const m = text.match(re); if (m) return m[1]; } return null; }
 const providerBlocks = {};
+const egressIps = {}; // internal fleet: our IP as named by rejecting receivers -> { count, lastSeen }
 function noteBlock(fleet, text, at) {
   if (!BLOCK_RE.test(text)) return;
   // The receiver is named in the REJECTION line, not just anywhere in the source
@@ -174,7 +175,17 @@ function noteBlock(fleet, text, at) {
   // Sample CENTERED on the rejection: a window starting 300 chars early captured only
   // postmaster boilerplate, which made the ledger's evidence unreadable to a human.
   if (!b.sample) b.sample = text.slice(Math.max(0, hit - 90), hit + 190);
-  if (!b.blockedIp) b.blockedIp = ourIpIn(windowText);
+  const ourIp = ourIpIn(windowText);
+  if (!b.blockedIp) b.blockedIp = ourIp;
+  // Egress canary (2026-08-20 cutover 192.3.221.194 -> 173.254.242.194): the IP named
+  // in the NEWEST rejection is the IP the world is actually seeing us connect from.
+  // blockedIp above is first-seen and would still say the old IP after a cutover.
+  if (ourIp && seen >= b.lastSeen) b.lastIp = ourIp;
+  if (ourIp && fleet === "internal") {
+    const e = egressIps[ourIp] || (egressIps[ourIp] = { count: 0, lastSeen: null });
+    e.count++;
+    if (!e.lastSeen || seen > e.lastSeen) e.lastSeen = seen;
+  }
   if (!b.blocklist) { const m = windowText.match(BLOCKLIST_RE); if (m) b.blocklist = m[1].toLowerCase(); }
 }
 
@@ -279,6 +290,7 @@ const out = {
   warmupNdrs,
   warmupPerBox,     // per-box warm-up bounce counts: the graduation gate holds boxes under rejection pressure
   providerBlocks,   // fleet x receiving-provider block signatures seen this window (merged into the ledger by ndr-sweep.mjs)
+  egressIps,        // internal fleet: which of OUR IPs receivers named in rejections (System Health "internalegress" canary)
   infraNdrs,
   perBoxInfra,
   bounced: [...bounced].sort(),

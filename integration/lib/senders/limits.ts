@@ -44,7 +44,7 @@ export function coldCap(storedDailyCap?: number): number {
 }
 
 /** Effective cold cap for one inbox: provider-, status- and age-aware. */
-export function coldCapFor(m: { status?: string; createdAt?: string; provider?: string }): number {
+export function coldCapFor(m: { status?: string; createdAt?: string; provider?: string; activatedAt?: string }): number {
   if (m.status === "paused" || m.status === "error") return 0;
   const created = m.createdAt ? Date.parse(m.createdAt) : NaN;
   const ageDays = Number.isFinite(created) ? Math.max(0, (Date.now() - created) / 86_400_000) : Infinity;
@@ -53,7 +53,13 @@ export function coldCapFor(m: { status?: string; createdAt?: string; provider?: 
   if (ageDays < coldMinAgeDaysPool()) return 0;
   if (m.provider === "sending-ac") return SENDING_AC_PER_INBOX; // flat, never ramps
   if (m.status === "warming") return COLD_PER_INBOX;
-  const week = Math.floor((Number.isFinite(ageDays) ? ageDays : 999) / 7);
+  // Own-SMTP boxes graduate at ~30 days of AGE, so an age-keyed week would put all 75
+  // at the ceiling on their first day of cold mail (1,500/day onto a freshly cut-over
+  // IP, 2026-08-20). Their ramp counts from ACTIVATION instead: healthGuard stamps
+  // activatedAt at graduation. Rows without it (legacy / operator-activated) keep age.
+  const rampFrom = m.provider === "own-smtp" && m.activatedAt ? Date.parse(m.activatedAt) : created;
+  const rampDays = Number.isFinite(rampFrom) ? Math.max(0, (Date.now() - rampFrom) / 86_400_000) : Infinity;
+  const week = Math.floor((Number.isFinite(rampDays) ? rampDays : 999) / 7);
   const cap = week < RAMP_BY_WEEK.length ? RAMP_BY_WEEK[week] : coldMaxPerInbox();
   return Math.min(cap, coldMaxPerInbox());
 }
