@@ -136,7 +136,12 @@ test("render gate passes a clean email", () => {
 
 /* ------------------------------------------------------------------------------------------
  * OWNER-ONLY TARGETING + 100-1,000 HEADCOUNT BAND (owner mandate 2026-08-20)
+ *
+ * Pinned to STRICT here so the suite asserts the mandate itself, whatever the box env happens to
+ * be set to. The transition-mode behaviour is asserted separately at the bottom.
  * ---------------------------------------------------------------------------------------- */
+process.env.MPC_TARGETING_MODE = "strict";
+process.env.MPC_SIZE_MODE = "confirmed";
 
 test("owner-only: a CEO is NOT the buyer for a non-leadership req", () => {
   const p = base(); p.managerName = "Dave Girouard"; p.managerTitle = "Chief Executive Officer";
@@ -149,11 +154,20 @@ test("owner-only: the function owner IS the buyer", () => {
   const p = base(); p.managerTitle = "VP of Finance";
   assert.equal(assessProspect(p).eligible, true, assessProspect(p).failures.join("; "));
 });
-test("owner-only: a company-level buyer row is never the owner of a req", () => {
-  const p = base(); p.managerTitle = "Chief Financial Officer"; p.companyBuyerRow = true;
+test("owner-only: a company-level buyer row who does NOT own the function is rejected", () => {
+  // The real problem case: the CHRO mined once per company, carrying whatever req happened to be
+  // in hand. She does not own an accounting hire.
+  const p = base(); p.managerName = "Nina Patel"; p.managerTitle = "Chief People Officer";
+  p.likelyEmail = "nina.patel@upstart.com"; p.companyBuyerRow = true;
   const r = assessProspect(p);
   assert.equal(r.eligible, false);
-  assert.ok(r.failures.some(f => /company-level buyer/.test(f)), r.failures.join("; "));
+  assert.ok(r.failures.some(f => /company-level buyer|owns People/.test(f)), r.failures.join("; "));
+});
+test("owner-only: a buyer row whose person DOES own the function is a valid target", () => {
+  // Provenance does not outrank the fact: the CFO owns accounting hiring wherever the row came from.
+  const p = base(); p.managerTitle = "Chief Financial Officer"; p.companyBuyerRow = true;
+  const r = assessProspect(p);
+  assert.equal(r.eligible, true, r.failures.join("; "));
 });
 test("owner-only: an ambiguous title cannot be confirmed as the owner", () => {
   const p = base(); p.managerName = "Pat Reilly"; p.managerTitle = "Vice President";
@@ -260,6 +274,42 @@ test("buyerFit agrees with assessProspect and names the recoverable holds", () =
   const cold = buyerFit({ company: "Nowhere Co", role: "Staff Accountant", managerTitle: "Founder" }, buildCompanyKnowledge([]));
   assert.equal(cold.ok, false);
   assert.ok(/hold until the Finance owner/.test(cold.why), cold.why);
+});
+
+/* ------------------------------------------------------------------------------------------
+ * TRANSITION MODE (the default while the pipeline re-curates under the new targeting)
+ * ---------------------------------------------------------------------------------------- */
+process.env.MPC_TARGETING_MODE = "transition";
+process.env.MPC_SIZE_MODE = "known-bad-only";
+
+test("transition: a CEO may send when nobody better is known", () => {
+  const p = base(); p.managerName = "Dave Girouard"; p.managerTitle = "Chief Executive Officer";
+  p.likelyEmail = "dave.girouard@upstart.com";
+  assert.equal(assessProspect(p).eligible, true, assessProspect(p).failures.join("; "));
+});
+test("transition: a DIFFERENT-function exec is STILL rejected", () => {
+  // The one thing that was never defensible stays rejected in both modes.
+  const p = base(); p.managerName = "Nina Patel"; p.managerTitle = "Chief People Officer";
+  p.likelyEmail = "nina.patel@upstart.com";
+  const r = assessProspect(p);
+  assert.equal(r.eligible, false);
+  assert.ok(r.failures.some(f => /owns People \/ HR, not the Finance/.test(f)), r.failures.join("; "));
+});
+test("transition: unconfirmed size sends with a warning, confirmed-out-of-band still does not", () => {
+  const unknown = base(); delete unknown.employeeCount;
+  const r = assessProspect(unknown);
+  assert.equal(r.eligible, true, r.failures.join("; "));
+  assert.ok(r.warnings.some(w => /size unconfirmed/.test(w)), r.warnings.join("; "));
+  // Positively confirmed outside the band is data telling us NOT to send: rejected in both modes.
+  const big = base(); big.employeeCount = 3800;
+  assert.equal(assessProspect(big).eligible, false);
+  const small = base(); small.employeeCount = 40;
+  assert.equal(assessProspect(small).eligible, false);
+});
+test("transition: the role owner is still preferred (buyerFit rank 0 vs held)", () => {
+  const know = buildCompanyKnowledge([{ company: "Upstart", role: "Financial Analyst", managerTitle: "VP of Finance" }]);
+  assert.equal(buyerFit({ company: "Upstart", role: "Staff Accountant", managerTitle: "VP of Finance" }, know).rank, 0);
+  assert.equal(buyerFit({ company: "Upstart", role: "Staff Accountant", managerTitle: "Chief Executive Officer" }, know).ok, false);
 });
 
 console.log("\n" + passed + " passed");

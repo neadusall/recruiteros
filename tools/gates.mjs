@@ -241,10 +241,29 @@ export function assessProspect(p) {
     const roleFn = roleFunctionGroup(fam);
     const dmFn = dmFunction(p.managerTitle);
     const execReq = roleFn === "Executive" || isSeniorHire(p.role);
+    // TRANSITION vs STRICT (owner decision 2026-08-20, after the first strict dry run).
+    //   strict     — the mandate in full: owner of the role's function, or hold.
+    //   transition — keep the desk running on the store we already have while the pipeline
+    //                re-curates under the new targeting. The owner is still ALWAYS preferred
+    //                (batch.mjs re-points to them whenever the pool knows who they are, and
+    //                sends in rank order), but a whole-company exec or an ambiguous senior is
+    //                allowed through when nobody better is known for that req. What stays
+    //                rejected in BOTH modes is a clearly different-function exec, which was
+    //                never defensible.
+    // Flip with MPC_TARGETING_MODE=strict in .env.production. No code change needed.
+    const strictOwner = (process.env.MPC_TARGETING_MODE || "transition").toLowerCase() === "strict";
+    const isOwner = !!(dmFn && dmFn !== "universal" && dmFn === roleFn);
     if (execReq) {
       // A leadership hire: the whole-company exec or that function's own exec both qualify.
       if (dmFn && dmFn !== "universal" && dmFn !== roleFn) {
         failures.push(`decision-maker "${p.managerTitle}" owns ${dmFn}, not the ${roleFn} function this leadership role sits in`);
+      }
+    } else if (isOwner) {
+      /* the person who owns the req: always the right target, in either mode */
+    } else if (!strictOwner) {
+      // Transition: everything except a clearly different-function exec.
+      if (dmFn && dmFn !== "universal" && dmFn !== roleFn) {
+        failures.push(`decision-maker "${p.managerTitle}" owns ${dmFn}, not the ${roleFn} function this role sits in`);
       }
     } else if (p.companyBuyerRow) {
       // A company-level buyer row (the Head of People / C-suite mined once per company by the
@@ -264,11 +283,20 @@ export function assessProspect(p) {
   // CONFIRMED-size gate and it fails closed — an unconfirmed company is held, never mailed on a
   // guess. tools/company-size.mjs resolves real LinkedIn headcounts into the shared size cache,
   // and batch.mjs attaches them to the prospect before this runs.
+  // A company we have POSITIVELY CONFIRMED is outside 100-1,000 is rejected in BOTH modes: that is
+  // not unused data, it is data telling us not to send. Only the treatment of an UNCONFIRMED size
+  // differs: strict holds it (never mail on a guess), transition lets it through with a warning so
+  // the desk is not throttled by resolver coverage while the cache fills in.
   const minHeads = Number(process.env.MPC_MIN_HEADCOUNT || 100);
   const maxHeads = Number(process.env.MPC_MAX_HEADCOUNT || 1000);
+  const sizeStrict = (process.env.MPC_SIZE_MODE || "known-bad-only").toLowerCase() === "confirmed";
   const heads = Number(p.employeeCount);
   if (!Number.isFinite(heads) || heads <= 0) {
-    failures.push(`company size for ${p.company} is unconfirmed; the ${minHeads}-${maxHeads} employee mandate needs a verified headcount`);
+    if (sizeStrict) {
+      failures.push(`company size for ${p.company} is unconfirmed; the ${minHeads}-${maxHeads} employee mandate needs a verified headcount`);
+    } else {
+      warnings.push(`${p.company} size unconfirmed (sent under transition mode; run tools/company-size.mjs to resolve it)`);
+    }
   } else if (heads < minHeads || heads > maxHeads) {
     failures.push(`${p.company} has ${heads} employees, outside the ${minHeads}-${maxHeads} employee target band`);
   }

@@ -20,7 +20,7 @@
 // Read-only against the curated store; writes ONLY its own files under /out.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, readdirSync } from "node:fs";
-import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, roleFamily, roleFunctionGroup, buildCompanyKnowledge, buyerFit } from "./gates.mjs";
+import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, roleFamily, roleFunctionGroup, buildCompanyKnowledge, buyerFit, companyKeyOf, isSeniorHire } from "./gates.mjs";
 import { writeEmail, signature, footer, greetingName, recruiterFor } from "./writer.mjs";
 import { pickVariant } from "./variants.mjs";
 import { classifyEmails } from "./mxclass.mjs";
@@ -360,10 +360,39 @@ async function main() {
   // it below to write the hold reasons.
   const know = buildCompanyKnowledge(curated.map((r) => r.lead || r));
 
+  // OWNER RE-POINTING (owner decision 2026-08-20: "utilize the data we have and leverage it").
+  //
+  // The store is full of rows that carry the RIGHT COMPANY and the RIGHT REQ but the WRONG PERSON —
+  // a CEO, or a company-level buyer row — while a different row at that SAME company already names
+  // the leader of the function the req sits in, with a validated address. Holding those rows throws
+  // away work we already paid for. Instead of discarding them, we swap in the owner we already know
+  // and send to THEM about that req. Nothing is written back to the store; this is selection-time
+  // only, so it is fully reversible and re-derives itself every run.
+  const ownerKey = (co, fn) => `${companyKeyOf(co)}|${fn}`;
+  const owners = new Map();
+  for (const r of curated) {
+    const p = r.lead || r;
+    if (!p.managerName || !p.managerTitle || !p.likelyEmail) continue;
+    const fn = dmFunction(p.managerTitle);
+    if (!fn || fn === "universal") continue;              // only a real function leader can be an owner
+    const k = ownerKey(p.company, fn);
+    // Prefer the best-evidenced address: validated beats unknown, and a catch-all guess is last.
+    const score = (p.emailValidated ? 2 : 0) - (p.emailCatchAll ? 1 : 0) - (p.emailInvalid ? 5 : 0);
+    const cur = owners.get(k);
+    if (!cur || score > cur.score) {
+      owners.set(k, {
+        score, name: p.managerName, title: p.managerTitle, email: p.likelyEmail,
+        emailValidated: !!p.emailValidated, emailCatchAll: !!p.emailCatchAll, emailInvalid: !!p.emailInvalid,
+      });
+    }
+  }
+  if (owners.size) console.log(`owner index: ${owners.size} named function leaders across the pool`);
+
   // Stage 1-3: role + decision-maker + size + email gates.
   const gated = [];
   const rejected = { role: 0, dm: 0, size: 0, email: 0, other: 0 };
   const buyerHolds = [];
+  let retargeted = 0;
   for (const r of curated) {
     const p = r.lead || r;
     // A company-level buyer row (id "cp_<company>_buyer_<person>") is the Head of People / C-suite
@@ -373,6 +402,27 @@ async function main() {
     if (p.employeeCount == null) {
       const c = sizeByName.get(normCoName(p.company));
       if (c != null) p.employeeCount = c;
+    }
+    // Re-point to the req's real owner when this row is aimed at someone else and the pool already
+    // knows who owns that function here. Executive searches are left alone: the CEO IS their buyer.
+    {
+      const roleFn = roleFunctionGroup(roleFamily(p.role));
+      const curFn = dmFunction(p.managerTitle);
+      const alreadyOwner = curFn && curFn !== "universal" && curFn === roleFn;
+      if (!alreadyOwner && roleFn !== "Executive" && !isSeniorHire(p.role)) {
+        const o = owners.get(ownerKey(p.company, roleFn));
+        if (o && o.name.trim().toLowerCase() !== String(p.managerName || "").trim().toLowerCase()) {
+          p.retargetedFrom = `${p.managerName || "?"} (${p.managerTitle || "?"})`;
+          p.managerName = o.name;
+          p.managerTitle = o.title;
+          p.likelyEmail = o.email;
+          p.emailValidated = o.emailValidated;
+          p.emailCatchAll = o.emailCatchAll;
+          p.emailInvalid = o.emailInvalid;
+          p.companyBuyerRow = false;   // this row now targets the owner of the req, not a stray buyer
+          retargeted++;
+        }
+      }
     }
     const res = assessProspect(p);
     if (res.eligible) { gated.push(p); continue; }
@@ -390,6 +440,8 @@ async function main() {
   }
   console.log(`curated: ${curated.length} | passed all gates: ${gated.length}`);
   console.log(`rejected -> role:${rejected.role} decision-maker:${rejected.dm} size:${rejected.size} email:${rejected.email} other:${rejected.other}`);
+  if (retargeted) console.log(`re-pointed to the req's real owner: ${retargeted} (rows that were aimed at a CEO or a company-level buyer)`);
+  console.log(`targeting mode: ${(process.env.MPC_TARGETING_MODE || "transition").toLowerCase()} | size mode: ${(process.env.MPC_SIZE_MODE || "known-bad-only").toLowerCase()}`);
   if (buyerHolds.length) {
     const f = `${OUT}/buyer-holds-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
     try { writeFileSync(f, JSON.stringify(buyerHolds, null, 1)); console.log(`buyer holds written: ${buyerHolds.length} -> ${f}`); } catch {}
@@ -421,6 +473,13 @@ async function main() {
   if (preferred.length < gated.length) {
     console.log(`same-req duplicate buyers collapsed: ${gated.length - preferred.length} (kept the best-fit buyer per req)`);
   }
+  // SEND THE OWNERS FIRST. In transition mode a whole-company exec can still pass the gate, so the
+  // daily cap must not be spent on those while genuine function owners wait in the queue. Ordering
+  // by buyer rank means the cap is always consumed best-first, and the weaker fallbacks only ever
+  // use capacity the owners did not need. Ties keep their existing order (highest score first).
+  preferred.sort((a, b) => dmRank(a) - dmRank(b));
+  const rankMix = preferred.reduce((acc, p) => { acc[dmRank(p)] = (acc[dmRank(p)] || 0) + 1; return acc; }, {});
+  console.log(`buyer mix -> role owner:${rankMix[0] || 0} ambiguous senior:${rankMix[1] || 0} whole-company exec:${rankMix[2] || 0} other:${rankMix[3] || 0}`);
 
   // Suppression: never re-email anyone we've already contacted (makes daily autopilot safe),
   // AND dedupe within this run so a duplicate curated row can't double-send in one batch.

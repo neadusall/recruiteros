@@ -2,6 +2,11 @@
 // body claimed "local to your market" on a record the batch treated as remote).
 import { assessProspect, checkRenderedEmail, dmFunction, roleFamily, roleFunctionGroup, buildCompanyKnowledge, buyerFit, isSeniorHire, staffingFirmSignal, rescueDecisionMaker, extractPersonFromTitle } from "./gates.mjs";
 
+// Pinned to STRICT: this suite asserts the owner-only mandate itself, so it must not shift when the
+// box is running in transition mode. Transition behaviour is covered in test-gates.mjs.
+process.env.MPC_TARGETING_MODE = "strict";
+process.env.MPC_SIZE_MODE = "confirmed";
+
 let passed = 0, failed = 0;
 function t(name, cond, detail) {
   if (cond) { passed++; console.log(`ok   ${name}`); }
