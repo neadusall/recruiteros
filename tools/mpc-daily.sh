@@ -36,6 +36,17 @@ docker run --rm --env-file /tmp/dr.env -v recruiteros_app_data:/data -v /opt/rec
   --entrypoint node recruiteros-app /tools/domain-rest.mjs >> "$LOG" 2>&1 || true
 rm -f /tmp/dr.env
 
+# 0.93) COMPANY SIZE: resolve real headcounts for pool companies that don't have one yet, so the
+#       100-1,000 employee mandate in gates.mjs has confirmed numbers to bite on. That gate fails
+#       CLOSED, so a company with no resolved size is held out of the send rather than mailed on a
+#       guess. This step is therefore what keeps sendable volume alive as net-new companies enter
+#       the pool. ~$0.001/company via Serper; resolved companies are skipped for 90 days, so the
+#       steady-state cost is only the new arrivals.
+grep -E '^(SERPER_API_KEY|MPC_MIN_HEADCOUNT|MPC_MAX_HEADCOUNT)=' .env.production > /tmp/cs.env 2>/dev/null || true
+docker run --rm --env-file /tmp/cs.env -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro -v /opt/recruiteros/mpc-out:/out \
+  -e MPC_SIZE_CONCURRENCY=6 --entrypoint node recruiteros-app /tools/company-size.mjs --limit "${MPC_SIZE_LIMIT:-800}" >> "$LOG" 2>&1 || true
+rm -f /tmp/cs.env
+
 # 0.95) Touch 2, the VIDEO email: personalized-video follow-up to YESTERDAY's touch-1 recipients
 #       (no reply, video rendered), one recruiter at a time. Runs BEFORE today's touch-1 batch so
 #       box capacity finishes existing sequences before starting new ones. Same box as touch 1;
