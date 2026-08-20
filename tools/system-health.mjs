@@ -176,16 +176,35 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
   const since = (iso) => cutoverAt && iso && iso > cutoverAt;
   const leak = ips.filter(([ip, v]) => ip !== NEW_IP && since(v?.lastSeen));
   const fresh = ips.filter(([ip, v]) => ip === NEW_IP && since(v?.lastSeen));
-  const st = !cutoverAt ? "amber" : leak.length ? "bad" : fresh.length ? "amber" : "good";
+  // Standing monitor pulled from the Mailcow host (lume-ip-pull.timer, q15min): the
+  // receivers' verdicts from the authoritative log + blocklists via the box's resolver.
+  const sm = readJson(`${VOL}/snap_internal_egress_status_v1.json`);
+  const smAge = sm ? ageMin(sm.at) : null;
+  const smFresh = sm && smAge != null && smAge <= 120;
+  const g = sm?.receivers?.google || {};
+  const gAtt = (g.accepted || 0) + (g.rejected || 0);
+  const gPct = gAtt ? Math.round(((g.accepted || 0) / gAtt) * 100) : null;
+  const listed = Object.entries(sm?.dnsbl || {}).filter(([, v]) => v !== "clean").map(([z]) => z);
+  const pinBad = smFresh && (sm.rulePos1 === false || (sm.egressSeen && sm.egressSeen !== NEW_IP) || (sm.oldIpMentions || 0) > 0);
+  const accBad = smFresh && gAtt >= 20 && gPct != null && gPct < 90;
+  const accSoft = smFresh && ((gAtt >= 10 && gPct != null && gPct < 95) || (g.rateLimited || 0) > 0);
+  const st = !cutoverAt ? "amber" : (leak.length || pinBad || listed.length || accBad) ? "bad" : (fresh.length || accSoft || !smFresh) ? "amber" : "good";
+  const standingLine = smFresh
+    ? `Gmail ${gPct == null ? "no attempts" : `${gPct}% of ${gAtt} accepted`}${g.rateLimited ? `, ${g.rateLimited} rate-limited` : ""}, blocklists ${listed.length ? "LISTED " + listed.join(",") : "clean"}, monitor ${fmtAge(smAge)}`
+    : `standing monitor ${sm ? fmtAge(smAge) : "never pulled"}`;
   add(GROUP_SEND, "internalegress", "Internal server egress IP (mail.lumesp.com)", st,
     !cutoverAt ? "no cutover marker on this host" :
     leak.length ? `receivers named ${leak.map(([ip, v]) => `${ip} (${v.count}, last ${fmtAge(ageMin(v.lastSeen))})`).join(", ")} AFTER the cutover` :
-    fresh.length ? `${fresh[0][1].count} rejections name the new IP ${NEW_IP} (last ${fmtAge(ageMin(fresh[0][1].lastSeen))})` :
-    `no rejection has named any of our IPs since the cutover (${cutoverAt.slice(0, 10)})`,
+    pinBad ? `egress pin not holding on the Mailcow host (rulePos1=${sm.rulePos1}, egress seen ${sm.egressSeen || "?"}, old IP named ${sm.oldIpMentions || 0}x)` :
+    `${NEW_IP}: ${standingLine}`,
     !cutoverAt ? "Write the cutover timestamp to /var/lib/recruiteros/internal-egress-cutover-at" :
-    leak.length ? "The SNAT pin on the Mailcow host is not in effect: run /usr/local/sbin/lume-smtp-snat.sh there and check `iptables -t nat -S POSTROUTING` (our rule must be first)" :
-    fresh.length ? "The new IP is being rejected by someone: read providerBlocks in the IMAP sidecar for the receiver and reason before ramping warm-up" :
-    "Egress pinned to the clean primary IP; warm-up ramp 8 -> 20 -> 35 is gated on this staying quiet");
+    (leak.length || pinBad) ? "Run /usr/local/sbin/lume-smtp-snat.sh on the Mailcow host and check `iptables -t nat -S POSTROUTING` (our SNAT rule must be first)" :
+    listed.length ? "The sending IP is on a blocklist: the keeper has dropped warm-up to 8/day; request delisting before it climbs again" :
+    accBad ? "Gmail is refusing most of our mail again: keeper steps warm-up back to 8/day; read the rejection text in the IMAP sidecar" :
+    accSoft ? "Acceptance is slipping or Gmail is rate-limiting: the keeper holds the current rung until 24h are clean" :
+    !smFresh ? "lume-ip-pull.timer on this host is not delivering the Mailcow monitor; the keeper holds its rung until it does" :
+    fresh.length ? "Some receiver named the new IP in a rejection: read providerBlocks in the IMAP sidecar before the next rung" :
+    "Egress pinned to the clean primary IP; warm-up climbs 8/14/20/28/35 one rung at a time on clean 24h evidence");
 }
 
 // Provider-block radar: fleet x receiving-provider pairs currently rejecting our servers.

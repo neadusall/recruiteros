@@ -60,6 +60,12 @@ interface RestSnap { domains?: Record<string, { state?: string; until?: string }
 interface NdrSnap { perDomain?: Record<string, { bounces?: number }>; warmupNdrs?: number; generatedAt?: string }
 interface BlocksSnap { blocks?: Record<string, { fleet?: string; provider?: string; count?: number; lastSeen?: string }> }
 interface EgressSnap { cutoverAt?: string; egressIp?: string; warmupRamp?: { afterDays: number; perDay: number }[] }
+interface Recv { accepted: number; rejected: number; deferred: number; rateLimited?: number }
+interface StandingSnap {
+  at?: string; newIp?: string; rulePos1?: boolean; egressSeen?: string; oldIpMentions?: number;
+  receivers?: { google?: Recv; microsoft?: Recv; other?: Recv };
+  dnsbl?: Record<string, string>;
+}
 
 function fleetOf(m: SenderInbox): FleetKey {
   if (m.provider === "sending-ac") return "sendingac";
@@ -81,7 +87,7 @@ const FLEET_NAMES: Record<FleetKey, string> = {
 };
 
 export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
-  const [inboxes, rest, ndr, ndrImap, blocks, blocksSnap, egress] = await Promise.all([
+  const [inboxes, rest, ndr, ndrImap, blocks, blocksSnap, egress, standing] = await Promise.all([
     listInboxes(workspaceId),
     loadSnapshot<RestSnap>("mpc_domain_rest_v1"),
     loadSnapshot<NdrSnap>("mpc_ndr_v1"),
@@ -89,6 +95,7 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
     activeBlocks().catch(() => new Map<string, Set<string>>()),
     loadSnapshot<BlocksSnap>("provider_blocks_v1"),
     loadSnapshot<EgressSnap>("internal_egress_v1"),
+    loadSnapshot<StandingSnap>("internal_egress_status_v1"),
   ]);
 
   const now = Date.now();
@@ -187,6 +194,23 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
         // provider-block ledger via recipientGuard.activeBlocks), never from prose:
         // on 2026-08-20 a hardcoded "Outlook sends normally" line sat on this card
         // while Microsoft was rejecting 100% of the server's mail.
+        // STANDING of the sending IP, last 24h, from the Mailcow host's own log (pulled
+        // every 15 min): what receivers actually did, plus blocklists through the box's
+        // recursive resolver. This is the evidence the warm-up keeper climbs on.
+        const stAge = standing?.at ? (now - Date.parse(standing.at)) / 60_000 : Infinity;
+        if (standing && stAge <= 120) {
+          const pct = (r?: Recv) => { const n = (r?.accepted || 0) + (r?.rejected || 0); return n ? `${Math.round(((r?.accepted || 0) / n) * 100)}% of ${n}` : "no attempts"; };
+          const listed = Object.entries(standing.dnsbl || {}).filter(([, v]) => v !== "clean").map(([z]) => z);
+          const pin = standing.rulePos1 === false || (standing.egressSeen && standing.newIp && standing.egressSeen !== standing.newIp) ? "egress pin NOT holding" : "egress pin holding";
+          out.notes.push(
+            `Standing of ${standing.newIp || "the sending IP"} (last 24h): Gmail accepted ${pct(standing.receivers?.google)}${standing.receivers?.google?.rateLimited ? `, ${standing.receivers.google.rateLimited} rate-limited` : ""}; ` +
+            `Outlook ${pct(standing.receivers?.microsoft)}; other hosts ${pct(standing.receivers?.other)}; ` +
+            `blocklists ${listed.length ? "LISTED on " + listed.join(", ") : "clean"}; ${pin}` +
+            `${(standing.oldIpMentions || 0) > 0 ? `; old IP still named ${standing.oldIpMentions}x` : ""}.`,
+          );
+        } else {
+          out.notes.push("Standing monitor has not reported in the last 2 hours; the warm-up ramp holds its current rung until it does.");
+        }
         const rejecting = [...(blocks.get("internal") || [])].sort();
         if (rejecting.length) {
           const names = rejecting.map((p) => RECEIVER_LABEL[p] || p).join(", ");
@@ -227,7 +251,7 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
           for (const r of egress?.warmupRamp || []) {
             if (!(r.afterDays > 0)) continue;
             const t = Math.max(cut + r.afterDays * DAY, quietAt ? quietAt - 4 * DAY : 0);
-            steps.push({ when: iso(t), what: `Warm-up steps up to ${r.perDay}/day per box (automatic, held while any receiver is rejecting)`, done: t <= now });
+            steps.push({ when: iso(t), what: `Warm-up steps up to ${r.perDay}/day per box (automatic; climbs only on clean standing, steps back to 8 on trouble)`, done: t <= now });
           }
         }
         // Graduation: the age clock AND a 7-day sweep window under the bounce ceiling.
