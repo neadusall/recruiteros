@@ -156,6 +156,11 @@ export interface OutlookInput {
   boxes: { total: number; active: number; warming: number; paused: number; error: number; benched: number };
   capacity: { today: number; benched: number; atFullRamp: number };
   coldToday: number;
+  /** Whether coldToday came from the sender's published capacity ledger. When the
+   *  sender has not published (ledger absent or stale), coldToday reads 0, and 0 is
+   *  indistinguishable from a parked lane: the cold-lane milestone must report that
+   *  it cannot tell rather than assert either. */
+  coldPublished: boolean;
   sentToday: number;
   activatedBoxes: number;              // boxes carrying activatedAt (health-guard graduation stamp)
   graduationAt: number | null;         // median age clock, before the quiet-window gate
@@ -463,7 +468,9 @@ function rampSteps(input: OutlookInput, gradAt: number): OutlookStep[] {
   }
   const coldV: Verdict = input.coldToday > 0
     ? { ok: true, proof: `the cold lane is open at ${num(input.coldToday)}/day and the fleet has sent ${num(input.sentToday)} today` }
-    : { ok: false, blocker: "the cold outreach lane stays parked until a person opens it (MPC_SMTP_LANE); nothing here opens it on a date" };
+    : !input.coldPublished
+      ? { ok: false, unverified: true, blocker: "the sender has not published a capacity ledger recently, so whether this lane is open cannot be read from here" }
+      : { ok: false, blocker: "the cold outreach lane stays parked until a person opens it (MPC_SMTP_LANE); nothing here opens it on a date" };
   out.push(step(
     input, "coldlane",
     "Cold outreach lane stays parked until opened by hand; earliest sensible date, after a clean week of app-lane sends",

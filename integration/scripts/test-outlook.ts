@@ -53,7 +53,7 @@ function input(over: Partial<OutlookInput> = {}): OutlookInput {
     domainBoxes: new Map([["a.com", { boxes: 5, cap: 100 }]]),
     boxes: { total: 75, active: 0, warming: 75, paused: 0, error: 0, benched: 0 },
     capacity: { today: 120, benched: 0, atFullRamp: 1500 },
-    coldToday: 0, sentToday: 0, activatedBoxes: 0,
+    coldToday: 0, coldPublished: true, sentToday: 0, activatedBoxes: 0,
     graduationAt: Date.parse("2026-08-27T00:00:00Z"),
     rest: { domains: { "a.com": { state: "resting", reason: "12 bounces against 40 sends", until: "2026-08-23T00:00:00Z" } } },
     blocking: ["google"],
@@ -137,6 +137,15 @@ group("the cutover reads the host, not the calendar");
   const staleMonitor: StandingSnap = { ...standingClean, at: new Date(NOW - 5 * 3_600_000).toISOString() };
   const c = byId(buildOutlook(input({ standing: staleMonitor })).steps, "cutover")!;
   ok(!c.done && c.state === "unverified", "a stale standing monitor cannot confirm the cutover", `state=${c.state}`);
+}
+
+group("an unpublished capacity ledger is unknown, not parked");
+{
+  const s = byId(buildOutlook(input({ coldToday: 0, coldPublished: false })).steps, "coldlane")!;
+  ok(!s.done && s.state === "unverified", "no ledger means the cold lane cannot be read", `state=${s.state}`);
+  ok(/cannot be read from here/.test(s.blocker || ""), "and it says so instead of claiming parked", s.blocker || "");
+  const p = byId(buildOutlook(input({ coldToday: 0, coldPublished: true })).steps, "coldlane")!;
+  ok(/parked/.test(p.blocker || ""), "a published zero really is parked", p.blocker || "");
 }
 
 group("a receiver that never blocked us never gets a milestone");

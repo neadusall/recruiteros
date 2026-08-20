@@ -235,7 +235,7 @@ export async function fleetOverview(workspaceId: string): Promise<FleetCard[]> {
         const built = buildOutlook({
           now, workspaceId, fleet: c.key, fleetName: c.name,
           domains: c._domains, domainBoxes: c._domainBoxes,
-          boxes: c.boxes, capacity: c.capacity, coldToday,
+          boxes: c.boxes, capacity: c.capacity, coldToday, coldPublished: !!published,
           sentToday: c._sentToday, activatedBoxes: c._activated,
           graduationAt: c.boxes.warming && grad ? grad : null,
           rest, blocking: [...(blocks.get(c.key) || [])].sort(), blocks: blocksSnap,
