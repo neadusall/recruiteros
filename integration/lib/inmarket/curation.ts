@@ -1643,7 +1643,8 @@ export async function enrichCompanyPhones(
   limit: number,
   nowIso: string,
   concurrency = 4,
-): Promise<{ domains: number; resolved: number; rowsUpdated: number }> {
+  budgetMs = 120_000,
+): Promise<{ domains: number; resolved: number; rowsUpdated: number; timedOut: boolean }> {
   const { resolveCompanyPhone } = await import("./companyPhone");
   const rows = await load();
 
@@ -1675,24 +1676,35 @@ export async function enrichCompanyPhones(
     .sort((a, b) => b[1] - a[1])
     .slice(0, Math.max(0, limit))
     .map(([d]) => d);
-  if (!domains.length) return { domains: 0, resolved: 0, rowsUpdated: 0 };
+  if (!domains.length) return { domains: 0, resolved: 0, rowsUpdated: 0, timedOut: false };
 
   // Resolve each domain once, bounded concurrency (each resolve is a few timed-out page reads).
+  //
+  // HARD TIME BUDGET. This pass sits in the MIDDLE of the curation tick, ahead of the SMTP and
+  // residual email finders, and the whole tick lives under a watchdog. A batch of slow or hanging
+  // sites must never eat the remaining headroom and starve those rungs: email supply outranks a
+  // phone number. Workers stop TAKING new domains once the budget is spent; whatever wasn't
+  // reached is simply not stamped, so the next tick picks it up exactly where this one stopped.
+  const deadline = Date.now() + Math.max(5_000, budgetMs);
   const found = new Map<string, { phone: string; display: string; via: string; confidence: number; sourceUrl: string }>();
-  let cursor = 0;
+  // Only domains a worker ACTUALLY tried get stamped. Stamping the whole selected batch would
+  // mark never-visited domains as done and blank them for the full retry window.
+  const attempted = new Set<string>();
+  let cursor = 0, timedOut = false;
   async function worker(): Promise<void> {
     while (cursor < domains.length) {
+      if (Date.now() >= deadline) { timedOut = true; return; }
       const d = domains[cursor++];
+      attempted.add(d);
       try {
         const hit = await resolveCompanyPhone(d);
         if (hit) found.set(d, hit);
-      } catch { /* skip: a miss is stamped below so the domain isn't retried every tick */ }
+      } catch { /* skip: still stamped, so the domain isn't retried every tick */ }
     }
   }
   await Promise.all(Array.from({ length: Math.min(Math.max(concurrency, 1), 8) }, worker));
 
   // Fan the answers out to every prospect at those domains, under the write lock.
-  const attempted = new Set(domains);
   let rowsUpdated = 0;
   await withCurationLock(async () => {
     const current = await load();
@@ -1716,7 +1728,7 @@ export async function enrichCompanyPhones(
     await save(current);
   });
 
-  return { domains: domains.length, resolved: found.size, rowsUpdated };
+  return { domains: attempted.size, resolved: found.size, rowsUpdated, timedOut };
 }
 
 /** Coverage for the Clients tab header + health board: how much of the book carries a company line. */

@@ -83,6 +83,9 @@ const PAID_FIND_BATCH = envNum("INMARKET_PAID_FIND_BATCH", 25);  // misses sent 
 const COMPANY_PHONE_ENABLED = process.env.INMARKET_COMPANY_PHONE !== "0";
 const COMPANY_PHONE_BATCH = envNum("INMARKET_COMPANY_PHONE_BATCH", 120);
 const COMPANY_PHONE_CONCURRENCY = envNum("INMARKET_COMPANY_PHONE_CONCURRENCY", 4);
+// Hard ceiling on how long the free phone rung may hold the tick. It runs AHEAD of the SMTP and
+// residual email finders, so it must never spend their headroom: email supply outranks a phone number.
+const COMPANY_PHONE_BUDGET_MS = envNum("INMARKET_COMPANY_PHONE_BUDGET_SEC", 120) * 1000;
 // FAST INFLOW — brand-new hiring companies/postings flow in on their OWN fast tick (every few
 // minutes) so prospects appear as they're posted, not once an hour. It runs ONLY the cheap,
 // high-yield breadth vacuum (+ a couple of rotating sectors) — never the expensive board
@@ -579,7 +582,7 @@ async function runCurationTickInner(): Promise<void> {
   try {
     if (COMPANY_PHONE_ENABLED) {
       const { enrichCompanyPhones } = await import("./curation");
-      await enrichCompanyPhones(COMPANY_PHONE_BATCH, new Date().toISOString(), COMPANY_PHONE_CONCURRENCY);
+      await enrichCompanyPhones(COMPANY_PHONE_BATCH, new Date().toISOString(), COMPANY_PHONE_CONCURRENCY, COMPANY_PHONE_BUDGET_MS);
     }
   } catch { /* best-effort; the next tick retries */ }
 
