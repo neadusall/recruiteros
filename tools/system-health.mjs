@@ -588,6 +588,48 @@ for (const [key, label] of [["ANTHROPIC_API_KEY", "Anthropic key (email writer)"
     envVal(key) ? "" : "The dependent automation silently skips its job without this");
 }
 
+/* ---------------- voicemail-drop readiness (role VM on email send) ---------------- */
+// The email -> voicemail follow-up has three independent prerequisites, and when any one is
+// missing the automation refuses to queue rather than leaving SILENCE on a prospect's mailbox.
+// That refusal is correct but invisible, which is exactly the silent-failure shape this board
+// exists to catch — so each prerequisite is its own row with the fix in the detail.
+try {
+  const vd = readJson(`${VOL}/snap_voice_drops.json`) || {};
+  const creds = readJson(`${VOL}/snap_integration_credentials_v1.json`) || {};
+  const settings = vd.settings || {};
+  const consent = (vd.consent || []).filter((c) => c && c.voiceId);
+
+  // Which workspaces actually matter: those the pipeline enrolls into.
+  const core = readJson(`${VOL}/snap_core.json`) || {};
+  const prospects = (core.prospects || []).map((e) => (Array.isArray(e) ? e[1] : e)).filter(Boolean);
+  const counts = {};
+  for (const pr of prospects) if (pr.workspaceId) counts[pr.workspaceId] = (counts[pr.workspaceId] || 0) + 1;
+  const primary = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  const ws = primary ? primary[0] : "";
+
+  // 1. a usable voice for the workspace that owns the prospects
+  const mine = consent.filter((c) => c.workspaceId === ws);
+  const prov = (settings[ws] || {}).activeProvider || "elevenlabs";
+  const usable = mine.filter((c) => (c.provider || "elevenlabs") === prov);
+  add(GROUP_API, "role-vm-voice", "Voicemail drop: a voice to speak with",
+    usable.length ? "good" : "bad",
+    usable.length ? `${usable.length} ${prov} voice(s)` : `none for ${ws || "(no workspace)"}`,
+    usable.length ? "" : `No cloned ${prov} voice on the workspace holding ${primary ? primary[1] : 0} prospects, so every role voicemail would render as SILENCE and is refused (reason no_voice). Record a voice in Voice Drops to start the follow-ups.`);
+
+  // 2. the TTS credential behind it
+  const hasKey = Object.keys(((creds[ws] || {}).integrations || {}).elevenlabs?.keys || {}).length > 0;
+  add(GROUP_API, "role-vm-tts-key", "Voicemail drop: TTS credential",
+    hasKey ? "good" : "bad", hasKey ? "configured" : "missing",
+    hasKey ? "" : "No ElevenLabs credential on the prospect workspace; synthesis cannot run.");
+
+  // 3. the on-send trigger itself
+  const on = /^(1|true|yes|on)$/i.test(envVal("RECRUITEROS_ROLE_VM_ON_SEND"));
+  add(GROUP_API, "role-vm-on-send", "Voicemail drop: follow-up on email send",
+    on ? "good" : "amber", on ? "armed" : "off",
+    on ? "Every email sent stages a role voicemail; dialing still waits for an admin to start the queue."
+       : "RECRUITEROS_ROLE_VM_ON_SEND is unset, so emails do not stage a voicemail follow-up.");
+} catch { /* never let a readiness probe break the collector */ }
+
 /* ---------------- write ---------------- */
 const summary = { good: checks.filter((c) => c.status === "good").length, amber: checks.filter((c) => c.status === "amber").length, bad: checks.filter((c) => c.status === "bad").length };
 const out = { generatedAt: new Date().toISOString(), summary, groups: [GROUP_SEND, GROUP_SUPPLY, GROUP_WATCH, GROUP_API], checks };

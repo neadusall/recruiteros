@@ -97,7 +97,7 @@ export async function assembleRoleVoicemail(
 
 export interface EnqueueResult {
   queued: boolean;
-  reason?: "not_emailed" | "no_number" | "already_queued" | "no_role" | "not_business_line";
+  reason?: "not_emailed" | "no_number" | "already_queued" | "no_role" | "not_business_line" | "no_voice";
   role?: string;
   itemId?: string;
 }
@@ -256,7 +256,17 @@ export async function enqueueRoleVoicemail(workspaceId: string, p: Prospect): Pr
   }
   // Business-line gate: never dial a personal/residential/mobile number.
   if (!(await ensureBusinessLine(workspaceId, p))) return { queued: false, reason: "not_business_line" };
-  const { url, role } = await assembleRoleVoicemail(workspaceId, p);
+  const { url, role, dryRun } = await assembleRoleVoicemail(workspaceId, p);
+  // SILENCE GATE. assembleSplicedDrop returns dryRun with PLACEHOLDER audio whenever the
+  // workspace has no usable voice — no cloned voice on file, or no TTS credential. Queuing that
+  // is worse than queuing nothing: Phone Intel would dial the switchboard, navigate the IVR,
+  // reach the person's mailbox, and play SILENCE. That burns the contact, spends Telnyx
+  // minutes, and reads as a broken robocall to the prospect.
+  //
+  // This is what makes RECRUITEROS_ROLE_VM_ON_SEND safe to leave ON: with no voice the
+  // automation quietly declines instead of shipping dead air, and it starts working by itself
+  // the moment a voice is recorded. Nothing to remember to flip back on.
+  if (dryRun || !url) return { queued: false, reason: "no_voice" };
   const full = (p.fullName || p.firstName || "").trim();
   const toks = full.split(/\s+/).filter(Boolean);
   const item = enqueue(workspaceId, {
@@ -279,7 +289,7 @@ export async function enqueueRoleVoicemail(workspaceId: string, p: Prospect): Pr
 export interface PullSummary {
   scanned: number;
   queued: number;
-  skipped: { notEmailed: number; noNumber: number; alreadyQueued: number; notBusinessLine: number };
+  skipped: { notEmailed: number; noNumber: number; alreadyQueued: number; notBusinessLine: number; noVoice: number };
   /** A few example rows for the UI ("queued Hector Alvarez re: VP of Sales"). */
   examples: Array<{ name: string; company?: string; role: string }>;
 }
@@ -297,7 +307,7 @@ export async function pullRoleVoicemailsFromPipeline(
   const prospects = opts.motion ? all.filter((p) => (p.motion ?? "bd") === opts.motion) : all;
   const cap = Math.max(1, opts.limit ?? 200);
 
-  const sum: PullSummary = { scanned: 0, queued: 0, skipped: { notEmailed: 0, noNumber: 0, alreadyQueued: 0, notBusinessLine: 0 }, examples: [] };
+  const sum: PullSummary = { scanned: 0, queued: 0, skipped: { notEmailed: 0, noNumber: 0, alreadyQueued: 0, notBusinessLine: 0, noVoice: 0 }, examples: [] };
   for (const p of prospects) {
     if (sum.queued >= cap) break;
     sum.scanned++;
@@ -309,6 +319,7 @@ export async function pullRoleVoicemailsFromPipeline(
     else if (res.reason === "no_number") sum.skipped.noNumber++;
     else if (res.reason === "already_queued") sum.skipped.alreadyQueued++;
     else if (res.reason === "not_business_line") sum.skipped.notBusinessLine++;
+    else if (res.reason === "no_voice") sum.skipped.noVoice++;
   }
   return sum;
 }
