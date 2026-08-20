@@ -74,6 +74,16 @@ const MARKET_TIME_WINDOW = process.env.ROLE_HUNTER_TIME_WINDOW ?? "qdr:m";
 const COMMENT_FIRST = process.env.ROLE_HUNTER_COMMENT_FIRST !== "0";
 const POSTER_NEW_PER_TICK = 8;   // drafts created per combo
 const POSTER_NEW_PER_SCAN = Math.max(POSTER_NEW_PER_TICK, Number(process.env.ROLE_HUNTER_NEW_PER_SCAN ?? 24));
+// THE budget that actually matters. Search credits are a tenth of a cent; a
+// recruiter's LinkedIn account is not replaceable, and profile views are the
+// thing LinkedIn counts. Widening discovery made every result a fresh one,
+// which turned ~0.5 reads per search into ~7 - so the whole scan now stops
+// when the tick's read budget is gone, before the next search is even paid
+// for. At 14 a tick that is ~1,300 reads a day across the desk: FEWER per
+// seat than the two-seat desk was already running on 8/19 (540 over two), and
+// it still clears the ~70 drafts a day five seats need, because roughly one
+// read in four becomes a draft.
+const POSTER_READS_PER_SCAN = Math.max(1, Number(process.env.ROLE_HUNTER_READS_PER_SCAN ?? 14));
 const POSTER_RECHECK_DAYS = 7;   // never re-message the same author within a week
 const CLOSED_PROFILE_DAYS = 30;  // remember closed profiles; no repeat profile reads
 const MAX_POST_AGE_DAYS = 14;    // hard ceiling: never message about a stale post
@@ -2631,6 +2641,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     accounts.reduce((sum, a) => sum + Math.max(0, seatRoomToday(workspaceId, a.accountId, scanDay)), 0)
     - pendingComments;
   let totalCreated = 0;
+  let readsThisScan = 0;
 
   /**
    * One (scenario x role) combo: ask the index, screen what comes back, draft
@@ -2761,6 +2772,12 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
     // Profile read on the seat that will send. Company pages fail here,
     // which is the point.
+    //
+    // The tick's read budget is checked HERE, at the only line that spends
+    // one: out of budget ends the scan outright rather than paying for more
+    // searches whose results nothing is left to screen.
+    if (readsThisScan >= POSTER_READS_PER_SCAN) break;
+    readsThisScan++;
     const sendAccount = pickSendSeat(workspaceId, accounts, scanDay, pendingBySeat, rota);
     stats.profileReads += 1;
     const prof = await fetchProfileLite(sendAccount, c.authorRef);
@@ -2956,7 +2973,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   }
 
   save();
-  console.log(`[comment-radar] market "${keyword}" p${page} via ${source}: results=${candidates.length} created=${created} gates=${JSON.stringify(g)}`);
+  console.log(`[comment-radar] market "${keyword}" p${page} via ${source}: results=${candidates.length} created=${created} reads=${readsThisScan}/${POSTER_READS_PER_SCAN} gates=${JSON.stringify(g)}`);
   return created;
   };
 
@@ -2967,6 +2984,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   const passes = adhoc ? 1 : MARKET_SEARCHES_PER_TICK;
   for (let pass = 0; pass < passes; pass++) {
     if (totalCreated >= POSTER_NEW_PER_SCAN) break;
+    if (readsThisScan >= POSTER_READS_PER_SCAN) break;
     // A full approval queue does not need more searches paid for on top of it.
     if (pass > 0 && pendingComments >= commentQueueCap) break;
     let combo: ScanCombo;
