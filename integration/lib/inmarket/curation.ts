@@ -1650,8 +1650,26 @@ export async function enrichCompanyPhones(
   concurrency = 4,
   budgetMs = 120_000,
 ): Promise<{ domains: number; resolved: number; rowsUpdated: number; timedOut: boolean }> {
-  const { resolveCompanyPhone } = await import("./companyPhone");
+  const { resolveCompanyPhone, isDialableHere } = await import("./companyPhone");
   const rows = await load();
+
+  // SELF-HEAL. Clear any switchboard already stored that the current gate would refuse — the
+  // non-US numbers written before the NANP gate existed were wrong-company artifacts, and a
+  // recruiter dialing one reaches a stranger. Keep companyPhoneAt so they do not churn.
+  const stale = rows.filter((r) => r.companyPhone && !isDialableHere(r.companyPhone));
+  if (stale.length) {
+    await withCurationLock(async () => {
+      const current = await load();
+      for (const r of current) {
+        if (r.companyPhone && !isDialableHere(r.companyPhone)) {
+          r.companyPhone = undefined; r.companyPhoneDisplay = undefined;
+          r.companyPhoneVia = undefined; r.companyPhoneConfidence = undefined;
+          r.companyPhoneSource = undefined;
+        }
+      }
+      await save(current);
+    });
+  }
 
   // Re-check a row only if it has never been enriched, or its stamp has aged out.
   //
@@ -1769,6 +1787,7 @@ export async function syncCompanyPhonesToPipeline(
   workspaceIds?: string[],
 ): Promise<{ checked: number; updated: number; reason?: string }> {
   const { getCore } = await import("../core/repository");
+  const { isDialableHere: isDialable } = await import("./companyPhone");
   const core = getCore();
 
   // Build email -> switchboard once, then sweep prospects ONCE. The reverse (a lookup per
@@ -1802,7 +1821,14 @@ export async function syncCompanyPhonesToPipeline(
     try { list = await core.listProspects(ws); } catch { continue; }
     for (const p of list) {
       if (updated >= Math.max(0, limit)) break;
-      if (p.companyPhone) continue;                    // never overwrite
+      if (p.companyPhone) {
+        // Sweep out anything the gate now refuses (written before it existed).
+        if (!isDialable(p.companyPhone)) {
+          p.companyPhone = undefined; p.companyPhoneVia = undefined;
+          try { await core.saveProspect(p); updated++; } catch { /* retried next tick */ }
+        }
+        continue;                                      // otherwise never overwrite
+      }
       const hit = byEmail.get(String(p.email ?? "").toLowerCase());
       if (!hit) continue;
       checked++;

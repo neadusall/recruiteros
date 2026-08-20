@@ -285,3 +285,34 @@ test("refuses input that is not a domain", async () => {
   assert.equal(await resolveCompanyPhone(""), null);
   assert.equal(await resolveCompanyPhone("not-a-domain"), null);
 });
+
+/* ------------------------------------------------------------------ */
+/* NANP gate: a non-US number here is a wrong-company alarm            */
+/* ------------------------------------------------------------------ */
+
+test("REFUSES a non-NANP switchboard, because it means the domain is wrong", async () => {
+  // Reproduces the live failure: "Notion" resolved to notionpress.com, an Indian publisher,
+  // whose schema.org markup publishes a real +91 line. Reading it is correct; HANDING IT TO
+  // THE DIALER is not, so it must never become the answer.
+  const { __resetCompanyPhoneCache, extractSchemaOrg, pickBest } = await import("./companyPhone");
+  __resetCompanyPhoneCache();
+  const html = `<script type="application/ld+json">{"@type":"Organization","telephone":"+91 44 4631 5631"}</script>`;
+  // The extractor still parses it (it IS a valid published number)...
+  const cands = extractSchemaOrg(html, "https://notionpress.com/");
+  assert.equal(cands.length, 1, "the number itself parses fine");
+  assert.ok(cands[0].phone.startsWith("+91"));
+  // ...but the resolver's gate is what refuses to hand it over.
+  const usable = cands.filter((c) => c.phone.startsWith("+1"));
+  assert.equal(pickBest(usable), null, "a non-NANP number must not survive the gate");
+  __resetCompanyPhoneCache();
+});
+
+test("REFUSES a bare public suffix as a company domain", async () => {
+  // Live case: the upstream resolver handed us "com.ar" for a company called Cresta, and the
+  // registrar page duly served a phone number. Never spend a fetch on a TLD.
+  const { resolveCompanyPhone, __resetCompanyPhoneCache } = await import("./companyPhone");
+  __resetCompanyPhoneCache();
+  assert.equal(await resolveCompanyPhone("com.ar"), null);
+  assert.equal(await resolveCompanyPhone("co.uk"), null);
+  __resetCompanyPhoneCache();
+});

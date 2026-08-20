@@ -59,6 +59,30 @@ const MAX_CACHE = 60_000;         // bound the persisted blob
 const SHARED_DOMAIN_LIMIT = 3;    // a number on >= this many unrelated domains is boilerplate, not theirs
 const UA = "RecruitersOS/1.0 (+https://recruiteros.app; company contact lookup)";
 
+/**
+ * NANP ONLY, by default.
+ *
+ * This rung exists to feed a US dialer (Telnyx US lines, 10DLC, Phone Intel's NANP IVR
+ * navigation) and the signal pool is itself US-only (the accumulator purges non-US leads). So a
+ * non-NANP switchboard is never dialable here — and in practice it is not merely useless, it is
+ * a WRONG-COMPANY ALARM. Live proof from the first sweep, every non-US number found was an
+ * upstream domain-resolution error, not an international office:
+ *   "Notion" -> notionpress.com (+91, an Indian publisher; the role was in New York)
+ *   "SNI Financial" -> snitechnology.net (+90 Turkey; the role was in Dallas)
+ *   "Cresta" -> com.ar (a bare TLD, not a company domain at all)
+ * Handing any of those to Voice Drops means leaving a voicemail at a stranger's front desk, so
+ * we refuse them. Set INMARKET_COMPANY_PHONE_INTL=1 if a genuinely international book ever
+ * needs them.
+ */
+const NANP_ONLY = process.env.INMARKET_COMPANY_PHONE_INTL !== "1";
+
+/** Public suffixes that are NOT a company domain. A resolver that hands us a bare TLD
+ *  ("com.ar") would otherwise get its registrar/parking page scraped for a "main line". */
+const BARE_SUFFIX = new Set([
+  "com.ar", "com.au", "com.br", "co.uk", "org.uk", "co.jp", "co.in", "com.mx", "co.za",
+  "com.cn", "co.nz", "com.sg", "com.tr", "com.pl", "co.kr", "com.tw", "com.hk",
+]);
+
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
@@ -453,6 +477,8 @@ export async function resolveCompanyPhone(
 ): Promise<CompanyPhoneResolution | null> {
   const d = (domain || "").trim().toLowerCase().replace(/^www\./, "");
   if (!d || !d.includes(".")) return null;
+  // A bare public suffix is not a company. Refuse before spending a fetch on it.
+  if (BARE_SUFFIX.has(d) || d.split(".").length < 2) return null;
 
   const cache = await ensureCache();
   const hit = cache.get(d);
@@ -505,8 +531,8 @@ export async function resolveCompanyPhone(
     }
   }
 
-  // Drop anything the shared-number veto rejects, then pick the winner.
-  const usable = cands.filter((c) => !isSharedNumber(cache, c.phone, d));
+  // Drop anything the shared-number veto or the NANP gate rejects, then pick the winner.
+  const usable = cands.filter((c) => !isSharedNumber(cache, c.phone, d) && (!NANP_ONLY || c.phone.startsWith("+1")));
   const best = pickBest(usable);
 
   let result: CompanyPhoneResolution | null = null;
@@ -539,6 +565,16 @@ export async function companyPhoneStats(): Promise<{ attempts: number; resolved:
   for (const v of c.values()) if (v.ok) resolved++;
   const attempts = c.size;
   return { attempts, resolved, rate: attempts ? Math.round((resolved / attempts) * 100) / 100 : 0 };
+}
+
+/**
+ * Is this a number THIS deployment can actually dial? Exported so the stores can be swept
+ * clean of values written before the gate existed (self-healing beats a one-off script: a
+ * rollback or a stale cache entry would otherwise resurrect the bad number).
+ */
+export function isDialableHere(phone?: string): boolean {
+  if (!phone) return false;
+  return !NANP_ONLY || phone.startsWith("+1");
 }
 
 /** Test seam: reset the in-memory cache between cases. */
