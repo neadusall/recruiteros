@@ -49,6 +49,24 @@
     the guard's graduation veto (`SENDER_GRADUATE_MAX_NDR`) exists because a fleet ran
     "reputation 100%" for weeks while Gmail rejected every message.
 
+12. **Never self-probe a public blocklist for a verdict.** Public resolvers answer
+    Spamhaus queries with `127.255.255.254` ("open resolver"), which reads as CLEAN
+    while every message is being refused. The authority is the receiver's own
+    rejection text: the sweeps capture the IP it names and the list it cites onto the
+    block ledger, and `lib/senders/ipReputation.ts` alarms from that. Treat a
+    `127.255.x.x` answer as "unknown", never as "not listed".
+
+13. **When a sending server is blocked, stop its warm-up too.** Warm-up over a blocked
+    or listed IP generates continuous rejections that keep the listing alive and train
+    DOMAIN-level reputation against the sending domains. Domains are the irreplaceable
+    asset; an IP is cheap. Throttling is not enough once a public listing exists.
+
+14. **A false alarm is a real defect.** Bench/verify rules need a minimum sample
+    (`domain-rest` requires 25+ sends before a bounce RATIO benches anything) and
+    host-appropriate probes (DKIM across the full selector set, provider-scoped
+    mailbox existence checks). Benching healthy domains destroys capacity and teaches
+    the operator to ignore the board, which is how a real incident gets missed.
+
 ## Prod snapshots (hydration trap)
 
 In-memory stores backed by `/data/snap_*.json` are re-saved by the running app. Never
