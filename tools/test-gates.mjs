@@ -122,11 +122,11 @@ test("metroOf pulls a real metro, rejects remote", () => {
   assert.equal(metroOf({ jobLocation: "United States | Remote" }), null);
 });
 test("render gate catches token/empty/hole/em-dash/placeholder", () => {
-  assert.equal(checkRenderedEmail("hi", "maps to your {{Open_Role}} seat").ok, false);
-  assert.equal(checkRenderedEmail("", "body").ok, false);
-  assert.equal(checkRenderedEmail("subj", "maps to your  seat").ok, false);
-  assert.equal(checkRenderedEmail("subj", "worth a chat — really?").ok, false);
-  assert.equal(checkRenderedEmail("subj", "leftover [role] here").ok, false);
+  assert.equal(checkRenderedEmail("hi", "maps to your {{Open_Role}} seat", { shape: false }).ok, false);
+  assert.equal(checkRenderedEmail("", "body", { shape: false }).ok, false);
+  assert.equal(checkRenderedEmail("subj", "maps to your  seat", { shape: false }).ok, false);
+  assert.equal(checkRenderedEmail("subj", "worth a chat — really?", { shape: false }).ok, false);
+  assert.equal(checkRenderedEmail("subj", "leftover [role] here", { shape: false }).ok, false);
 });
 test("render gate holds the wordy pre-MPC copy (length, run-on, lecture)", () => {
   // The two live 2026-08-20 sends that started this rewrite. Both must now be HELD.
@@ -143,6 +143,12 @@ test("render gate holds a short email that hides a run-on sentence", () => {
   assert.equal(r.ok, false);
   assert.ok(r.problems.some((x) => /sentence runs/.test(x)), r.problems.join("; "));
 });
+test("render gate holds a one-block email that is otherwise short and clean", () => {
+  const r = checkRenderedEmail("controller, off market",
+    "I'm representing a Controller in Denver. They've owned the monthly close, rebuilt the chart of accounts. They're open to a move. Worth a look?");
+  assert.equal(r.ok, false);
+  assert.ok(r.problems.some((x) => /3-paragraph/.test(x)), r.problems.join("; "));
+});
 test("render gate passes the new MPC format", () => {
   const r = checkRenderedEmail("vp of sales, quietly looking",
     "I'm representing a VP of Sales in Denver.\n\nGrew a portfolio from $12M to $40M, built the team from 3 to 22 reps.\n\nThey're exploring their next move confidentially. Worth a look at their profile?");
@@ -150,7 +156,8 @@ test("render gate passes the new MPC format", () => {
 });
 test("render gate passes a clean email", () => {
   const r = checkRenderedEmail("your assistant controller search, Vernon",
-    "Hi Hali, saw Reformation's opening for an Assistant Controller in Vernon. worth a quick call? Best, Ryan");
+    "Hi Hali, saw Reformation's opening for an Assistant Controller in Vernon. worth a quick call? Best, Ryan",
+    { shape: false });
   assert.equal(r.ok, true, r.problems.join("; "));
 });
 

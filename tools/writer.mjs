@@ -67,10 +67,17 @@ export function matchCandidate(role, metro, bank = loadCandidateBank()) {
 const SYSTEM = [
   "You are a recruiter at Lume Search Partners. You write ONE cold MPC email: you represent a candidate and you are marketing that person to a company hiring their exact title. You are not selling a search, not selling your firm, and not explaining their own job to them.",
   "",
-  "THE FORMAT IS FIXED. Three short paragraphs, in this order, nothing else:",
-  "  1. WHO. One sentence. You are representing a <exact open title> in their space. If a metro is given, put the metro in this sentence. Stop there.",
+  "THE FORMAT IS FIXED. Three short paragraphs SEPARATED BY A BLANK LINE, in this order, nothing else. A body that is not three blank-line-separated paragraphs is a failure:",
+  "  1. WHO. One sentence, and it MUST begin with the words \"I'm representing\". Then the exact open title, then the metro if one is given, or 'in your space' if none is. Nothing else. Never 'we're representing', never a plural, never your own words for their industry.",
   "  2. PROOF. One sentence. Exactly TWO concrete things this person has done, joined by a comma. Nothing else in this paragraph.",
-  "  3. CLOSE. Two short sentences: their situation in one clause, then ONE question. Nothing after the question.",
+  "  3. CLOSE. Two short sentences. The first MUST begin with the word \"They're\" and say their situation in one clause. The second is ONE question. Nothing after the question.",
+  "",
+  "A CORRECT EMAIL, exactly this shape:",
+  "  I'm representing a VP of Sales in Denver.",
+  "  <blank line>",
+  "  Grew a portfolio from $12M to $40M, built the team from 3 to 22 reps.",
+  "  <blank line>",
+  "  They're exploring their next move confidentially. Worth a look at their profile?",
   "",
   "LENGTH IS THE FEATURE. 35 to 55 words of body, total, across all three paragraphs. At 60 words you have failed. Cut whole ideas, do not compress them into longer sentences. Every sentence stays under 18 words.",
   "",
@@ -85,6 +92,7 @@ const SYSTEM = [
   "",
   "THE PROOF LINE IS THE WHOLE EMAIL. Two facts, concrete, past tense, no adjectives.",
   "  - If CANDIDATE PROOF lines are given in the facts, use them VERBATIM (you may join them with a comma and fix tense or capitalization, nothing more). Those are the only hard numbers you may ever write.",
+  "  - Every proof fact starts with a past-tense verb: Owned, Built, Ran, Grew, Led, Closed, Rebuilt, Managed. Never a present participle, never 'Overseen'.",
   "  - If no candidate proof is given, you know this person only at the capability level. Write two things the job posting itself demands, phrased as work this person has owned: 'Owned the close cycle and deferred revenue' is fine. NEVER invent a number, a year count, a certification, an employer, a system, or a headcount. Inventing one is a hard failure.",
   "",
   "VOICE. One busy operator writing to another. Contractions. Plain words. Normal capitalization. Never an em-dash, use a comma or a period. No hype, no buzzwords, no sign-off, no P.S.",
@@ -92,10 +100,14 @@ const SYSTEM = [
   "HARD RULES:",
   "- The candidate's function must match the OPEN ROLE. A sales req gets a sales candidate, a finance req gets a finance candidate. Never pitch a different function.",
   "- Refer to the candidate as 'they' throughout. Never a name, never a current employer, never a named competitor.",
+"- You are one person writing. Always 'I', never 'we' or 'our team', anywhere in the email.",
+"- Never apologize for the candidate or frame them as a leftover ('we couldn't place them'). State the fact and move on.",
   "- If an ANGLE instruction is given, it steers ONE sentence of paragraph 1 or 3. It never adds a sentence and never buys extra words.",
   "- If metro is null (a remote or national role), never claim they are local to anything. Say they are remote-ready or drop location entirely.",
   "- Exactly ONE question mark in the whole body, at the very end. The close is a question about seeing the person: 'Worth a look?', 'Want their profile?', 'Worth a quick call?'. Do not ask for a meeting time and do not offer to attach or send a resume.",
-  "- Subject: lowercase, 3 to 6 words, the title plus their state. Examples of the shape: 'vp of sales, quietly looking', 'controller, off market', 'director of nursing, ready now'. No company name, no clickbait, no question mark.",
+  "- Subject: lowercase, 3 to 6 words, in the shape '<title>, <their status>'. The half after the comma describes THE PERSON, never a city and never the industry: 'quietly looking', 'off market', 'ready now', 'open to a move', 'still employed'. So: 'vp of sales, quietly looking', 'controller, off market', 'director of nursing, ready now'. Shorten a long title rather than dropping the status. No company name, no metro, no clickbait, no question mark.",
+"- Never characterize their industry or market in your own words ('your engineering software space', 'the fast-moving fintech world'). Name the metro or say 'in your space', nothing more.",
+"- Never say you placed a ROLE somewhere. You place PEOPLE. If a variant is about a search you closed, phrase it as a person you could not place.",
   "Return STRICT JSON only: {\"subject\": string, \"body\": string}. Body is the message only: NO greeting, NO name, NO sign-off. Start with a capital letter.",
 ].join("\n");
 
@@ -129,6 +141,22 @@ export function greetingName(managerName) {
 /** Remove any em-dash the model slips in, so a good draft is never dropped by the render gate. */
 function deDash(s) {
   return (s || "").replace(/\s*—\s*/g, ", ").replace(/\s*–\s*/g, ", ");
+}
+
+// The subject is "<title>, <their status>". The status half is what makes it an MPC subject
+// rather than a job-board one, and the model keeps re-reading the tail of a long title as the
+// status ("design engineer, transmission line"). So it is enforced here, not asked for: casing
+// is forced down and a missing status is filled from the variant that was actually assigned.
+const SUBJECT_STATUSES = [
+  "quietly looking", "off market", "never hit the market", "ready now",
+  "open to a move", "still employed", "exploring quietly", "available now",
+];
+export function normalizeSubject(raw, variant) {
+  let s = String(raw || "").toLowerCase().replace(/\s+/g, " ").replace(/[?!.]+$/, "").trim();
+  if (SUBJECT_STATUSES.some((st) => s.endsWith(st))) return s;
+  const head = s.split(",")[0].trim();
+  const status = (variant && variant.subjectStatus) || "quietly looking";
+  return head ? `${head}, ${status}` : status;
 }
 
 export async function writeEmail(p, opts = {}) {
@@ -170,7 +198,10 @@ export async function writeEmail(p, opts = {}) {
   const data = await res.json();
   const text = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).join("");
   const json = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
-  return { subject: deDash(String(json.subject || "").trim()), body: deDash(String(json.body || "").trim()) };
+  return {
+    subject: normalizeSubject(deDash(String(json.subject || "")), opts.variant),
+    body: deDash(String(json.body || "").trim()),
+  };
 }
 
 // Fixed signatures + CAN-SPAM footer appended to every send (never AI-varied).

@@ -662,6 +662,13 @@ export function checkRenderedEmail(subject, body, opts = {}) {
   for (const [label, re] of LECTURE) {
     if (re.test(b)) { problems.push(`lectures the reader: ${label}`); break; }
   }
+  // WHITE SPACE IS THE FORMAT. The same 45 words in one block reads as a wall on a phone and as
+  // three lines with air between them reads as a note from a person. Enforce the shape: who /
+  // proof / close, blank line between. Opt out per box with MPC_REQUIRE_PARAGRAPHS=0.
+  if (opts.shape !== false && process.env.MPC_REQUIRE_PARAGRAPHS !== "0") {
+    const paras = b.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+    if (paras.length !== 3) problems.push(`not the 3-paragraph MPC shape (${paras.length} paragraph${paras.length === 1 ? "" : "s"})`);
+  }
   // Exactly ONE soft CTA: a second question is the writer stacking closes ("Worth a call?
   // Open to a sync this week?"), which reads as pushy template output.
   const questions = (b.match(/\?/g) || []).length;

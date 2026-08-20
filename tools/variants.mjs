@@ -13,26 +13,31 @@
 export const VARIANTS = [
   {
     id: "quietly_looking",
+    subjectStatus: "quietly looking",
     label: "quietly looking",
     lead: "ANGLE: they are looking quietly, still employed, not on any job board. State it flat in the close. Do not dramatize it.",
   },
   {
     id: "runner_up",
+    subjectStatus: "off market",
     label: "runner-up from a search you closed",
-    lead: "ANGLE: you just placed this exact title for another company in their space and this person was the one you could not place. Say that in five words in the first sentence, then go straight to proof.",
+    lead: "ANGLE: this person was the runner-up on a search you just closed for another company in their space, so you could not place them. Add it as a short clause on the END of sentence 1, which still opens with \"I'm representing\". Never say you placed a role somewhere, you place people.",
   },
   {
     id: "ready_now",
+    subjectStatus: "ready now",
     label: "available now",
     lead: "ANGLE: they are ready to move now, not in six months. One clause in the close, no elaboration.",
   },
   {
     id: "off_market",
+    subjectStatus: "never hit the market",
     label: "never hit the market",
-    lead: "ANGLE: this person never reached the open market, you have them because of the search you just ran. Compress it to one clause in the first sentence.",
+    lead: "ANGLE: this person never reached the open market, you have them only because of a search you just ran. Compress it to one clause on the end of sentence 1, and phrase it about THEM ('who never hit the open market'), never about the search you ran.",
   },
   {
     id: "exact_title",
+    subjectStatus: "open to a move",
     label: "same title, same size company",
     lead: "ANGLE: they are doing this exact title right now at a company the same size, in the same industry. First sentence only, then proof.",
   },
