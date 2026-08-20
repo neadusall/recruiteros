@@ -41,8 +41,8 @@ import { classifyTitle } from "../signals/filters";
 import { requestLinkedInAction } from "./os/engine";
 import { ensureAccount, listAccounts } from "./os/health";
 import { putPolicy } from "./os/policy";
-import { seatsForWorkspace } from "./seats";
-import { unipileRequest } from "./provider";
+import { seatsForWorkspace, markSeatChecked } from "./seats";
+import { unipileRequest, UnipileError } from "./provider";
 import { listMembers } from "../auth/team";
 import type { LiAccountState } from "./os/types";
 
@@ -1625,14 +1625,45 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     const bound = new Set(engineAccounts.flatMap((a) => [a.accountId, a.providerAccountId].filter(Boolean) as string[]));
     for (const seat of await seatsForWorkspace(workspaceId)) {
       if (!seat.accountId || bound.has(seat.accountId)) continue;
-      let live = false;
+      const who = seat.label || seat.userId;
+
+      // Three outcomes, never two. "Signed out" and "we could not ask" are
+      // different facts and the seat's stored status is what the recruiter's
+      // own JD Sourcing card reads back: a stale "ok" makes that card claim
+      // "Your LinkedIn is connected" for a login that is actually dead (seen
+      // live 2026-08-20 on a seat last probed three weeks earlier), while
+      // flipping a seat to "reconnect" over a network blip is a false alarm
+      // that sends a recruiter to re-login for nothing. So only a DEFINITIVE
+      // verdict is written back; an unreachable provider leaves the seat
+      // exactly as it was and simply skips adoption this tick.
+      let verdict: "healthy" | "relogin" | "unknown" = "unknown";
+      let detail = "";
       try {
         const acct = await unipileRequest<{ sources?: Array<{ status?: string }> }>(`/accounts/${encodeURIComponent(seat.accountId)}`);
-        live = !(acct.sources ?? []).some((s) => /CREDENTIALS|DISCONNECTED|ERROR|STOPPED/i.test(String(s.status ?? "")));
-      } catch { /* provider unreachable or account deleted: not adoptable this tick */ }
-      const who = seat.label || seat.userId;
-      if (!live) {
-        console.log(`[comment-radar] ${workspaceId}: seat "${who}" not adopted (needs re-login or provider unreachable)`);
+        const bad = (acct.sources ?? [])
+          .map((s) => String(s.status ?? ""))
+          .filter((s) => /CREDENTIALS|DISCONNECTED|ERROR|STOPPED/i.test(s));
+        if (bad.length) { verdict = "relogin"; detail = `provider reports ${bad.join(", ")}`; }
+        else { verdict = "healthy"; }
+      } catch (e) {
+        // 404: the provider account no longer exists, which IS a definitive
+        // re-login verdict. Anything else (5xx, auth, DNS, timeout) is us
+        // failing to ask, and must never be reported as their fault.
+        const status = e instanceof UnipileError ? e.status : 0;
+        if (status === 404) { verdict = "relogin"; detail = "the provider has no such account (the login was removed)"; }
+        else { detail = e instanceof Error ? e.message : String(e); }
+      }
+
+      if (verdict === "relogin") {
+        // Write the truth onto the seat so the recruiter's own card shows
+        // "Your LinkedIn needs a re-login" and its Reconnect button, instead
+        // of a cached "connected" that hides the problem forever.
+        try { await markSeatChecked(workspaceId, seat.userId, "reconnect"); } catch { /* log line still stands */ }
+        console.log(`[comment-radar] ${workspaceId}: seat "${who}" needs a re-login, card updated (${detail})`);
+        continue;
+      }
+      if (verdict === "unknown") {
+        console.log(`[comment-radar] ${workspaceId}: seat "${who}" not checked this tick, provider unreachable (${detail}); seat left untouched`);
         continue;
       }
       const member = listMembers(workspaceId).find((mm) => mm.userId === seat.userId);
@@ -1648,6 +1679,10 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
         await putPolicy(workspaceId, osAccountId, { applyPreset: "conservative", timezone: "America/New_York" });
       } catch { /* policy stays at the engine default if this races */ }
       bound.add(seat.accountId);
+      // The probe just verified this login live: stamp the seat so its card
+      // reads a FRESH ok rather than a months-old one, and so the next
+      // portal visit does not re-probe needlessly.
+      try { await markSeatChecked(workspaceId, seat.userId, "ok"); } catch { /* adoption still stands */ }
       console.log(`[comment-radar] ${workspaceId}: adopted seat "${member?.name || who}" into the hunt`);
     }
   } catch (e) {
