@@ -31,10 +31,18 @@ mkdir -p "$STATE"
 # mistaken for a watchdog that stopped. Read with:
 #   date -u -d @$(cat /var/lib/ros-sentinel/lastrun.epoch); cat /var/lib/ros-sentinel/lastrun.reason
 RUN_REASON=""
+# Public heartbeat: the cross-box deadman watchdog on recruiteros-worker-2 reads
+# this over HTTPS (https://lumesp.com/ros-heartbeat.txt) every 5 minutes. If it
+# goes stale, THIS sentinel is dead and the watchdog raises the alarm from the
+# other box. It is just a unix timestamp - nothing sensitive. The file is
+# untracked inside the caddy-served marketing dir; git reset --hard leaves
+# untracked files alone, and even a deletion self-heals on the next run.
+HEARTBEAT_PUB="${ROS_SENTINEL_HEARTBEAT_PUB:-/opt/recruiteros/lumesp-web/ros-heartbeat.txt}"
 stamp() {
   RUN_REASON="$1"
   date -u +%s > "$STATE/lastrun.epoch" 2>/dev/null || true
   printf '%s\n' "$1" > "$STATE/lastrun.reason" 2>/dev/null || true
+  date -u +%s > "$HEARTBEAT_PUB" 2>/dev/null || true
 }
 # The skip paths stamp their own reason first, so the trap must not overwrite it
 # on the way out: an unrecorded skip is the exact blindness this closes.
@@ -53,11 +61,38 @@ if [ -z "$DRYRUN" ]; then
   esac
 fi
 
+# Maintenance hold: a script that deliberately stops/recreates containers should
+# `touch /var/lib/ros-sentinel/hold` first and `rm` it when done - a tick under a
+# fresh hold skips instead of paging the owner about downtime the operator caused
+# on purpose (the 17:36 Aug-18 CRITICAL storm was exactly this). A hold older
+# than 30 min is ignored AND deleted: a leaked hold must never blind monitoring.
+if [ -z "$DRYRUN" ] && [ -f "$STATE/hold" ]; then
+  HOLD_AGE=$(( $(date -u +%s) - $(stat -c %Y "$STATE/hold" 2>/dev/null || echo 0) ))
+  if [ "$HOLD_AGE" -lt 1800 ]; then stamp skipped-maintenance-hold; exit 0; else rm -f "$STATE/hold"; fi
+fi
+# An app-container swap in progress (swap lock held exclusively by swap_app or a
+# maintenance script) is deliberate too: wait briefly for it to finish, then skip
+# rather than inspect a half-recreated stack. Held SHARED for the rest of the run,
+# same pattern as the cron ticks, so a swap cannot start under our feet either.
+if [ -z "$DRYRUN" ]; then
+  exec 8>/var/lock/recruiteros-app-swap.lock
+  flock -s -w 45 8 || { stamp skipped-app-swap; exit 0; }
+fi
+
 envval() { grep -m1 "^$1=" "$ENVFILE" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'"; }
 
 OWNER_TO="$(envval OWNER_EMAIL)"; [ -n "$OWNER_TO" ] || OWNER_TO="neadusall@gmail.com"
 MAIL_FROM="$(envval EMAIL_FROM)"; [ -n "$MAIL_FROM" ] || MAIL_FROM="RecruitersOS <onboarding@resend.dev>"
 RESEND_KEY="$(envval RESEND_API_KEY)"
+
+# SMS escalation: CRITICAL problems also text the owner's cell, because email
+# sat unread for 5 days during the Aug 13-18 video outage. Config lives in
+# /etc/ros-alert.env (ALERT_TELNYX_KEY / ALERT_SMS_FROM / ALERT_SMS_TO) so it
+# survives .env.production rewrites; falls back to the app's Telnyx creds.
+[ -f /etc/ros-alert.env ] && . /etc/ros-alert.env
+SMS_KEY="${ALERT_TELNYX_KEY:-$(envval TELNYX_API_KEY)}"
+SMS_FROM="${ALERT_SMS_FROM:-$(envval TELNYX_FROM_NUMBER)}"
+SMS_TO="${ALERT_SMS_TO:-}"
 
 FAILS=()
 fail() { FAILS+=("$1 :: $2"); }
@@ -292,7 +327,9 @@ fi
 #     crash, just a search that returns nobody — so the watchdog is what
 #     notices it.  [ready-monitor]
 READY_SECRET="$(envval RECRUITEROS_CRON_SECRET)"
-if [ -n "$READY_SECRET" ]; then
+# Skip when the portal itself already failed this run: an unreachable audit on a
+# down portal is the same problem twice, and the second line only adds noise.
+if [ -n "$READY_SECRET" ] && ! printf '%s\n' "${FAILS[@]:-}" | grep -q '^PORTAL-DOWN'; then
   READY_JSON=$(curl -s -m 20 -k --resolve recruitersos.co:443:127.0.0.1 \
     "https://recruitersos.co/api/ready/audit?secret=$READY_SECRET" || true)
   if ! printf '%s' "$READY_JSON" | jq -e '.blocked' >/dev/null 2>&1; then
@@ -304,6 +341,103 @@ if [ -n "$READY_SECRET" ]; then
       fail "TOOL-NOT-CONNECTED" "$READY_N tool/account combination(s) cannot work: $READY_LIST"
     fi
   fi
+fi
+
+# 14. Cold-email SEND OUTCOMES: warm-up reputation and auth pills can all read
+#     green while real sends are being rejected at submission (Aug 18: 10 domains
+#     failing ~90% of sends with 100% warm-up reputation). The deliverability
+#     tracker (mpc-deliverability.mjs, q20min) records what actually happened to
+#     every send; alert on THAT, not on proxies.
+DSTATS=$(docker exec recruiteros-app-1 node -e "
+try{
+const raw=require('/data/snap_mpc_deliverability_v1.json');
+const d=raw.data||raw;
+const o=d.overall||{};
+const ageH=(Date.now()-Date.parse(d.generatedAt||0))/36e5;
+let worst=0,worstDom='',badDoms=0;
+for(const s of Object.values(d.byDomain||{})){
+  if((s.sent||0)>=25&&(s.hardFailRatePct||0)>=80){badDoms++;
+    if(s.hardFailRatePct>worst){worst=s.hardFailRatePct;worstDom=s.domain;}}
+}
+console.log([ageH.toFixed(1),o.hardFailRatePct??'NA',o.sent??0,badDoms,worst,worstDom||'-'].join(' '));
+}catch(e){console.log('ERR')}" 2>/dev/null || echo ERR)
+if [ "$DSTATS" != "ERR" ] && [ -n "$DSTATS" ]; then
+  read DAGE DFAIL DSENT DBAD DWORST DWORSTDOM <<SENTINEL_DSTATS
+$DSTATS
+SENTINEL_DSTATS
+  if awk -v a="$DAGE" 'BEGIN{exit !(a>3)}'; then
+    fail "SENDING-STATS-STALE" "the send-outcome tracker has not written in ${DAGE}h (normal: every 20 min) - nothing is measuring whether cold email is actually delivering"
+  elif [ "$DFAIL" != "NA" ] && [ "${DSENT:-0}" -ge 50 ] 2>/dev/null; then
+    if [ "${DBAD:-0}" -ge 1 ] || awk -v f="$DFAIL" 'BEGIN{exit !(f>=30)}'; then
+      fail "SENDING-FAILRATE-HIGH" "real cold-email sends are being rejected: overall hard-fail ${DFAIL}% of ${DSENT} sends; ${DBAD} domain(s) fail 80%+ of their sends (worst: ${DWORSTDOM} at ${DWORST}%). Warm-up dashboards will still look green - this is measured from actual send logs"
+    elif awk -v f="$DFAIL" 'BEGIN{exit !(f>=10)}'; then
+      fail "SENDING-FAILRATE-ELEVATED" "cold-email hard-fail rate is ${DFAIL}% of ${DSENT} sends (healthy is under 5%) - list quality or a failing domain is burning sends"
+    fi
+  fi
+fi
+
+# 15. MPC engine posture (added 2026-08-18): the four SILENT failure modes of the
+#     Aug 14-18 week, each of which kept every timer green while cold email starved.
+# 15a. Enrichment role drift: cold email needs scrape+validate both armed. The 8/17
+#      pause (INMARKET_ROLE=scraper) starved sends for days with everything "healthy".
+MROLE=$(grep '^INMARKET_ROLE=' /opt/recruiteros/.env.production 2>/dev/null | cut -d= -f2)
+if [ -n "$MROLE" ] && [ "$MROLE" != "all" ]; then
+  fail "MPC-ENRICHMENT-OFF" "INMARKET_ROLE=$MROLE in .env.production - DM research and email validation are OFF, so cold-email supply is starving. If this is not a deliberate pause, set INMARKET_ROLE=all and recreate the app"
+fi
+# 15b. Curation tick stalled/abandoned (the Aug-14 drought signature). Engine health
+#      is written every tick; silence for 45+ min with the app up 45+ min = stalled.
+CURSTATS=$(docker exec recruiteros-app-1 node -e "
+try{const h=require('/data/snap_inmarket_engine_health_v1.json');
+const age=(Date.now()-Date.parse(h.lastCurationAt||h.bootAt||0))/6e4;
+console.log(age.toFixed(0)+' '+(h.lastCurationOk===false?'bad':'ok'));}catch(e){console.log('ERR')}" 2>/dev/null || echo ERR)
+if [ "$CURSTATS" != "ERR" ] && [ -n "$CURSTATS" ] && { [ "$MROLE" = "all" ] || [ -z "$MROLE" ]; }; then
+  CAGE=${CURSTATS%% *}; COK=${CURSTATS##* }
+  APPSTART=$(docker inspect recruiteros-app-1 --format '{{.State.StartedAt}}' 2>/dev/null)
+  UPMIN=$(( ( $(date -u +%s) - $(date -u -d "$APPSTART" +%s 2>/dev/null || date -u +%s) ) / 60 ))
+  if [ "${UPMIN:-0}" -ge 45 ] && [ "${CAGE:-0}" -ge 45 ] 2>/dev/null; then
+    fail "MPC-CURATION-STALLED" "no curation tick has completed in ${CAGE} min with the app up ${UPMIN} min (normal cadence: ~10 min) - DM naming and email validation are not running, cold-email supply is flatlining"
+  elif [ "$COK" = "bad" ]; then
+    fail "MPC-CURATION-FAILING" "the last curation tick was abandoned by its watchdog - repeated abandons are the Aug-14 supply-drought signature; check INMARKET_CURATE_WATCHDOG_SEC headroom and app logs"
+  fi
+fi
+# 15c. Sends flatline: on a weekday after 17:00 UTC (the daily unit fires 15:00),
+#      near-zero send attempts means supply or the daily unit quietly died.
+if [ "$(date -u +%u)" -le 5 ] && [ "$(date -u +%H)" -ge 17 ]; then
+  TODAYCT=$(cat /opt/recruiteros/mpc-out/sent-$(date -u +%F)T*.jsonl 2>/dev/null | wc -l)
+  if [ "${TODAYCT:-0}" -lt 5 ]; then
+    fail "MPC-SENDS-FLATLINE" "only ${TODAYCT} cold-email send attempt(s) logged today (weekday, past 17:00 UTC; daily run fires 15:00) - the pipeline is starved or the daily unit died; check mpc-daily.service and the supply funnel"
+  fi
+fi
+# 15d. Mailbox-API error spike: 404 "No such mailbox" / 429 bursts are lane/config
+#      bugs (the 8/15 signature). They no longer bench domains, but a spike means a
+#      misrouted lane is burning the send queue.
+INFRACT=$(grep -hE '"error":"(404|429):' /opt/recruiteros/mpc-out/sent-$(date -u +%F)T*.jsonl 2>/dev/null | wc -l)
+if [ "${INFRACT:-0}" -ge 25 ]; then
+  fail "MPC-API-ERRORS" "${INFRACT} Mailbox-API 404/429 send failures logged today - a box or lane misconfiguration is burning send attempts (8/15 signature: follow-ups fired at boxes that don't exist on Sending.ac)"
+fi
+# 16. SEND FUSE (2026-08-20): the fleet-wide cold-email kill switch + per-source breakers.
+#     A tripped fuse is CRITICAL by design (a person has to look and clear it); a paused
+#     address rung is a WARNING; a stale or missing ledger means nothing is arming the switch.
+FUSESTATS=$(node -e "
+try{const f=require('/var/lib/docker/volumes/recruiteros_app_data/_data/snap_mpc_send_fuse_v1.json');
+const age=(Date.now()-Date.parse(f.updatedAt||0))/36e5;
+const paused=Object.entries(f.sources||{}).filter(([,s])=>s&&s.paused).map(([k])=>k);
+const w=f.window||{};
+console.log([age.toFixed(1),f.fleet&&f.fleet.tripped?'TRIPPED':'armed',(f.fleet&&f.fleet.by)||'-',paused.join(',')||'-',w.bounces==null?0:w.bounces,w.sends==null?0:w.sends].join(' '));
+}catch(e){console.log('ERR')}" 2>/dev/null || echo ERR)
+if [ "$FUSESTATS" != "ERR" ] && [ -n "$FUSESTATS" ]; then
+  read FAGE FSTATE FBY FPAUSED FB FS <<SENTINEL_FUSE
+$FUSESTATS
+SENTINEL_FUSE
+  if [ "$FSTATE" = "TRIPPED" ]; then
+    fail "SEND-FUSE-TRIPPED" "the cold-email send fuse is TRIPPED (by: ${FBY}); every cold send and follow-up is stopped on every lane until a person clears it. Look first: bash /opt/recruiteros/tools/send-fuse.sh --status ; clear: bash /opt/recruiteros/tools/send-fuse.sh --clear . Window: ${FB} bounces / ${FS} sends"
+  elif awk -v a="$FAGE" 'BEGIN{exit !(a>6)}'; then
+    fail "SEND-FUSE-STALE" "the send fuse ledger has not been evaluated in ${FAGE}h (normal: every 20-min send tick and every 4h sweep) - the kill switch is not being armed against fresh bounce data"
+  elif [ "$FPAUSED" != "-" ]; then
+    fail "SEND-SOURCE-PAUSED" "address rung(s) paused by the source breaker for bouncing: ${FPAUSED}. Every other rung keeps sending; the pause releases itself (48h, then 7d on a repeat)"
+  fi
+else
+  fail "SEND-FUSE-MISSING" "no send fuse ledger at snap_mpc_send_fuse_v1.json - the cold-email kill switch has never been evaluated (batch.mjs / send-fuse.mjs write it)"
 fi
 
 # ---- notify on change ----
@@ -326,6 +460,21 @@ send_mail() { # subject, body
     -d "$payload")
   echo "$(date -u) mail '$subject' -> $OWNER_TO (resend $code)" >> "$LOG"
   case "$code" in 2*) return 0;; *) cat /tmp/ros-sentinel-mail.out >> "$LOG" 2>/dev/null; return 1;; esac
+}
+
+send_sms() { # text -> 0 only when Telnyx accepted the message
+  local text="$1"
+  if [ -n "$DRYRUN" ]; then printf 'SMS: %s\n' "$text"; return 0; fi
+  if [ -z "$SMS_KEY" ] || [ -z "$SMS_FROM" ] || [ -z "$SMS_TO" ]; then
+    echo "$(date -u) WOULD SMS (ALERT_SMS_TO not configured): $text" >> "$LOG"; return 1
+  fi
+  local code
+  code=$(curl -s -o /tmp/ros-sentinel-sms.out -w '%{http_code}' -m 30 \
+    -X POST https://api.telnyx.com/v2/messages \
+    -H "Authorization: Bearer $SMS_KEY" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg f "$SMS_FROM" --arg t "$SMS_TO" --arg x "$text" '{from:$f,to:$t,text:$x}')")
+  echo "$(date -u) sms -> $SMS_TO (telnyx $code)" >> "$LOG"
+  case "$code" in 2*) return 0;; *) cat /tmp/ros-sentinel-sms.out >> "$LOG" 2>/dev/null; return 1;; esac
 }
 
 # Turn a failure code into owner-facing language: what the tool is, what broke,
@@ -409,6 +558,27 @@ explain() {
     MYTAL-DOWN) NAME="mytal.co site"; SEV="WARNING"
       MEANING="The client intake site mytal.co is not answering."
       IMPACT="Prospects and clients hitting that link get an error.";;
+    SEND-FUSE-TRIPPED) NAME="Cold email send fuse"; SEV="CRITICAL"
+      MEANING="The fleet-wide kill switch for cold email is tripped: the fleet's bounce ratio crossed the limit, a canary re-check of verified addresses failed, or someone pulled it by hand."
+      IMPACT="No cold email or follow-up goes out on any lane until a person clears the fuse. This is the system protecting the domains; read the reason before clearing.";;
+    SEND-FUSE-STALE) NAME="Cold email send fuse"; SEV="WARNING"
+      MEANING="The send fuse has not been re-evaluated against fresh bounce data recently."
+      IMPACT="The kill switch may not fire on a new bounce spike. The send tick or the sweep timer is not running.";;
+    SEND-FUSE-MISSING) NAME="Cold email send fuse"; SEV="WARNING"
+      MEANING="The send fuse ledger does not exist yet."
+      IMPACT="Until the first evaluation runs, the fleet-wide kill switch is not armed.";;
+    SEND-SOURCE-PAUSED) NAME="Cold email source breaker"; SEV="WARNING"
+      MEANING="One address-finding rung is producing bouncing addresses and has been paused on its own."
+      IMPACT="Volume from that rung is held for 48 hours (7 days on a repeat). Other rungs keep sending. That rung's supply may need a look.";;
+    SENDING-FAILRATE-HIGH) NAME="Cold email delivery"; SEV="CRITICAL"
+      MEANING="A large share of real cold-email sends are being REJECTED by receiving servers. This is measured from actual send logs, not warm-up scores - warm-up and DNS panels can show green while this is happening."
+      IMPACT="Outreach volume is silently burning: sends count against daily caps but never reach a prospect, and sustained rejection damages domain reputation. The detail names the worst domain.";;
+    SENDING-FAILRATE-ELEVATED) NAME="Cold email delivery"; SEV="WARNING"
+      MEANING="The hard-fail rate on real cold-email sends is above the healthy line (under 5%)."
+      IMPACT="Some sends are wasted and reputation is at mild risk. Usually list quality (bad addresses) or one misbehaving domain.";;
+    SENDING-STATS-STALE) NAME="Send-outcome tracking"; SEV="WARNING"
+      MEANING="The tracker that measures whether cold email actually delivers has stopped writing."
+      IMPACT="Delivery could be failing right now and nothing would say so. The measurement layer itself needs reviving.";;
     ENGINE-HEALTH-STALE) NAME="JD Sourcing health monitor"; SEV="WARNING"
       MEANING="The hourly JD Sourcing health check has not reported in over 2 hours."
       IMPACT="Sourcing problems could now go unnoticed. The monitor itself needs reviving.";;
@@ -418,6 +588,12 @@ explain() {
 CURR=$(printf '%s\n' "${FAILS[@]:-}" | sed '/^$/d' | sort)
 PREVF="$STATE/failures.txt"
 PREV=$(cat "$PREVF" 2>/dev/null || true)
+# Digit-normalized views for change detection: a failure whose detail embeds a live count
+# (queue depth, seconds) must not read as a NEW failure every 5-min run just because the
+# number moved. Without this, one stuck incident emailed every run instead of every 6h.
+norm_fails() { sed 's/[0-9][0-9.]*/N/g'; }
+CURRN=$(echo "$CURR" | norm_fails | sort)
+PREVN=$(echo "$PREV" | norm_fails | sort)
 LASTMAIL=$(cat "$STATE/lastmail.epoch" 2>/dev/null || echo 0)
 NOW=$(date -u +%s)
 HOSTLINE="Server: $(hostname), checked $(date -u '+%Y-%m-%d %H:%M UTC'). Checks run every 5 minutes."
@@ -444,9 +620,11 @@ fi
 
 if [ -n "$CURR" ]; then
   N=$(echo "$CURR" | wc -l)
-  if [ "$CURR" != "$PREV" ] || [ $((NOW - LASTMAIL)) -ge $REALERT_SECS ]; then
-    NEWLINES=$(comm -13 <(echo "$PREV") <(echo "$CURR") 2>/dev/null || echo "$CURR")
-    GONE=$(comm -23 <(echo "$PREV") <(echo "$CURR") 2>/dev/null || true)
+  if [ "$CURRN" != "$PREVN" ] || [ $((NOW - LASTMAIL)) -ge $REALERT_SECS ]; then
+    NEWLINES=$(comm -13 <(echo "$PREVN") <(echo "$CURRN") 2>/dev/null || echo "$CURRN")
+    GONE=$(while IFS= read -r l; do [ -n "$l" ] || continue
+      echo "$CURRN" | grep -qxF "$(echo "$l" | norm_fails)" || echo "$l"
+    done <<< "$PREV")
 
     # Overall severity: CRITICAL if any single problem is critical.
     OVERALL="WARNING"
@@ -460,7 +638,7 @@ if [ -n "$CURR" ]; then
       explain "$CODE"
       [ "$SEV" = "CRITICAL" ] && OVERALL="CRITICAL"
       MARK="STILL BROKEN (already alerted)"
-      echo "$NEWLINES" | grep -qxF "$line" && MARK="NEW"
+      echo "$NEWLINES" | grep -qxF "$(echo "$line" | norm_fails)" && MARK="NEW"
       PROBLEMS="$PROBLEMS
 --------------------------------------------------
 PROBLEM $i of $N: $NAME
@@ -501,6 +679,16 @@ $HOSTLINE"
     if send_mail "[ROS SENTINEL] RED / $OVERALL: $N problem(s) need attention" "$BODY"; then
       echo "$NOW" > "$STATE/lastmail.epoch"
       echo "$CURR" > "$PREVF"
+      # CRITICAL problems ALSO text the owner. Gated behind the successful email
+      # send, so SMS inherits the exact anti-spam contract (change or 6h).
+      if [ "$OVERALL" = "CRITICAL" ]; then
+        CRITCODES=$(while IFS= read -r l; do [ -n "$l" ] || continue
+          C="${l%% ::*}"; explain "$C"; [ "$SEV" = "CRITICAL" ] && echo "$C"
+        done <<< "$CURR" | sort -u | paste -sd, -)
+        if send_sms "RecruitersOS CRITICAL: $N problem(s). Broken: ${CRITCODES:-see email}. Full detail emailed to $OWNER_TO."; then
+          echo "$NOW" > "$STATE/sms.flag"
+        fi
+      fi
     fi
   else
     echo "$CURR" > "$PREVF"
@@ -532,6 +720,11 @@ $HOSTLINE" || exit 0
     # Same delivery guarantee as alerts: only clear the state once the
     # all-clear email really sent, so a failed send retries next tick.
     echo "$NOW" > "$STATE/lastmail.epoch"
+    # If a CRITICAL was texted, text the recovery too - the owner should never
+    # be left believing something is still on fire.
+    if [ -f "$STATE/sms.flag" ]; then
+      send_sms "RecruitersOS: all clear. Every check passes again, no action needed." && rm -f "$STATE/sms.flag"
+    fi
   fi
   : > "$PREVF"
 fi
