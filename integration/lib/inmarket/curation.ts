@@ -1123,8 +1123,25 @@ export async function koldInfoExportRows(opts: { limit?: number; mode?: "seed" |
   const limit = Math.max(0, opts.limit ?? 4000);
   const mode = opts.mode ?? "seed";
   const rows = await load();
+  // WHAT THE FINDER SHOULD SEE (widened 2026-08-20). A row whose address is PROVEN needs
+  // nothing here. Everything else does, and that deliberately includes the catch-all tier:
+  // a catch-all verdict means the domain accepts anything, so the specific mailbox was never
+  // proven — which is exactly the row a name + company lookup can turn into a real address.
+  // Excluding `emailCatchAll` (as this filter did until now) locked ~3,400 queued rows out of
+  // the only rung measured at a 0% bounce rate, while `guess`, the rung they fall back to,
+  // bounced 68% of the time (170 of the fleet's 271 bounces). It also lets back in rows carrying
+  // a bare `emailValidated` with no verifier word — the pre-e7debe93 backfill that stamped
+  // pattern guesses as confirmed. Applies to mode "all" only: that is the zero-credit KoldInfo
+  // DB lane the residual timer drives, so widening it cannot increase spend. `seed` keeps its
+  // original, narrower pile because it ranks for a credit-billed flow.
+  const PROVING = /^(safe|valid|deliverable|ok)$/i;
+  const isProven = (r: CuratedProspect) =>
+    !!r.emailValidated && !r.emailCatchAll && PROVING.test(r.emailVerifyStatus || "");
+  const wants = mode === "all"
+    ? (r: CuratedProspect) => !isProven(r)
+    : (r: CuratedProspect) => !r.emailValidated && !r.emailCatchAll;
   const pool = rows
-    .filter((r) => r.domain && !r.emailValidated && !r.emailCatchAll
+    .filter((r) => r.domain && wants(r)
       && r.status !== "enrolled" && r.status !== "queued"
       // suppressed rows come back in ONLY when suppression meant "the guessed address failed" and
       // the person was never contacted (same guard as findEmailsByPaid) - KoldInfo is the residual
