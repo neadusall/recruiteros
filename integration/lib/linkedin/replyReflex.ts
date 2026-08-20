@@ -27,7 +27,7 @@
 
 import { listMembers } from "../auth/team";
 import { workspaceOwner } from "../auth";
-import { numberForUser } from "../phone/store";
+import { listLines, numberForUser } from "../phone/store";
 import { requestLinkedInAction } from "./os/engine";
 import type { LiAccountState } from "./os/types";
 
@@ -64,9 +64,22 @@ interface Seat {
   email?: string;
 }
 
-function seatOwner(workspaceId: string, accounts: LiAccountState[], accountId?: string): Seat {
+async function seatOwner(workspaceId: string, accounts: LiAccountState[], accountId?: string): Promise<Seat> {
   const account = accounts.find((a) => a.accountId === accountId);
-  const userId = account?.ownerUserId;
+  let userId = account?.ownerUserId;
+  // The desk's oldest engine accounts were registered before seats carried an
+  // owner (their accountId IS the provider id, and the adoption bridge counts
+  // them as bound, so they never get stamped). Those are the two seats posting
+  // the most, so falling back to the seat store is the difference between a
+  // recruiter being told and only the owner being told.
+  if (!userId && account) {
+    try {
+      const { seatsForWorkspace } = await import("./seats");
+      const seats = await seatsForWorkspace(workspaceId);
+      const provider = account.providerAccountId || account.accountId;
+      userId = seats.find((s) => s.accountId === provider)?.userId;
+    } catch { /* the workspace owner is still copied on every alert */ }
+  }
   if (!userId) return { name: account?.displayName };
   const member = listMembers(workspaceId).find((m) => m.userId === userId);
   return { userId, name: member?.name ?? account?.displayName, email: member?.email };
@@ -102,7 +115,9 @@ async function textOne(workspaceId: string, to: string, from: string | null, tex
   await withWorkspaceCreds(workspaceId, () => telnyx.sendSms(to, text, from));
 }
 
-/** Their line first (a recruiter recognizes their own number), then the desk's. */
+/** Their line first (a recruiter recognizes their own number), then the desk's.
+ *  The last fallback matters: without a from-line the text silently does not
+ *  send, and a silent alert is the failure this whole module exists to end. */
 function fromLine(workspaceId: string, userId?: string): string | null {
   try {
     if (userId) {
@@ -111,7 +126,10 @@ function fromLine(workspaceId: string, userId?: string): string | null {
     }
   } catch { /* fall through to the desk line */ }
   const env = (process.env.ROLE_HUNTER_ALERT_SMS_FROM || process.env.RECRUITEROS_BOOKING_SMS_FROM || "").trim();
-  return env || null;
+  if (env) return env;
+  try {
+    return listLines(workspaceId).find((l) => !!l.e164)?.e164 || null;
+  } catch { return null; }
 }
 
 /* ------------------------------------------------------------------ */
@@ -247,7 +265,7 @@ async function connect(workspaceId: string, item: RepliedThread): Promise<void> 
 export async function posterReplyReflex(
   workspaceId: string, item: RepliedThread, accounts: LiAccountState[],
 ): Promise<void> {
-  const seat = seatOwner(workspaceId, accounts, item.accountId);
+  const seat = await seatOwner(workspaceId, accounts, item.accountId);
   if (!item.replyAlertAt) {
     item.replyAlertAt = new Date().toISOString();
     try { await alert(workspaceId, item, seat); } catch (e) {
