@@ -6,8 +6,9 @@
 // shows real activity: sends, reply rate BY VARIANT (what's working), replies by sentiment, clean
 // supply ready, and free boards discovered. One source of truth, no double-counting.
 //
-// Reads only already-produced data (send logs + the bridged inbox + curation), no API calls.
-//   node scripts/mpc/mpc-stats.mjs
+// Reads only already-produced data (send logs + the reply ledger + the bridged inbox + curation),
+// no API calls.
+//   node /opt/recruiteros/tools/mpc-stats.mjs
 
 import { readFileSync, readdirSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { assessProspect } from "./gates.mjs";
@@ -41,7 +42,64 @@ function loadArray(file) {
   } catch { return []; }
 }
 
-// Bridged finance-campaign replies already in the unified inbox: email -> sentiment class.
+// ===========================================================================
+// WHO REPLIED - two sources, one truth.
+//
+// THE DURABLE RECORD is /out/replies-*.jsonl, appended by monitor.mjs on every sweep. A row
+// lands there only when an inbound sender EXACTLY matches an address that same box emailed, so
+// warm-up network chatter can never enter it, and it stays on disk forever.
+//
+// THE UNIFIED INBOX (snap_inbox.json) is a live, mutable, capped UI store that ALSO carries
+// hundreds of warm-up messages a day. A real reply can be deleted from it by a recruiter or
+// crowded out of it entirely. Reading replies from the inbox alone is exactly what made this
+// Dashboard report "0 replies / 0%" against 2,177 sends while nine people had actually written
+// back: not one identity-verified row survived in the inbox.
+//
+// So the LEDGER decides WHO replied, and the inbox only supplies the sentiment label for the
+// rows it still holds.
+// ===========================================================================
+
+// Free sentiment heuristics, a deliberate MIRROR of fastPath() in
+// integration/lib/response/classify.ts - same patterns, same order - so a reply reads the same
+// on the Dashboard as it does in the Reply center. No model call: this tool stays free and
+// offline, and anything the heuristics do not recognise stays "unclassified" rather than being
+// guessed into a hot label. Only the reply SUBJECT is available here, which is enough to catch
+// the out-of-office family that dominates cold-email replies.
+const RX_OPT_OUT = /\b(stop|unsubscribe|do not contact|remove me|opt[\s-]?out|take me off)\b/;
+const RX_BOOKED = /\b(booked|calendly\.com|cal\.com\/|i picked|just grabbed a slot)\b/;
+const RX_OOO = /\b(out of (the )?office|on vacation|annual leave|parental leave|maternity leave|paternity leave|automatic reply|auto[\s-]?repl(y|ied)|autoreply|away from (my )?(email|desk)|limited access to (my )?email|currently (out|away|traveling|travelling)|(will|i'll) (respond|reply|return) (when|on|upon)|delayed response)\b/;
+function fastClass(text) {
+  const t = String(text || "").toLowerCase().trim();
+  if (!t) return "unclassified";
+  if (RX_OPT_OUT.test(t)) return "stop";
+  if (RX_BOOKED.test(t)) return "positive";
+  if (RX_OOO.test(t.slice(0, 300))) return "auto_reply";
+  return "unclassified";
+}
+
+// Identity-verified replies from the durable ledger: email -> newest sighting.
+// Every sweep re-writes the matches it can still see, so one person appears across many files;
+// keeping the newest sighting counts them exactly once.
+function ledgerReplies() {
+  const map = new Map();
+  if (!existsSync(OUT)) return map;
+  for (const f of readdirSync(OUT).filter((n) => /^replies-.*\.jsonl$/.test(n))) {
+    for (const line of readFileSync(`${OUT}/${f}`, "utf8").split("\n")) {
+      const s = line.trim(); if (!s) continue;
+      try {
+        const r = JSON.parse(s);
+        const email = String(r.to_email || "").toLowerCase().trim();
+        if (!email) continue;
+        const at = String(r.reply_at || "");
+        const prev = map.get(email);
+        if (!prev || at > prev.at) map.set(email, { at, subject: String(r.reply_subject || ""), variant: String(r.variant || "") });
+      } catch { /* skip */ }
+    }
+  }
+  return map;
+}
+
+// Bridged campaign replies already in the unified inbox: email -> sentiment class.
 function inboxReplies() {
   const map = new Map();
   try {
@@ -60,7 +118,14 @@ function inboxReplies() {
 }
 
 const sent = loadSent();
-const replies = inboxReplies();
+const ledger = ledgerReplies();
+const inboxCls = inboxReplies();
+// The reply set: everyone the ledger proves wrote back, plus anything the inbox bridged that the
+// ledger has not seen. Where the inbox still holds the row, its real classification wins over the
+// subject-line heuristic.
+const replies = new Map();
+for (const [email, hit] of ledger) replies.set(email, fastClass(hit.subject));
+for (const [email, cls] of inboxCls) replies.set(email, cls);
 
 // Sending mailbox -> owning recruiter, from the senders store snapshot. Newer send rows carry
 // from_owner directly; this map back-fills the pre-fleet rows (which all went out on owned boxes
@@ -88,7 +153,7 @@ function newSide() {
   return {
     variants: new Map(), recruiters: new Map(), bySentiment: {},
     lastSenderByLead: new Map(), // lead email -> recruiter who last emailed them (gets the reply credit)
-    sentToday: 0, sentTotal: 0,
+    sentToday: 0, sentTotal: 0, repliesTotal: 0,
   };
 }
 const sides = { bd: newSide(), recruiting: newSide() };
@@ -104,6 +169,8 @@ for (const r of sent) {
   contacted.add(email);
   const isToday = (r.at || "").slice(0, 10) === today;
   if (isToday) side.sentToday++;
+  // variant.replied = "sends of this angle that earned a reply", the leaderboard's own metric.
+  // It is NOT the reply count: a person on touch 3 carries the same reply across three sends.
   if (replies.has(email)) s.replied++;
   const owner = canonOwner(r.from_owner || ownerByBox.get(String(r.from || "").toLowerCase().trim()) || "Unattributed");
   const rec = recFor(side, owner);
@@ -112,8 +179,15 @@ for (const r of sent) {
   side.lastSenderByLead.set(email, owner);
   lastMotionByLead.set(email, motionOf(r));
 }
+// One reply = one person, counted once, on the side that last touched them. A reply whose send
+// row is not in this ledger at all (a job blast, which the app sends and records itself) is
+// placed by the ledger row's own variant; the app's /mpc-stats route then folds the matching
+// portal-native SENDS into the same side, so the rate has a real denominator.
 for (const [email, cls] of replies) {
-  const side = sides[lastMotionByLead.get(email) || "bd"];
+  const known = lastMotionByLead.get(email);
+  const fallback = String((ledger.get(email) || {}).variant || "") === "job_blast" ? "recruiting" : "bd";
+  const side = sides[known || fallback];
+  side.repliesTotal++;
   side.bySentiment[cls] = (side.bySentiment[cls] || 0) + 1;
   const owner = side.lastSenderByLead.get(email);
   if (owner) recFor(side, owner).replies++;
@@ -125,10 +199,9 @@ function sideRollup(side) {
   const recruiterRows = [...side.recruiters.values()]
     .map((s) => ({ ...s, replyRate: s.sentTotal ? Math.round((s.replies / s.sentTotal) * 1000) / 10 : 0 }))
     .sort((a, b) => b.sentToday - a.sentToday || b.sentTotal - a.sentTotal);
-  const repliesTotal = variantRows.reduce((n, v) => n + v.replied, 0);
   return {
-    sentToday: side.sentToday, sentTotal: side.sentTotal, repliesTotal,
-    replyRate: side.sentTotal ? Math.round((repliesTotal / side.sentTotal) * 1000) / 10 : 0,
+    sentToday: side.sentToday, sentTotal: side.sentTotal, repliesTotal: side.repliesTotal,
+    replyRate: side.sentTotal ? Math.round((side.repliesTotal / side.sentTotal) * 1000) / 10 : 0,
     repliesBySentiment: side.bySentiment, variants: variantRows, recruiters: recruiterRows,
   };
 }
@@ -174,7 +247,7 @@ const variantRows = [...variants.values()]
   .sort((a, b) => b.rate - a.rate || b.replied - a.replied);
 
 const totalSent = sent.length;
-const totalReplied = [...variants.values()].reduce((n, s) => n + s.replied, 0);
+const totalReplied = bdSlice.repliesTotal + recruitingSlice.repliesTotal;
 
 const stats = {
   generatedAt: new Date().toISOString(),
@@ -188,6 +261,9 @@ const stats = {
   recruiters: recruiterRows,      // who sent it: per-recruiter sends + reply credit
   supplyReady: sendableNow,
   freeBoards: boards,
+  // Where each reply number came from, so the daily audit (and a human) can tell a genuine
+  // zero from a broken pipe without re-deriving anything.
+  replySources: { ledger: ledger.size, inbox: inboxCls.size, counted: replies.size },
   // The BD/Recruiting split of THIS engine's ledger. The app's /mpc-stats route folds the
   // portal-native recruiting sends (job blasts, campaign cadences) into motions.recruiting,
   // so the Dashboard's Recruiting tab covers both paths.
@@ -198,6 +274,7 @@ const tmp = STATS_FILE + ".tmp";
 writeFileSync(tmp, JSON.stringify(stats, null, 2));
 renameSync(tmp, STATS_FILE);
 console.log(`mpc-stats -> sent ${totalSent} (today ${sentToday}), replies ${totalReplied} (${stats.replyRate}%), supplyReady ${sendableNow}, boards ${boards}`);
+console.log(`reply sources: ledger ${ledger.size} + inbox ${inboxCls.size} -> ${replies.size} distinct people`);
 console.log(`by motion: BD today ${bdSlice.sentToday} / total ${bdSlice.sentTotal} / replies ${bdSlice.repliesTotal} | Recruiting today ${recruitingSlice.sentToday} / total ${recruitingSlice.sentTotal} / replies ${recruitingSlice.repliesTotal}`);
 console.log("by variant:", variantRows.map((v) => `${v.variant} ${v.replied}/${v.sent} (${v.rate}%)`).join(" | "));
 console.log("by recruiter:", recruiterRows.map((r) => `${r.name} today ${r.sentToday} / total ${r.sentTotal} / replies ${r.replies}`).join(" | "));

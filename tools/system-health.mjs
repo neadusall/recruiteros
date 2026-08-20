@@ -439,6 +439,7 @@ const TIMERS = [
   ["mpc-seed-test.timer", "Weekly seed placement test", 8 * 24 * 60],
   ["recruiteros-signals-watch.timer", "Signal watchlists (q15m)", 60],
   ["fleet-verify.timer", "Daily fleet verification", 26 * 60],
+  ["recruiteros-numbers.timer", "Daily numbers pass + audit", 26 * 60],
   ["system-health.timer", "This health collector", 45],
 ];
 for (const [unit, label, staleMin] of TIMERS) {
@@ -630,9 +631,38 @@ try {
        : "RECRUITEROS_ROLE_VM_ON_SEND is unset, so emails do not stage a voicemail follow-up.");
 } catch { /* never let a readiness probe break the collector */ }
 
+/* ---------------- Numbers & tracking ---------------- */
+// Every figure the portal shows is a claim about data that lives somewhere else. tools/numbers-
+// audit.mjs re-derives those claims from the ledgers once a day and records where they disagree;
+// this surfaces its verdict on the board so a wrong number is as visible as a dead timer. Born
+// out of the 2026-08-20 fault where the Dashboard showed "0 replies" against nine real ones and
+// refreshed punctually the whole time, so nothing else on this board noticed.
+const GROUP_NUM = "Numbers & tracking";
+{
+  const audit = readJson(`${VOL}/snap_numbers_audit_v1.json`);
+  const age = audit ? ageMin(audit.generatedAt) : null;
+  if (!audit) {
+    add(GROUP_NUM, "numbers-audit", "Portal numbers audited against their source", "bad", "never run",
+      "recruiteros-numbers.timer has not produced an audit. No portal figure is being checked against the ledger under it.");
+  } else if (age == null || age > 2 * 1440) {
+    add(GROUP_NUM, "numbers-audit", "Portal numbers audited against their source", "bad", `last audit ${fmtAge(age)}`,
+      "The daily numbers pass has stopped. Check recruiteros-numbers.timer.");
+  } else {
+    // One row per finding, so the board names the exact surface that is lying rather than a score.
+    const map = { ok: "good", warn: "amber", bad: "bad" };
+    for (const f of audit.findings || []) {
+      add(GROUP_NUM, `num-${f.id}`, f.surface, map[f.status] || "amber", f.reading, f.detail || "");
+    }
+    add(GROUP_NUM, "numbers-audit", "Portal numbers audited against their source",
+      audit.verdict === "bad" ? "bad" : audit.verdict === "warn" ? "amber" : "good",
+      `${(audit.summary || {}).ok || 0} agree / ${(audit.summary || {}).warn || 0} drifting / ${(audit.summary || {}).bad || 0} wrong, checked ${fmtAge(age)}`,
+      audit.verdict === "ok" ? "" : "A figure on the portal does not match the data underneath it; read the rows above before trusting it.");
+  }
+}
+
 /* ---------------- write ---------------- */
 const summary = { good: checks.filter((c) => c.status === "good").length, amber: checks.filter((c) => c.status === "amber").length, bad: checks.filter((c) => c.status === "bad").length };
-const out = { generatedAt: new Date().toISOString(), summary, groups: [GROUP_SEND, GROUP_SUPPLY, GROUP_WATCH, GROUP_API], checks };
+const out = { generatedAt: new Date().toISOString(), summary, groups: [GROUP_SEND, GROUP_SUPPLY, GROUP_WATCH, GROUP_NUM, GROUP_API], checks };
 const tmp = OUT_FILE + ".tmp";
 writeFileSync(tmp, JSON.stringify(out, null, 1));
 renameSync(tmp, OUT_FILE);
