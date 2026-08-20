@@ -277,55 +277,76 @@ if (stats) {
 }
 
 /* =========================================================================
-   6. VIDEO. Two different numbers that are easy to confuse, so both are here.
+   6. VIDEO, AS A CHAIN. A personalized video is only worth anything if it is
+   made, then sent, then watched, and each of those can stop independently.
+   Reporting only the last one is how this went wrong: "no engagement events
+   for six days" was read as a tracking fault, when in fact production was
+   healthy and not one video had been EMAILED in three days.
 
-   PRODUCTION is whether the engine can still make a video at all. Every video
-   needs a REAL capture of the role's own posting — the synthetic role card was
-   made opt-in on 2026-08-14 by owner mandate, so a page it cannot reach is a
-   video that does not get made. Real captures have only ever succeeded ~11% of
-   attempts, so this can quietly fall to zero without anything erroring.
-
-   ENGAGEMENT is whether anyone watched. A quiet spell there is legitimate; a
-   quiet spell that is really a production stoppage is not, and the two look
-   identical from the engagement number alone. That is why production is read
-   first: an empty board with nothing being produced is a supply problem.
+   Note which file production is read from. snap_inmarket_videos_v1.json looks
+   like the video registry and is not — it is a legacy list, last written
+   2026-08-14, and reading it says "nothing has been made in a week" while the
+   fleet is composing steadily. The real record is the autovideo map, which is
+   what recordVideoResults() actually writes when a worker reports a composite.
    ========================================================================= */
 {
   const since = new Date(now - 7 * 86400000).toISOString();
   const fails = readJson(`${VOL}/snap_inmarket_autovideo_fails_v1.json`) || {};
-  const vids = readJson(`${VOL}/snap_inmarket_videos_v1.json`) || {};
+  const made = readJson(`${VOL}/snap_inmarket_autovideo_map_v1.json`) || {};
   const failRecent = Object.values(fails).filter((v) => String((v || {}).at || "") >= since).length;
-  const madeRecent = Object.values(vids).filter((v) => String((v || {}).at || "") >= since).length;
+  const madeRecent = Object.values(made).filter((v) => v && typeof v === "object" && String(v.at || "") >= since).length;
   const attempts = failRecent + madeRecent;
   const pct = attempts ? Math.round((100 * madeRecent) / attempts) : 0;
-  // Reasons matter: a wall of "role not found" is a reachability problem worth acting on,
-  // where scattered failures are just the long tail of the open web.
+  // Reasons matter: a wall of one reason is a reachability problem worth acting on, where a
+  // spread of them is just the long tail of the open web.
   const reasons = {};
   for (const v of Object.values(fails)) {
     if (String((v || {}).at || "") < since) continue;
-    const r = String((v || {}).reason || "unknown").slice(0, 60);
+    const r = String((v || {}).reason || "unknown").slice(0, 56);
     reasons[r] = (reasons[r] || 0) + 1;
   }
   const top = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0];
-  const prodStatus = !attempts ? "warn" : madeRecent === 0 ? "bad" : pct < 10 ? "warn" : "ok";
+  // A capture rate in the low teens is NORMAL here and always has been (56 real captures of
+  // 518 shots historically): most of the pool's harvested links are job aggregators, which we
+  // refuse to screenshot. Zero is the number that means something has actually broken.
+  const prodStatus = !attempts ? "warn" : madeRecent === 0 ? "bad" : "ok";
   add("videoproduction", "PiP Studio · videos actually being produced", prodStatus,
     attempts ? `${madeRecent} made of ${attempts} attempts (${pct}%) in 7d` : "no attempts in 7d",
     prodStatus === "ok" ? ""
-      : !attempts ? "The video engine has not tried to build anything this week."
-      : `Every attempt failed. Videos require a real capture of the role's own posting (the synthetic role card is opt-in since 2026-08-14), so a pool of aggregator links produces nothing.${top ? ` Leading reason: ${top[0]} (${top[1]}).` : ""}`);
+      : !attempts ? "The video fleet has not tried to build anything this week."
+      : `Every attempt failed. A video needs a REAL capture of the role's own posting (the synthetic role card is opt-in since 2026-08-14), so a pool of aggregator links produces nothing.${top ? ` Leading reason: ${top[0]} (${top[1]}).` : ""}`);
+
+  // DELIVERY — the step that was silently zero. video-email2 writes one ledger per run.
+  let vsent = 0, vrows = 0;
+  try {
+    for (const f of readdirSync(MPC_OUT).filter((n) => /^sent-video2?-.*\.jsonl$/.test(n))) {
+      for (const line of readFileSync(`${MPC_OUT}/${f}`, "utf8").split("\n")) {
+        const t = line.trim(); if (!t) continue;
+        try {
+          const r = JSON.parse(t);
+          if (String(r.at || "") < since) continue;
+          vrows++;
+          if (r.result && r.result.ok) vsent++;
+        } catch { /* skip */ }
+      }
+    }
+  } catch { /* no ledger dir */ }
+  const delStatus = vsent > 0 ? "ok" : madeRecent > 0 ? "bad" : "warn";
+  add("videodelivery", "PiP Studio · videos actually reaching a recipient", delStatus,
+    `${vsent} sent of ${vrows} attempted in 7d`,
+    delStatus === "ok" ? ""
+      : madeRecent > 0
+        ? `The fleet made ${madeRecent} videos this week and none of them were emailed, so the whole lane produced nothing of value. Check the daily log for the video-email2 line: the usual causes are a thin touch-1 cohort the day before, domains benched by the rest ledger, and the RYAN-ONLY restriction on video sends.`
+        : "Nothing was made, so nothing could be sent. Read the production row above.");
 
   const age = mtimeMin(`${VOL}/snap_inmarket_video_stats_v1.json`);
-  // Engagement can only be judged when something was actually sent to be watched.
-  // Judge engagement only once enough videos went out to expect a watch. Three videos in a
-  // week producing no opens says nothing, and reporting it as a tracking fault would send the
-  // reader hunting a broken beacon when the real story is upstream in production.
-  const enoughToJudge = madeRecent >= 10;
-  const engStatus = !enoughToJudge ? "ok" : age == null ? "warn" : age <= 3 * 1440 ? "ok" : "warn";
+  // Engagement can only be judged when videos actually reached people.
+  const engStatus = vsent < 5 ? "ok" : age == null ? "warn" : age <= 3 * 1440 ? "ok" : "warn";
   add("videostats", "PiP Studio · video opens, visits, watchers", engStatus,
     `last engagement event ${fmtAge(age)}`,
     engStatus === "ok"
-      ? (enoughToJudge ? "" : `Only ${madeRecent} video${madeRecent === 1 ? "" : "s"} went out this week, too few to read anything into the silence. The production row above is the one to act on.`)
-      : "Videos are going out but nothing is being watched. Check that the watch links and the tracking beacon still resolve.");
+      ? (vsent < 5 ? "Too few videos reached anyone this week to read anything into the silence. The rows above are the ones to act on." : "")
+      : "Videos are reaching people and nothing is being watched. Check that the watch links and the tracking beacon still resolve.");
 }
 
 /* ---------------- verdict, snapshot, edge-triggered owner alert ---------------- */
