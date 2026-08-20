@@ -59,7 +59,7 @@ function taskMaxAgeMs(): number { return (Number(process.env.REOON_TASK_MAX_AGE_
  * status is Reoon's own word, persisted on the row so a bounced address can be diagnosed later.
  * Defensive across Reoon's field names (status string + the boolean flags it returns in power mode).
  */
-function interpret(r: any): { valid: boolean | null; catchAll: boolean; status: string } {
+export function interpretReoonVerdict(r: any): { valid: boolean | null; catchAll: boolean; status: string } {
   if (!r || typeof r !== "object") return { valid: null, catchAll: false, status: "" };
   const status = String(r.status ?? r.result ?? r.state ?? "").toLowerCase().replace(/[\s-]+/g, "_");
   const disposable = r.is_disposable === true || r.disposable === true;
@@ -126,7 +126,7 @@ async function pollBulkTask(taskId: string): Promise<{ done: boolean; verdicts: 
     const verdicts: Array<{ email: string; valid: boolean; catchAll?: boolean; status?: string }> = [];
     for (const { email, r } of entries) {
       if (!email) continue;
-      const v = interpret(r);
+      const v = interpretReoonVerdict(r);
       if (v.valid === null) continue; // inconclusive → leave pending
       verdicts.push({ email, valid: v.valid, catchAll: v.catchAll, status: v.status });
     }
@@ -171,12 +171,20 @@ async function runReoonTickInner(): Promise<void> {
     return;
   }
 
-  // No task in flight → submit the next batch of still-pending guesses.
-  const { pendingValidationEmails } = await import("./curation");
+  // No task in flight → submit the next batch of still-pending guesses, then (2026-08-20) the
+  // RE-VERIFICATION BACKFILL: rows stamped emailValidated before the verifier's status word was
+  // persisted (the pre-8/19 population that burned the fleet) get a fresh bulk verdict so the
+  // store itself becomes trustworthy and the send-time belt has a word to read.
+  const { pendingValidationEmails, markVerificationSubmitted } = await import("./curation");
   const emails = await pendingValidationEmails(bulkSize());
   if (!emails.length) return;
   const taskId = await createBulkTask(emails);
-  if (taskId) await saveSnapshot(STATE_KEY, { taskId, count: emails.length, createdAt: Date.now() } as TaskState);
+  if (taskId) {
+    await saveSnapshot(STATE_KEY, { taskId, count: emails.length, createdAt: Date.now() } as TaskState);
+    // Stamp the submission so an inconclusive verdict (which leaves the row as it was) does not
+    // re-queue the same address every tick; the backfill retries it after a cooling-off period.
+    await markVerificationSubmitted(emails, new Date().toISOString()).catch(() => undefined);
+  }
 }
 
 function withWatchdog(fn: () => Promise<void>, ms: number): Promise<void> {

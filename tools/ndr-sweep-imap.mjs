@@ -46,6 +46,8 @@ function decryptSecret(stored) {
 // Campaign recipients + per-domain send counts from the send ledgers (14 days).
 const sentTo = new Set();
 const sentByDomain = new Map();
+const sentMeta = new Map();   // rcpt -> { source, tier, at } (provenance for the send fuse; twin of ndr-sweep.mjs)
+const sentBySource = {};
 const cutoff = new Date(Date.now() - 14 * 86_400_000).toISOString();
 try {
   for (const f of readdirSync(OUT).filter((n) => /^sent-.*\.jsonl$/.test(n))) {
@@ -53,7 +55,13 @@ try {
       const s = line.trim(); if (!s) continue;
       let r; try { r = JSON.parse(s); } catch { continue; }
       if (!r || !r.to_email || (r.at && r.at < cutoff)) continue;
-      sentTo.add(String(r.to_email).toLowerCase());
+      const rcptKey = String(r.to_email).toLowerCase();
+      sentTo.add(rcptKey);
+      if (r.email_source) {
+        const prev = sentMeta.get(rcptKey);
+        if (!prev || String(r.at || "") > String(prev.at || "")) sentMeta.set(rcptKey, { source: r.email_source, tier: r.tier || null, at: r.at || null });
+        if (r.result && r.result.ok) sentBySource[r.email_source] = (sentBySource[r.email_source] || 0) + 1;
+      }
       const d = String(r.from || "").split("@")[1];
       if (d) sentByDomain.set(d, (sentByDomain.get(d) || 0) + 1);
     }
@@ -227,6 +235,8 @@ const byReason = {};
 const reasonExamples = {};
 const perBoxInfra = {};
 const warmupPerBox = {};
+const notices = [];   // send fuse inputs (merged into the main sidecar by ndr-sweep.mjs)
+const perSource = {};
 let warmupNdrs = 0, staleSkipped = 0, infraNdrs = 0;
 for (const n of ndrs) {
   const rcpt = String(n.rcpt || "").toLowerCase();
@@ -250,6 +260,9 @@ for (const n of ndrs) {
   perDomain[d] = perDomain[d] || { bounces: 0, sent: sentByDomain.get(d) || 0 };
   perDomain[d].bounces++;
   perBox[n.box] = (perBox[n.box] || 0) + 1;
+  const meta = rcpt ? sentMeta.get(rcpt) : null;
+  notices.push({ at: n.at, rcpt: rcpt || null, box: n.box, domain: d, reason, source: meta ? meta.source : null, tier: meta ? meta.tier : null, lane: "imap" });
+  if (meta) { const ps = perSource[meta.source] || (perSource[meta.source] = { sent: sentBySource[meta.source] || 0, bounces: 0 }); ps.bounces++; }
 }
 if (staleSkipped) console.log(`freshness rule: ${staleSkipped} pre-bench notices excluded`);
 if (infraNdrs) console.log(`relay-auth rule: ${infraNdrs} our-box auth failures kept OFF the reputation books (boxes: ${Object.keys(perBoxInfra).join(", ")})`);
@@ -273,6 +286,8 @@ const out = {
   perBox,
   byReason,
   reasonExamples,
+  notices,          // send fuse: timestamped campaign bounces seen over IMAP (merged by ndr-sweep.mjs)
+  perSource,        // send fuse: bounces per address rung on this lane
 };
 const tmp = SIDECAR + ".tmp";
 writeFileSync(tmp, JSON.stringify(out, null, 1));

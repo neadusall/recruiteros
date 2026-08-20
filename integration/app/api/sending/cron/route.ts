@@ -132,6 +132,24 @@ async function run(req: Request) {
     }
   } catch (e: any) { bounceFeedback = { error: e?.message ?? "bounce_feedback_failed" }; }
 
+  // Verdict sync (owner mandate 2026-08-20): the send-time verification belt (tools/batch.mjs)
+  // re-checks addresses live right before a send and caches the verifier's word in
+  // snap_mpc_verify_cache_v1. Folding those verdicts back here keeps the store honest: a
+  // live "invalid" becomes emailInvalid (and flows to the rescue finders), a live "safe"
+  // gives the row its status word. Newer store verdicts are never overwritten.
+  let verdictSync: unknown = null;
+  try {
+    const { loadSnapshot } = await import("../../../../lib/db");
+    const cache = await loadSnapshot<{ entries?: Record<string, { at?: string; verdict?: string; status?: string }> }>("mpc_verify_cache_v1");
+    const entries = cache?.entries ?? {};
+    if (Object.keys(entries).length) {
+      const { syncExternalVerdicts } = await import("../../../../lib/inmarket/curation");
+      verdictSync = await syncExternalVerdicts(entries, new Date().toISOString());
+    } else {
+      verdictSync = { applied: 0, considered: 0 };
+    }
+  } catch (e: any) { verdictSync = { error: e?.message ?? "verdict_sync_failed" }; }
+
   // Staff-mailbox fail-safe sweep (owner mandate 2026-08-19): suppression
   // entries for workspace members' own login mailboxes rest 48h max. The Aug 5
   // incident hid five bouncing recruiter boxes behind a silent 30-day
@@ -161,7 +179,7 @@ async function run(req: Request) {
     jobBlasts = await runJobBlastTickAll();
   } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, ipReputation, variants, bounceFeedback, staffSuppression, replies, jobBlasts });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, ipReputation, variants, bounceFeedback, verdictSync, staffSuppression, replies, jobBlasts });
 }
 
 export const GET = run;

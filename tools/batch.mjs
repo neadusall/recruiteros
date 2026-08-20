@@ -8,6 +8,11 @@
 // signing each email as the box's owner, and logs every send. A hard per-box daily cap keeps
 // every mailbox at safe cold volume.
 //
+// 2026-08-20 safeguards (after the 8/19 fleet burn): the SEND FUSE is evaluated first (fleet-wide
+// bounce ratio + per-source breakers; latched, person-cleared), cold sends HOLD without fresh
+// bounce data, every address passes the VERIFICATION BELT (verdict on file or a live Reoon check,
+// canary sample of older verdicts), and pattern-derived addresses only leave the blast-radius slice.
+//
 //   node scripts/mpc/batch.mjs                 # dry-run: gate + write + show, send nothing
 //   node scripts/mpc/batch.mjs --limit 25      # cap how many to draft
 //   node scripts/mpc/batch.mjs --send          # send the drafts that passed every gate
@@ -19,6 +24,13 @@ import { assessProspect, metroOf, checkRenderedEmail, cohortKeyOf, dmFunction, r
 import { writeEmail, signature, footer, greetingName, recruiterFor } from "./writer.mjs";
 import { pickVariant } from "./variants.mjs";
 import { classifyEmails } from "./mxclass.mjs";
+// VERIFICATION BELT + SEND FUSE (owner mandate 2026-08-20, after the 8/19 fleet burn): every
+// address must carry a verifier verdict the sender can read back (or gets re-verified live right
+// here), a sample of older verdicts is canary-checked before each run, weaker-proof addresses ride
+// a fixed slice of the fleet, and a fleet-wide fuse / per-source breakers stop a bad run while it
+// is happening. See verify.mjs + fuse.mjs; both ship with tests (test-verify.mjs, test-fuse.mjs).
+import { loadVerifyCache, saveVerifyCache, proofOf, verifyMany } from "./verify.mjs";
+import { loadFuseLedger, writeFuseLedger, evaluateFuse, loadSentRows, loadNdr, ndrAgeHours, tripFleet, notifyOwner, tierOf, canarySlice } from "./fuse.mjs";
 
 // Recruiter decisions from the Growth cockpit: a suppressed / wrong-market / still-snoozed cohort
 // is OFF, so the autopilot never sends it. This is what makes the "Suppress" button have teeth.
@@ -294,6 +306,32 @@ async function sendViaMailboxApi(fromEmail, to, subject, body) {
 async function main() {
   mkdirSync(OUT, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+  // ===== SEND FUSE + BOUNCE VISIBILITY (evaluated before a single credit or token is spent) =====
+  // Fail-CLOSED by design (owner mandate 2026-08-20): without fresh bounce data the fleet is
+  // flying blind, so cold sends wait for the next NDR sweep instead of guessing. The fleet fuse
+  // latches on a bounce spike (or a failed canary) and only a person clears it.
+  const ndr = loadNdr();
+  const NDR_MAX_AGE_H = Number(process.env.MPC_NDR_MAX_AGE_H || 12);
+  const ndrAge = ndrAgeHours(ndr);
+  let fuse = loadFuseLedger();
+  const fuseEval = evaluateFuse({ ledger: fuse, sentRows: loadSentRows(OUT, 14), ndr });
+  fuse = fuseEval.ledger;
+  try { writeFuseLedger(fuse); } catch (e) { console.log(`fuse ledger not writable: ${e.message}`); }
+  for (const c of fuseEval.changes) console.log(`  fuse: ${c.text}`);
+  if (fuseEval.changes.length) await notifyOwner(fuseEval.changes);
+  if (fuse.fleet.tripped) {
+    console.log(`HOLD: the send fuse is TRIPPED (${fuse.fleet.by}: ${fuse.fleet.reason}; since ${fuse.fleet.since}). Nothing sends until a person clears it: bash /opt/recruiteros/tools/send-fuse.sh --clear`);
+    return;
+  }
+  if (SEND && (ndrAge == null || ndrAge > NDR_MAX_AGE_H)) {
+    console.log(`HOLD: bounce data is ${ndrAge == null ? "missing" : `${ndrAge.toFixed(1)}h old`} (limit ${NDR_MAX_AGE_H}h). Cold sends wait for a fresh NDR sweep (mpc-ndr-sweep.timer); set MPC_NDR_MAX_AGE_H to widen.`);
+    return;
+  }
+  const pausedSources = new Set(Object.entries(fuse.sources || {}).filter(([, s]) => s && s.paused).map(([k]) => k));
+  if (pausedSources.size) console.log(`  fuse: source breaker(s) open: ${[...pausedSources].join(", ")} (those rungs' addresses are held this run)`);
+  const fw = fuse.window || {};
+  console.log(`send fuse: armed | ${fw.available === false ? "bounce notices not yet in the sweep" : `${fw.bounces ?? 0} bounces / ${fw.sends ?? 0} sends in ${fw.windowH ?? 24}h`} | NDR data ${ndrAge == null ? "missing" : `${ndrAge.toFixed(1)}h old`}`);
   // START FRESH: ignore the pre-finance firehose backlog entirely. Only work records curated on or
   // after the finance-approach cutoff (all records carry an ISO curatedAt). Override with MPC_CURATED_SINCE.
   const SINCE = process.env.MPC_CURATED_SINCE || "2026-08-11";
@@ -371,6 +409,7 @@ async function main() {
   let skippedBlocked = 0;
   let skippedUnvalidated = 0;
   let skippedBounced = 0;
+  let skippedSourcePaused = 0;
   // VALIDATION BELT (2026-08-12 deliverability audit). The app-side enroll gate requires a
   // Reoon-validated address, but curated rows reach this lane directly, so the same rule holds
   // here: a known-invalid address never sends, and an unvalidated one waits for the nightly
@@ -383,10 +422,11 @@ async function main() {
     if (ndrStop.has(e)) { skippedBounced++; continue; } // receiver already told us this address is dead
     if (blocked.size && blocked.has(cohortKeyOf(p))) { skippedBlocked++; continue; } // recruiter said "no" to this cohort
     if (p.emailInvalid || (REQUIRE_VALIDATED && p.emailValidated !== true)) { skippedUnvalidated++; continue; }
+    if (pausedSources.size && pausedSources.has(p.emailSource || "guess")) { skippedSourcePaused++; continue; } // that rung is bouncing: held, not dropped
     runSeen.add(e);
     fresh.push(p);
   }
-  console.log(`already emailed: ${seen.size} | known-bounced suppressed: ${skippedBounced} | blocked-cohort skipped: ${skippedBlocked} | unvalidated/invalid held: ${skippedUnvalidated} | fresh & ready: ${fresh.length}`);
+  console.log(`already emailed: ${seen.size} | known-bounced suppressed: ${skippedBounced} | blocked-cohort skipped: ${skippedBlocked} | unvalidated/invalid held: ${skippedUnvalidated} | paused-source held: ${skippedSourcePaused} | fresh & ready: ${fresh.length}`);
 
   // PROVIDER-AWARE ORDERING + SEG PHASE (the enterprise-deliverability layer, mxclass.mjs).
   // All MPC volume leaves Azure/Outlook infrastructure, so Outlook-hosted recipients are our
@@ -478,7 +518,93 @@ async function main() {
   const effLimit = SEND ? Math.min(LIMIT, dailyRemaining) : LIMIT;
   if (SEND) console.log(`daily cap ${DAILY_CAP} | already sent today ${sentToday} | room left ${dailyRemaining}`);
 
-  const batch = ordered.slice(0, effLimit);
+  // ===== VERIFICATION BELT: a verdict on file, or a live re-check, before anything is written =====
+  // emailValidated:true is a flag; the belt wants the verifier's WORD (emailVerifyStatus on the row,
+  // or this belt's own cache from an earlier live check). No word, an inconclusive word, or a proven
+  // word older than MPC_VERIFY_MAX_AGE_D days -> one live Reoon check now (concurrency-bounded, the
+  // result cached + folded back into the store by the app's hourly cron). Dead / catch-all / role
+  // verdicts never send. Transport errors hold the row for the next run and cache nothing.
+  // Spend is bounded: at most 3x the batch size of candidates are examined per run.
+  const cache = loadVerifyCache();
+  const VERIFY_MAX_AGE_D = Number(process.env.MPC_VERIFY_MAX_AGE_D || 30);
+  const REVERIFY = process.env.MPC_REVERIFY !== "0" && !!process.env.REOON_API_KEY;
+  if (!REVERIFY) console.log(process.env.MPC_REVERIFY === "0" ? "  belt: live re-verification disabled by MPC_REVERIFY=0 (only addresses with a proven verdict on file can send)" : "  belt: REOON_API_KEY not set; only addresses with a proven verdict on file can send");
+  const belt = { at: new Date().toISOString(), candidates: 0, provenOnFile: 0, reverified: 0, provenLive: 0, dead: 0, catchAll: 0, role: 0, inconclusive: 0, heldNoVerifier: 0 };
+  const proven = [];
+  const POOL_LIMIT = Math.min(ordered.length, Math.max(effLimit, 1) * 3);
+  let cursor = 0;
+  while (proven.length < effLimit && cursor < POOL_LIMIT) {
+    const chunk = ordered.slice(cursor, Math.min(POOL_LIMIT, cursor + (effLimit - proven.length)));
+    cursor += chunk.length;
+    belt.candidates += chunk.length;
+    const needLive = [];
+    for (const p of chunk) {
+      const pr = proofOf(p, cache, { maxAgeDays: VERIFY_MAX_AGE_D });
+      if (pr.state === "proven") { p.__proof = pr; proven.push(p); belt.provenOnFile++; }
+      else if (pr.state === "dead") belt.dead++;
+      else if (pr.state === "catch_all") belt.catchAll++;
+      else if (pr.state === "role") belt.role++;
+      else needLive.push(p); // unproven or stale
+    }
+    if (!needLive.length) continue;
+    if (!REVERIFY) { belt.heldNoVerifier += needLive.length; continue; }
+    const res = await verifyMany(needLive.map((p) => p.likelyEmail), { concurrency: Number(process.env.MPC_VERIFY_CONCURRENCY || 6) });
+    const at = new Date().toISOString();
+    for (const p of needLive) {
+      const e = String(p.likelyEmail).toLowerCase().trim();
+      const v = res.get(e);
+      belt.reverified++;
+      if (!v || v.error) { belt.inconclusive++; continue; } // transient: held for the next run, nothing cached
+      cache.entries[e] = { at, verdict: v.verdict, status: v.status, source: p.emailSource || "guess" };
+      if (v.verdict === "proven") { p.__proof = { state: "proven", via: "live", at: Date.parse(at), status: v.status }; proven.push(p); belt.provenLive++; }
+      else if (v.verdict === "dead") belt.dead++;
+      else if (v.verdict === "catch_all") belt.catchAll++;
+      else if (v.verdict === "role") belt.role++;
+      else belt.inconclusive++;
+    }
+  }
+
+  // ===== CANARY: re-check a sample of the addresses we are about to trust on an OLDER verdict =====
+  // If previously-proven addresses have gone bad in bulk, something upstream is lying (a verifier
+  // change, a rung bug, a stale import). The sample costs a few credits; a failed sample latches
+  // the fleet fuse and nothing sends until a person looks.
+  const CANARY_PCT = Number(process.env.MPC_CANARY_PCT || 5);
+  const CANARY_MIN = Number(process.env.MPC_CANARY_MIN || 8);
+  const CANARY_TRIP_MIN = Number(process.env.MPC_CANARY_TRIP_MIN || 2);
+  const CANARY_TRIP_RATIO = Number(process.env.MPC_CANARY_TRIP_RATIO || 0.15);
+  const trusted = proven.filter((p) => p.__proof.via !== "live");
+  let canary = null;
+  if (REVERIFY && trusted.length) {
+    const n = Math.min(trusted.length, Math.max(CANARY_MIN, Math.ceil((trusted.length * CANARY_PCT) / 100)));
+    const sample = [...trusted].sort(() => Math.random() - 0.5).slice(0, n);
+    const res = await verifyMany(sample.map((p) => p.likelyEmail), { concurrency: Number(process.env.MPC_VERIFY_CONCURRENCY || 6) });
+    const at = new Date().toISOString();
+    canary = { at, sample: n, invalid: 0, inconclusive: 0, tripped: false, examples: [] };
+    for (const p of sample) {
+      const e = String(p.likelyEmail).toLowerCase().trim();
+      const v = res.get(e);
+      if (!v || v.error) { canary.inconclusive++; continue; }
+      cache.entries[e] = { at, verdict: v.verdict, status: v.status, source: p.emailSource || "guess" };
+      if (v.verdict === "dead") { canary.invalid++; p.__hold = true; if (canary.examples.length < 5) canary.examples.push({ email: e, status: v.status, source: p.emailSource || "guess", via: p.__proof.via }); }
+      else if (v.verdict !== "proven") p.__hold = true; // catch-all / role / inconclusive now: not this run
+    }
+    const judged = n - canary.inconclusive;
+    if (judged > 0 && canary.invalid >= CANARY_TRIP_MIN && canary.invalid / judged >= CANARY_TRIP_RATIO) canary.tripped = true;
+  }
+  try { saveVerifyCache(cache); } catch (e) { console.log(`verify cache not writable: ${e.message}`); }
+  fuse.belt = { ...belt, canary: canary ? { sample: canary.sample, invalid: canary.invalid, inconclusive: canary.inconclusive, tripped: canary.tripped } : null };
+  if (canary) fuse.canary = canary;
+  if (canary && canary.tripped) {
+    const why = `canary: ${canary.invalid} of ${canary.sample} previously-verified addresses now verify INVALID (${canary.examples.map((x) => `${x.email} [${x.source}]`).join(", ")})`;
+    tripFleet(fuse, { by: "canary", reason: why, scope: "fleet" });
+    try { writeFuseLedger(fuse); } catch { /* logged above */ }
+    await notifyOwner([{ kind: "fleet_tripped", text: `FUSE TRIPPED by the canary: ${why}. Addresses the store calls verified are failing a fresh check, so every cold send is stopped until a person looks.` }]);
+    console.log(`HOLD: ${why}. Fleet fuse tripped; nothing sends until cleared.`);
+    return;
+  }
+  try { writeFuseLedger(fuse); } catch { /* logged above */ }
+  const batch = proven.filter((p) => !p.__hold);
+  console.log(`verification belt: ${belt.candidates} candidates -> ${belt.provenOnFile} proven on file, ${belt.reverified} re-verified live (${belt.provenLive} proven, ${belt.dead} dead, ${belt.catchAll} catch-all, ${belt.role} role, ${belt.inconclusive} inconclusive)${belt.heldNoVerifier ? `, ${belt.heldNoVerifier} held (no verifier)` : ""}${canary ? ` | canary ${canary.invalid}/${canary.sample} invalid` : ""} -> ${batch.length} cleared`);
   console.log(`\nwriting ${batch.length} emails (${SEND ? "SEND" : "DRY-RUN"})...\n`);
 
   const drafts = [];
@@ -495,7 +621,15 @@ async function main() {
     // message. Signature + footer are appended at SEND time, once we know which recruiter's box
     // the email leaves from, so every send signs as its actual sender.
     const baseBody = `Hi ${greetingName(p.managerName)},\n\n${email.body}`;
-    drafts.push({ company: p.company, role: p.role, metro: metro || "remote", variant: variant.id, variant_label: variant.label, to_name: p.managerName, to_title: p.managerTitle, to_email: p.likelyEmail, subject: email.subject, body: baseBody });
+    // Provenance travels with the send: which rung produced the address, what the verifier said and
+    // when. The NDR sweep joins bounces back to these fields (per-source breakers) and the tier
+    // decides which slice of the fleet may carry it.
+    drafts.push({
+      company: p.company, role: p.role, metro: metro || "remote", variant: variant.id, variant_label: variant.label,
+      to_name: p.managerName, to_title: p.managerTitle, to_email: p.likelyEmail, subject: email.subject, body: baseBody,
+      email_source: p.emailSource || "guess", tier: tierOf(p.emailSource),
+      verify_status: p.__proof.status, verify_via: p.__proof.via, verified_at: new Date(p.__proof.at).toISOString(),
+    });
   }
 
   const draftFile = `${OUT}/drafts-${stamp}.json`;
@@ -549,7 +683,30 @@ async function main() {
   const boxAvoids = (b, fam) => !!(b.fleet && AVOID[b.fleet] && AVOID[b.fleet].has(fam));
   const liveAvoids = Object.entries(AVOID).filter(([, s]) => s.size).map(([f, s]) => `${f} avoids ${[...s].join("+")}`);
   if (liveAvoids.length) console.log(`  provider-block routing: ${liveAvoids.join(" | ")}`);
-  let sent = 0, failed = 0, idx = 0, blockRouted = 0, blockDeferred = 0;
+  // BLAST-RADIUS SLICE (owner mandate 2026-08-20). Weaker-proof ("pattern") addresses, the rungs
+  // that derived a syntax and had a verifier bless it, only ever leave a fixed ~MPC_PATTERN_SLICE_PCT
+  // (25%) slice of the fleet's domains, chosen by hash over ALL fleet domains (resting included) so it
+  // never migrates onto clean domains as others rest. Found-tier addresses (a finder returned a
+  // record) prefer the other 75% and borrow slice boxes only when nothing else is free
+  // (MPC_STRICT_SLICE=1 forbids even that). A rung that goes bad can burn the slice, never the fleet.
+  const SLICE_PCT = Number(process.env.MPC_PATTERN_SLICE_PCT || 25);
+  const slice = canarySlice(allBoxes.map((b) => domOf(b.email)), SLICE_PCT);
+  const sliceLive = [...new Set(fleet.map((b) => domOf(b.email)))].filter((d) => slice.has(d));
+  console.log(`  blast-radius slice: ${slice.size} domain(s) carry pattern-tier sends (${sliceLive.length} of them not resting: ${sliceLive.join(", ") || "none; pattern-tier drafts wait"})`);
+  const pickBox = (d) => {
+    const fam = famOf(d.to_email);
+    const ok = (b) => !boxAvoids(b, fam);
+    const inSlice = (b) => slice.has(domOf(b.email));
+    let pool;
+    if (d.tier === "pattern") pool = avail.filter((b) => inSlice(b) && ok(b));
+    else {
+      pool = avail.filter((b) => !inSlice(b) && ok(b));
+      if (!pool.length && process.env.MPC_STRICT_SLICE !== "1") pool = avail.filter(ok);
+    }
+    if (!pool.length) return null;
+    return pool[idx++ % pool.length];
+  };
+  let sent = 0, failed = 0, idx = 0, sliceDeferred = 0, blockDeferred = 0, patternSent = 0;
   for (const d of drafts) {
     // Google-lane domain ceiling: evict boxes whose domain hit today's cap before picking
     // (the draft is then tried against the remaining boxes, never dropped).
@@ -558,15 +715,8 @@ async function main() {
       if (c.google && (domCounts.get(domOf(c.email)) || 0) >= GOOGLE_DOMAIN_CAP) avail.splice(i, 1);
     }
     if (!avail.length) { console.log("  every box is at its per-box or per-domain daily cap; stopping (deliverability guard)"); break; }
-    let pos = idx % avail.length;
-    {
-      const fam = famOf(d.to_email);
-      let hops = 0;
-      while (hops < avail.length && boxAvoids(avail[pos], fam)) { pos = (pos + 1) % avail.length; hops++; }
-      if (hops >= avail.length) { blockDeferred++; continue; } // only incompatible boxes left: not logged as sent, re-enters next run
-      if (hops > 0) blockRouted++;
-    }
-    const box = avail[pos];
+    const box = pickBox(d);
+    if (!box) { if (d.tier === "pattern") sliceDeferred++; else blockDeferred++; continue; } // not logged as sent: re-enters next run
     const rec = recruiterFor(box.owner);
     const body = d.body + signature(rec) + footer();
     const r = box.kind === "smtp"
@@ -578,13 +728,14 @@ async function main() {
     appendFileSync(logFile, JSON.stringify({ at: new Date().toISOString(), motion: process.env.MPC_MOTION || "bd", from: box.email, from_owner: rec.name, lane: box.kind || "api", ...d, body, result: r }) + "\n");
     boxCounts.set(box.email, (boxCounts.get(box.email) || 0) + 1);
     if (box.google) { const bd = domOf(box.email); domCounts.set(bd, (domCounts.get(bd) || 0) + 1); }
-    if ((boxCounts.get(box.email) || 0) >= capFor(box)) avail.splice(pos, 1); else idx++;
-    if (r.ok) { sent++; console.log(`  sent ${d.to_email} (as ${box.email} / ${rec.name})${r.note ? " [" + r.note + "]" : ""}`); }
+    if ((boxCounts.get(box.email) || 0) >= capFor(box)) { const i = avail.indexOf(box); if (i >= 0) avail.splice(i, 1); }
+    if (d.tier === "pattern") patternSent++;
+    if (r.ok) { sent++; console.log(`  sent ${d.to_email} (as ${box.email} / ${rec.name}; ${d.tier}/${d.email_source}, ${d.verify_status} via ${d.verify_via})${r.note ? " [" + r.note + "]" : ""}`); }
     else { failed++; console.log(`  FAIL ${d.to_email}: ${r.error}`); }
     await new Promise(res => setTimeout(res, 1200)); // pace under 60/min
   }
-  if (blockRouted || blockDeferred) console.log(`  provider-block routing: ${blockRouted} steered to a compatible fleet, ${blockDeferred} deferred (no compatible box this run)`);
-  console.log(`\n[SEND] done: ${sent} sent, ${failed} failed. Log: ${logFile}`);
+  if (sliceDeferred || blockDeferred) console.log(`  routing: ${sliceDeferred} pattern-tier draft(s) waited for a slice box, ${blockDeferred} deferred (no provider-compatible box this run)`);
+  console.log(`\n[SEND] done: ${sent} sent (${patternSent} pattern-tier on the slice), ${failed} failed. Log: ${logFile}`);
 }
 
 main().catch(e => { console.error(e); process.exitCode = 1; });

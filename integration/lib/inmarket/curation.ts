@@ -90,6 +90,7 @@ export interface CuratedProspect {
   emailVerifyStatus?: string;   // the validator's own status word (e.g. "safe", "catch_all") — kept
                                 // so a bounced address can be traced back to what the verifier said
   validatedAt?: string;
+  reverifyAt?: string;          // last time this address was (re)submitted to the bulk verifier (backfill cadence)
   /* ---- post-send tracking (filled from the sending engine by email) ---- */
   sentAt?: string;
   openedAt?: string;
@@ -1604,7 +1605,16 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
   return { checked, found, missed };
 }
 
-/** The curated emails still needing validation — feed this list to the external validator. */
+/** How long a submitted-but-inconclusive address waits before the backfill re-submits it. */
+const REVERIFY_COOLDOWN_MS = 7 * 86_400_000;
+
+/**
+ * The curated emails still needing validation — feed this list to the external validator.
+ * New (never-verdicted) addresses first; then (2026-08-20) the RE-VERIFICATION BACKFILL: rows
+ * carrying emailValidated:true with NO verifier status word on file. Those were stamped before
+ * the status was persisted (the population that hard-bounced on 8/19); re-submitting them gives
+ * the store a real verdict per address, so the send-time belt reads a word instead of a flag.
+ */
 export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
   const rows = await load();
   const out: string[] = [];
@@ -1616,7 +1626,71 @@ export async function pendingValidationEmails(limit = 1000): Promise<string[]> {
     seen.add(e); out.push(r.likelyEmail!);
     if (out.length >= limit) break;
   }
+  if (out.length < limit) {
+    const now = Date.now();
+    for (const r of rows) {
+      if (out.length >= limit) break;
+      const e = (r.likelyEmail ?? "").toLowerCase();
+      if (!e || seen.has(e)) continue;
+      if (r.emailValidated !== true || r.emailInvalid || r.emailCatchAll) continue;
+      if (r.emailVerifyStatus) continue;                                   // already carries the verifier's word
+      if (r.reverifyAt && now - Date.parse(r.reverifyAt) < REVERIFY_COOLDOWN_MS) continue;
+      seen.add(e); out.push(r.likelyEmail!);
+    }
+  }
   return out;
+}
+
+/** Stamp reverifyAt on every row whose address was just submitted to the bulk verifier. */
+export async function markVerificationSubmitted(emails: string[], nowIso: string): Promise<number> {
+  const set = new Set(emails.map((e) => String(e || "").toLowerCase().trim()).filter(Boolean));
+  if (!set.size) return 0;
+  return withCurationLock(async () => {
+    const rows = await load();
+    let n = 0;
+    for (const r of rows) {
+      const e = (r.likelyEmail ?? "").toLowerCase();
+      if (e && set.has(e)) { r.reverifyAt = nowIso; n++; }
+    }
+    if (n) await save(rows);
+    return n;
+  });
+}
+
+/**
+ * Fold the send-time belt's live verdicts (tools/verify.mjs cache, snap_mpc_verify_cache_v1,
+ * host-owned; the app only READS it) back into the store, so an address batch.mjs found dead
+ * right before a send becomes emailInvalid here too (and flows to the rescue finders), and a
+ * live "safe" gives the row the verifier's word. Only a verdict NEWER than the row's own
+ * validatedAt is applied, so a fresh bulk result is never overwritten by an older live check.
+ */
+export async function syncExternalVerdicts(
+  entries: Record<string, { at?: string; verdict?: string; status?: string }>,
+  nowIso: string,
+): Promise<{ applied: number; considered: number }> {
+  const keys = Object.keys(entries || {});
+  if (!keys.length) return { applied: 0, considered: 0 };
+  const rows = await load();
+  const results: Array<{ email: string; valid: boolean; catchAll?: boolean; status?: string }> = [];
+  const picked = new Set<string>();
+  for (const r of rows) {
+    const e = (r.likelyEmail ?? "").toLowerCase();
+    if (!e || picked.has(e)) continue;
+    const v = entries[e];
+    if (!v || !v.verdict) continue;
+    const vAt = Date.parse(v.at ?? "");
+    const rAt = Date.parse(r.validatedAt ?? "");
+    if (!Number.isFinite(vAt)) continue;
+    if (Number.isFinite(rAt) && rAt >= vAt && r.emailVerifyStatus) continue;   // store already has a newer word
+    const status = v.status || v.verdict;
+    if (v.verdict === "proven") { if (r.emailValidated === true && r.emailVerifyStatus === status) continue; results.push({ email: e, valid: true, status }); }
+    else if (v.verdict === "dead" || v.verdict === "role") { if (r.emailInvalid === true && r.emailVerifyStatus === status) continue; results.push({ email: e, valid: false, status }); }
+    else if (v.verdict === "catch_all") { if (r.emailCatchAll === true) continue; results.push({ email: e, valid: true, catchAll: true, status }); }
+    else continue; // inconclusive live checks change nothing
+    picked.add(e);
+  }
+  const applied = results.length ? await applyEmailValidation(results, nowIso) : 0;
+  return { applied, considered: keys.length };
 }
 
 /**

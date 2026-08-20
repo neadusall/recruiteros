@@ -15,6 +15,10 @@
 // into the daily rota now, it simply kicks in as today's sends age.
 
 import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
+// Send fuse + bounce-visibility hold (owner mandate 2026-08-20): follow-ups are cold volume too.
+// batch.mjs evaluates and writes the fuse ledger right before this runs in the same tick; this
+// lane only has to honor it. See fuse.mjs.
+import { loadFuseLedger, loadNdr, ndrAgeHours } from "./fuse.mjs";
 
 const OUT = process.env.MPC_OUT_DIR || "/out";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
@@ -165,6 +169,18 @@ function foot() { return "\n\nLume Search Partners · 148 Doughty Blvd, Inwood, 
 
 async function main() {
   mkdirSync(OUT, { recursive: true });
+  // ===== SEND FUSE + BOUNCE VISIBILITY (fail-closed, same rules as batch.mjs) =====
+  const fuse = loadFuseLedger();
+  if (fuse.fleet && fuse.fleet.tripped) {
+    console.log(`HOLD: the send fuse is TRIPPED (${fuse.fleet.by}: ${fuse.fleet.reason}; since ${fuse.fleet.since}). Follow-ups wait until a person clears it: bash /opt/recruiteros/tools/send-fuse.sh --clear`);
+    return;
+  }
+  const ndrAge = ndrAgeHours(loadNdr());
+  const NDR_MAX_AGE_H = Number(process.env.MPC_NDR_MAX_AGE_H || 12);
+  if (SEND && (ndrAge == null || ndrAge > NDR_MAX_AGE_H)) {
+    console.log(`HOLD: bounce data is ${ndrAge == null ? "missing" : `${ndrAge.toFixed(1)}h old`} (limit ${NDR_MAX_AGE_H}h). Follow-ups wait for a fresh NDR sweep.`);
+    return;
+  }
   const rows = loadSentRows();
   const stop = repliedOrStopped();
   const now = Date.now();
@@ -235,7 +251,8 @@ async function main() {
     }
     const res = await sendViaMailboxApi(r.from, t.email, fu.subject, fullBody);
     // Log as a normal send row so the touch count increments for the NEXT run.
-    appendFileSync(`${OUT}/sent-followup-${stamp}.jsonl`, JSON.stringify({ at: new Date().toISOString(), from: r.from, to_email: t.email, to_name: r.to_name, company: r.company, role: r.role, variant: r.variant, subject: fu.subject, body: fullBody, touch: nextTouch, result: res }) + "\n");
+    // Provenance carries over from touch 1 so a bounce on touch 2/3 still attributes to its rung.
+    appendFileSync(`${OUT}/sent-followup-${stamp}.jsonl`, JSON.stringify({ at: new Date().toISOString(), from: r.from, to_email: t.email, to_name: r.to_name, company: r.company, role: r.role, variant: r.variant, subject: fu.subject, body: fullBody, touch: nextTouch, email_source: r.email_source, tier: r.tier, verify_status: r.verify_status, result: res }) + "\n");
     if (res.ok) { sent++; console.log(`  sent follow-up ${nextTouch} -> ${t.email} (as ${r.from})`); }
     else console.log(`  FAIL ${t.email}: ${res.error}`);
     await new Promise((res2) => setTimeout(res2, 1200));

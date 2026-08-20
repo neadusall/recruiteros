@@ -67,6 +67,21 @@
     mailbox existence checks). Benching healthy domains destroys capacity and teaches
     the operator to ignore the board, which is how a real incident gets missed.
 
+15. **Nothing cold-sends on a boolean.** A recipient address must carry a verifier VERDICT the
+    sender can read back (`emailVerifyStatus` on the row, or the belt cache
+    `snap_mpc_verify_cache_v1`), proven and fresh (<= `MPC_VERIFY_MAX_AGE_D`), or it is
+    re-verified live right before the send (`tools/verify.mjs`, wired in `tools/batch.mjs`).
+    Catch-all, role, dead and inconclusive verdicts never send. Every send ledger row carries
+    `email_source` / `tier` / `verify_status`; the NDR sweeps join bounces back to them.
+
+16. **The send fuse is the first line, the domain breaker the second.** `tools/fuse.mjs`
+    (ledger `snap_mpc_send_fuse_v1`) stops ALL cold sends on a fleet-wide bounce spike or a
+    failed canary and LATCHES until a person clears it (`tools/send-fuse.sh --clear`); a
+    bouncing address rung pauses alone (source breaker). Every sender honors it (batch,
+    followup, app preflight). New send lanes must read the fuse before transmit and must
+    hold when bounce data (`snap_mpc_ndr_v1`) is older than `MPC_NDR_MAX_AGE_H`. Pattern-
+    derived addresses only leave the blast-radius slice of the fleet (`canarySlice`).
+
 ## Prod snapshots (hydration trap)
 
 In-memory stores backed by `/data/snap_*.json` are re-saved by the running app. Never

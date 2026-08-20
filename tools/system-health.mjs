@@ -101,6 +101,32 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
       : `Mostly undeliverable addresses (list quality), which cost sends but not reputation. ${(ndr.bounced || []).length} addresses suppressed permanently.`);
 }
 
+// Send fuse + verification belt (2026-08-20): the fleet kill switch, the per-source breakers
+// and the pre-send verdict belt. A tripped fuse is RED on purpose: a person has to look.
+{
+  const fuse = readJson(`${VOL}/snap_mpc_send_fuse_v1.json`);
+  const fAge = fuse ? ageMin(fuse.updatedAt) : null;
+  const tripped = !!fuse?.fleet?.tripped;
+  const paused = Object.entries(fuse?.sources || {}).filter(([, s]) => s?.paused).map(([k]) => k);
+  const w = fuse?.window || {};
+  add(GROUP_SEND, "sendfuse", "Send fuse (fleet kill switch + source breakers)",
+    !fuse ? "bad" : tripped ? "bad" : fAge > 6 * 60 ? "amber" : paused.length ? "amber" : "good",
+    !fuse ? "no ledger" : tripped ? `TRIPPED ${fmtAge(ageMin(fuse.fleet.since))} by ${fuse.fleet.by}` : `armed · ${w.bounces ?? 0} bounces / ${w.sends ?? 0} sends in ${w.windowH ?? 24}h${paused.length ? ` · paused: ${paused.join(", ")}` : ""}`,
+    !fuse ? "No sender has evaluated the fuse yet; batch.mjs writes it before every run and the sweep timer re-evaluates it" :
+    tripped ? `${fuse.fleet.reason}. Cold sends are stopped on every lane until cleared: bash /opt/recruiteros/tools/send-fuse.sh --clear` :
+    fAge > 6 * 60 ? "Ledger is stale: neither the send tick nor the sweep has evaluated it lately" :
+    paused.length ? "A bouncing address rung is paused; every other rung keeps sending" :
+    `Trips at >${(w.maxRatio ?? 0.05) * 100}% bounces on ${w.minSends ?? 100}+ sends in ${w.windowH ?? 24}h; stays tripped until a person clears it`);
+  const b = fuse?.belt;
+  const c = b?.canary;
+  add(GROUP_SEND, "verifybelt", "Pre-send verification belt",
+    !b ? "amber" : c?.tripped ? "bad" : b.heldNoVerifier ? "amber" : "good",
+    !b ? "no run yet" : `${b.provenOnFile} proven on file · ${b.reverified} re-verified live (${b.provenLive} ok, ${b.dead} dead, ${b.catchAll} catch-all)${c ? ` · canary ${c.invalid}/${c.sample}` : ""} · ${fmtAge(ageMin(b.at))}`,
+    !b ? "Reports after the first send tick" :
+    b.heldNoVerifier ? "REOON_API_KEY is not reaching the send tick: unproven addresses are held instead of checked" :
+    "Nothing cold-sends without a verifier verdict; dead, catch-all and role verdicts never send, stale verdicts are re-checked");
+}
+
 // Google cold lane (Zapmail Gmail boxes): active fleet + today's throughput + failure rate.
 {
   const snd = readJson(`${VOL}/snap_senders_v1.json`);
@@ -284,17 +310,19 @@ let gatesNote = "";
   }
   // The honest "ready to send" number applies the SAME quality gates the sender applies —
   // the earlier version skipped them and read thousands while the real pool was 36.
-  let passGates = 0, segDeferred = 0, gateRejected = 0;
+  let passGates = 0, segDeferred = 0, gateRejected = 0, provenVerdict = 0;
   try {
     const g = await import("/opt/recruiteros/tools/gates.mjs");
+    const v = await import("/opt/recruiteros/tools/verify.mjs");
     const mx = readJson(`${MPC_OUT}/mx-class.json`) || {};
     for (const r of candidates) {
       if (!g.assessProspect(r).eligible) { gateRejected++; continue; }
       const dom = String(r.likelyEmail).split("@")[1]?.toLowerCase();
       if (mx[dom]?.seg) { segDeferred++; continue; }
       passGates++;
+      if (v.isProvenStatus(r.emailVerifyStatus)) provenVerdict++;
     }
-    gatesNote = `${gateRejected} fail quality gates, ${segDeferred} gateway-deferred`;
+    gatesNote = `${gateRejected} fail quality gates, ${segDeferred} gateway-deferred. ${provenVerdict} of the sendable carry a proven verifier verdict; the rest are re-verified at send time`;
   } catch (e) {
     passGates = candidates.length;
     gatesNote = `gates module unavailable (${String(e.message).slice(0, 40)}): count is pre-gate`;

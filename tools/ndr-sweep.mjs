@@ -26,13 +26,24 @@ const SINCE = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString();
 const boxes = new Map(); // from -> sends
 const sentTo = new Set();
 const sentByDomain = new Map();
+// PROVENANCE (2026-08-20): belt-era send rows carry the rung that produced the address
+// (email_source) and its proof tier. Joining bounces back to those fields is what lets the
+// send fuse pause ONE bouncing rung instead of benching the domains it burned.
+const sentMeta = new Map();   // rcpt -> { source, tier, at, from } (latest send wins)
+const sentBySource = {};      // source -> real sends in the 14d window
 const cutoff = new Date(Date.now() - 14 * 86_400_000).toISOString();
 for (const f of readdirSync(OUT).filter((n) => /^sent-.*\.jsonl$/.test(n))) {
   for (const line of readFileSync(`${OUT}/${f}`, "utf8").split("\n")) {
     const s = line.trim(); if (!s) continue;
     let r; try { r = JSON.parse(s); } catch { continue; }
     if (!r || !r.to_email || (r.at && r.at < cutoff)) continue;
-    sentTo.add(String(r.to_email).toLowerCase());
+    const rcptKey = String(r.to_email).toLowerCase();
+    sentTo.add(rcptKey);
+    if (r.email_source) {
+      const prev = sentMeta.get(rcptKey);
+      if (!prev || String(r.at || "") > String(prev.at || "")) sentMeta.set(rcptKey, { source: r.email_source, tier: r.tier || null, at: r.at || null, from: r.from || null });
+      if (r.result && r.result.ok) sentBySource[r.email_source] = (sentBySource[r.email_source] || 0) + 1;
+    }
     if (r.from) {
       boxes.set(r.from, (boxes.get(r.from) || 0) + 1);
       const d = String(r.from).split("@")[1];
@@ -190,6 +201,12 @@ const perBoxInfra = {};
 const byReason = {};
 const reasonExamples = {};
 const warmupPerBox = {};
+// The send fuse's inputs: every campaign bounce in the window as a timestamped notice (fleet
+// 24h ratio), and bounce counts per address rung (per-source breakers). relay_auth never lands
+// here (no mail left the building).
+const notices = [];
+const perSource = {};
+for (const [src, n] of Object.entries(sentBySource)) perSource[src] = { sent: n, bounces: 0 };
 let warmupNdrs = 0, staleSkipped = 0, infraNdrs = 0;
 for (const n of ndrs) {
   const rcpt = String(n.rcpt || "").toLowerCase();
@@ -215,6 +232,9 @@ for (const n of ndrs) {
   perDomain[d] = perDomain[d] || { bounces: 0, sent: sentByDomain.get(d) || 0 };
   perDomain[d].bounces++;
   perBox[n.box] = (perBox[n.box] || 0) + 1; // per-mailbox counts for the daily fleet verifier
+  const meta = rcpt ? sentMeta.get(rcpt) : null;
+  notices.push({ at: n.at, rcpt: rcpt || null, box: n.box, domain: d, reason, source: meta ? meta.source : null, tier: meta ? meta.tier : null });
+  if (meta) { const ps = perSource[meta.source] || (perSource[meta.source] = { sent: 0, bounces: 0 }); ps.bounces++; }
 }
 if (staleSkipped) console.log(`freshness rule: ${staleSkipped} pre-bench notices excluded from resting domains' counts`);
 if (infraNdrs) console.log(`relay-auth rule: ${infraNdrs} our-box auth failures kept OFF the reputation books (boxes: ${Object.keys(perBoxInfra).join(", ")})`);
@@ -246,6 +266,11 @@ try {
       for (const [b, n] of Object.entries(im.perBox || {})) perBox[b] = (perBox[b] || 0) + n;
       for (const [b, n] of Object.entries(im.perBoxInfra || {})) perBoxInfra[b] = (perBoxInfra[b] || 0) + n;
       for (const [b, n] of Object.entries(im.warmupPerBox || {})) warmupPerBox[b] = (warmupPerBox[b] || 0) + n;
+      for (const nt of im.notices || []) notices.push(nt);
+      for (const [src, v] of Object.entries(im.perSource || {})) {
+        const ps = perSource[src] || (perSource[src] = { sent: sentBySource[src] || 0, bounces: 0 });
+        ps.bounces += (v && v.bounces) || 0;
+      }
       for (const [key, b] of Object.entries(im.providerBlocks || {})) {
         const dst = providerBlocks[key];
         if (!dst) { providerBlocks[key] = b; continue; }
@@ -280,6 +305,8 @@ const out = {
   perBoxInfra,     // which boxes cannot send (SendAs/relay auth broken) — fix these, don't bench their domains
   byReason,        // this sweep's window: bounce counts by the receiver's stated reason
   reasonExamples,  // up to 3 real notice texts per reason, for the portal's details view
+  notices: notices.sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-5000), // send fuse: timestamped campaign bounces (7d window)
+  perSource,       // send fuse: per address-rung sends (14d) + bounces (7d) -> source breakers
 };
 const tmp = SIDECAR + ".tmp";
 writeFileSync(tmp, JSON.stringify(out, null, 1));
