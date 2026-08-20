@@ -346,13 +346,19 @@ let gatesNote = "";
   walk(cur || {});
   const rows = (arrs.sort((a, b) => b.length - a.length)[0] || []).map((r) => r.lead || r);
   const h24 = now - 24 * 3600000;
-  let curated24 = 0, validated24 = 0, backlog = 0;
+  let curated24 = 0, validated24 = 0, backlog = 0, catchAllHeld = 0;
   const candidates = [];
   for (const r of rows) {
     if (Date.parse(r.curatedAt || 0) >= h24) curated24++;
     if (Date.parse(r.validatedAt || 0) >= h24 && r.emailValidated === true) validated24++;
     if (r.likelyEmail && !r.emailInvalid) {
-      if (r.emailValidated !== true) backlog++;
+      // Catch-all is a FINAL verdict, not a queue state: the domain accepts every address,
+      // so a specific mailbox can never be proven and these rows never become validated.
+      // Counting them as "awaiting validation" reported a backlog of 4,194 on 2026-08-20
+      // when the real queue was 10, i.e. a permanent red light nobody could ever clear.
+      // This mirrors the app's own pendingValidation rule in lib/inmarket/curation.ts.
+      if (r.emailCatchAll) catchAllHeld++;
+      else if (r.emailValidated !== true) backlog++;
       else if (!sentTo.has(String(r.likelyEmail).toLowerCase())) candidates.push(r);
     }
   }
@@ -380,7 +386,10 @@ let gatesNote = "";
   add(GROUP_SUPPLY, "validated", "Emails validated (24h)", validated24 >= 200 ? "good" : validated24 >= 50 ? "amber" : "bad",
     `${validated24} in 24h`, "Reoon inline validation inside the curation tick");
   add(GROUP_SUPPLY, "backlog", "Validation backlog", backlog < 500 ? "good" : backlog < 2500 ? "amber" : "bad",
-    `${backlog} awaiting validation`, backlog >= 500 ? "Drains automatically while the curation tick completes" : "");
+    `${backlog} awaiting validation`,
+    catchAllHeld
+      ? `${catchAllHeld.toLocaleString("en-US")} further addresses sit on catch-all domains. Those are decided, not queued: the domain accepts anything, so no mailbox can be proven and they never send. Supply comes from finding better addresses, not from more validating.`
+      : backlog >= 500 ? "Drains automatically while the curation tick completes" : "");
   add(GROUP_SUPPLY, "sendable", "Prospects ready to send (all gates applied)", passGates >= 450 ? "good" : passGates >= 100 ? "amber" : "bad",
     `${passGates} sendable now`, `Validated, never contacted, gate-passing. Of the rest: ${gatesNote}`);
 }
