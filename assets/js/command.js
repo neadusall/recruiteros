@@ -9858,6 +9858,24 @@
       var notes = (f.notes || []).map(function (t) {
         return '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(t) + '</div>';
       }).join("");
+      // "What to expect": the server computes each date from the ledger that gates
+      // that step, so this list is a forecast the machinery will actually keep.
+      function fmtDay(iso) {
+        var d = new Date(iso); if (isNaN(d)) return String(iso).slice(0, 10);
+        return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      }
+      var outlook = (f.outlook && f.outlook.length)
+        ? '<div style="margin-top:9px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">' +
+            '<div class="muted" style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px">What to expect</div>' +
+            f.outlook.map(function (s) {
+              var when = s.when ? fmtDay(s.when) : "when quiet";
+              return '<div style="display:flex;gap:10px;align-items:baseline;font-size:12.5px;margin-top:3px' + (s.done ? ';opacity:.6' : '') + '">' +
+                '<span style="flex:0 0 60px;font-weight:600;font-variant-numeric:tabular-nums;color:' + (s.done ? '#1a7f37' : 'inherit') + '">' + esc(when) + '</span>' +
+                '<span style="min-width:0">' + esc(s.what) + (s.done ? ' <span class="muted">(done)</span>' : '') + '</span>' +
+              '</div>';
+            }).join("") +
+          '</div>'
+        : '';
       return '<div style="padding:10px 0;border-top:1px solid var(--border)">' +
         '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
           '<b>' + esc(f.name) + '</b>' +
@@ -9866,7 +9884,7 @@
         '</div>' +
         '<div class="muted" style="font-size:12.5px;margin-top:4px">' + fmt(f.boxes.active) + ' active' + grad + benched + resting +
           ' · bounces last sweep: ' + fmt(f.bounces7d) + (f.warmupBounces7d != null ? ' campaign / ' + fmt(f.warmupBounces7d) + ' on warm-up traffic' : '') +
-        '</div>' + notes +
+        '</div>' + notes + outlook +
       '</div>';
     }).join("");
     box.innerHTML = '<div class="snd-story" style="margin-top:14px">' +
