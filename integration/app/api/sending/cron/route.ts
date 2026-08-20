@@ -95,6 +95,15 @@ async function run(req: Request) {
     onboarding = await auditPendingOnboards();
   } catch (e: any) { onboarding = { error: e?.message ?? "onboarding_audit_failed" }; }
 
+  // Sending-IP reputation alarm: a public blocklist listing (named by the receivers
+  // themselves in the block ledger) stops mail at many receivers at once and puts the
+  // sending DOMAINS at risk, so it pages the owner once per distinct listing state.
+  let ipReputation: unknown = null;
+  try {
+    const { checkSendingIpReputation } = await import("../../../../lib/senders/ipReputation");
+    ipReputation = await checkSendingIpReputation();
+  } catch (e: any) { ipReputation = { error: e?.message ?? "ip_reputation_check_failed" }; }
+
   // MPC variant bank: the weekly Haiku refresh of pre-generated Day-0 phrasing variants (the
   // layer that replaced per-send humanizer spend). Self-gating: a no-op unless the bank is
   // stale (>7d), incomplete, or a template changed; when it does run it's ~50 small calls.
@@ -152,7 +161,7 @@ async function run(req: Request) {
     jobBlasts = await runJobBlastTickAll();
   } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, variants, bounceFeedback, staffSuppression, replies, jobBlasts });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, revive, onboarding, ipReputation, variants, bounceFeedback, staffSuppression, replies, jobBlasts });
 }
 
 export const GET = run;

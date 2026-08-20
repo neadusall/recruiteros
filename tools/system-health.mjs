@@ -138,6 +138,28 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
     "Sweeps scan every bounce notice (campaign + warm-up) for IP/reputation block signatures");
 }
 
+// Sending IP reputation. Receivers name the IP they refused and the public blocklist
+// they consulted; that is ground truth about our own infrastructure and beats a
+// self-probe (public resolvers refuse Spamhaus queries outright). A public listing is
+// the most dangerous state a sending server can be in: it stops mail at MANY receivers
+// at once and it puts the DOMAINS at risk, not just the IP.
+{
+  const led = readJson(`${VOL}/snap_provider_blocks_v1.json`);
+  const fresh = Object.values(led?.blocks || {}).filter((b) => b?.lastSeen && now - Date.parse(b.lastSeen) < 7 * 86400000 && (b.count || 0) >= 20);
+  const listed = fresh.filter((b) => b.blocklist);
+  const ips = [...new Set(fresh.map((b) => b.blockedIp).filter(Boolean))];
+  const listedIps = [...new Set(listed.map((b) => b.blockedIp).filter(Boolean))];
+  const lists = [...new Set(listed.map((b) => b.blocklist))];
+  const st = listed.length ? "bad" : ips.length ? "amber" : "good";
+  add(GROUP_SEND, "sendingip", "Sending IP reputation", st,
+    listed.length ? `${listedIps.join(", ") || "a sending IP"} listed on ${lists.join(", ")}`
+      : ips.length ? `${ips.join(", ")} refused by receivers, no public listing cited`
+      : "no receiver has named a blocked sending IP",
+    listed.length ? `A public listing stops mail at many receivers at once and trains domain-level reputation against you. Stop that server's outbound volume (warm-up included), then request delisting at check.spamhaus.org, or cut over to a clean IP.`
+      : ips.length ? "Receivers reject this IP on their own reputation data; routing already steers the affected fleets away."
+      : "");
+}
+
 // New Email ID onboarding audit: every imported sender is vetted (login, DNS posture,
 // blocklists) before it can matter. Failures alert the owner and hold here until fixed.
 {

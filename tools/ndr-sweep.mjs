@@ -151,6 +151,18 @@ const RECEIVER_PATTERNS = [
   ["barracuda", /barracuda/i],
 ];
 function receiverOf(text) { for (const [k, re] of RECEIVER_PATTERNS) if (re.test(text)) return k; return null; }
+// Receivers name OUR sending IP in the rejection, and often the public blocklist they
+// consulted (mirrors ndr-sweep-imap.mjs). Narrow patterns only: a bare "[1.2.3.4]" is
+// usually the RECEIVER's own host, so only client-side phrasings count.
+const OUR_IP_PATTERNS = [
+  /client host \[?((?:\d{1,3}\.){3}\d{1,3})\]?/i,
+  /reputation of ((?:\d{1,3}\.){3}\d{1,3})/i,
+  /sending ip \[?((?:\d{1,3}\.){3}\d{1,3})\]?/i,
+  /\[((?:\d{1,3}\.){3}\d{1,3})(?:\s+\d+)?\]\s*(?:gmail|our system|this)/i,
+  /ip \[?((?:\d{1,3}\.){3}\d{1,3})\]?\s*(?:is |was )?(?:listed|blocked|banned)/i,
+];
+const BLOCKLIST_RE = /\b(spamhaus|barracuda|spamcop|sorbs|psbl|uceprotect|invaluement|senderscore)\b/i;
+function ourIpIn(text) { for (const re of OUR_IP_PATTERNS) { const m = text.match(re); if (m) return m[1]; } return null; }
 const providerBlocks = {};
 function noteBlock(fleet, text, at) {
   if (!BLOCK_RE.test(text)) return;
@@ -161,11 +173,14 @@ function noteBlock(fleet, text, at) {
   const rcv = receiverOf(windowText) || receiverOf(text);
   if (!rcv) return;
   const key = `${fleet}|${rcv}`;
-  const b = providerBlocks[key] || (providerBlocks[key] = { fleet, provider: rcv, count: 0, lastSeen: null, sample: null });
+  const b = providerBlocks[key] || (providerBlocks[key] = { fleet, provider: rcv, count: 0, lastSeen: null, sample: null, blockedIp: null, blocklist: null });
   b.count++;
   const seen = at || new Date().toISOString();
   if (!b.lastSeen || seen > b.lastSeen) b.lastSeen = seen;
-  if (!b.sample) b.sample = windowText.slice(0, 220);
+  // Sample CENTERED on the rejection so the ledger's evidence is readable.
+  if (!b.sample) b.sample = text.slice(Math.max(0, hit - 90), hit + 190);
+  if (!b.blockedIp) b.blockedIp = ourIpIn(windowText);
+  if (!b.blocklist) { const m = windowText.match(BLOCKLIST_RE); if (m) b.blocklist = m[1].toLowerCase(); }
 }
 
 const bounced = new Set();
@@ -237,6 +252,8 @@ try {
         dst.count += b.count || 0;
         if (b.lastSeen && (!dst.lastSeen || b.lastSeen > dst.lastSeen)) dst.lastSeen = b.lastSeen;
         if (!dst.sample) dst.sample = b.sample;
+        if (!dst.blockedIp) dst.blockedIp = b.blockedIp || null;
+        if (!dst.blocklist) dst.blocklist = b.blocklist || null;
       }
       infraNdrs += im.infraNdrs || 0;
       for (const [k, n] of Object.entries(im.byReason || {})) byReason[k] = (byReason[k] || 0) + n;
