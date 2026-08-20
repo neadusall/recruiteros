@@ -83,9 +83,22 @@ const rest = readJson(`${VOL}/snap_mpc_domain_rest_v1.json`);
 const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
 {
   const fresh = Object.values(ndr?.perDomain || {}).reduce((s, v) => s + (v.bounces || 0), 0);
-  const st = fresh >= 30 ? "bad" : fresh >= 10 ? "amber" : "good";
-  add(GROUP_SEND, "bounces", "Fresh bounce pressure", ndr ? st : "bad", ndr ? `${fresh} recent notices` : "no sweep data",
-    ndr ? `${(ndr.bounced || []).length} addresses on the permanent suppression list` : "NDR sweep has never produced a sidecar");
+  // Severity follows the RECEIVER'S STATED REASON, not the raw count. A pile of dead
+  // addresses is a list-quality chore; a handful of spam verdicts, blocklist rejections
+  // or auth failures is a reputation emergency, because those are the ones that burn
+  // domains. Flagging both at the same threshold trains the operator to ignore red.
+  const R = ndr?.byReason || {};
+  const reputational = (R.spam_verdict || 0) + (R.blocklist || 0) + (R.auth_fail || 0) + (R.send_limit || 0);
+  const dead = (R.dead_address || 0) + (R.mailbox_full || 0);
+  const st = reputational >= 10 ? "bad" : reputational >= 3 ? "amber"
+    : fresh >= 120 ? "bad" : fresh >= 40 ? "amber" : "good";
+  const mix = [reputational ? `${reputational} reputation-class` : null, dead ? `${dead} dead/full mailbox` : null]
+    .filter(Boolean).join(", ");
+  add(GROUP_SEND, "bounces", "Fresh bounce pressure", ndr ? st : "bad",
+    ndr ? `${fresh} recent notices${mix ? ` (${mix})` : ""}` : "no sweep data",
+    !ndr ? "NDR sweep has never produced a sidecar"
+      : reputational >= 3 ? `Receivers are judging our CONTENT or REPUTATION, not just bad addresses: this is what benches domains. ${(ndr.bounced || []).length} addresses suppressed permanently.`
+      : `Mostly undeliverable addresses (list quality), which cost sends but not reputation. ${(ndr.bounced || []).length} addresses suppressed permanently.`);
 }
 
 // Google cold lane (Zapmail Gmail boxes): active fleet + today's throughput + failure rate.
