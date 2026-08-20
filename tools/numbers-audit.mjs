@@ -31,6 +31,17 @@ const OWNER_TO = process.env.OWNER_EMAIL || "neadusall@gmail.com";
 const MAIL_FROM = process.env.EMAIL_FROM || "RecruitersOS <onboarding@resend.dev>";
 const RESEND_KEY = process.env.RESEND_API_KEY || "";
 
+/**
+ * PEEK: report, persist nothing, notify nobody. `node numbers-audit.mjs --peek`
+ *
+ * The owner alert is edge-triggered off the PREVIOUS run's verdict, which means an ordinary
+ * hand-run silently consumes the edge: check the audit while something is newly broken and the
+ * scheduled run an hour later sees the state as unchanged and stays quiet. That happened the
+ * day this was built — a test run recorded the first BAD, so the real alert about it never
+ * went out. Anyone inspecting the audit should be able to do so without disarming it.
+ */
+const PEEK = process.argv.includes("--peek") || process.env.NUMBERS_AUDIT_PEEK === "1";
+
 const now = Date.now();
 const findings = [];
 /** status: "ok" | "warn" | "bad". `surface` is what a human would point at in the portal. */
@@ -359,10 +370,12 @@ const summary = {
 const prev = readJson(OUT_FILE);
 const prevWorst = prev && prev.verdict ? prev.verdict : "ok";
 const out = { generatedAt: new Date().toISOString(), workspaceId: WS, verdict: worst, summary, findings };
-const tmp = OUT_FILE + ".tmp";
-writeFileSync(tmp, JSON.stringify(out, null, 1));
-renameSync(tmp, OUT_FILE);
-console.log(`numbers-audit -> ${worst.toUpperCase()} (${summary.ok} ok / ${summary.warn} warn / ${summary.bad} bad)`);
+if (!PEEK) {
+  const tmp = OUT_FILE + ".tmp";
+  writeFileSync(tmp, JSON.stringify(out, null, 1));
+  renameSync(tmp, OUT_FILE);
+}
+console.log(`numbers-audit${PEEK ? " (peek: nothing written, nobody notified)" : ""} -> ${worst.toUpperCase()} (${summary.ok} ok / ${summary.warn} warn / ${summary.bad} bad)`);
 for (const f of findings) if (f.status !== "ok") console.log(`  [${f.status}] ${f.surface}: ${f.reading}${f.detail ? ` -- ${f.detail}` : ""}`);
 
 async function mailOwner() {
@@ -394,5 +407,6 @@ async function mailOwner() {
 
 // Edge-triggered: mail only on a step DOWN in verdict. A standing amber stays quiet after the
 // first notice; a recovery is silent too, because the board already shows it.
-if (RANK[worst] > RANK[prevWorst]) await mailOwner();
+if (PEEK) { /* a look must never disarm the alarm */ }
+else if (RANK[worst] > RANK[prevWorst]) await mailOwner();
 else if (worst !== "ok") console.log(`verdict ${worst} unchanged from last run; owner not re-emailed`);
