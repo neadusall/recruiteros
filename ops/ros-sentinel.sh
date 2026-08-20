@@ -93,6 +93,7 @@ RESEND_KEY="$(envval RESEND_API_KEY)"
 SMS_KEY="${ALERT_TELNYX_KEY:-$(envval TELNYX_API_KEY)}"
 SMS_FROM="${ALERT_SMS_FROM:-$(envval TELNYX_FROM_NUMBER)}"
 SMS_TO="${ALERT_SMS_TO:-}"
+SMS_PROFILE="${ALERT_SMS_PROFILE:-$(envval TELNYX_MESSAGING_PROFILE_ID)}"
 
 FAILS=()
 fail() { FAILS+=("$1 :: $2"); }
@@ -472,7 +473,7 @@ send_sms() { # text -> 0 only when Telnyx accepted the message
   code=$(curl -s -o /tmp/ros-sentinel-sms.out -w '%{http_code}' -m 30 \
     -X POST https://api.telnyx.com/v2/messages \
     -H "Authorization: Bearer $SMS_KEY" -H "Content-Type: application/json" \
-    -d "$(jq -n --arg f "$SMS_FROM" --arg t "$SMS_TO" --arg x "$text" '{from:$f,to:$t,text:$x}')")
+    -d "$(jq -n --arg f "$SMS_FROM" --arg t "$SMS_TO" --arg x "$text" --arg p "$SMS_PROFILE" '{from:$f,to:$t,text:$x} + (if $p != "" then {messaging_profile_id:$p} else {} end)')")
   echo "$(date -u) sms -> $SMS_TO (telnyx $code)" >> "$LOG"
   case "$code" in 2*) return 0;; *) cat /tmp/ros-sentinel-sms.out >> "$LOG" 2>/dev/null; return 1;; esac
 }

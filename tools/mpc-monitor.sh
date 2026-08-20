@@ -30,6 +30,7 @@ fi
 # 2026-08-20: the send env now carries the verifier key (pre-send verification belt), the owner
 # alert keys (fuse/breaker emails) and every MPC_* tuning knob from .env.production.
 grep -E '^(ANTHROPIC_API_KEY|SENDINGAC_MAILBOX_API_KEY|REOON_API_KEY|REOON_VERIFY_MODE|RESEND_API_KEY|OWNER_EMAIL|EMAIL_FROM|MPC_[A-Z_]+)=' .env.production > /tmp/send.env
+grep -E '^ALERT_(TELNYX_KEY|SMS_FROM|SMS_TO|SMS_PROFILE)=' /etc/ros-alert.env >> /tmp/send.env 2>/dev/null || true  # owner SMS on fuse trips
 # SEND FUSE: evaluate the fleet fuse + per-source breakers against the latest bounce sweep BEFORE
 # anything sends (batch.mjs re-evaluates too; this pass is what emails the owner on a state change
 # even on a tick where nothing is due). Exit 2 = tripped; the senders below hold on their own.

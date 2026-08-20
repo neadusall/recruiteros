@@ -28,6 +28,7 @@ echo "$(date -u +%FT%TZ) domain-rest exit $?" >> "$LOG"
 # bounce spike trips the fuse the same cycle it is seen (and the owner is emailed), not at the next
 # send tick. Exit 2 = tripped (informational here; the senders hold on their own).
 grep -E '^(RESEND_API_KEY|EMAIL_FROM|OWNER_EMAIL|MPC_[A-Z_]+)=' /opt/recruiteros/.env.production > /tmp/ndr-fuse.env 2>/dev/null || true
+grep -E '^ALERT_(TELNYX_KEY|SMS_FROM|SMS_TO|SMS_PROFILE)=' /etc/ros-alert.env >> /tmp/ndr-fuse.env 2>/dev/null || true  # owner SMS on fuse trips
 docker run --rm --env-file /tmp/ndr-fuse.env -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro \
   -v /opt/recruiteros/mpc-out:/out --entrypoint node recruiteros-app \
   /tools/send-fuse.mjs >> "$LOG" 2>&1

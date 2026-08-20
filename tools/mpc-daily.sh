@@ -57,6 +57,7 @@ rm -f /tmp/v2.env
 #    (fuse/breaker emails) and every MPC_* knob. The fuse is evaluated first; batch.mjs holds
 #    on its own when the fuse is tripped or bounce data is stale.
 grep -E '^(ANTHROPIC_API_KEY|SENDINGAC_MAILBOX_API_KEY|REOON_API_KEY|REOON_VERIFY_MODE|RESEND_API_KEY|OWNER_EMAIL|EMAIL_FROM|MPC_[A-Z_]+)=' .env.production > /tmp/mpc.env
+grep -E '^ALERT_(TELNYX_KEY|SMS_FROM|SMS_TO|SMS_PROFILE)=' /etc/ros-alert.env >> /tmp/mpc.env 2>/dev/null || true  # owner SMS on fuse trips
 docker run --rm -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro -v /opt/recruiteros/mpc-out:/out \
   --env-file /tmp/mpc.env --entrypoint node recruiteros-app \
   /tools/send-fuse.mjs >> "$LOG" 2>&1 || true

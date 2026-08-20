@@ -243,10 +243,42 @@ export function evaluateFuse({ ledger, sentRows, ndr, now = Date.now(), config =
   return { ledger, changes };
 }
 
-/* ------------------------------ owner email ------------------------------ */
+/* ------------------------------ owner email + SMS ------------------------------ */
+
+/**
+ * Text the owner's cell (owner ask 2026-08-20: fuse events reach the phone, not only the inbox).
+ * Credentials come from the alert channel first (ALERT_TELNYX_KEY / ALERT_SMS_FROM / ALERT_SMS_TO,
+ * the same /etc/ros-alert.env the sentinel reads) and fall back to the app's Telnyx creds
+ * (TELNYX_API_KEY / TELNYX_FROM_NUMBER). No number configured = no text, never an error.
+ */
+export async function notifyOwnerSms(text) {
+  const key = process.env.ALERT_TELNYX_KEY || process.env.TELNYX_API_KEY || "";
+  const from = process.env.ALERT_SMS_FROM || process.env.TELNYX_FROM_NUMBER || "";
+  const to = process.env.MPC_ALERT_SMS_TO || process.env.ALERT_SMS_TO || "";
+  const profile = process.env.ALERT_SMS_PROFILE || process.env.TELNYX_MESSAGING_PROFILE_ID || "";
+  if (!key || !from || !to) { console.log("owner SMS skipped (no ALERT_SMS_TO / Telnyx creds in env)"); return false; }
+  try {
+    const r = await fetch("https://api.telnyx.com/v2/messages", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ from, to, text: String(text).slice(0, 480), ...(profile ? { messaging_profile_id: profile } : {}) }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    console.log(r.ok ? `owner texted ${to}` : `owner SMS failed: http ${r.status} ${(await r.text().catch(() => "")).slice(0, 120)}`);
+    return r.ok;
+  } catch (e) { console.log(`owner SMS failed: ${(e && e.message) || e}`); return false; }
+}
 
 export async function notifyOwner(changes, { subjectPrefix = "Send fuse" } = {}) {
   if (!changes || !changes.length) return false;
+  // Fleet-level events (trip / clear) page the phone; source pauses stay email-only.
+  const fleetEvents = changes.filter((c) => c.kind === "fleet_tripped" || c.kind === "fleet_cleared");
+  if (fleetEvents.length) {
+    const tripped = fleetEvents.find((c) => c.kind === "fleet_tripped");
+    await notifyOwnerSms(tripped
+      ? `RecruitersOS: cold-email SEND FUSE TRIPPED. ${String(tripped.text).replace(/^FUSE TRIPPED[^:]*:\s*/i, "").slice(0, 300)} All cold sends are stopped. Look: send-fuse.sh --status. Clear: send-fuse.sh --clear.`
+      : "RecruitersOS: send fuse cleared. Cold sends resume on the next tick; a fresh bounce spike trips it again.");
+  }
   const RESEND_KEY = process.env.RESEND_API_KEY || "";
   const to = process.env.OWNER_EMAIL || "neadusall@gmail.com";
   const from = process.env.EMAIL_FROM || "RecruitersOS <onboarding@resend.dev>";
