@@ -947,13 +947,17 @@ function mailboxBlockers(m: SenderInbox, acct: SmartleadAccount | undefined, dom
   if (cap > 0 && m.sentToday >= cap) {
     out.push(mk("cap.exhausted", `Sent ${m.sentToday} of ${cap} allowed today.`));
   }
-  const bouncePct = m.sent > 0 ? (m.bounced / m.sent) * 100 : null;
-  if (bouncePct != null && m.sent >= 25 && bouncePct > 5) {
-    out.push(mk("bounce.rate.high", `${m.bounced} bounces on ${m.sent} sends from this mailbox (${round1(bouncePct)}%).`));
-  } else if (m.bounced > 0 && m.sent === 0) {
-    // Say the number cannot be computed rather than rendering a blank that reads as
-    // a clean bill. A silent gap in a monitoring board is worse than a loud one.
-    out.push(mk("counters.unfed", `${m.bounced.toLocaleString()} bounces recorded against 0 recorded sends, so this mailbox has no computable bounce rate here. Judge it on its domain's numbers instead.`));
+  // A bounce RATE only ever comes from the matched campaign pair. `m.bounced` counts
+  // every delivery notice that landed in the mailbox, most of which is warm-up traffic
+  // on a warmed fleet, so it shares no denominator with campaign sends.
+  const cs = typeof m.coldSent === "number" ? m.coldSent : null;
+  const cb = m.coldBounced || 0;
+  if (cs != null && cs >= 25 && (cb / cs) * 100 > 5) {
+    out.push(mk("bounce.rate.high", `${cb} campaign bounces on ${cs} campaign sends from this mailbox (${round1((cb / cs) * 100)}%).`));
+  } else if (cs == null && (m.bounced || 0) > 0) {
+    out.push(mk("counters.unfed", `${(m.bounced || 0).toLocaleString()} delivery notices recorded but this mailbox appears in no send log we read, so it has no matched pair and no computable bounce rate.`));
+  } else if (cs != null && (m.bounced || 0) > cs) {
+    out.push(mk("counters.mismatched", `${(m.bounced || 0).toLocaleString()} delivery notices landed here against ${cs} campaign send${cs === 1 ? "" : "s"}. The excess is warm-up traffic bouncing, not campaign failure, so this mailbox's real campaign bounce rate is ${cs > 0 ? round1((cb / cs) * 100) + "%" : "not yet measurable"}.`));
   }
   return out;
 }

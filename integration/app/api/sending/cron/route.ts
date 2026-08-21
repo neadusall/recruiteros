@@ -58,6 +58,18 @@ async function run(req: Request) {
   let seeds: unknown = null;
   try { seeds = await runSeedMaintenance(); } catch (e: any) { seeds = { error: e?.message ?? "seed_maintenance_failed" }; }
 
+  // Counter reconciliation BEFORE the guard, deliberately. The host sender never calls
+  // back into the registry, so its Email IDs carried sent=0 while the bounce sweep wrote
+  // bounced=N onto the same rows: 129 mailboxes with bounces and no denominator. That did
+  // not just blank a display, it made the guard's bounce rule unfirable on that lane,
+  // because the rule needs a minimum sample the row could never reach. Folding the
+  // published per-box tally in first means the guard judges this tick on real rates.
+  let counters: unknown = null;
+  try {
+    const { reconcileSenderCounters } = await import("../../../../lib/senders/reconcile");
+    counters = await reconcileSenderCounters();
+  } catch (e: any) { counters = { error: e?.message ?? "counter_reconcile_failed" }; }
+
   // Email ID health guard over every portal's pool: auto-hold cold sends on
   // inboxes going bad (warm-up keeps running so they regain strength) and
   // auto-revive held ones once health recovers, onto the reduced ramp.
@@ -200,7 +212,7 @@ async function run(req: Request) {
     jobBlasts = await runJobBlastTickAll();
   } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, outlook, revive, onboarding, ipReputation, ledger, variants, bounceFeedback, verdictSync, staffSuppression, replies, jobBlasts });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, counters, guard, outlook, revive, onboarding, ipReputation, ledger, variants, bounceFeedback, verdictSync, staffSuppression, replies, jobBlasts });
 }
 
 export const GET = run;
