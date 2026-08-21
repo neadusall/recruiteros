@@ -38,6 +38,14 @@ export type { SendingAcPing } from "./sendingAcApi";
 export { runSenderHealthGuard, guardStatus } from "./healthGuard";
 export type { GuardReport, GuardAction } from "./healthGuard";
 
+export {
+  recordLedgerTick, ledgerFleet, ledgerIdentity, annotateEvent, causeCatalog, identityRef,
+  LEDGER_KEY, LEDGER_EVENTS_KEY,
+} from "./ledger";
+export type { LedgerTickReport, LedgerFleet, LedgerRow, LedgerIdentityView, Lifetime } from "./ledger";
+export { CAUSES, CAUSE_BY_CODE, SEVERITY_RANK } from "./ledgerTypes";
+export type { Blocker, CauseDef, Category, DomainDay, LedgerEvent, MailboxDay, ShelfLife, Severity, IdentityKind } from "./ledgerTypes";
+
 export { runReplySync } from "./replySync";
 export type { ReplySyncReport } from "./replySync";
 

@@ -610,6 +610,26 @@ add(GROUP_WATCH, "ndr-fresh", "Bounce data freshness", !ndr ? "bad" : ageMin(ndr
     "Warming boxes auto-activate at 14d (provider) / 30d (internal) once reputation holds 95%+");
 }
 
+// Sender health ledger: the living record behind Infrastructure > Health Ledger.
+// Two ways it can lie and both are checked here: it stops observing (the board goes
+// stale while looking confident), or it observes but nothing has been recorded, which
+// means the tick is running against an empty fleet.
+{
+  const led = readJson(`${VOL}/snap_sender_ledger_v1.json`);
+  const evs = readJson(`${VOL}/snap_sender_ledger_events_v1.json`);
+  const lAge = led ? ageMin(led.lastTickAt) : null;
+  const ids = led ? Object.keys(led.identities || {}).length : 0;
+  const open = (evs?.events || []).filter((e) => !e.closedAt);
+  const crit = open.filter((e) => e.severity === "critical").length;
+  const st = !led ? "amber" : lAge == null || lAge > 6 * 60 ? "bad" : !ids ? "bad" : lAge > 2 * 60 ? "amber" : "good";
+  add(GROUP_WATCH, "sender-ledger", "Sender health ledger observing", st,
+    !led ? "never observed" : `${ids} identities tracked · ${open.length} conditions open (${crit} critical) · observed ${fmtAge(lAge)}`,
+    !led ? "The observation tick has never run; it rides the sending cron (/api/sending/cron)." :
+    lAge > 6 * 60 ? "The ledger has stopped observing, so the Health Ledger board is history, not live. Check the sending cron timer." :
+    !ids ? "It is observing but recording nothing: no sender workspaces resolved." :
+    crit ? "Open the Health Ledger tab: every critical condition there names what proved it and what to do." : "");
+}
+
 // Daily fleet verification results (the Fleet tab's data).
 {
   const fleet = readJson(`${VOL}/snap_fleet_verify_v1.json`);

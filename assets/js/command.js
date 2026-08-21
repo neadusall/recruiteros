@@ -1627,6 +1627,7 @@
     sendqueue: { title: "Send Queue", crumb: "Business Development", action: null, render: function () { location.hash = "#email/sendqueue"; }, motionOnly: "bd", cap: "outreach:send" },
     senders: { title: "Senders", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure/senders"; }, cap: "team:manage" },
     mailboxops: { title: "Mailbox Ops", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure/mailboxes"; }, cap: "team:manage" },
+    senderhealth: { title: "Health Ledger", crumb: "Admin", action: null, render: function () { location.hash = "#infrastructure/health"; }, cap: "team:manage" },
     // Recruiting gets the unified Candidates tab (pipeline + ATS people database
     // in one table); BD keeps the classic Prospects pipeline.
     prospects: { title: "Prospects", crumb: "Operate", action: "+ Add prospect", render: function (el) { return motion === "recruiting" ? renderCandidates(el) : renderProspects(el); } },
@@ -1751,13 +1752,15 @@
   var INFRA_HUB_TABS = [
     { key: "", label: "Engine / Throughput", icon: "i-activity" },
     { key: "senders", label: "Senders", icon: "i-send" },
+    { key: "health", label: "Health Ledger", icon: "i-activity" },
     { key: "mailboxes", label: "Mailbox Ops", icon: "i-shield" }
   ];
   function renderInfraHub(el) {
     var d = currentDetail();
-    var key = (d === "senders" || d === "mailboxes") ? d : "";
+    var key = (d === "senders" || d === "mailboxes" || d === "health") ? d : "";
     var body = hubMount(el, "infrastructure", INFRA_HUB_TABS, key);
     if (key === "senders") return renderSenders(body);
+    if (key === "health") return renderHealthLedger(body);
     if (key === "mailboxes") return renderMailboxOps(body);
     return renderEngine(body);
   }
@@ -9467,6 +9470,566 @@
     }
   }
 
+  /* ================= HEALTH LEDGER (Infrastructure › Health Ledger) =========
+     The living record for every sending domain and Email ID: what state it is
+     in today, what stopped it and since when, what caused that, and how much
+     shelf life it has left. Data is /api/senders/ledger, which is written by an
+     observation tick rather than recomputed per poll, so this panel shows real
+     history instead of a snapshot that forgets.
+
+     Three reading levels, in the order an operator actually works:
+       1. the fleet strip      is anything on fire right now
+       2. the cause worklist   what is stopping mail, biggest first, with the fix
+       3. the identity record  one domain or mailbox, its whole life so far
+     ------------------------------------------------------------------------ */
+  var hlData = null, hlDetail = null, hlDetailRef = null, hlCatalog = null;
+  var hlTimer = null, hlLoading = false, hlTicking = false, hlDetailLoading = false;
+  var hlQTimer = null;
+  var hlQuery = "", hlFilter = "problems", hlCauseOpen = {}, hlShowCatalog = false, hlNoteFor = null;
+
+  function hlEnsureStyles() {
+    if (document.getElementById("hlStyles")) return;
+    var st = document.createElement("style");
+    st.id = "hlStyles";
+    st.textContent =
+      '.hl-card{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:16px 18px;margin:4px 0 16px}' +
+      '.hl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}' +
+      '.hl-title{font-size:15px;font-weight:650;letter-spacing:-.01em}' +
+      '.hl-sub{font-size:12.5px;color:var(--muted,var(--text-dim));margin-bottom:12px;max-width:920px;line-height:1.5}' +
+      '.hl-strip{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
+      '.hl-stat{flex:1;min-width:118px;border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--surface)}' +
+      '.hl-statv{font-size:21px;font-weight:650;letter-spacing:-.02em;line-height:1.15}' +
+      '.hl-statl{font-size:11.5px;color:var(--muted,var(--text-dim));margin-top:2px}' +
+      '.hl-statn{font-size:10.5px;color:var(--muted,var(--text-dim));margin-top:3px;line-height:1.35}' +
+      '.hl-table{width:100%;border-collapse:collapse;font-size:13px}' +
+      '.hl-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}' +
+      '.hl-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:top}' +
+      '.hl-row{cursor:pointer}.hl-row:hover td{background:var(--surface-2,rgba(46,91,215,.05))}' +
+      '.hl-row.sel td{background:rgba(46,91,215,.08)}' +
+      '.hl-scroll{overflow-x:auto}' +
+      '.hl-sev{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}' +
+      '.hl-sev.critical{background:#b3261e}.hl-sev.warn{background:#b26a00}.hl-sev.watch{background:#2e5bd7}.hl-sev.info{background:var(--muted,#8a94a6)}' +
+      '.hl-chip{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:2px 9px;white-space:nowrap}' +
+      '.hl-chip.critical{background:rgba(179,38,30,.12);color:#b3261e}' +
+      '.hl-chip.warn{background:rgba(178,106,0,.13);color:#b26a00}' +
+      '.hl-chip.watch{background:rgba(46,91,215,.10);color:#2e5bd7}' +
+      '.hl-chip.info{background:var(--border);color:var(--muted,var(--text-dim))}' +
+      '.hl-chip.ok{background:rgba(26,127,55,.12);color:#1a7f37}' +
+      '.hl-stage{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;border-radius:5px;padding:2px 6px}' +
+      '.hl-stage.provisioning{background:var(--border);color:var(--muted,var(--text-dim))}' +
+      '.hl-stage.warming{background:rgba(46,91,215,.10);color:#2e5bd7}' +
+      '.hl-stage.ready{background:rgba(26,127,55,.10);color:#1a7f37}' +
+      '.hl-stage.prime{background:rgba(26,127,55,.18);color:#12602a}' +
+      '.hl-stage.fatigued{background:rgba(178,106,0,.14);color:#b26a00}' +
+      '.hl-stage.burned{background:rgba(179,38,30,.14);color:#b3261e}' +
+      '.hl-stage.retired{background:var(--border);color:var(--muted,var(--text-dim))}' +
+      '.hl-wear{display:flex;align-items:center;gap:7px;min-width:132px}' +
+      '.hl-weart{flex:1;height:7px;border-radius:4px;background:var(--border);overflow:hidden;min-width:56px}' +
+      '.hl-wearf{display:block;height:100%;border-radius:4px}' +
+      '.hl-wearn{font-size:11.5px;font-weight:650;min-width:30px;text-align:right}' +
+      '.hl-cause{border:1px solid var(--border);border-radius:11px;margin-bottom:7px;overflow:hidden}' +
+      '.hl-cause-h{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;flex-wrap:wrap}' +
+      '.hl-cause-h:hover{background:var(--surface-2,rgba(46,91,215,.04))}' +
+      '.hl-cause-t{font-size:13px;font-weight:600}' +
+      '.hl-cause-n{font-size:11.5px;color:var(--muted,var(--text-dim))}' +
+      '.hl-cause-b{padding:2px 13px 12px 29px;font-size:12.5px;line-height:1.55;border-top:1px solid var(--border)}' +
+      '.hl-def{margin-top:8px}.hl-def b{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));display:block;margin-bottom:1px}' +
+      '.hl-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:11px}' +
+      '.hl-input{border:1px solid var(--border);border-radius:9px;padding:6px 10px;font-size:12.5px;background:var(--surface);color:inherit;min-width:200px}' +
+      '.hl-seg{display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden}' +
+      '.hl-seg button{border:0;background:transparent;color:inherit;font:inherit;font-size:12px;padding:6px 11px;cursor:pointer}' +
+      '.hl-seg button.on{background:var(--brand,#2e5bd7);color:#fff}' +
+      '.hl-detail{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:16px 18px;margin:0 0 16px}' +
+      '.hl-dh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:3px}' +
+      '.hl-dt{font-size:17px;font-weight:660;letter-spacing:-.02em}' +
+      '.hl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:12px}' +
+      '.hl-box{border:1px solid var(--border);border-radius:12px;padding:12px 14px}' +
+      '.hl-box-t{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,var(--text-dim));margin-bottom:8px}' +
+      '.hl-contrib{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px dashed var(--border)}' +
+      '.hl-contrib:last-child{border-bottom:0}' +
+      '.hl-contrib i{font-style:normal;color:var(--muted,var(--text-dim));font-size:11.5px;display:block}' +
+      '.hl-tl{list-style:none;margin:0;padding:0}' +
+      '.hl-tl li{position:relative;padding:0 0 14px 20px;border-left:2px solid var(--border);margin-left:5px}' +
+      '.hl-tl li:last-child{border-left-color:transparent;padding-bottom:0}' +
+      '.hl-tl li:before{content:"";position:absolute;left:-6px;top:3px;width:10px;height:10px;border-radius:50%;background:var(--border)}' +
+      '.hl-tl li.critical:before{background:#b3261e}.hl-tl li.warn:before{background:#b26a00}.hl-tl li.watch:before{background:#2e5bd7}' +
+      '.hl-tl li.closed:before{background:#1a7f37}' +
+      '.hl-tl-t{font-size:12.8px;font-weight:600}' +
+      '.hl-tl-m{font-size:11.5px;color:var(--muted,var(--text-dim));margin-top:1px}' +
+      '.hl-tl-d{font-size:12.3px;margin-top:3px;line-height:1.5}' +
+      '.hl-note{background:var(--surface-2,rgba(46,91,215,.05));border-radius:8px;padding:6px 9px;font-size:12px;margin-top:5px}' +
+      '.hl-spark{vertical-align:middle}' +
+      '.hl-empty{font-size:12.5px;color:var(--muted,var(--text-dim));padding:14px 2px}' +
+      '.hl-warn{border:1px solid rgba(179,38,30,.35);background:rgba(179,38,30,.06);border-radius:11px;padding:10px 13px;font-size:12.5px;margin-bottom:13px;line-height:1.5}' +
+      '.hl-mono{font:500 11.5px var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace)}';
+    document.head.appendChild(st);
+  }
+
+  /* ---- small renderers ---- */
+
+  function hlAgo(iso) {
+    if (!iso) return "";
+    var s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 90) return s + "s ago";
+    var m = Math.round(s / 60); if (m < 90) return m + " min ago";
+    var h = Math.round(m / 60); if (h < 48) return h + " h ago";
+    return Math.round(h / 24) + " d ago";
+  }
+  function hlDur(hours) {
+    if (hours == null) return "";
+    if (hours < 1) return Math.max(1, Math.round(hours * 60)) + " min";
+    if (hours < 48) return (Math.round(hours * 10) / 10) + " h";
+    return Math.round(hours / 24) + " days";
+  }
+  function hlNum(n) { return (n == null ? 0 : n).toLocaleString(); }
+
+  function hlWearBar(shelf) {
+    if (!shelf) return '<span class="muted">n/a</span>';
+    var w = shelf.wearPct || 0;
+    var c = w >= 85 ? "#b3261e" : w >= 60 ? "#b26a00" : w >= 35 ? "#2e5bd7" : "#1a7f37";
+    return '<div class="hl-wear" title="' + esc(shelf.verdict || "") + '">' +
+      '<span class="hl-stage ' + esc(shelf.stage) + '">' + esc(shelf.stage) + '</span>' +
+      '<span class="hl-weart"><i class="hl-wearf" style="width:' + Math.max(2, Math.min(100, w)) + '%;background:' + c + '"></i></span>' +
+      '<span class="hl-wearn" style="color:' + c + '">' + w + '%</span></div>';
+  }
+
+  /** Reputation sparkline. Flat-line and gap handling matter here: a mailbox with
+   *  no reputation data must not draw as a confident zero. */
+  function hlSpark(series) {
+    var pts = (series || []).map(function (v, i) { return { i: i, v: v }; }).filter(function (p) { return p.v != null; });
+    if (pts.length < 2) return '<span class="muted" style="font-size:11px">no series yet</span>';
+    var w = 74, h = 18, n = (series.length - 1) || 1;
+    var min = 0, max = 100;
+    var d = pts.map(function (p) {
+      var x = (p.i / n) * w;
+      var y = h - ((p.v - min) / (max - min)) * h;
+      return (Math.round(x * 10) / 10) + "," + (Math.round(y * 10) / 10);
+    }).join(" ");
+    var last = pts[pts.length - 1].v, first = pts[0].v;
+    var c = last < first - 5 ? "#b3261e" : last > first + 2 ? "#1a7f37" : "#8a94a6";
+    return '<svg class="hl-spark" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" aria-hidden="true">' +
+      '<polyline points="' + d + '" fill="none" stroke="' + c + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>';
+  }
+
+  /** The recorded series as a real chart: reputation and wear as lines over the
+   *  same days, cold sends per day as bars underneath. */
+  function hlChart(series) {
+    var rows = (series || []).slice(-90);
+    if (rows.length < 2) return '<div class="hl-empty">Not enough recorded days yet. The observation tick writes one row a day; the chart fills in as it runs.</div>';
+    var w = 640, h = 150, pad = 22, n = rows.length - 1;
+    function x(i) { return pad + (i / n) * (w - pad * 2); }
+    function y(v) { return pad + (1 - v / 100) * (h - pad * 2); }
+    function line(get, color, dash) {
+      var segs = [], cur = [];
+      rows.forEach(function (r, i) {
+        var v = get(r);
+        if (v == null) { if (cur.length > 1) segs.push(cur); cur = []; return; }
+        cur.push(Math.round(x(i) * 10) / 10 + "," + Math.round(y(v) * 10) / 10);
+      });
+      if (cur.length > 1) segs.push(cur);
+      return segs.map(function (s) {
+        return '<polyline points="' + s.join(" ") + '" fill="none" stroke="' + color + '" stroke-width="1.9"' +
+          (dash ? ' stroke-dasharray="4 3"' : "") + ' stroke-linejoin="round"/>';
+      }).join("");
+    }
+    // Daily cold sends, from cumulative deltas: what actually left the building.
+    var deltas = rows.map(function (r, i) { return i === 0 ? 0 : Math.max(0, (r.cSent || 0) - (rows[i - 1].cSent || 0)); });
+    var maxD = Math.max.apply(null, deltas.concat([1]));
+    var bars = deltas.map(function (d, i) {
+      if (!d) return "";
+      var bh = (d / maxD) * 26, bx = x(i) - 1.6;
+      return '<rect x="' + (Math.round(bx * 10) / 10) + '" y="' + (Math.round((h - pad + 4 - bh) * 10) / 10) + '" width="3.2" height="' + (Math.round(bh * 10) / 10) + '" fill="rgba(46,91,215,.45)" rx="1"><title>' + d + ' sends on ' + esc(rows[i].d) + '</title></rect>';
+    }).join("");
+    var grid = [0, 50, 100].map(function (v) {
+      return '<line x1="' + pad + '" y1="' + y(v) + '" x2="' + (w - pad) + '" y2="' + y(v) + '" stroke="var(--border)" stroke-width="1"/>' +
+        '<text x="2" y="' + (y(v) + 3.5) + '" font-size="9" fill="var(--muted,#8a94a6)">' + v + '</text>';
+    }).join("");
+    return '<div class="hl-scroll"><svg width="' + w + '" height="' + (h + 16) + '" viewBox="0 0 ' + w + ' ' + (h + 16) + '" role="img" aria-label="Recorded reputation, wear and daily sends">' +
+      grid + bars +
+      line(function (r) { return r.rep; }, "#1a7f37", false) +
+      line(function (r) { return r.wear == null ? null : r.wear; }, "#b26a00", true) +
+      line(function (r) { return r.health == null ? null : r.health; }, "#2e5bd7", false) +
+      '<text x="' + pad + '" y="' + (h + 12) + '" font-size="9.5" fill="var(--muted,#8a94a6)">' + esc(rows[0].d) + '</text>' +
+      '<text x="' + (w - pad) + '" y="' + (h + 12) + '" font-size="9.5" text-anchor="end" fill="var(--muted,#8a94a6)">' + esc(rows[rows.length - 1].d) + '</text>' +
+      '</svg></div>' +
+      '<div style="font-size:11px;color:var(--muted,var(--text-dim));margin-top:2px">' +
+      '<span style="color:#1a7f37">━</span> reputation &nbsp; <span style="color:#2e5bd7">━</span> composite health &nbsp; <span style="color:#b26a00">┄</span> wear &nbsp; <span style="color:rgba(46,91,215,.7)">▮</span> cold sends that day</div>';
+  }
+
+  function hlBlockerBlock(b) {
+    return '<div class="hl-cause" style="margin-bottom:6px">' +
+      '<div class="hl-cause-h" style="cursor:default">' +
+        '<span class="hl-sev ' + esc(b.severity) + '"></span>' +
+        '<span class="hl-cause-t">' + esc(b.title) + '</span>' +
+        (b.blocking ? '<span class="hl-chip critical">stops mail</span>' : '<span class="hl-chip info">degrades</span>') +
+        (b.since ? '<span class="hl-cause-n">since ' + esc(String(b.since).slice(0, 16).replace("T", " ")) + ' UTC · ' + esc(hlAgo(b.since)) + '</span>' : "") +
+        '<span style="flex:1"></span><span class="hl-mono" style="opacity:.6">' + esc(b.code) + '</span>' +
+      '</div>' +
+      '<div class="hl-cause-b">' + esc(b.detail) +
+        '<div class="hl-def"><b>Proven by</b>' + esc(b.source) + '</div>' +
+        (b.fix ? '<div class="hl-def"><b>What to do</b>' + esc(b.fix) + '</div>' : "") +
+      '</div></div>';
+  }
+
+  /* ---- the panel ---- */
+
+  function renderHealthLedger(view) {
+    hlEnsureStyles();
+    view.innerHTML = '<div id="hlWrap"><div class="hl-card"><div class="hl-empty">Opening the health ledger…</div></div></div>';
+    hlLoad(false);
+    // The catalog is small and static; pulling it up front means a timeline row
+    // never renders a bare code where a written title belongs.
+    if (!hlCatalog) {
+      send("/senders/ledger?catalog=1", "GET").then(function (r) {
+        hlCatalog = (r.ok && r.data && r.data.catalog) || [];
+        hlCatalog.forEach(function (c) { CAUSE_TITLES[c.code] = c.title; });
+        if (document.getElementById("hlWrap")) hlPaint();
+      });
+    }
+    if (!hlTimer) {
+      hlTimer = setInterval(function () {
+        if (!document.getElementById("hlWrap")) { clearInterval(hlTimer); hlTimer = null; return; }
+        hlLoad(false);
+      }, 60000);
+    }
+  }
+
+  function hlLoad(fresh) {
+    if (hlLoading) return;
+    hlLoading = true;
+    send("/senders/ledger", "GET").then(function (r) {
+      hlLoading = false;
+      if (!document.getElementById("hlWrap")) return;
+      if (r.ok) hlData = r.data || null;
+      hlPaint();
+      // A portal that has never observed gets one warm start, then settles onto
+      // the normal poll rather than hammering the tick.
+      if (hlData && hlData.warming && !fresh) setTimeout(function () { if (document.getElementById("hlWrap")) hlLoad(true); }, 15000);
+    });
+  }
+
+  function hlLoadIdentity(ref) {
+    hlDetailRef = ref;
+    hlDetail = null;
+    hlDetailLoading = true;
+    hlPaint();
+    send("/senders/ledger?identity=" + encodeURIComponent(ref), "GET").then(function (r) {
+      hlDetailLoading = false;
+      if (hlDetailRef !== ref) return;
+      hlDetail = r.ok ? (r.data || null) : null;
+      hlPaint();
+    });
+  }
+
+  function hlTick() {
+    if (hlTicking) return;
+    hlTicking = true; hlPaint();
+    send("/senders/ledger", "POST", { action: "tick", force: true }).then(function () {
+      hlTicking = false;
+      hlLoad(true);
+      if (hlDetailRef) hlLoadIdentity(hlDetailRef);
+    });
+  }
+
+  function hlPaint() {
+    var box = document.getElementById("hlWrap"); if (!box) return;
+    if (!hlData) { box.innerHTML = '<div class="hl-card"><div class="hl-empty">The health ledger is not readable on this portal yet.</div></div>'; return; }
+    box.innerHTML = hlHeaderCard() + hlCausesCard() + (hlDetailRef ? hlDetailCard() : "") + hlFleetCard() + hlCatalogCard();
+    hlBind(box);
+  }
+
+  function hlHeaderCard() {
+    var t = (hlData.totals || {}), cap = hlData.capacity;
+    function stat(v, l, note, color) {
+      return '<div class="hl-stat"><div class="hl-statv"' + (color ? ' style="color:' + color + '"' : "") + '>' + v + '</div>' +
+        '<div class="hl-statl">' + esc(l) + '</div>' + (note ? '<div class="hl-statn">' + esc(note) + '</div>' : "") + '</div>';
+    }
+    var hc = t.avgHealth == null ? "" : t.avgHealth >= 85 ? "#1a7f37" : t.avgHealth >= 65 ? "#b26a00" : "#b3261e";
+    var stale = cap && cap.stale;
+    var warn = "";
+    if (stale) {
+      warn = '<div class="hl-warn"><b>The sender has not published for ' + hlNum(cap.ageMinutes) + ' minutes.</b> ' +
+        'Capacity, sends and remaining below are the last numbers it wrote, not live truth. Check the sending timers on the host before trusting anything on this page.</div>';
+    }
+    if (t.criticalOpen) {
+      warn += '<div class="hl-warn">' + t.criticalOpen + ' critical condition' + (t.criticalOpen === 1 ? " is" : "s are") + ' open right now. They are listed first below, each with what proved it and what to do.</div>';
+    }
+    return '<div class="hl-card">' +
+      '<div class="hl-head"><div class="hl-title">Sender health ledger</div>' +
+        '<span class="hl-chip ' + (t.criticalOpen ? "critical" : "ok") + '">' + (t.criticalOpen ? t.criticalOpen + " critical" : "no critical faults") + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<span class="hl-cause-n">last observed ' + esc(hlAgo(hlData.lastTickAt)) + '</span>' +
+        '<button class="btn btn-ghost btn-sm" id="hlTick"' + (hlTicking ? " disabled" : "") + '>' + (hlTicking ? "Observing…" : "↻ Observe now") + '</button>' +
+      '</div>' +
+      '<div class="hl-sub">Every sending domain and Email ID on this portal, recorded daily rather than sampled. A row here carries its whole life: how it is behaving today, what is stopping it and since when, the evidence that proved it, and how much shelf life it has left. Conditions open and close on their own, so a stoppage always has a start, an end and a duration on the record. ' +
+        '<b>Capacity numbers on this page come from the sender itself</b>, read from the ledger it publishes; nothing here re-sums the fleet. A blocking condition counted below is a condition on the Email ID as this portal holds it, which is not the same question as how many boxes the sender can pick today, so the two counts are shown side by side rather than blended.</div>' +
+      warn +
+      '<div class="hl-strip">' +
+        stat(t.avgHealth == null ? "n/a" : t.avgHealth, "Fleet health", "composite of reputation, authentication, placement and real bounces", hc) +
+        stat(hlNum(t.domains), "Domains tracked", hlNum(t.mailboxes) + " Email IDs on the record") +
+        stat(hlNum(t.blocked), "Email IDs with a blocking condition", "every one has a named cause below · " + hlNum(t.sendingNow) + " carry none", t.blocked ? "#b26a00" : "#1a7f37") +
+        stat(hlNum(t.openEvents), "Open conditions", t.criticalOpen ? t.criticalOpen + " critical" : "nothing critical", t.criticalOpen ? "#b3261e" : "") +
+        stat(t.avgWear == null ? "n/a" : t.avgWear + "%", "Average wear", hlNum(t.fatigued) + " fatigued · " + hlNum(t.burned) + " burned") +
+        (cap ? stat(hlNum(cap.capToday), "Cold capacity today", "published by the sender · bound by " + cap.boundBy + " · " + hlNum(cap.sentToday) + " sent, " + hlNum(cap.remainingToday) + " left", stale ? "#b3261e" : "") : "") +
+        (cap ? stat(hlNum(cap.usableBoxes), "Boxes the sender can use", "the sender's own count, of " + hlNum(cap.boxes) + " in the fleet · " + hlNum(cap.benchedBoxes) + " benched") : "") +
+        stat(hlNum(t.lifetimeSent), "Lifetime cold sends", hlNum(t.lifetimeBounces) + " bounces recorded") +
+      '</div></div>';
+  }
+
+  function hlCausesCard() {
+    var causes = hlData.byCause || [];
+    if (!causes.length) {
+      return '<div class="hl-card"><div class="hl-head"><div class="hl-title">Open conditions</div></div>' +
+        '<div class="hl-empty">Nothing is stopping or degrading mail on this portal right now. Every recorded condition has closed.</div></div>';
+    }
+    var rows = causes.map(function (c) {
+      var open = !!hlCauseOpen[c.code];
+      var n = c.domains + c.mailboxes;
+      return '<div class="hl-cause">' +
+        '<div class="hl-cause-h" data-hl-cause="' + esc(c.code) + '">' +
+          '<span class="hl-sev ' + esc(c.severity) + '"></span>' +
+          '<span class="hl-cause-t">' + esc(c.title) + '</span>' +
+          (c.blocking ? '<span class="hl-chip critical">stops mail</span>' : '<span class="hl-chip info">degrades</span>') +
+          '<span class="hl-cause-n">' + (c.domains ? c.domains + ' domain' + (c.domains === 1 ? "" : "s") : "") +
+            (c.domains && c.mailboxes ? " · " : "") +
+            (c.mailboxes ? c.mailboxes + ' Email ID' + (c.mailboxes === 1 ? "" : "s") : "") + '</span>' +
+          (c.oldestSince ? '<span class="hl-cause-n">oldest open ' + esc(hlAgo(c.oldestSince)) + '</span>' : "") +
+          '<span style="flex:1"></span><span class="hl-mono" style="opacity:.55">' + esc(c.code) + '</span>' +
+          '<span class="hl-cause-n">' + (open ? "▾" : "▸") + '</span>' +
+        '</div>' +
+        (open ? '<div class="hl-cause-b">' + esc(c.meaning) +
+          (c.fix ? '<div class="hl-def"><b>What to do</b>' + esc(c.fix) + '</div>' : "") +
+          '<div class="hl-def"><b>Affects</b>' + n + ' identit' + (n === 1 ? "y" : "ies") + ' · category ' + esc(c.category) + '</div></div>' : "") +
+      '</div>';
+    }).join("");
+    return '<div class="hl-card">' +
+      '<div class="hl-head"><div class="hl-title">Open conditions</div>' +
+        '<span class="hl-cause-n">the worklist, blocking first</span></div>' +
+      '<div class="hl-sub">Everything currently stopping or degrading mail, grouped by cause and ordered by how much damage it does. Open one for what it means and what to do about it.</div>' +
+      rows + '</div>';
+  }
+
+  function hlFleetCard() {
+    var all = hlData.domains || [];
+    var q = hlQuery.toLowerCase().trim();
+    var rows = all.filter(function (d) {
+      if (q && d.id.toLowerCase().indexOf(q) < 0) return false;
+      if (hlFilter === "problems") return d.blockingCount > 0 || d.warningCount > 0;
+      if (hlFilter === "fatigued") return d.shelf && (d.shelf.stage === "fatigued" || d.shelf.stage === "burned");
+      if (hlFilter === "sending") return d.blockingCount === 0;
+      return true;
+    });
+    var body = rows.length ? rows.map(function (d) {
+      var sel = hlDetailRef === d.identity;
+      var h = d.health == null ? "" : d.health >= 85 ? "#1a7f37" : d.health >= 65 ? "#b26a00" : "#b3261e";
+      var headline = d.headline
+        ? '<span class="hl-chip ' + esc(d.headline.severity) + '" title="' + esc(d.headline.detail) + '">' + esc(d.headline.title) + '</span>' +
+          (d.headline.since ? '<div class="hl-cause-n" style="margin-top:3px">for ' + esc(hlAgo(d.headline.since).replace(" ago", "")) + '</div>' : "")
+        : '<span class="hl-chip ok">sending</span>';
+      var dnsMissing = ["SPF", "DKIM", "DMARC", "MX"].filter(function (k) { return (d.dns || []).indexOf(k) < 0; });
+      return '<tr class="hl-row' + (sel ? " sel" : "") + '" data-hl-id="' + esc(d.identity) + '">' +
+        '<td><b>' + esc(d.id) + '</b>' +
+          (d.infra ? '<div class="hl-cause-n">' + esc(d.infra) + '</div>' : "") + '</td>' +
+        '<td>' + hlWearBar(d.shelf) + '</td>' +
+        '<td style="color:' + h + ';font-weight:650">' + (d.health == null ? "n/a" : d.health) + '</td>' +
+        '<td>' + (d.rep == null ? '<span class="muted">n/a</span>' : d.rep + "%") + '<div>' + hlSpark(d.spark) + '</div></td>' +
+        '<td>' + (d.ageDays == null ? '<span class="muted">n/a</span>' : Math.round(d.ageDays) + " d") + '</td>' +
+        '<td>' + d.sending + "/" + d.boxes + '</td>' +
+        '<td>' + hlNum(d.cSent) + (d.bounceRatePct != null ? '<div class="hl-cause-n" style="color:' + (d.bounceRatePct > 5 ? "#b3261e" : "") + '">' + d.bounceRatePct + '% bounced</div>' : "") + '</td>' +
+        '<td>' + (dnsMissing.length ? '<span class="hl-chip warn">' + esc(dnsMissing.join(" ")) + ' missing</span>' : '<span class="hl-chip ok">authed</span>') +
+          (d.blocklists ? '<div><span class="hl-chip critical">listed</span></div>' : "") + '</td>' +
+        '<td>' + headline + '</td>' +
+        '<td>' + (d.shelf && d.shelf.retireBy ? esc(d.shelf.retireBy) + '<div class="hl-cause-n">' + d.shelf.daysRemaining + ' days at this rate</div>' : '<span class="muted">not wearing</span>') + '</td>' +
+      '</tr>';
+    }).join("") : '<tr><td colspan="10"><div class="hl-empty">Nothing matches this filter.</div></td></tr>';
+    return '<div class="hl-card">' +
+      '<div class="hl-head"><div class="hl-title">Domains on the record</div>' +
+        '<span class="hl-cause-n">' + rows.length + ' of ' + all.length + ' shown · click a row for its full history</span></div>' +
+      '<div class="hl-tools">' +
+        '<input class="hl-input" id="hlQ" placeholder="Filter by domain…" value="' + esc(hlQuery) + '">' +
+        '<span class="hl-seg">' +
+          ['problems', 'all', 'sending', 'fatigued'].map(function (k) {
+            var label = k === "problems" ? "Needs attention" : k === "all" ? "All" : k === "sending" ? "Sending" : "Wearing out";
+            return '<button data-hl-f="' + k + '" class="' + (hlFilter === k ? "on" : "") + '">' + label + '</button>';
+          }).join("") +
+        '</span>' +
+      '</div>' +
+      '<div class="hl-scroll"><table class="hl-table"><thead><tr>' +
+        '<th>Domain</th><th>Shelf life</th><th>Health</th><th>Reputation</th><th>Age</th><th>Sending</th><th>Lifetime sends</th><th>Auth</th><th>State</th><th>Retire by</th>' +
+      '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
+  }
+
+  function hlDetailCard() {
+    if (hlDetailLoading || !hlDetail) {
+      return '<div class="hl-detail"><div class="hl-empty">Opening the record for ' + esc(String(hlDetailRef).split(":").slice(1).join(":")) + '…</div></div>';
+    }
+    if (!hlDetail.found) {
+      return '<div class="hl-detail"><div class="hl-empty">Nothing recorded for that identity yet.</div></div>';
+    }
+    var d = hlDetail.row, shelf = hlDetail.shelf, lt = hlDetail.lifetime || {};
+    var blockers = hlDetail.blockers || [];
+    var contrib = (shelf && shelf.contributions || []).map(function (c) {
+      return '<div class="hl-contrib"><span>' + esc(c.label) + '<i>' + esc(c.detail) + '</i></span><b>+' + c.points + '</b></div>';
+    }).join("") || '<div class="hl-empty" style="padding:2px 0">Nothing has worn this identity yet.</div>';
+
+    var timeline = (hlDetail.timeline || []).map(function (e) {
+      var cls = e.closedAt ? "closed" : e.severity;
+      var notes = (e.notes || []).map(function (n) {
+        return '<div class="hl-note"><b>' + esc(n.by) + '</b> · ' + esc(hlAgo(n.at)) + '<br>' + esc(n.text) + '</div>';
+      }).join("");
+      var composing = hlNoteFor === e.id;
+      return '<li class="' + esc(cls) + '">' +
+        '<div class="hl-tl-t">' + esc((CAUSE_TITLES[e.code] || e.code)) +
+          (e.closedAt ? ' <span class="hl-chip ok">resolved</span>' : ' <span class="hl-chip ' + esc(e.severity) + '">open</span>') + '</div>' +
+        '<div class="hl-tl-m">' + esc(String(e.openedAt).slice(0, 16).replace("T", " ")) + ' UTC' +
+          (e.closedAt ? ' → ' + esc(String(e.closedAt).slice(0, 16).replace("T", " ")) + ' UTC · lasted ' + esc(hlDur(e.hoursOpen)) : ' · ' + esc(hlAgo(e.openedAt)) + ' and counting') +
+          ' · <span class="hl-mono">' + esc(e.code) + '</span></div>' +
+        '<div class="hl-tl-d">' + esc(e.detail) + '</div>' +
+        notes +
+        (composing
+          ? '<div style="margin-top:6px;display:flex;gap:6px"><input class="hl-input" id="hlNoteText" style="flex:1" placeholder="What did you do about it?">' +
+            '<button class="btn btn-sm" data-hl-notesave="' + esc(e.id) + '">Save</button></div>'
+          : '<button class="btn btn-ghost btn-sm" style="margin-top:5px" data-hl-note="' + esc(e.id) + '">Add note</button>') +
+      '</li>';
+    }).join("") || '<div class="hl-empty">No recorded events yet. Conditions appear here the moment one opens.</div>';
+
+    var mailboxes = (hlDetail.mailboxes || []).map(function (m) {
+      return '<tr class="hl-row" data-hl-id="' + esc(m.identity) + '">' +
+        '<td>' + esc(m.id) + (m.ownerName ? '<div class="hl-cause-n">' + esc(m.ownerName) + '</div>' : "") + '</td>' +
+        '<td>' + hlWearBar(m.shelf) + '</td>' +
+        '<td>' + (m.rep == null ? '<span class="muted">n/a</span>' : m.rep + "%") + '</td>' +
+        '<td>' + hlNum(m.cSent) + (m.bounceRatePct != null ? ' · ' + m.bounceRatePct + '%' : "") + '</td>' +
+        '<td>' + (m.headline ? '<span class="hl-chip ' + esc(m.headline.severity) + '" title="' + esc(m.headline.detail) + '">' + esc(m.headline.title) + '</span>' : '<span class="hl-chip ok">sending</span>') + '</td>' +
+      '</tr>';
+    }).join("");
+
+    return '<div class="hl-detail">' +
+      '<div class="hl-dh"><div class="hl-dt">' + esc(d.id) + '</div>' +
+        (shelf ? '<span class="hl-stage ' + esc(shelf.stage) + '">' + esc(shelf.stage) + '</span>' : "") +
+        '<span class="hl-cause-n">' + esc(d.kind === "domain" ? "sending domain" : "Email ID") +
+          (d.infra ? ' · ' + esc(d.infra) : "") +
+          (hlDetail.firstSeen ? ' · first recorded ' + esc(String(hlDetail.firstSeen).slice(0, 10)) : "") + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-ghost btn-sm" id="hlClose">Close record</button></div>' +
+      (shelf ? '<div class="hl-sub" style="margin-bottom:6px">' + esc(shelf.verdict) + '</div>' : "") +
+      '<div class="hl-grid">' +
+        '<div class="hl-box"><div class="hl-box-t">Shelf life · why it is worn</div>' +
+          (shelf ? hlWearBar(shelf) + '<div style="margin-top:9px">' + contrib + '</div>' +
+            '<div class="hl-cause-n" style="margin-top:9px;line-height:1.5">' +
+              'Wear is charged against volume carried, bounces taken, rest episodes served, guard holds, receiver refusals, lost DNS records and reputation trend. ' +
+              (shelf.wearPerDay != null ? 'Currently wearing <b>' + shelf.wearPerDay + ' points a day</b>. ' : 'Not measurably wearing yet. ') +
+              (shelf.retireBy ? 'At that rate it reaches the ceiling around <b>' + esc(shelf.retireBy) + '</b>' + (shelf.sendsRemaining != null ? ', after roughly ' + hlNum(shelf.sendsRemaining) + ' more sends' : "") + '.' : "") +
+            '</div>' : '<div class="hl-empty">No shelf-life reading yet.</div>') +
+        '</div>' +
+        '<div class="hl-box"><div class="hl-box-t">Lifetime on the record</div>' +
+          '<div class="hl-contrib"><span>Days observed</span><b>' + hlNum(lt.daysObserved) + '</b></div>' +
+          '<div class="hl-contrib"><span>Days with mail stopped</span><b>' + hlNum(lt.daysBlocked) + '</b></div>' +
+          '<div class="hl-contrib"><span>Cold sends</span><b>' + hlNum(lt.cSent) + '</b></div>' +
+          '<div class="hl-contrib"><span>Bounces</span><b>' + hlNum(lt.bounces) + '</b></div>' +
+          '<div class="hl-contrib"><span>Warm-up sent / in spam</span><b>' + hlNum(lt.wSent) + ' / ' + hlNum(lt.wSpam) + '</b></div>' +
+          '<div class="hl-contrib"><span>Rest episodes</span><b>' + hlNum(lt.restEpisodes) + '</b></div>' +
+          '<div class="hl-contrib"><span>Guard holds</span><b>' + hlNum(lt.guardHolds) + '</b></div>' +
+          '<div class="hl-contrib"><span>Blocklist listings</span><b>' + hlNum(lt.blocklistEpisodes) + '</b></div>' +
+          '<div class="hl-contrib"><span>DNS regressions</span><b>' + hlNum(lt.authRegressions) + '</b></div>' +
+          '<div class="hl-contrib"><span>Peak reputation</span><b>' + (lt.repPeak == null ? "n/a" : lt.repPeak + "%") + '</b></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="hl-box" style="margin-top:14px"><div class="hl-box-t">Recorded history</div>' + hlChart(hlDetail.series) + '</div>' +
+      '<div class="hl-box" style="margin-top:14px"><div class="hl-box-t">Why it is in this state right now</div>' +
+        (blockers.length ? blockers.map(hlBlockerBlock).join("") : '<div class="hl-empty">Nothing is stopping or degrading it. It is sending.</div>') + '</div>' +
+      (mailboxes ? '<div class="hl-box" style="margin-top:14px"><div class="hl-box-t">Email IDs on this domain</div>' +
+        '<div class="hl-scroll"><table class="hl-table"><thead><tr><th>Email ID</th><th>Shelf life</th><th>Reputation</th><th>Sends</th><th>State</th></tr></thead><tbody>' + mailboxes + '</tbody></table></div></div>' : "") +
+      '<div class="hl-box" style="margin-top:14px"><div class="hl-box-t">Timeline · every condition, start to finish</div>' +
+        '<ul class="hl-tl">' + timeline + '</ul></div>' +
+    '</div>';
+  }
+
+  /** Titles for codes the fleet payload did not carry (timeline rows). Filled from
+   *  the catalog on first load; falls back to the raw code, never blank. */
+  var CAUSE_TITLES = {};
+
+  function hlCatalogCard() {
+    if (!hlShowCatalog) {
+      return '<div class="hl-card"><div class="hl-head"><div class="hl-title">Reference</div>' +
+        '<span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="hlCat">Open the cause reference</button></div>' +
+        '<div class="hl-sub" style="margin:0">Every condition this ledger can record, what it means, what proves it and how to fix it.</div></div>';
+    }
+    var rows = (hlCatalog || []).map(function (c) {
+      return '<div class="hl-cause"><div class="hl-cause-h" style="cursor:default">' +
+        '<span class="hl-sev ' + esc(c.severity) + '"></span><span class="hl-cause-t">' + esc(c.title) + '</span>' +
+        (c.blocking ? '<span class="hl-chip critical">stops mail</span>' : '<span class="hl-chip info">degrades</span>') +
+        '<span class="hl-cause-n">' + esc(c.category) + '</span>' +
+        '<span style="flex:1"></span><span class="hl-mono" style="opacity:.55">' + esc(c.code) + '</span></div>' +
+        '<div class="hl-cause-b">' + esc(c.meaning) +
+          '<div class="hl-def"><b>Proven by</b>' + esc(c.provenBy) + '</div>' +
+          '<div class="hl-def"><b>What to do</b>' + esc(c.fix) + '</div>' +
+        '</div></div>';
+    }).join("") || '<div class="hl-empty">Loading the reference…</div>';
+    return '<div class="hl-card"><div class="hl-head"><div class="hl-title">Reference · every cause this ledger records</div>' +
+      '<span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="hlCat">Hide</button></div>' + rows + '</div>';
+  }
+
+  function hlBind(box) {
+    var tick = document.getElementById("hlTick");
+    if (tick) tick.addEventListener("click", hlTick);
+    var close = document.getElementById("hlClose");
+    if (close) close.addEventListener("click", function () { hlDetailRef = null; hlDetail = null; hlPaint(); });
+    var cat = document.getElementById("hlCat");
+    if (cat) cat.addEventListener("click", function () {
+      hlShowCatalog = !hlShowCatalog;
+      if (hlShowCatalog && !hlCatalog) {
+        send("/senders/ledger?catalog=1", "GET").then(function (r) {
+          hlCatalog = (r.ok && r.data && r.data.catalog) || [];
+          hlCatalog.forEach(function (c) { CAUSE_TITLES[c.code] = c.title; });
+          hlPaint();
+        });
+      }
+      hlPaint();
+    });
+    var q = document.getElementById("hlQ");
+    if (q) q.addEventListener("input", function () {
+      hlQuery = q.value;
+      clearTimeout(hlQTimer);
+      hlQTimer = setTimeout(function () {
+        hlPaint();
+        var again = document.getElementById("hlQ");
+        if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+      }, 160);
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-hl-f]"), function (b) {
+      b.addEventListener("click", function () { hlFilter = b.getAttribute("data-hl-f"); hlPaint(); });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-hl-cause]"), function (el) {
+      el.addEventListener("click", function () {
+        var c = el.getAttribute("data-hl-cause");
+        hlCauseOpen[c] = !hlCauseOpen[c];
+        hlPaint();
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-hl-id]"), function (tr) {
+      tr.addEventListener("click", function () {
+        var ref = tr.getAttribute("data-hl-id");
+        if (hlDetailRef === ref) { hlDetailRef = null; hlDetail = null; hlPaint(); return; }
+        hlLoadIdentity(ref);
+      });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-hl-note]"), function (b) {
+      b.addEventListener("click", function () { hlNoteFor = b.getAttribute("data-hl-note"); hlPaint(); });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-hl-notesave]"), function (b) {
+      b.addEventListener("click", function () {
+        var input = document.getElementById("hlNoteText");
+        var text = input ? input.value.trim() : "";
+        if (!text) return;
+        b.disabled = true;
+        send("/senders/ledger", "POST", { action: "note", eventId: b.getAttribute("data-hl-notesave"), text: text }).then(function () {
+          hlNoteFor = null;
+          if (hlDetailRef) hlLoadIdentity(hlDetailRef);
+        });
+      });
+    });
+  }
+
   function wuEnsureStyles() {
     if (document.getElementById("wuStyles")) return;
     var st = document.createElement("style");
@@ -9631,7 +10194,8 @@
         '<button class="btn btn-ghost btn-sm" id="wuRefresh"' + (wuLoading ? " disabled" : "") + '>' + (wuLoading ? "Refreshing…" : "↻ Refresh now") + '</button>' +
       '</div>' +
       '<div class="wu-sub">Every sending domain in warm-up on this portal, with mailbox reputation, volume and time in warm-up. New domains start at 50 to 80% and that is expected, reputation climbs as warm-up sends land and get pulled from spam. A domain is <b>Ready to send</b> at 95%+ average reputation after its full warm period: <b>14+ days</b> on provider-run mailboxes (Sending.ac, Gmail), <b>30+ days</b> on the Internal SMTP server, which earns its reputation from scratch. Each warming domain shows its day count toward that mark. Click a domain for its mailboxes.</div>' +
-      (wuData.portalNote ? '<div class="wu-sub"><b>Portal split:</b> ' + esc(wuData.portalNote) + '</div>' : '');
+      (wuData.portalNote ? '<div class="wu-sub"><b>Portal split:</b> ' + esc(wuData.portalNote) + '</div>' : '') +
+      '<div class="wu-sub">Warm-up is only one vital. For the full read on a domain, why it is or is not sending, what caused that, how long it has been that way and how much shelf life it has left, open <a href="#infrastructure/health"><b>Health Ledger</b></a>.</div>';
     // Infrastructure split cards: only providers that actually have mailboxes.
     var infraCards = "";
     (t.byInfra || []).forEach(function (b) {
