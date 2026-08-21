@@ -4495,6 +4495,9 @@
     ostext: [
       { src: "/assets/video/os-text-demo.mp4", label: "Features Video", title: "OS Text features video" },
       { src: "/assets/video/os-text-demo-live.mp4", label: "Demo Video", title: "OS Text demo video" }
+    ],
+    postrecruiter: [
+      { src: "/assets/video/post-recruiter-demo.mp4", label: "Features Video", title: "Post Recruiter features video" }
     ]
   };
   var demoSeen = {}; // src -> true once the file is confirmed present (missing files re-probe)
