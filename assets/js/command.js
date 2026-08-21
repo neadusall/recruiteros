@@ -1839,6 +1839,56 @@
           "</div>" +
           '<div class="ob-note">Numbers are cached per EMPLOYER domain, so one lookup covers every prospect at that company. A domain that has never been tried is worth resolving; one already tried and missed is cached negative and is not.</div>';
 
+        // 2c) TARGETING ORG CHART. The rule that decides who gets the email and the voice drop for
+        //     any posted job. Rendered from the snapshot the targeting module itself publishes, so
+        //     this sheet cannot drift from what the sender actually does. Grouped by function with
+        //     a row per company-size tier, because the size tier is the part that changes the
+        //     answer and is the part people get wrong.
+        var oc = f.orgchart;
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Targeting org chart · who gets the email and the voice drop</h3>';
+        if (!oc || !oc.rows || !oc.rows.length) {
+          html += '<div class="ob-note">Not published yet. It is written by the daily run (tools/orgchart-print.mjs --json), and the sender enforces the same model either way.</div>';
+        } else {
+          html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">';
+          for (var ti = 0; ti < oc.tiers.length; ti++) {
+            var tr = oc.tiers[ti];
+            html += '<div class="panel-card" style="flex:1 1 260px;padding:10px 12px">' +
+              '<div style="font-weight:600;font-size:13px;margin-bottom:4px">' + esc(tr.label) + '</div>' +
+              '<div style="font-size:12px;color:var(--text-dim);line-height:1.45">' + esc(tr.what) + '</div></div>';
+          }
+          html += '</div>';
+
+          var fns = oc.functions.slice().sort();
+          html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">' +
+            '<thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Function</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Posted job</th>' +
+            oc.tiers.map(function (t) { return '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">' + esc(t.label) + '</th>'; }).join('') +
+            '</tr></thead><tbody>';
+          for (var i = 0; i < fns.length; i++) {
+            var fnName = fns[i];
+            var levels = ["IC", "Manager", "Director", "VP"];
+            for (var j = 0; j < levels.length; j++) {
+              var lvl = levels[j];
+              html += '<tr>' +
+                '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text-dim);vertical-align:top">' + (j === 0 ? '<b style="color:var(--text)">' + esc(fnName) + '</b>' : '') + '</td>' +
+                '<td style="padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top">' + esc(lvl) + '-level</td>';
+              for (var k = 0; k < oc.tiers.length; k++) {
+                var row = null;
+                for (var m = 0; m < oc.rows.length; m++) {
+                  var r0 = oc.rows[m];
+                  if (r0.functionGroup === fnName && r0.tier === oc.tiers[k].key && r0.reqLevelName === lvl) { row = r0; break; }
+                }
+                if (!row) { html += '<td style="padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top">-</td>'; continue; }
+                var band = row.buyerLevels.join(" → ") + (row.ownerBuys ? " + owner" : "");
+                html += '<td style="padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top" title="' + esc(row.why) + '"><div>' + esc(band) + '</div>' +
+                  '<div style="color:var(--text-dim)">' + esc(row.buyerTitles.slice(0, 2).join(" / ")) + '</div></td>';
+              }
+              html += '</tr>';
+            }
+          }
+          html += '</tbody></table></div>' +
+            '<div class="ob-note">Read a row as: for this kind of posted job, at a company this size, contact this seat. The band is the part that moves: the same job at 200 employees reaches the owner, and at 2,000 it stops at the Director. Hover a cell for the reason. Never contacted for a normal req: anyone below Manager, a leader of a different function, and above 250 employees the CEO, unless the req itself is a C-suite search or the owner search came back empty.</div>';
+        }
+
         // 2a) WHERE THE BACKLOG IS STUCK. The video fleet renders `renderable` and nothing else, so
         //     when video output falls to zero this row says which gate is holding the rest — instead
         //     of the answer being "somewhere upstream". Buckets are exclusive and sum to Curated.

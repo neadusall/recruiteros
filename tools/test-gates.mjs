@@ -290,12 +290,46 @@ process.env.MPC_SIZE_MODE = "known-bad-only";
    exact owner (a CFO on an accounting req), which is what makes the contrast tests meaningful. */
 
 test("extended band: the exact function owner sends at 1,001-2,500", () => {
-  const p = base(); p.employeeCount = 1500;
+  // The buyer here is the CONTROLLER, not the CFO, and that is the org chart doing its job. base()
+  // is a Senior Associate req; at 1,500 employees the finance function is multi-layered, so that
+  // req is owned at Manager/Director level and the CFO is two rungs too high (see orgchart.mjs).
+  // Before the org chart this fixture passed with a CFO, which is exactly the mis-targeting the
+  // model exists to stop.
+  const owner = () => {
+    const p = base();
+    p.managerName = "Dana Cole"; p.managerTitle = "Controller";
+    p.likelyEmail = "dana.cole@upstart.com";
+    return p;
+  };
+  const p = owner(); p.employeeCount = 1500;
   assert.equal(assessProspect(p).eligible, true, assessProspect(p).failures.join("; "));
-  const edge = base(); edge.employeeCount = 2500;
+  const edge = owner(); edge.employeeCount = 2500;
   assert.equal(assessProspect(edge).eligible, true, "2,500 is inside the extended band");
-  const over = base(); over.employeeCount = 2501;
+  const over = owner(); over.employeeCount = 2501;
   assert.equal(assessProspect(over).eligible, false, "2,501 is outside it");
+});
+
+test("org chart: the CFO is too senior for a junior req at a layered company", () => {
+  // The headline case. Same person, same company, same req: valid at 400 employees where the
+  // layers do not exist, refused at 1,500 where they do.
+  const big = base(); big.employeeCount = 1500;          // managerTitle is CFO
+  const r = assessProspect(big);
+  assert.equal(r.eligible, false);
+  assert.ok(r.failures.some(f => /org chart:/.test(f) && /above the/.test(f)), r.failures.join("; "));
+
+  const small = base(); small.employeeCount = 400;
+  assert.equal(assessProspect(small).eligible, true, "at 400 the CFO is still the right door");
+});
+
+test("org chart: MPC_ORGCHART=0 reverts to function-only matching", () => {
+  const prev = process.env.MPC_ORGCHART;
+  process.env.MPC_ORGCHART = "0";
+  try {
+    const big = base(); big.employeeCount = 1500;
+    assert.equal(assessProspect(big).eligible, true, "the rollback switch must fully restore the old behaviour");
+  } finally {
+    if (prev === undefined) delete process.env.MPC_ORGCHART; else process.env.MPC_ORGCHART = prev;
+  }
 });
 
 test("extended band: a whole-company exec does NOT send on a normal req", () => {
@@ -502,3 +536,25 @@ test("talent leader: must be IN-HOUSE, never an agency or another employer", () 
 });
 
 console.log("\n" + passed + " passed");
+
+test("buyer titles: every rung the org chart TARGETS is accepted, and the near-misses are not", () => {
+  // The org chart aims junior reqs at Managers and Controllers, so VALID_DM_TITLE has to accept
+  // them or the model would pick a target the gate then refuses as "not a senior buyer" — a hold
+  // whose reason contradicts the targeting. The rejections matter just as much: a board seat and a
+  // project/office manager do not buy hiring, and `\w+ director` would have let "Board Director" in.
+  const p = () => ({
+    id: "x", company: "Upstart", domain: "upstart.com", role: "Staff Accountant",
+    jobLocation: "United States", managerName: "Pat Lee", likelyEmail: "pat.lee@upstart.com",
+    emailValidated: true, curatedAt: "2026-08-10", employeeCount: 1500,
+  });
+  const notBuyer = (title) => assessProspect({ ...p(), managerTitle: title })
+    .failures.some((f) => /not a senior buyer/.test(f));
+
+  for (const t of ["Accounting Manager", "Controller", "Sales Director", "Director of Finance",
+    "General Counsel", "VP of Finance", "Chief Financial Officer"]) {
+    assert.equal(notBuyer(t), false, `${t} must be accepted as a buyer`);
+  }
+  for (const t of ["Board Director", "Project Manager", "Office Manager", "Staff Accountant"]) {
+    assert.equal(notBuyer(t), true, `${t} must NOT read as a buyer`);
+  }
+});

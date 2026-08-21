@@ -701,6 +701,23 @@ export interface CurationFunnel {
     resolverResolved: number;      // ...that produced a dialable number
     resolverRate: number;          // resolved / attempts
   };
+  /**
+   * TARGETING ORG CHART: for a posted job of a given function and seniority, at a company of a
+   * given size, which seat gets the cold email and the voice drop. Read from the snapshot that
+   * tools/orgchart-print.mjs publishes rather than re-implemented here, for the same reason the
+   * capacity ledger is read and not recomputed: the module that ENFORCES the targeting is the only
+   * one allowed to describe it. Null until the first publish.
+   */
+  orgchart: {
+    at: string;
+    tiers: Array<{ key: string; label: string; what: string; ownerBuys: boolean }>;
+    functions: string[];
+    rows: Array<{
+      functionGroup: string; tier: string; tierLabel: string;
+      reqLevel: number; reqLevelName: string;
+      buyerLevels: string[]; buyerTitles: string[]; ownerBuys: boolean; why: string;
+    }>;
+  } | null;
   /** Daily throughput toward the 5,000 valid-emails/day goal, so consistency is measurable. */
   daily: {
     target: number;                  // 5,000
@@ -822,6 +839,13 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   let domainsUnattempted = 0;
   for (const d of allDomains) if (!phoneAttempted.has(d)) domainsUnattempted++;
 
+  // The targeting org chart, as published by the module that enforces it.
+  let orgchart: CurationFunnel["orgchart"] = null;
+  try {
+    const snap = await loadSnapshot<CurationFunnel["orgchart"]>("mpc_orgchart_v1");
+    if (snap && Array.isArray(snap.rows) && snap.rows.length) orgchart = snap;
+  } catch { /* not published yet: the panel says so rather than inventing a chart */ }
+
   return {
     total: rows.length,
     byStatus,
@@ -847,6 +871,7 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     emailBySource: [...src.entries()].map(([source, v]) => ({ source, ...v })).sort((a, b) => b.total - a.total),
     blocked,
     levers: { catchAllContactable: catchAllContactableEnabled(), residualFinder: await residualFinderEnabled() },
+    orgchart,
     voice: {
       curatedWithPhone,
       contactable: contactableRows,

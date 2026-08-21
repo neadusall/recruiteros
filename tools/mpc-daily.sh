@@ -61,6 +61,13 @@ docker run --rm --env-file /tmp/cs.env -v recruiteros_app_data:/data -v /opt/rec
   -e MPC_SIZE_CONCURRENCY=6 --entrypoint node recruiteros-app /tools/company-size.mjs --limit "${MPC_SIZE_LIMIT:-800}" >> "$LOG" 2>&1 || true
 rm -f /tmp/cs.env
 
+# 0.935) PUBLISH THE TARGETING ORG CHART. The model that decides who gets the email and the
+#        voice drop for a given posting, written out as a snapshot the portal reads. Published by
+#        the module that ENFORCES it (tools/orgchart.mjs), so the sheet a recruiter reads and the
+#        rule the sender applies cannot drift. Read-only and free.
+docker run --rm -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro \
+  --entrypoint node recruiteros-app /tools/orgchart-print.mjs --json /data/snap_mpc_orgchart_v1.json >> "$LOG" 2>&1 || true
+
 # 0.94) BUYER RENAME: re-target rows whose named decision-maker is the wrong person for the req.
 #       This is the single biggest recoverable bucket in the funnel. Measured 2026-08-21: of 6,689
 #       IN-BAND curated rows, 1,595 had no decision-maker at all and ~400 more pointed at someone

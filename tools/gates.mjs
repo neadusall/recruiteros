@@ -8,6 +8,15 @@
 // checkRenderedEmail() to be queued. Each failure returns a reason, so a held record
 // always says why.
 
+import { targetFor, levelOf, LEVEL_NAME } from "./orgchart.mjs";
+
+// ORG-CHART TARGETING (2026-08-21): the seniority band a req's buyer must sit in, resolved from
+// the function, the req's own level and the company size. MPC_ORGCHART=0 reverts to function-only
+// matching, which is what ran before and is kept as a one-variable rollback.
+// Read per call, not at import: a module-level const cannot be toggled by a test or by an
+// operator flipping the variable, and a rollback switch that needs a rebuild is not a rollback.
+const orgchartOn = () => process.env.MPC_ORGCHART !== "0";
+
 const ACCOUNTING_ROLE = /\b(controller|comptroller|cpa|certified public accountant|accountant|accounting|bookkeep(?:er|ing)|regulatory reporting|financial report|tax (?:manager|accountant|analyst|associate|director)|audit(?:or)?|fp&a|finance manager|finance director|director of finance|vp,? finance|head of finance)\b/i;
 
 // A senior buyer for ANY function Lume recruits: C-level, President/VP/SVP/EVP, Head of X,
@@ -17,7 +26,24 @@ const ACCOUNTING_ROLE = /\b(controller|comptroller|cpa|certified public accounta
 // plainly "CTO" was rejected as "not a senior buyer", losing the single most correct owner of every
 // engineering req. "t" and "s" (CTO, CSO) added 2026-08-20. Bare "director" stays out on purpose:
 // "Board Director" is not a hiring buyer, while "Director of X" is.
-const VALID_DM_TITLE = /\b(c[efoimrphts]o|chief\s+(?:executive|financial|accounting|operating|revenue|marketing|technology|technical|product|people|human|legal|information|nursing|medical|clinical|data|customer)\w*|president|vice\s+president|\bvp\b|\bsvp\b|\bevp\b|head\s+of\s+\w+|director\s+of\s+\w+|managing\s+(?:director|partner)|\bpartner\b|founder|co-?founder|owner|general\s+manager|\bgm\b|plant\s+manager|nurse\s+manager|practice\s+(?:manager|administrator))\b/i;
+// 2026-08-21: extended to cover every rung tools/orgchart.mjs can TARGET. The org chart aims a
+// junior req at a Manager or Controller, and this pattern used to reject both — so the model would
+// have picked a target the gate then refused as "not a senior buyer", holding the row with a reason
+// that contradicted the targeting. Function-qualified managers only ("Accounting Manager"), never a
+// bare "Manager", so a Project Manager or Office Manager still does not read as a buyer.
+// The function vocabulary is shared by the manager and director forms so the two can never drift.
+// It is an explicit list rather than `\w+` on purpose: `\w+\s+director` would accept "Board
+// Director", which the original pattern deliberately excluded because a board seat does not buy
+// hiring. Same trap on the manager side with "Project Manager" and "Office Manager".
+const BUYER_FUNCTIONS = "(?:accounting|finance|sales|marketing|engineering|software\\s+development|operations|production|plant|manufacturing|hr|human\\s+resources|people|talent\\s+acquisition|recruiting|\\bit\\b|information\\s+technology|clinical|nurse|nursing|medical|customer\\s+success|client\\s+services|business\\s+development|demand\\s+generation|compliance|legal\\s+operations|product|supply\\s+chain|warehouse|quality|creative|technology)";
+const FUNCTION_MANAGER = BUYER_FUNCTIONS + "\\s+manager";
+const FUNCTION_DIRECTOR = BUYER_FUNCTIONS + "\\s+director";
+const VALID_DM_TITLE = new RegExp(
+  "\\b(c[efoimrphts]o|chief\\s+(?:executive|financial|accounting|operating|revenue|marketing|technology|technical|product|people|human|legal|information|nursing|medical|clinical|data|customer)\\w*"
+  + "|general\\s+counsel|president|vice\\s+president|\\bvp\\b|\\bsvp\\b|\\bevp\\b|head\\s+of\\s+\\w+|director\\s+of\\s+\\w+"
+  + "|controller|comptroller|managing\\s+(?:director|partner)|\\bpartner\\b|founder|co-?founder|owner|general\\s+manager|\\bgm\\b"
+  + "|" + FUNCTION_MANAGER + "|" + FUNCTION_DIRECTOR
+  + "|plant\\s+manager|nurse\\s+manager|practice\\s+(?:manager|administrator))\\b", "i");
 
 // "Controller" titles that are NOT accounting: document/quality/inventory control etc. (the
 // 2026-08-11 "EPC Document Controller" leak). Rejected unless the role is otherwise clearly finance.
@@ -301,6 +327,26 @@ export function assessProspect(p) {
       }
     } else if (isOwner || talentBuyer) {
       /* the owner of the req, or the talent leader who buys hiring for every function */
+      //
+      // ORG-CHART SENIORITY BAND (owner decision 2026-08-21). Matching the FUNCTION is necessary
+      // but not sufficient: it makes a CFO and an Accounting Manager equally valid buyers for a
+      // Staff Accountant opening, which is wrong in both directions. tools/orgchart.mjs resolves
+      // the band a req's buyer must sit in from three things — the function, how senior the req
+      // itself is, and how many layers the company has at that headcount.
+      //
+      // Applied ONLY to rows that already cleared the function check, and only where the headcount
+      // is confirmed, so this is a pure tightening of an existing pass rather than a new axis of
+      // rejection. Executive searches are exempt (handled above) and the talent-leader carve-out
+      // keeps its own rule: a CHRO buys hiring at any rung.
+      if (orgchartOn() && headsKnown && isOwner) {
+        const band = targetFor({ role: p.role, functionGroup: roleFn, headcount: headCount });
+        const lvl = levelOf(p.managerTitle);
+        if (lvl > band.max) {
+          failures.push(`org chart: "${p.managerTitle}" is ${LEVEL_NAME[lvl]} level, above the ${LEVEL_NAME[band.max]} ceiling for a ${band.reqLevelName} ${roleFn} req at ${band.tierLabel}. ${band.why}`);
+        } else if (lvl < band.min) {
+          failures.push(`org chart: "${p.managerTitle}" is ${LEVEL_NAME[lvl]} level, below the ${LEVEL_NAME[band.min]} who owns a ${band.reqLevelName} ${roleFn} req. ${band.why}`);
+        }
+      }
     } else if (exactOwnerOnly) {
       // LAST-RESORT C-SUITE LADDER (owner decision 2026-08-21). In the extended band the exact
       // owner of the req is always the target. The C-suite is a legitimate SECOND choice, but only

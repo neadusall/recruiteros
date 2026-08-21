@@ -23,6 +23,7 @@ import { readFileSync, readdirSync, writeFileSync, renameSync, existsSync, appen
 import {
   assessProspect, roleFamily, roleFunctionGroup, dmFunction, companyKeyOf,
 } from "/tools/gates.mjs";
+import { targetFor } from "/tools/orgchart.mjs";
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
 const CREDS = process.env.MPC_CREDS_FILE || "/data/snap_integration_credentials_v1.json";
@@ -132,7 +133,13 @@ function inferPattern(fullName, email) {
   return null;
 }
 
-/* ---------------- which leader title do we hunt per function group ------------------------ */
+/* ---------------- which leader title do we hunt per function group ------------------------
+ * FALLBACK ONLY as of 2026-08-21. The rung we hunt now comes from orgchart.targetFor(), which
+ * reads the req's own seniority and the company's headcount, so a Staff Accountant opening hunts
+ * an Accounting Manager and a Controller opening hunts a VP Finance or CFO. This table is what we
+ * fall back to when the org chart has no titles for a function (an unmapped function group), and
+ * it is also the list that decides which functions this tool will work at all.
+ * ---------------------------------------------------------------------------------------- */
 const HUNT = {
   "Finance": "Chief Financial Officer",
   "Sales": "Chief Revenue Officer",
@@ -186,6 +193,30 @@ const ledger = (rec) => appendFileSync(LEDGER, JSON.stringify({ ...rec, ts: new 
 
 /* ---------------- main --------------------------------------------------------------------- */
 const rows = loadArray(CURATION).map((r) => r.lead || r).filter((p) => String(p.curatedAt || "") >= SINCE);
+
+// HEADCOUNT (2026-08-21). This tool ran assessProspect and the people-search WITHOUT ever attaching
+// a company size, which made it blind in two ways that both point the search at the wrong person:
+// the band gate saw every company as "unconfirmed", and the org chart defaulted to the widest tier
+// and therefore hunted a C-level title for every req. Same source and normalisation as batch.mjs so
+// the tool that FINDS the buyer and the tool that SENDS to them read one number.
+{
+  const SIZE_SNAP = process.env.MPC_SIZE_SNAPSHOT || "/data/snap_inmarket_company_size_v1.json";
+  const normCo = (s) => String(s || "").toLowerCase().replace(/\b(inc|llc|ltd|corp|co|company|group|holdings)\b/g, " ").replace(/[^a-z0-9]+/g, "").trim();
+  const byName = new Map();
+  try {
+    const snap = JSON.parse(readFileSync(SIZE_SNAP, "utf8"));
+    for (const [k, v] of Object.entries((snap && (snap.data || snap)) || {})) {
+      if (v && typeof v.count === "number" && v.count > 0) byName.set(normCo(k), v.count);
+    }
+  } catch { /* no cache: sizes stay unknown and the chart falls back to its widest band */ }
+  let stamped = 0;
+  for (const p of rows) {
+    if (p.employeeCount != null) continue;
+    const n = byName.get(normCo(p.company));
+    if (n != null) { p.employeeCount = n; stamped++; }
+  }
+  if (stamped) console.log(`headcounts attached: ${stamped} rows (drives both the band gate and which rung we hunt)`);
+}
 const seen = sentEmails();
 const attempted = recentAttempts();
 console.log(`finance-era rows: ${rows.length} | prior overrides: ${Object.keys(ovrRows).length} | recent attempts skipped: ${attempted.size}`);
@@ -249,9 +280,24 @@ async function processJob(job) {
   if (existing) { person = { fullName: existing.name, headline: existing.title, via: "pool" }; freeReuse++; }
 
   // (2) People search: "{leader title} {company}", strict company + function match on the headline.
+  //
+  // WHICH TITLE WE HUNT (2026-08-21). This used to be a fixed C-level per function — "Chief
+  // Financial Officer {Company}" for every finance req, whatever the req was or however big the
+  // company. That is the same mis-targeting the org chart exists to stop, except here it was
+  // manufacturing it: the search could only ever return a CFO, so a Staff Accountant opening at a
+  // 2,000-person company was always going to end up aimed at one. Now the rung comes from
+  // orgchart.targetFor(), best rung first, and we walk UP the chain only if the ideal rung yields
+  // nobody. The probe below still re-runs the full gate, so a hit that is too senior for the req is
+  // rejected on the spot rather than being written into the overlay.
   if (!person) {
-    const hits = await searchPeople(api, `${HUNT[fn]} ${c.company}`);
-    if (hits === null) { ledger({ companyKey: ck, company: c.company, fn, outcome: "people_budget" }); return; }
+    const band = targetFor({ role: sample.role, functionGroup: fn, headcount: sample.employeeCount });
+    const hunts = band.titles.length ? [...new Set(band.titles)] : [HUNT[fn]];
+    let hits = null;
+    for (const huntTitle of hunts) {
+      hits = await searchPeople(api, `${huntTitle} ${c.company}`);
+      if (hits === null) { ledger({ companyKey: ck, company: c.company, fn, outcome: "people_budget" }); return; }
+      if (hits.length) break;
+    }
     const coSq = squash(c.company);
     for (const h of hits) {
       const headSq = squash(h.headline);
