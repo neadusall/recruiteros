@@ -3829,11 +3829,54 @@
               '<button class="btn btn-sm ' + (unsavedRoles !== null ? "btn-primary" : "btn-ghost") + '" data-lih-kwsave>' + (unsavedRoles !== null ? "Save roles (unsaved)" : "Save roles") + "</button>" +
             "</div>" +
           "</div>" +
+          // PREDICTIVE ACCOUNT WATCHLIST. The point of the whole model: not a feed of posts but a
+          // list of EMPLOYERS whose activity says a hire is coming, hottest first. Each row shows
+          // its own timeline, because "Acme, 84" is a number nobody can act on while "raise 3 weeks
+          // ago, expansion last week, CFO on infrastructure Tuesday" is a call to make.
+          (function () {
+            var accts = (d.intentAccounts || []);
+            if (!accts.length) {
+              return '<div class="lih-sec"><div class="lih-sec-h">' + icoShield + 'Accounts about to hire</div>' +
+                '<div class="lih-sec-d">Nothing yet. Companies appear here as the hunter scores their posts; a single event puts one on the list, and a second or third signal from the same employer moves it up.</div></div>';
+            }
+            var hot = accts.filter(function (a) { return a.hot; }).length;
+            var h = '<div class="lih-sec"><div class="lih-sec-h">' + icoShield + 'Accounts about to hire' +
+              ' <span class="cnt">' + accts.length + ' watched' + (hot ? ', ' + hot + ' hot' : '') + '</span></div>' +
+              '<div class="lih-sec-d">Ranked by accumulated heat over the last 90 days, not by who posted most recently. Heat counts DISTINCT events and decays with age, so one raise shouted five times stays one signal and a raise from eleven weeks ago stops looking like a live buying signal.</div>' +
+              '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">' +
+              '<thead><tr>' +
+              '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Company</th>' +
+              '<th style="text-align:right;padding:4px 8px;border-bottom:1px solid var(--border)">Heat</th>' +
+              '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Signals</th>' +
+              '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Likely to hire in</th>' +
+              '</tr></thead><tbody>';
+            for (var i = 0; i < accts.length && i < 20; i++) {
+              var a = accts[i];
+              var when = function (iso) {
+                var dd = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86400000));
+                return dd === 0 ? "today" : dd === 1 ? "yesterday" : dd + "d ago";
+              };
+              var tl = (a.timeline || []).map(function (t) {
+                return esc(t.event) + " " + when(t.at);
+              }).join(" · ");
+              h += '<tr>' +
+                '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><b>' + esc(a.company) + '</b>' +
+                  (a.signalCount > 1 ? ' <span style="font-size:10px;color:var(--ok)">' + a.signalCount + ' signals</span>' : '') + '</td>' +
+                '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;color:' + (a.hot ? "var(--ok)" : "var(--text-dim)") + '"><b>' + a.heat + '</b></td>' +
+                '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text-dim)">' + tl + '</td>' +
+                '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + esc((a.functions || []).slice(0, 3).join(", ")) + '</td>' +
+              '</tr>';
+            }
+            h += '</tbody></table></div>' +
+              '<div class="lih-sec-d">A company on this list has not necessarily advertised anything. That is the point: the requisition usually appears weeks after the event that caused it, and by then the search is contested.</div></div>';
+            return h;
+          })() +
           '<div class="lih-sec">' +
             '<div class="lih-sec-h">' + icoShield + "Public comments" +
               ' <span class="cnt">' + (thr.enabled ? thr.todayUsed + " of " + thr.todayAllowance + " today" : "off") + "</span></div>" +
-            '<div class="lih-sec-d">The hunter focuses exclusively on posts from people who are actively hiring for one of the roles we recruit for. Because the hunter comments directly on the hiring post, the comment reaches the author even when their profile does not allow direct messages.</div>' +
-            '<div class="lih-sec-d">Every comment is written specifically for the role and post, never generic and never promotional. The hunter contributes one relevant insight about the search that demonstrates we understand the talent market and have experience recruiting that type of candidate. It is written in the first-person plural ("we") and closes with a simple, low-pressure invitation to connect if they could use help with the search.</div>' +
+            '<div class="lih-sec-d">The hunter looks for decision-makers whose public activity says they are <b>about to hire</b>, not only those already advertising a job. By the time someone posts "we are hiring a VP of Finance", every recruiter can see it. The goal is to reach the business event two to twelve weeks before the job order exists: a raise, a sponsor coming in, an acquisition, a new site or market, a major contract, a new executive, an ERP programme, or the quieter tells like "wearing too many hats" and "time to professionalise the org".</div>' +
+            '<div class="lih-sec-d">Every post is scored 0 to 100 on the event, the language, how senior the poster is, whether the company is in our size band, whether the event maps to roles we recruit, and how fresh it is. Only 60 and above earns a comment. Everything from 40 up is recorded against the company, so three separate weak signals from one employer outrank one loud signal from a company we never hear from again. Because the hunter comments on the post itself, it reaches the author even when their profile does not allow direct messages.</div>' +
+            '<div class="lih-sec-d">Every comment is written specifically for that post, never generic and never promotional. On a hiring post the hunter contributes one relevant insight about the search that shows we understand the talent market. On an event post it does something different and more important: it never congratulates, never asks whether they are hiring, and never offers candidates. It says one thing about what typically happens next after an event like theirs, which is the kind of thing only a desk that has watched the sequence before would say. Both are written in the first-person plural ("we") and close with a simple, low-pressure invitation.</div>' +
             '<div class="lih-sec-d">There are no links, fees, canned sales pitches, or hard sells in the comments. The goal is to add enough value and credibility that the hiring manager chooses to engage.</div>' +
             '<div class="lih-sec-d">The activity limits below apply per recruiter seat. Each connected recruiter has their own daily allowance, weekly cap, and required spacing between comments. Activity should remain conservative and naturally paced rather than trying to maximize comment volume.</div>' +
             (thr.enabled && thr.blockedReason ? '<div class="lie-post muted" style="margin-bottom:8px">Holding: ' + esc(thr.blockedReason) + "</div>" : "") +

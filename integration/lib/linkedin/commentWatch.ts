@@ -44,6 +44,8 @@ import { putPolicy } from "./os/policy";
 import { seatsForWorkspace, markSeatChecked } from "./seats";
 import { unipileRequest, UnipileError } from "./provider";
 import { listMembers } from "../auth/team";
+import { readIntent, commentBrief, THRESHOLDS } from "./hiringIntent";
+import { recordSignal, rankAccounts, pruneLedger, type IntentLedger, type RankedAccount } from "./intentLedger";
 import type { LiAccountState } from "./os/types";
 
 const POSTS_TO_WATCH = 5;        // owner's most recent posts scanned per tick
@@ -663,6 +665,10 @@ interface WatchState {
   marketKeywords: Record<string, string[]>;
   /** ws -> rotation cursor into the keyword bank (one search per tick). */
   keywordCursor: Record<string, number>;
+  /** ws -> the predictive hiring-intent account ledger: every scored post recorded against
+   *  its company, so three separate weak signals from one employer outrank one loud signal from
+   *  a company we never hear from again. See lib/linkedin/intentLedger.ts. */
+  intentLedger: Record<string, IntentLedger>;
   /** ws -> active scenario selection (preset ids + custom phrases). */
   scenarios: Record<string, { presets: string[]; custom: Array<{ label: string; phrase: string }> }>;
   /** ws -> ISO timestamps of public comments actually handed to the engine.
@@ -739,7 +745,7 @@ interface WatchState {
 const COMMENT_COPY_EPOCH = 4;
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {}, interactionsMandate: {}, sendLogTruthBuilt: {}, profileHints: {}, profileViewsMandate: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, intentLedger: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {}, interactionsMandate: {}, sendLogTruthBuilt: {}, profileHints: {}, profileViewsMandate: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -811,6 +817,7 @@ async function hydrate(): Promise<void> {
           marketKeywords: snap.marketKeywords ?? {},
           keywordCursor: snap.keywordCursor ?? {},
           scenarios: snap.scenarios ?? {},
+          intentLedger: snap.intentLedger ?? {},
           commentLog: snap.commentLog ?? {},
           commentRecent: snap.commentRecent ?? {},
           commentLimits: snap.commentLimits ?? {},
@@ -2778,6 +2785,38 @@ interface ScanCombo {
   commentEligible?: boolean;
 }
 
+/**
+ * The function groups this desk actually recruits, derived from its own role keyword bank.
+ *
+ * Role relevance is worth 10 points in the intent score, and it has to be per-workspace: a funding
+ * round that implies operations hiring is a strong signal for an ops desk and a weak one for a
+ * finance desk. Deriving it from the keyword bank rather than a setting means it stays correct
+ * when the desk changes what it recruits, with nothing to keep in sync.
+ *
+ * The vocabulary matches tools/orgchart.mjs on purpose, so an implied function can be handed
+ * straight to the org chart to work out which seat to contact.
+ */
+const DESK_FUNCTION_PATTERNS: Array<[string, RegExp]> = [
+  ["Finance", /\b(account|accounting|controller|cpa|finance|financial|tax|audit|fp&a|treasury|payroll|bookkeep)/i],
+  ["Sales", /\b(sales|account executive|business development|revenue|\bbdr\b|\bsdr\b)/i],
+  ["Marketing", /\b(marketing|demand gen|brand|content|seo|communications)/i],
+  ["Engineering", /\b(engineer|developer|software|devops|data|platform|security|\bit\b|technology)/i],
+  ["Product", /\bproduct\b/i],
+  ["Operations", /\b(operations|supply chain|logistics|manufactur|production|plant|warehouse|procurement)/i],
+  ["People / HR", /\b(human resources|\bhr\b|people|talent|recruit)/i],
+  ["Legal", /\b(legal|counsel|compliance|paralegal)/i],
+  ["Customer Success", /\b(customer success|client services|customer experience|implementation)/i],
+  ["Clinical", /\b(nurse|nursing|clinical|physician|therapist|medical|patient)/i],
+];
+
+function deskFunctionsFor(workspaceId: string): string[] {
+  const bank = marketKeywordsFor(workspaceId).join(" ");
+  const out = DESK_FUNCTION_PATTERNS.filter(([, re]) => re.test(bank)).map(([f]) => f);
+  // A desk with an unreadable bank should not lose the role-relevance signal entirely; finance is
+  // this deployment's default desk and is the honest fallback rather than scoring every post zero.
+  return out.length ? out : ["Finance"];
+}
+
 function scanCombos(workspaceId: string): ScanCombo[] {
   const roles = marketKeywordsFor(workspaceId);
   const sel = scenariosFor(workspaceId);
@@ -3152,7 +3191,16 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, preIndexed: 0, viewCap: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, commentLowIntent: 0, preIndexed: 0, viewCap: 0 };
+  // Headcount feeds the company-fit term of the intent score. Loaded ONCE per scan, not per
+  // candidate: loadSizeMap is memoised but the lookup runs on every screened post, and a scan
+  // reads hundreds. An unresolved company simply scores zero fit rather than being guessed at.
+  let sizeMap: Record<string, { count?: number }> = {};
+  try { const { loadSizeMap } = await import("../inmarket/companySize"); sizeMap = (await loadSizeMap()) as Record<string, { count?: number }>; } catch { /* sizes unknown */ }
+  const headcountFor = (co?: string) => {
+    const e = co ? sizeMap[String(co).toLowerCase().trim()] : undefined;
+    return e && typeof e.count === "number" && e.count > 0 ? e.count : null;
+  };
   stats.searches += 1;
   stats.screened += candidates.length;
   for (const c of candidates) {
@@ -3384,9 +3432,43 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       // The other scenarios are untouched in DISCOVERY and in the DM lane: a funding round is still
       // a real hiring signal, just not one to comment publicly under. Gated on BOTH the scenario
       // and the post text, so a growth post that slipped into a hiring scenario is still refused.
-      if (!combo.commentEligible || !HIRING_INTENT_RE.test(c.text)) { g.commentNotHiring++; continue; }
+      // PREDICTIVE HIRING INTENT (owner model 2026-08-21). The gate is no longer "is this a hiring
+      // post". By the time someone writes "we're hiring a VP of Finance" every recruiter can see
+      // it. What we want is the organisational EVENT that creates the demand, 2 to 12 weeks before
+      // the requisition exists: a raise, a sponsor, an acquisition, a new site, a major contract, a
+      // new executive, an ERP programme, or the quiet ones ("wearing too many hats", "time to
+      // professionalise the org") that almost nobody reads for.
+      //
+      // The score is what makes widening the net safe. An earlier version of this lane commented on
+      // any growth post, which is how the trail filled with congratulations; the version before this
+      // one over-corrected to hiring posts only. Scoring lets us take the funding announcement and
+      // still refuse "congratulations on another strong quarter", which carries growth language and
+      // no catalyst whatsoever. See lib/linkedin/hiringIntent.ts for the weights.
+      const intent = readIntent({
+        text: c.text,
+        authorTitle: title ?? headline,
+        headcount: headcountFor(company),
+        deskFunctions: deskFunctionsFor(workspaceId),
+        postAt: c.postAt,
+      });
+
+      // Record EVERY scored post against its company, including ones we will not comment on. The
+      // track band exists precisely so a company that is not yet worth a public comment still
+      // accumulates heat, and the third weak signal in a fortnight is what puts an account at the
+      // top of the list before anyone else has noticed it.
+      if (intent.primary && company) {
+        if (!state.intentLedger[workspaceId]) state.intentLedger[workspaceId] = {};
+        recordSignal(state.intentLedger[workspaceId], {
+          company, domain: undefined, read: intent,
+          postUrl: c.postUrl, postAt: c.postAt,
+          authorName, authorTitle: title ?? headline, excerpt: c.text.slice(0, 240),
+        });
+      }
+
+      // Comment only from the engage band up. Below it the company is watched, not spoken to.
+      if (intent.score < THRESHOLDS.engage) { g.commentLowIntent++; continue; }
       const author = [authorName, title, company ? `at ${company}` : undefined].filter(Boolean).join(", ");
-      const brief = `The role they are hiring for is ${jobTitle}${city ? ` in ${city}` : ""}.`;
+      const brief = commentBrief(intent, jobTitle, city);
       const userMsg = `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId)}`;
       const drafted = await draft(POST_COMMENT_RULES, userMsg);
       if (!drafted || /^\s*SKIP\b/i.test(drafted)) { g.commentDraft++; continue; }
@@ -3497,6 +3579,9 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
 export interface CommentWatchView {
   status: CommentWatchStatus;
+  /** Predictive account watchlist: employers whose public activity says a hire is coming,
+   *  ranked by accumulated heat. See lib/linkedin/intentLedger.ts. */
+  intentAccounts: RankedAccount[];
   autopilot: { enabled: boolean; source: "manual" | "default_on" | "off" };
   /** The market-scan keyword bank in effect (backend defaults or override). */
   keywords: string[];
@@ -3611,6 +3696,11 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
     autoIndustries: autoIndustriesFor(workspaceId),
     industryOptions: INDUSTRY_MATCHERS.map((m) => ({ key: m.key, label: m.label })),
     commentThrottle,
+    // PREDICTIVE ACCOUNT WATCHLIST. Companies whose public activity says they are about to hire,
+    // ranked by accumulated heat rather than by whoever posted most recently. The timeline on
+    // each row is the reason it is there, which is what makes the list workable instead of just
+    // being another score. Pruned on read so a stale ledger cannot inflate it.
+    intentAccounts: rankAccounts(pruneLedger(state.intentLedger[workspaceId] ?? {}), Date.now(), 40),
     tracked,
     trackedTally: {
       postedTotal: (state.commentLog[workspaceId] ?? []).length,
