@@ -59,9 +59,27 @@ export const CAUSES: CauseDef[] = [
     category: "blocklist", severity: "critical", blocking: false,
     title: "Receiver is refusing us",
     meaning: "A mailbox provider such as Gmail or Outlook is rejecting our connections outright with an unsolicited-mail or reputation refusal. This is the receiver telling us, in its own words, that it does not trust this sender. It is marked as degrading rather than blocking on purpose: mail to everyone else still leaves, which is exactly why it is easy to miss and why it belongs at the top of the board.",
-    provenBy: "provider_blocks_v1, refusal text captured off real bounce notices by the NDR sweep, including the IP and list the receiver named.",
+    provenBy: "The lane's live egress monitor first (per-receiver accepted/rejected over the last 24 hours), and provider_blocks_v1 second, the refusal text captured off real bounce notices by the NDR sweep. A refusal that names an IP the lane has since retired, or that was recorded before the lane's egress cutover, is HISTORY and is never opened as a live condition: that is how a fixed incident keeps a board red for a week.",
     fix: "Pause the affected lane, cut volume hard, and repair sender reputation (postmaster tools, list quality, authentication) before resuming. If the refusal names an IP, the IP is the asset to replace, not the domain.",
     wearPerDay: 5,
+  },
+  {
+    code: "egress.regressed",
+    category: "blocklist", severity: "critical", blocking: true,
+    title: "Sending IP reverted",
+    meaning: "The lane is sending from an address it was moved off, or the rule that pins its egress is no longer in place. Everything the fleet earned on the clean address stops applying, and the refusals that caused the move start again immediately.",
+    provenBy: "The lane's egress monitor: the source address actually observed leaving the mail server, mentions of the retired IP in fresh rejections, and whether the SNAT pin still holds first position.",
+    fix: "Restore the pin before anything else sends. On this stack Docker re-inserts its own MASQUERADE rule above ours on container restarts, which is exactly what the pinning timer exists to undo.",
+    wearPerDay: 8,
+  },
+  {
+    code: "egress.rewarming",
+    category: "lifecycle", severity: "info", blocking: false,
+    title: "Re-warming on a new IP",
+    meaning: "The lane's sending address was replaced, so the domains on it are re-earning reputation from zero at the receivers, however old the mailboxes themselves are. Mailbox age is not trust: trust is anchored to the address the mail actually leaves from, and this clock counts from the cutover, not from when the boxes were created.",
+    provenBy: "The lane's egress cutover marker, read against each mailbox's own warm-up start.",
+    fix: "Nothing but time and clean sending. Let the ramp climb on evidence rather than on the calendar, and do not read the mailbox age as readiness while this is open.",
+    wearPerDay: 0,
   },
   {
     code: "fuse.tripped",
@@ -253,6 +271,15 @@ export const CAUSES: CauseDef[] = [
     wearPerDay: 4,
   },
   {
+    code: "counters.unfed",
+    category: "capacity", severity: "info", blocking: false,
+    title: "Send counters not being written here",
+    meaning: "This mailbox has recorded bounces but no recorded sends, which means the process that actually transmits is not writing back to this registry. Nothing is broken about the mailbox; what is broken is our ability to compute a per-mailbox bounce rate from this source, so the domain-level numbers are the only trustworthy ones for it.",
+    provenBy: "The senders registry itself: a non-zero bounce counter against a zero send counter is only possible if sends are not being recorded.",
+    fix: "Either have the transmitting sender call back into the registry on each send, or read per-mailbox rates from the bounce sweep instead. Until then, do not read a blank rate here as a good rate.",
+    wearPerDay: 0,
+  },
+  {
     code: "ledger.stale",
     category: "capacity", severity: "warn", blocking: false,
     title: "Sender has not reported",
@@ -309,6 +336,11 @@ export interface Blocker {
   /** Which ledger proved it, right now. */
   source: string;
   fix: string;
+  /** True when this condition belongs to the mailbox's DOMAIN or its whole lane and
+   *  was inherited, not observed on the mailbox itself. It still answers "why is this
+   *  one not sending", but the event is journalled once against the thing that owns
+   *  it, not 715 times against everything downstream of it. */
+  inherited?: boolean;
 }
 
 /** A recorded state change. Opens with a cause, closes when the cause clears. */
