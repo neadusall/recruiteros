@@ -1607,6 +1607,7 @@ export const __throttleTestHooks = {
    *  closing invitation now that the drafts are meant to sound spoken. */
   robotTellReason,
   hasClosingInvite,
+  scrub,
   /** The indexed pre-read screen and the read rota (2026-08-21). */
   preReadVeto,
   pickReadSeat,
@@ -1787,12 +1788,22 @@ const MODEL = () =>
 /** House style: no long dashes, no smart quotes, no leftover code fences. */
 function scrub(text: string): string {
   return text
-    .replace(/[—–]/g, ",")
+    // A long dash becomes a comma, and the SPACING has to come with it. The
+    // bare swap left "isn't the model , it's", and a space before a comma is
+    // precisely what a reader clocks as machine output. Seen live in the
+    // epoch-5 rewrite, 2026-08-21, in a draft that was otherwise the best
+    // thing the new rules had produced.
+    .replace(/\s*[—–]\s*/g, ", ")
     // "--" is the model dodging the long-dash ban with ASCII; same rule applies.
-    .replace(/\s+--+\s+/g, ", ")
+    .replace(/\s*--+\s*/g, ", ")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/^```[a-z]*\n?|```$/gm, "")
+    // Belt and braces over the whole string, whatever produced it: never a
+    // space before punctuation, never a doubled comma, never a double space.
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/,\s*,+/g, ",")
+    .replace(/[ \t]{2,}/g, " ")
     .trim();
 }
 

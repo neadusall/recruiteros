@@ -331,5 +331,16 @@ check("an observation with no invitation at all is still refused", () => {
     "Medford is the whole search here, not the title. Your pool is whoever is already inside a food plant."), false);
 });
 
+check("a long dash becomes a comma WITH its spacing", () => {
+  // Live defect 2026-08-21: the bare swap produced "the model , it's".
+  assert.equal(hooks.scrub("isn't the model \u2014 it's the assumptions"),
+    "isn't the model, it's the assumptions");
+  assert.equal(hooks.scrub("in New York \u2013 that conflict costs you"),
+    "in New York, that conflict costs you");
+  assert.equal(hooks.scrub("the model--the assumptions"), "the model, the assumptions");
+  assert.ok(!/\s[,.;:!?]/.test(hooks.scrub("one \u2014 two \u2014 three")),
+    "a space before punctuation survived scrub");
+});
+
 console.log(failures ? `\n${failures} failing` : "\nall passing");
 process.exit(failures ? 1 : 0);
