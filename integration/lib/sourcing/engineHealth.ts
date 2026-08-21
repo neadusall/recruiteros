@@ -71,6 +71,8 @@ interface ProbeResult {
   found?: number;
   /** The provider refused us (its throttle), rather than answering with nobody. */
   throttled?: boolean;
+  /** What the provider itself said, without our run-log framing around it. */
+  vendorMessage?: string;
   /** Consecutive TRANSIENT bad probes - empty answers or throttles. See liveProbe(). */
   emptyStreak?: number;
 }
@@ -197,7 +199,7 @@ const EMPTY_STREAK_TO_DOWN = 2;
  */
 async function liveProbe(
   key: string,
-  run: () => Promise<{ ok: boolean; error?: string; found?: number; throttled?: boolean }>,
+  run: () => Promise<{ ok: boolean; error?: string; found?: number; throttled?: boolean; vendorMessage?: string }>,
 ): Promise<ProbeResult | undefined> {
   const prev = store.probes[key];
   const due = !prev || !prev.ok || Date.now() - new Date(prev.at).getTime() > PROBE_EVERY_MS;
@@ -214,6 +216,7 @@ async function liveProbe(
     error: res.error,
     found: res.found,
     throttled: res.throttled,
+    vendorMessage: res.vendorMessage,
     emptyStreak: soft ? (prev?.emptyStreak ?? 0) + 1 : 0,
   };
   store.probes[key] = next;
@@ -269,10 +272,11 @@ async function checkRapidApi(workspaceId: string): Promise<EngineStatus> {
     // A throttle is the provider saying "not right now", NOT a key, a subscription or a
     // spent plan. Reporting it as "down" sent an owner hunting a billing problem that
     // did not exist, so it says which of the two this is in the first sentence.
+    const said = probe.vendorMessage || "too many requests";
     const detail = probe.throttled
       ? (state === "stale"
         ? `${host} is throttling our requests (its own limit, not your plan's). Re-checking before anyone is alerted.`
-        : `${host} keeps throttling our requests: ${probe.error || "too many requests"} Your plan credits are not the problem; searches will thin out until the provider lets up.`)
+        : `${host} keeps refusing our requests - it answers "${said}". That is the provider's own limit, not your plan: searches will return fewer people until it lets up, and it needs no change from you.`)
       : (state === "stale"
         ? `The people search on ${host} answered but returned nobody. Re-checking before anyone is alerted.`
         : `The people search is not answering on ${host}: ${probe.error || "search request failed"}`);

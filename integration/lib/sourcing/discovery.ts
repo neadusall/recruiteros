@@ -173,9 +173,20 @@ export function isPeopleSearchFatal(e: unknown): e is PeopleSearchFatal {
  */
 export class PeopleSearchThrottled extends Error {
   readonly throttled = true;
-  constructor(message: string) {
+  /**
+   * The VENDOR's own words, carried separately from `message`.
+   *
+   * `message` is a run-log line: it names the host, the pause and what to do about it.
+   * Embedding that inside an owner-facing alert produced "...throttling our requests:
+   * rapidapi <host> throttled: ..." - the same sentence twice, wrapped in itself. The
+   * health watch reads this field instead, so the alert can say what the provider said
+   * without repeating what we already told it.
+   */
+  readonly vendorMessage: string;
+  constructor(message: string, vendorMessage?: string) {
     super(message);
     this.name = "PeopleSearchThrottled";
+    this.vendorMessage = vendorMessage || message;
   }
 }
 
@@ -190,7 +201,7 @@ export function isPeopleSearchThrottled(e: unknown): e is PeopleSearchThrottled 
  * button turns green on success and surfaces the real error (bad path / key /
  * captcha) instead of a confusing "no client" message.
  */
-export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: string; found?: number; throttled?: boolean }> {
+export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: string; found?: number; throttled?: boolean; vendorMessage?: string }> {
   if (!RAPIDAPI_KEY()) return { ok: false, error: "Add your RapidAPI key first." };
   if (!PS_HOST()) return { ok: false, error: "Add the search host first." };
   try {
@@ -204,7 +215,9 @@ export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: str
     // A busy provider is not a broken key and must not be reported as one: the
     // subscription is fine, the answer is "not right now". Flagged so the health watch
     // can WATCH it instead of waking the owner over a throttle that clears itself.
-    if (isPeopleSearchThrottled(e)) return { ok: false, throttled: true, error: (e as Error).message };
+    if (isPeopleSearchThrottled(e)) {
+      return { ok: false, throttled: true, error: (e as Error).message, vendorMessage: e.vendorMessage };
+    }
     return { ok: false, error: (e && e.message) || "search request failed" };
   }
 }
@@ -436,7 +449,8 @@ async function peopleSearchOn(cfg: PsConfig, p: SearchParams): Promise<Candidate
   const benched = throttleWaitMs(host);
   if (benched > 0) {
     throw new PeopleSearchThrottled(
-      `rapidapi ${host} throttled: paused for another ${Math.ceil(benched / 1000)}s after repeated "too many requests" answers from the provider.`
+      `rapidapi ${host} throttled: paused for another ${Math.ceil(benched / 1000)}s after repeated "too many requests" answers from the provider.`,
+      "it is still refusing our requests",
     );
   }
   const headers: Record<string, string> = {
@@ -571,7 +585,8 @@ async function peopleSearchOn(cfg: PsConfig, p: SearchParams): Promise<Candidate
       openThrottleBreaker(host);
       throw new PeopleSearchThrottled(
         `rapidapi ${host} throttled: ${verdict.message}. This is the provider refusing us, not the plan running out - ` +
-        `the listing is paused for ${Math.ceil(throttleWaitMs(host) / 1000)}s and the query is worth re-running later.`
+        `the listing is paused for ${Math.ceil(throttleWaitMs(host) / 1000)}s and the query is worth re-running later.`,
+        verdict.message,
       );
     }
     const ladder = PS_THROTTLE_BACKOFF();

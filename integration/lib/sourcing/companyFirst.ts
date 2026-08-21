@@ -80,7 +80,7 @@ async function rapidGet(path: string): Promise<any> {
   // of the band for the rest of the job. A refusal is thrown, never returned.
   const wording = String((data && (data.message || data.error)) || "");
   if (res.status === 429 || (data && data.success === false && /\b429\b|too many requests|rate limit/i.test(wording))) {
-    throw new PeopleSearchThrottled(`rapidapi ${host} throttled: ${wording || "too many requests"}`);
+    throw new PeopleSearchThrottled(`rapidapi ${host} throttled: ${wording || "too many requests"}`, wording || "too many requests");
   }
   return data;
 }
