@@ -47,6 +47,27 @@ docker run --rm --env-file /tmp/cs.env -v recruiteros_app_data:/data -v /opt/rec
   -e MPC_SIZE_CONCURRENCY=6 --entrypoint node recruiteros-app /tools/company-size.mjs --limit "${MPC_SIZE_LIMIT:-800}" >> "$LOG" 2>&1 || true
 rm -f /tmp/cs.env
 
+# 0.94) BUYER RENAME: re-target rows whose named decision-maker is the wrong person for the req.
+#       This is the single biggest recoverable bucket in the funnel. Measured 2026-08-21: of 6,689
+#       IN-BAND curated rows, 1,595 had no decision-maker at all and ~400 more pointed at someone
+#       who owns a different function or works at a different company, while 1,804 pointed at the
+#       CEO when this company's actual function owner was ALREADY named on another curated row.
+#       Every one of those had already been paid for (domain resolved, person named, email
+#       verified) and was then refused at the gate.
+#
+#       The tool has existed since 2026-08-12 and last ran that day. It was never scheduled, and
+#       its overlay was never read by the sender (fixed the same day this step was added), so its
+#       2,411 renamed buyers had never influenced a single send. Running it daily is what keeps
+#       the KoldInfo residual finder fed too: that finder needs a NAME plus city/state, and it has
+#       been sweeping a 16,800-row pile finding nothing because the pile is "tried or unnamed".
+#
+#       Budgets stop the run cleanly rather than mid-person, and the ledger makes it idempotent,
+#       so a daily cadence costs only the new arrivals.
+grep -E '^(REOON_API_KEY|MPC_RENAME_[A-Z_]+|MPC_CURATED_SINCE)=' .env.production > /tmp/rb.env 2>/dev/null || true
+docker run --rm --env-file /tmp/rb.env -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro -v /opt/recruiteros/mpc-out:/out \
+  --entrypoint node recruiteros-app /tools/rename-buyers.mjs >> "$LOG" 2>&1 || true
+rm -f /tmp/rb.env
+
 # 0.95) Touch 2, the VIDEO email: personalized-video follow-up to YESTERDAY's touch-1 recipients
 #       (no reply, video rendered), one recruiter at a time. Runs BEFORE today's touch-1 batch so
 #       box capacity finishes existing sequences before starting new ones. Same box as touch 1;

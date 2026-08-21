@@ -380,6 +380,48 @@ export function roleFamily(role) {
   // Insurance underwriting/claims/actuarial: sits under the finance leadership chain.
   if (INSURANCE_ROLE.test(r)) return "Insurance";
   if (/\b(chief executive|\bceo\b|\bpresident\b|general manager|managing director|executive director)\b/.test(r)) return "Executive";
+  // ---- PROFESSIONAL OFFICE FAMILIES the patterns above miss (added 2026-08-21).
+  // Measured on the live store: 803 IN-BAND rows had already been fully enriched (domain resolved,
+  // decision-maker named, email verified) and were then hard-rejected as "not a professional hire
+  // we staff for". Reviewing all 373 distinct titles behind those rows, roughly half are genuinely
+  // this desk's work and half are correctly refused (freelance translators, contract interpreters,
+  // per-diem physicians, retail store leaders, a news columnist). Only the first half is added.
+  //
+  // Each maps onto an EXISTING family on purpose. Inventing a "Design" or "IT" family would only
+  // trade a role-family rejection for an owns-the-wrong-function one, because dmFunction() and
+  // roleFunctionGroup() would have no owner chain for the new name.
+  //
+  // EVERY branch below is guarded against the function it would otherwise STEAL. These patterns run
+  // ahead of the last-resort block, so an unguarded verb quietly re-homes reqs that were already
+  // classified correctly: a diff over all 20,031 curated roles caught "Product Designer" reading as
+  // Marketing, "Payroll Specialist" as People/HR and "Legal Billing Specialist" as Accounting.
+  // Re-run tools/test-rolefamily.mjs after touching any of them.
+  //
+  // Accounting operations: AR/AP, billing, collections, credit. The word "accounting" never
+  // appears in these titles, which is exactly why they fell through to Other. Healthcare revenue
+  // cycle IS medical billing, so it belongs here and not in Sales (where "revenue" used to put it);
+  // law-firm billing stays with Legal.
+  if (!/\blegal\b/.test(r) && /\b(accounts? (?:receivable|payable)|billing (?:specialist|analyst|manager|coordinator|clerk)|collections? (?:specialist|analyst|manager|representative)|credit and collections|revenue cycle|invoic\w+)\b/.test(r)) return "Accounting";
+  // Credit and financial-risk analysis sit on the finance chain (the CFO buys these).
+  if (/\b(credit (?:analyst|risk|manager|officer)|financial risk)\b/.test(r)) return "Finance";
+  // Talent, compensation and employee relations are People/HR work even with no "HR" in the title.
+  // "patient recruiter" is a clinical-trials seat, not a talent one. Payroll stays with Finance
+  // (dmFunction puts payroll on the CFO chain), so a combined "Payroll & Benefits Administrator"
+  // must not be pulled across by the benefits half of this pattern.
+  if (!/\b(patient|payroll)\b/.test(r) && /\b(recruit(?:er|ing|ment)|talent (?:partner|sourcer)|sourcer|compensation|benefits (?:analyst|manager|specialist|administrator)|employee relations|labor relations|hris)\b/.test(r)) return "People / HR";
+  // Advertising / paid media / lifecycle report to the CMO with the rest of marketing.
+  if (/\b(advertis\w+|paid (?:social|search|media)|sem|ppc|media buyer|lifecycle marketing|growth manager|merchandis\w+|copywriter|public relations)\b/.test(r)) return "Marketing";
+  // Design + creative also report into marketing at 100-1,000 employees, so the CMO is the buyer.
+  // Guarded against product and engineering: a "Product Designer" is a Product req and a "Software
+  // UX/UI Design Lead" is an Engineering one, and both were being pulled into Marketing.
+  if (!/\b(product|software|engineer\w*)\b/.test(r) && /\b(ux|ui|user experience|user interface|graphic design\w*|web design\w*|visual design\w*|art director|creative director|motion design\w*|designer)\b/.test(r)) return "Marketing";
+  // IT / internal systems is the technology leader's remit, the same buyer as engineering.
+  if (/\b(it (?:analyst|support|manager|director|administrator|specialist)|help ?desk|service desk|desktop support|systems? administrator|sysadmin|network (?:administrator|engineer|analyst)|salesforce (?:administrator|admin|developer)|business applications administrator|database administrator|dba|information technology|cybersecurity|information security|infosec)\b/.test(r)) return "Engineering";
+  // Presales / solutions engineering carries the number, so it belongs to Sales.
+  if (/\b(solutions? (?:consultant|engineer|architect)|sales engineer|presales|pre-sales|technical account manager|account development)\b/.test(r)) return "Sales";
+  // Implementation / onboarding is post-sale delivery, owned by the customer-success leader.
+  if (/\b(implementation|onboarding)\s+(?:specialist|consultant|analyst|coordinator|lead|manager)\b/.test(r)) return "Customer Success";
+
   // LAST RESORT: the req names a function, but in a phrasing none of the patterns above cover
   // ("VP of Finance", "Head of Manufacturing", "Financial Systems Analyst", "Director of Nursing
   // Services"). Recall matters more than precision at this point: an unrecognised family is
@@ -395,6 +437,13 @@ export function roleFamily(role) {
   if (/\b(clinical|nursing|patient|health)\b/.test(r)) return "Healthcare";
   if (/\b(customer|client|account manager)\b/.test(r)) return "Customer Success";
   if (/\b(data|analytics|reporting)\b/.test(r)) return "Data";
+  // EXECUTIVE SUPPORT, dead last on purpose (2026-08-21). An EA / chief of staff / office manager
+  // is a real professional hire, but the seat belongs to whichever leader it supports: "Executive
+  // Assistant, Finance" and "Chief of Staff, Data" must keep their own function so the owner chain
+  // points at the CFO and the Head of Data. Running this branch above the last-resort block sent 23
+  // such reqs to Operations and lost their real owner, so it sits below every function pattern and
+  // only catches an EA req that names no function at all.
+  if (/\b(executive assistant|chief of staff|administrative assistant|office manager)\b/.test(r)) return "Operations";
   return "Other";
 }
 

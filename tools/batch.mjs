@@ -50,6 +50,7 @@ function loadBlockedCohorts() {
 }
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
+const SUPPLY_SNAP = process.env.MPC_SUPPLY_SNAPSHOT || "/data/snap_mpc_supply_v1.json";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
 const OUT = process.env.MPC_OUT_DIR || "/out";
 const LUME_WS = "ws_mqf6o989003";
@@ -425,7 +426,25 @@ async function main() {
   const SINCE = process.env.MPC_CURATED_SINCE || "2026-08-11";
   const curatedAll = loadArray(CURATION);
   const curated = SINCE ? curatedAll.filter((r) => String((r.lead || r).curatedAt || "") >= SINCE) : curatedAll;
-  console.log(`curated total: ${curatedAll.length} | finance-era (since ${SINCE}): ${curated.length}`);
+
+  // BUYER OVERRIDES (2026-08-21). rename-buyers.mjs re-targets rows whose named decision-maker is
+  // the wrong person for the req, and writes them to an overlay file rather than co-writing the
+  // app's curation store (that store's write lock is in-process only, so a sidecar writer would
+  // race the 4-minute curation tick). Its header has always said the overlay is "applied by
+  // batch.mjs at read time" — it never was. Only inspect-supply.mjs applied it, which is why the
+  // inspector cheerfully reported "buyer overrides applied: 242" while the sender ignored every
+  // one of them: 2,411 buyers renamed on 2026-08-12 had never influenced a single send.
+  // Apply by row id BEFORE the gates run, exactly as the inspector does, so the two agree.
+  const OVR_FILE = process.env.MPC_BUYER_OVERRIDES || "/data/snap_mpc_buyer_overrides_v1.json";
+  let ovrApplied = 0;
+  try {
+    const ovr = (JSON.parse(readFileSync(OVR_FILE, "utf8")) || {}).rows || {};
+    for (const r of curated) {
+      const p = r.lead || r;
+      if (p.id && ovr[p.id]) { Object.assign(p, ovr[p.id]); ovrApplied++; }
+    }
+  } catch { /* absent overlay is fine: nothing has been re-targeted yet */ }
+  console.log(`curated total: ${curatedAll.length} | finance-era (since ${SINCE}): ${curated.length}${ovrApplied ? ` | buyer overrides applied: ${ovrApplied}` : ""}`);
 
   // Attach company headcount from the app's free size cache (Wikidata-backed, in the same /data
   // volume) so the universal-buyer seniority gate in gates.mjs has real numbers to bite on.
@@ -618,6 +637,36 @@ async function main() {
   }
   console.log(`already emailed: ${seen.size} | known-bounced suppressed: ${skippedBounced} | blocked-cohort skipped: ${skippedBlocked} | unvalidated/invalid held: ${skippedUnvalidated} | paused-source held: ${skippedSourcePaused}${skippedPattern ? ` | GUESSED addresses held: ${skippedPattern}` : ""} | fresh & ready: ${fresh.length}`);
   if (skippedPattern) console.log(`  no-guessing: ${skippedPattern} row(s) held because their address was derived, not found. They wait for the KoldInfo finder to return a real record (MPC_PATTERN_LANE=1 re-opens the rung).`);
+  // PUBLISH TODAY'S SUPPLY FUNNEL (2026-08-21). Same principle as the cold-capacity ledger: the
+  // stage that ENFORCES a number is the stage that publishes it, so no surface can invent its own.
+  // Until now the funnel existed only as console lines in mpc-out/monitor-*.log, which meant the
+  // single most important question about this business — "why did only 4 emails go out today?" —
+  // could only be answered by SSHing to the box and reading a log. Nothing alerted, because
+  // nothing had a number to alert on: the send fuse was armed, capacity read 832/day, and every
+  // dashboard was green while the top of the funnel had been dry for days.
+  //
+  // Ordering note: the buckets below are EXCLUSIVE and measured at the point each one bites, so
+  // they do not sum to `curated` (a row rejected at the gate is never tested for an address).
+  // `freshReady` is the only number that means "could have been sent this run".
+  try {
+    const supply = {
+      version: 1,
+      at: new Date().toISOString(),
+      curatedTotal: curatedAll.length,
+      curatedSince: curated.length,
+      buyerOverridesApplied: ovrApplied,
+      passedGates: gated.length,
+      buyerHolds: buyerHolds.length,
+      alreadyEmailed: seen.size,
+      heldBounced: skippedBounced,
+      heldBlockedCohort: skippedBlocked,
+      heldUnvalidated: skippedUnvalidated,
+      heldSourcePaused: skippedSourcePaused,
+      heldGuessed: skippedPattern,
+      freshReady: fresh.length,
+    };
+    writeFileSync(SUPPLY_SNAP, JSON.stringify(supply, null, 1));
+  } catch { /* never let a reporting write break a send run */ }
 
   // PROVIDER-AWARE ORDERING + SEG PHASE (the enterprise-deliverability layer, mxclass.mjs).
   // All MPC volume leaves Azure/Outlook infrastructure, so Outlook-hosted recipients are our

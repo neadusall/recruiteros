@@ -215,6 +215,17 @@ async function wikidataSize(name: string): Promise<{ band: Band; count: number }
 /** Enrich a batch of company names from Wikidata, writing results (positive + negative) to
  *  the cache. Rate-disciplined: caps how many uncached companies it resolves per call, in
  *  small concurrent chunks. Safe no-op without a database. */
+/** True when the cache already holds a verdict for this company that enrichSizesBatch would
+ *  NOT re-try. This mirrors the `isStale` rule inside enrichSizesBatch ON PURPOSE: the size-first
+ *  selector in poolCompanyNames has to skip exactly the companies the resolver would skip. If the
+ *  two rules drift, pass 1 hands over names that enrichSizesBatch then discards as fresh, the batch
+ *  silently does nothing, and the unresolved backlog stops draining with no error anywhere. */
+export function sizeVerdictFresh(cache: SizeMap, name: string, now = Date.now()): boolean {
+  const e = cache[nameKey(name)];
+  if (!e) return false;
+  return e.src === "wikidata" ? now - e.at <= FRESH_MS : now - e.at <= NEG_MS;
+}
+
 export async function enrichSizesBatch(names: string[], max = 25): Promise<number> {
   const cache = await loadCache();
   const now = Date.now();

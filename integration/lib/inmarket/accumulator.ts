@@ -450,10 +450,25 @@ async function runCycleInner(): Promise<void> {
   // pool kept 2,409 companies the band forbids, and nothing anywhere said why. A failure in one of
   // these must not take the other two down, and none of them may fail silently again.
   try {
-    const { names, total } = await poolCompanyNames(sizeCursor, SIZE_BATCH);
+    // SIZE-FIRST (2026-08-21): hand the resolver the companies it has NO verdict for, best-scored
+    // first, instead of a blind rotating slice. The band filter in curateFromPool fails OPEN on an
+    // unknown size, so an unresolved company is one we pay to name + verify before learning it was
+    // never mailable. Draining "unknown" is therefore the real intake gate, and the log line below
+    // is what tells us it is converging rather than cycling.
+    const { loadSizeMap, sizeVerdictFresh } = await import("./companySize");
+    const sizeCache = await loadSizeMap();
+    const nowMs = Date.now();
+    const { names, total, unresolvedFirst, unresolvedLeft } = await poolCompanyNames(
+      sizeCursor,
+      SIZE_BATCH,
+      { resolved: (nm) => sizeVerdictFresh(sizeCache, nm, nowMs) },
+    );
     if (names.length) {
       sizeCursor = total ? (sizeCursor + names.length) % total : 0;
-      await enrichSizesBatch(names, SIZE_BATCH);
+      const resolved = await enrichSizesBatch(names, SIZE_BATCH);
+      console.log(
+        `[inmarket] size resolve: ${resolved}/${names.length} resolved (${unresolvedFirst} had no verdict, ${unresolvedLeft} still queued behind this batch)`,
+      );
     }
   } catch (err) {
     console.warn("[inmarket] size enrichment failed:", (err as Error)?.message || err);

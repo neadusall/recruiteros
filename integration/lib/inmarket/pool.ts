@@ -335,22 +335,55 @@ function slugifyCompany(name: string): string {
     .trim();
 }
 
-/** A rotating slice of raw company NAMES from the pool (highest-scored first), to feed the
- *  free company-size resolver (Wikidata) in the background. `offset` rotates over cycles. */
-export async function poolCompanyNames(offset: number, limit: number): Promise<{ names: string[]; total: number }> {
+/** A slice of raw company NAMES from the pool (highest-scored first), to feed the free
+ *  company-size resolver (Wikidata) in the background. `offset` rotates over cycles.
+ *
+ *  SIZE-FIRST (2026-08-21): pass `opts.resolved` and the batch is filled with companies that
+ *  have NO resolved headcount yet, best-scored first, before it falls back to the rotating
+ *  cursor. Without this the cursor walked the pool blind and re-offered companies the cache
+ *  already knew: ~64% of every batch was a no-op, so the unresolved set (7,858 companies)
+ *  drained at a third of the intended rate and never converged. That matters far beyond the
+ *  Wikidata spend, because the enrichment band filter in curateFromPool FAILS OPEN on an
+ *  unknown size, so every company the resolver has not reached yet is a company we pay to
+ *  name and verify before finding out it was never mailable. Draining "unknown" IS the gate.
+ *
+ *  The rotating tail is kept on purpose: once unresolved is empty the cursor still refreshes
+ *  stale entries, so a company that changed headcount is eventually re-checked. */
+export async function poolCompanyNames(
+  offset: number,
+  limit: number,
+  opts?: { resolved?: (name: string) => boolean },
+): Promise<{ names: string[]; total: number; unresolvedFirst: number; unresolvedLeft: number }> {
   const pool = (await load()).sort((a, b) => (b.lead.score ?? 0) - (a.lead.score ?? 0));
   const seen = new Set<string>();
   const names: string[] = [];
-  for (let i = 0; i < pool.length; i++) {
+  const isResolved = opts?.resolved;
+
+  // PASS 1 - companies with no resolved headcount, highest-scored first.
+  let unresolvedLeft = 0;
+  if (isResolved) {
+    for (const e of pool) {
+      const nm = (e.lead.company || "").trim();
+      const k = nm.toLowerCase();
+      if (!nm || seen.has(k) || isStaffingFirm(nm)) continue;
+      if (isResolved(nm)) continue;
+      seen.add(k);
+      if (names.length < limit) names.push(nm);
+      else unresolvedLeft++;
+    }
+  }
+  const unresolvedFirst = names.length;
+
+  // PASS 2 - rotating cursor over the rest, so resolved-but-stale entries still get refreshed.
+  for (let i = 0; i < pool.length && names.length < limit; i++) {
     const idx = (offset + i) % pool.length;
     const nm = (pool[idx].lead.company || "").trim();
     const k = nm.toLowerCase();
     if (!nm || seen.has(k) || isStaffingFirm(nm)) continue;
     seen.add(k);
     names.push(nm);
-    if (names.length >= limit) break;
   }
-  return { names, total: pool.length };
+  return { names, total: pool.length, unresolvedFirst, unresolvedLeft };
 }
 
 /** Companies whose full ATS board we haven't pulled yet (or not in `staleMs`), highest-

@@ -144,6 +144,28 @@ const ndr = readJson(`${VOL}/snap_mpc_ndr_v1.json`);
     `Published by the sender that enforces the caps, so the log and the portal cannot disagree. ${cc.benchedBoxes} boxes benched holding ${cc.benchedCeiling}/day${(cc.lanesParked || []).length ? `; ${cc.lanesParked.join(", ")} lane parked` : ""}`);
 }
 
+// Supply funnel (2026-08-21): the top of the cold lane. Registered because every OTHER send
+// check can read green while nothing goes out: on 2026-08-21 the fuse was armed, capacity said
+// 832/day and the belt was healthy, yet 4 emails sent all day because fresh supply was 15 rows
+// and all 8 candidates verified dead. Capacity answers "what COULD we send"; this answers "what
+// is there TO send", and only the second one had gone to zero.
+{
+  const sp = readJson(`${VOL}/snap_mpc_supply_v1.json`);
+  const spAge = sp ? ageMin(sp.at) : null;
+  // Thresholds are deliberately generous: this is a starvation alarm, not a pacing one. A day
+  // that sends its whole ramp is fine; a day with nothing QUEUED is what nobody noticed.
+  const freshReady = sp?.freshReady ?? 0;
+  add(GROUP_SEND, "supplyfunnel", "Supply funnel (fresh sendable rows)",
+    !sp ? "amber" : spAge > 60 ? "amber" : freshReady === 0 ? "bad" : freshReady < 25 ? "amber" : "good",
+    !sp ? "not published"
+      : `${freshReady} fresh & ready · ${sp.passedGates} passed gates of ${sp.curatedSince} curated · ${sp.alreadyEmailed} already emailed · ${fmtAge(spAge)}`,
+    !sp ? "batch.mjs publishes this every send tick; without it nothing can tell a dry funnel from a paused sender"
+    : spAge > 60 ? "The send loop publishes every 20 minutes, so a figure older than an hour means the cold lane is not running"
+    : freshReady === 0 ? `Nothing is queued to send. Held right now: ${sp.heldGuessed} guessed addresses, ${sp.heldUnvalidated} unvalidated, ${sp.buyerHolds} pointing at the wrong buyer, ${sp.heldSourcePaused} on a paused rung. Capacity is irrelevant until this is above zero.`
+    : freshReady < 25 ? `Only ${freshReady} rows are sendable, so today's volume is capped by SUPPLY, not by fleet capacity or reputation. The buyer rename and the KoldInfo finder are what refill this.`
+    : `${sp.buyerOverridesApplied} rows re-targeted by the buyer rename. Guessed addresses are held by policy (${sp.heldGuessed}) and only the finder converts them.`);
+}
+
 // Google cold lane (Zapmail Gmail boxes): active fleet + today's throughput + failure rate.
 {
   const snd = readJson(`${VOL}/snap_senders_v1.json`);
