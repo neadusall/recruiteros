@@ -162,6 +162,14 @@ docker run --rm --env-file /tmp/dr.env -v recruiteros_app_data:/data -v /opt/rec
   --entrypoint node recruiteros-app /tools/domain-rest.mjs >> "$LOG" 2>&1 || true
 rm -f /tmp/dr.env
 
+# 3.95) TARGETING SCORECARD: join the send ledgers to the reply ledgers and cut reply rate by
+#       every targeting decision we make - who we picked, their company size, the function, the
+#       address rung, and whether the prospect was also callable. Appends one row per day to a
+#       rolling history, which is the only way "did that change help" gets an answer instead of
+#       an opinion. Read-only over ledgers we already write; spends nothing.
+docker run --rm -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro -v /opt/recruiteros/mpc-out:/out \
+  --entrypoint node recruiteros-app /tools/targeting-scorecard.mjs >> "$LOG" 2>&1 || true
+
 # 4) AI advisor: daily "how to move the needle" recommendations, grounded in REAL deliverability
 #    facts (failure rate, bounces, campaign age, Smartlead warm-up), so it never guesses.
 grep -E '^(ANTHROPIC_API_KEY|SMARTLEAD_API_KEY)=' .env.production > /tmp/adv.env

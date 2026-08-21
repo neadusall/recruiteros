@@ -1889,6 +1889,68 @@
             '<div class="ob-note">Read a row as: for this kind of posted job, at a company this size, contact this seat. The band is the part that moves: the same job at 200 employees reaches the owner, and at 2,000 it stops at the Director. Hover a cell for the reason. Never contacted for a normal req: anyone below Manager, a leader of a different function, and above 250 employees the CEO, unless the req itself is a C-suite search or the owner search came back empty.</div>';
         }
 
+        // 2d) TARGETING SCORECARD. What is actually working: reply rate cut by every targeting
+        //     decision we make. This is the panel that decides whether the org chart earns its
+        //     keep, so it deliberately shows the SAMPLE next to every rate — a 100% reply rate on
+        //     two sends is noise, and a scorecard that renders it like signal teaches people to
+        //     trust noise. Buckets under the minimum sample are greyed and labelled.
+        var sc = f.targeting;
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Targeting scorecard · what is working in cold outreach</h3>';
+        if (!sc || !sc.totals || !sc.totals.sends) {
+          html += '<div class="ob-note">Not published yet. The daily run joins the send ledgers to the reply ledgers and writes it (tools/targeting-scorecard.mjs).</div>';
+        } else {
+          var rate = function (x) { return (Math.round((x || 0) * 10000) / 100) + "%"; };
+          html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
+            card("Prospects mailed", n(sc.totals.sends), "last " + sc.windowDays + " days") +
+            card("Real replies", n(sc.totals.replies), rate(sc.totals.rate) + " reply rate", "var(--ok)") +
+            card("Auto-replies excluded", n(sc.totals.auto), "out-of-office is not interest", "var(--text-dim)") +
+            "</div>";
+
+          // Each dimension as its own compact table. buyerLevel first: it is the org chart's test.
+          var dims = [
+            ["Who we picked", sc.byBuyerLevel, "The org chart's whole premise. If C-level is most of the sample there is no comparison group yet."],
+            ["Company size", sc.bySizeTier, "Whether the size tiers behave differently at all."],
+            ["Also callable", sc.byCallable, "Prospects whose employer has a dialable number, so the email can be paired with a voice drop."],
+            ["Function", sc.byFunction, "Which desks reply."],
+            ["Address rung", sc.byEmailSource, "Whether a found address outperforms a pattern-derived one."]
+          ];
+          html += '<div style="display:flex;gap:14px;flex-wrap:wrap">';
+          for (var di = 0; di < dims.length; di++) {
+            var title = dims[di][0], rowsD = dims[di][1] || [], note = dims[di][2];
+            if (!rowsD.length) continue;
+            html += '<div class="panel-card" style="flex:1 1 340px;padding:12px">' +
+              '<div style="font-weight:600;font-size:13px;margin-bottom:2px">' + esc(title) + '</div>' +
+              '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;line-height:1.4">' + esc(note) + '</div>' +
+              '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+            for (var ri = 0; ri < rowsD.length && ri < 8; ri++) {
+              var rw = rowsD[ri];
+              var dim = rw.thin ? "color:var(--text-dim)" : "";
+              html += '<tr style="' + dim + '">' +
+                '<td style="padding:3px 0">' + esc(rw.key) + (rw.thin ? ' <span style="font-size:10px">thin</span>' : '') + '</td>' +
+                '<td style="padding:3px 0;text-align:right;color:var(--text-dim)">' + n(rw.sends) + ' sent</td>' +
+                '<td style="padding:3px 0;text-align:right;width:64px"><b>' + rate(rw.rate) + '</b></td></tr>';
+            }
+            html += '</table></div>';
+          }
+          html += '</div>';
+
+          // The three open questions, with movement since the first day on file.
+          var w = sc.watch || {}, hist = sc.history || [], f0 = hist.length ? hist[0] : null;
+          var mv = function (now, then, isPct) {
+            if (then == null || hist.length < 2) return "first reading";
+            var d = isPct ? Math.round((now - then) * 1000) / 10 : (now - then);
+            return (d > 0 ? "+" : "") + d + (isPct ? " pts" : "") + " in " + hist.length + "d";
+          };
+          html += '<h4 style="margin:16px 0 6px;font-size:13px;color:var(--text-muted)">Open questions · tracked daily</h4>' +
+            '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+            card("Domains resting", n(w.fleet && w.fleet.restingDomains), mv(w.fleet && w.fleet.restingDomains, f0 && f0.watch && f0.watch.fleet && f0.watch.fleet.restingDomains), (w.fleet && w.fleet.restingDomains) > 0 ? "var(--warn)" : "var(--ok)") +
+            card("Phone coverage", Math.round((w.phone && w.phone.coverage || 0) * 100) + "%", mv(w.phone && w.phone.coverage, f0 && f0.watch && f0.watch.phone && f0.watch.phone.coverage, true)) +
+            card("Never looked up", n(w.phone && w.phone.unattempted), "employer domains, free to resolve", "var(--warn)") +
+            card("Owner-search find rate", Math.round((w.ownerSearch && w.ownerSearch.findRate || 0) * 1000) / 10 + "%", mv(w.ownerSearch && w.ownerSearch.findRate, f0 && f0.watch && f0.watch.ownerSearch && f0.watch.ownerSearch.findRate, true)) +
+            "</div>" +
+            '<div class="ob-note">Reply rate is credited to the FIRST send to a prospect, so a conversation is attributed to the targeting decision that opened it rather than to whichever follow-up landed last. Watch the owner-search find rate as the org chart shifts hunts down from C-level: if it falls, mid-level seats are harder to name than the C-suite and the fix is a two-step, not more hunts.</div>';
+        }
+
         // 2a) WHERE THE BACKLOG IS STUCK. The video fleet renders `renderable` and nothing else, so
         //     when video output falls to zero this row says which gate is holding the rest — instead
         //     of the answer being "somewhere upstream". Buckets are exclusive and sum to Curated.

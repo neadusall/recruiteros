@@ -624,6 +624,9 @@ function rolesByFunction(l: PoolLeadLite, max: number): string[] {
 /* Funnel — the real numbers, sliced by signal + function             */
 /* ------------------------------------------------------------------ */
 
+/** One row of a scorecard cut: how many we mailed in this bucket and how many replied. */
+interface TargetingBucket { key: string; sends: number; replies: number; auto: number; rate: number; thin: boolean }
+
 export interface CurationFunnel {
   total: number;
   byStatus: Record<CurationStatus, number>;
@@ -717,6 +720,27 @@ export interface CurationFunnel {
       reqLevel: number; reqLevelName: string;
       buyerLevels: string[]; buyerTitles: string[]; ownerBuys: boolean; why: string;
     }>;
+  } | null;
+  /**
+   * TARGETING SCORECARD: reply rate cut by every targeting decision we make (who we picked, their
+   * company size, the function, the address rung, whether they were also callable), plus the three
+   * tracked watch items and a rolling daily history. Read from the snapshot the scorecard tool
+   * publishes; null until its first run. Shapes are loose on purpose — this is a report the tool
+   * owns, and pinning every bucket here would mean editing two files to add a dimension.
+   */
+  targeting: {
+    at: string;
+    windowDays: number;
+    minSample: number;
+    totals: { sends: number; replies: number; auto: number; rate: number };
+    byBuyerLevel: TargetingBucket[];
+    bySizeTier: TargetingBucket[];
+    byFunction: TargetingBucket[];
+    byEmailSource: TargetingBucket[];
+    byCallable: TargetingBucket[];
+    byLevelAndTier: TargetingBucket[];
+    watch: Record<string, Record<string, number | Record<string, number>>>;
+    history: Array<{ date: string; sends: number; replies: number; rate: number; watch: Record<string, Record<string, number | Record<string, number>>> }>;
   } | null;
   /** Daily throughput toward the 5,000 valid-emails/day goal, so consistency is measurable. */
   daily: {
@@ -839,6 +863,13 @@ export async function curationFunnel(): Promise<CurationFunnel> {
   let domainsUnattempted = 0;
   for (const d of allDomains) if (!phoneAttempted.has(d)) domainsUnattempted++;
 
+  // The targeting scorecard, as published by the tool that computes it.
+  let targeting: CurationFunnel["targeting"] = null;
+  try {
+    const snap = await loadSnapshot<CurationFunnel["targeting"]>("mpc_targeting_v1");
+    if (snap && snap.totals) targeting = snap;
+  } catch { /* not published yet: the panel says so rather than inventing numbers */ }
+
   // The targeting org chart, as published by the module that enforces it.
   let orgchart: CurationFunnel["orgchart"] = null;
   try {
@@ -872,6 +903,7 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     blocked,
     levers: { catchAllContactable: catchAllContactableEnabled(), residualFinder: await residualFinderEnabled() },
     orgchart,
+    targeting,
     voice: {
       curatedWithPhone,
       contactable: contactableRows,

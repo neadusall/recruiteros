@@ -403,6 +403,77 @@ const GROUP_SUPPLY = "Supply pipeline";
     : `Coupled outreach is covered for most of the batch. Numbers are cached per employer domain, so one lookup serves every prospect at that company.`);
 }
 
+// THE THREE OPEN QUESTIONS (2026-08-21). These were the items flagged as "read again in a week",
+// and a note in a chat log is not a monitor. tools/targeting-scorecard.mjs writes one row per day
+// into snap_mpc_targeting_v1, so each of these shows its CURRENT value and the DELTA since the
+// oldest day on file. The delta is the point: a coverage number that is stuck is a different
+// problem from one that is climbing slowly, and the raw percentage cannot tell them apart.
+{
+  const tg = readJson(`${VOL}/snap_mpc_targeting_v1.json`);
+  const hist = Array.isArray(tg?.history) ? tg.history : [];
+  const first = hist.length ? hist[0] : null;
+  const days = hist.length;
+  const tgAge = tg ? ageMin(tg.at) : null;
+  // "+3 in 6d" / "-2 in 6d" / "first reading" — reads the same whichever direction is good.
+  const delta = (now, then, unit) => {
+    if (then == null || days < 2) return "first reading";
+    const d = Math.round((now - then) * (unit === "pct" ? 1000 : 1)) / (unit === "pct" ? 10 : 1);
+    return `${d > 0 ? "+" : ""}${d}${unit === "pct" ? " pts" : ""} in ${days}d`;
+  };
+
+  const w = tg?.watch || {};
+  const fleet = w.fleet || {};
+  const phone = w.phone || {};
+  const owner = w.ownerSearch || {};
+
+  add(GROUP_SUPPLY, "watchfleet", "Watch · sending fleet recovery",
+    !tg ? "amber" : fleet.restingDomains > 0 ? "amber" : "good",
+    !tg ? "not published"
+      : `${fleet.restingDomains} of ${fleet.knownDomains} domains resting · ${delta(fleet.restingDomains, first?.watch?.fleet?.restingDomains)}`,
+    !tg ? "tools/targeting-scorecard.mjs writes this every day; nothing tracks fleet recovery without it"
+    : fleet.restingDomains > 0
+      ? "Resting domains contribute ZERO capacity and hold their mailboxes benched. Until this falls, supply improvements bank up rather than ship, so read every other number here as potential rather than throughput."
+      : "Every known sending domain is live.");
+
+  add(GROUP_SUPPLY, "watchphone", "Watch · corporate phone coverage",
+    !tg ? "amber" : (phone.coverage ?? 0) < 0.35 ? "amber" : "good",
+    !tg ? "not published"
+      : `${Math.round((phone.coverage || 0) * 100)}% of ${phone.curatedDomains} employer domains · ${phone.unattempted} never looked up · ${delta(phone.coverage, first?.watch?.phone?.coverage, "pct")}`,
+    !tg ? "published daily by the scorecard"
+    : (phone.unattempted || 0) > 0
+      ? `${phone.unattempted} employer domains have never had a phone lookup ATTEMPTED. That is the free half of the gap: a switchboard resolves from the company's own site, while a domain already tried and missed is cached negative and is not worth re-queuing. If coverage is flat while this number stays high, the resolver is not being run, not failing.`
+      : "Every curated employer domain has been through the resolver at least once.");
+
+  // The org chart's supply-side test. It aims junior reqs at Managers and Directors, which is only
+  // useful if those people can actually be NAMED as reliably as a CFO can.
+  add(GROUP_SUPPLY, "watchowner", "Watch · owner-search find rate",
+    !tg ? "amber" : (owner.findRate ?? 0) < 0.15 ? "amber" : "good",
+    !tg ? "not published"
+      : `${Math.round((owner.findRate || 0) * 1000) / 10}% of ${owner.pairsHunted} company+function hunts named a person · ${owner.noName} came back empty · ${delta(owner.findRate, first?.watch?.ownerSearch?.findRate, "pct")}`,
+    !tg ? "published daily by the scorecard"
+    : (owner.findRate ?? 0) < 0.15
+      ? "Most hunts cannot name the owner, so the targeting model is aiming at seats we often cannot resolve. Watch this as the org chart shifts hunts from C-level down to Manager and Director: if the rate FALLS, mid-level seats are harder to name than the C-suite and the answer is a two-step (name the Director, ask who owns the req) rather than more hunts."
+      : "The owner search names a person often enough for the org chart to aim at real seats.");
+
+  // The headline the whole exercise exists to move.
+  const t = tg?.totals || {};
+  const lvl = Array.isArray(tg?.byBuyerLevel) ? tg.byBuyerLevel : [];
+  const top = lvl.filter((r) => !r.thin).sort((a, b) => b.rate - a.rate)[0];
+  const cSuiteShare = (() => {
+    const c = lvl.find((r) => r.key === "C-level");
+    return c && t.sends ? Math.round((c.sends / t.sends) * 100) : null;
+  })();
+  add(GROUP_SUPPLY, "targeting", "Targeting scorecard (reply rate by who we picked)",
+    !tg ? "amber" : tgAge > 36 * 60 ? "amber" : "good",
+    !tg ? "not published"
+      : `${t.sends} mailed, ${t.replies} real replies (${Math.round((t.rate || 0) * 10000) / 100}%)${cSuiteShare != null ? ` · ${cSuiteShare}% went to C-level` : ""}${top ? ` · best rung: ${top.key} at ${Math.round(top.rate * 10000) / 100}%` : ""}`,
+    !tg ? "Runs in the daily; joins the send ledgers to the reply ledgers and cuts reply rate by every targeting decision"
+    : tgAge > 36 * 60 ? "Older than a day: the daily run that publishes it has not completed"
+    : cSuiteShare != null && cSuiteShare > 70
+      ? `Nearly all outreach is still going to C-level, so the org chart has no comparison group yet and its premise is UNTESTED on this list. Auto-replies are excluded from the reply count on purpose: counting an out-of-office as interest would flatter C-suite targeting specifically.`
+      : "Reply rate is cut by buyer seniority, company size, function, address rung and whether the prospect was also callable. Buckets under the minimum sample are marked thin rather than shown as signal.");
+}
+
 const eng = readJson(`${VOL}/snap_inmarket_engine_health_v1.json`);
 {
   const okTick = eng?.lastCurationOk === true;
