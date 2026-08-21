@@ -30,7 +30,7 @@ import { adminListAccounts } from "../auth";
 
 export type ToolKey =
   | "inmarket" | "builder" | "jdsourcing" | "linkedin" | "automation"
-  | "linkedinposter" | "postrecruiter" | "vetting" | "calls" | "bdphone" | "voicedrops";
+  | "linkedinposter" | "rolerecruiter" | "vetting" | "calls" | "bdphone" | "voicedrops";
 
 export type ToolState = "ready" | "unverified" | "blocked";
 
@@ -91,12 +91,12 @@ const TOOLS: Record<ToolKey, ToolSpec> = {
     needs: ["unipile"],
     impact: "invites and messages are queued but never actually sent",
   },
-  // Post Recruiter needs the LinkedIn seat and nothing else: the seat both
+  // Role Recruiter needs the LinkedIn seat and nothing else: the seat both
   // confirms open-to-work and sends. The indexed post lane runs on a server-side
   // search key (Serper/DataForSEO) that has no portal tile, and its absence only
   // costs the secondary lane, so it is reported on the card rather than gated here.
-  postrecruiter: {
-    label: "Post Recruiter",
+  rolerecruiter: {
+    label: "Role Recruiter",
     needs: ["unipile"],
     impact: "candidates cannot be confirmed as open to work, and nothing can be sent to them",
   },
