@@ -24,7 +24,7 @@ import {
   assessProspect, roleFamily, roleFunctionGroup, dmFunction, companyKeyOf,
 } from "/tools/gates.mjs";
 import { targetFor } from "/tools/orgchart.mjs";
-import { searchPeople as apiSearchPeople } from "/tools/peopleapi.mjs";
+import { searchPeople as apiSearchPeople, companyMatches } from "/tools/peopleapi.mjs";
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
 const CREDS = process.env.MPC_CREDS_FILE || "/data/snap_integration_credentials_v1.json";
@@ -36,7 +36,14 @@ const LUME_WS = "ws_mqf6o989003";
 const PEOPLE_BUDGET = Number(process.env.MPC_RENAME_PEOPLE_BUDGET || 600);
 const REOON_BUDGET = Number(process.env.MPC_RENAME_REOON_BUDGET || 1500);
 const RETRY_HOURS = Number(process.env.MPC_RENAME_RETRY_HOURS || 20);
-const PACE_MS = Number(process.env.MPC_RENAME_PACE_MS || 800);
+// PACING (raised 2026-08-21 after measuring the real constraint). The binding limit on this
+// provider is PER MINUTE, not the 20,000/month quota: the plan answers "you have exceeded the rate
+// limit per minute for your plan, PRO". At the old 800ms gate the tool asked for ~75 calls a
+// minute and was refused for almost all of them, and because refusals were being read as "no owner
+// exists" (see peopleapi.mjs) the run looked like it was working. A live test at 9s spacing
+// answered 6 of 8. 5s is the compromise: a 600-call budget takes ~50 minutes, which is fine for a
+// nightly job, and the client's backoff absorbs the rest.
+const PACE_MS = Number(process.env.MPC_RENAME_PACE_MS || 5000);
 const MAX_FN_PER_COMPANY = 2;
 const REOON_KEY = (process.env.REOON_API_KEY || "").trim();
 
@@ -315,11 +322,13 @@ async function processJob(job) {
       ledger({ companyKey: ck, company: c.company, fn, outcome: refusal.kind === "ratelimit" ? "api_ratelimit" : "api_error", detail: String(refusal.message || "").slice(0, 120) });
       return;
     }
-    const coSq = squash(c.company);
     for (const h of hits) {
-      const headSq = squash(h.headline);
-      const mentionsCo = coSq.length >= 5 ? headSq.includes(coSq) : new RegExp(`\\b${c.company.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/ +/g, "\\s+")}\\b`, "i").test(h.headline);
-      if (!mentionsCo) continue;
+      // COMPANY MATCH via the shared matcher, which compares against the EMPLOYER named in the
+      // headline rather than scanning the whole string. The old squashed-substring test accepted
+      // "Director Of Media Relations at Magna Carta Records" as a match for "Carta", because
+      // "carta" sits inside "magnacartarecords". Caught in the live run on 2026-08-21; a false
+      // company match is worse than a miss, since it aims outreach at a stranger.
+      if (!companyMatches(c.company, h.headline)) continue;
       const title = h.headline.split("|")[0].trim().slice(0, 90);
       const dmFn = dmFunction(title);
       const fnOk = fn === "Executive" ? dmFn === "universal" : dmFn === fn;

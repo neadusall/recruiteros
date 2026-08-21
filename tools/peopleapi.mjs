@@ -38,6 +38,58 @@
  * Only `empty` is evidence about the world. Everything else is evidence about us.
  */
 
+const squash = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+const tokens = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+/** Suffixes that are noise on an employer name, so "Webflow" and "Webflow, Inc." are one company. */
+const SUFFIX = /(inc|llc|ltd|corp|corporation|co|company|group|holdings|plc|gmbh|sa|ag|bv|pte|technologies|labs)$/;
+const stripSuffix = (sq) => { let s = sq; for (let i = 0; i < 3 && SUFFIX.test(s); i++) s = s.replace(SUFFIX, ""); return s; };
+
+/**
+ * Is `employerRaw` the same employer as `company`?
+ *
+ * Compares TOKEN SEQUENCES, not squashed substrings or prefixes. A squashed prefix test accepted
+ * "Oura" as a match for "Ouraring Collective Supply", because "ouraringcollectivesupply" starts
+ * with "oura" — the same class of error as "Carta" inside "Magna Carta Records", just moved.
+ * Requiring the company's tokens to be a leading run of the employer's tokens means a short name
+ * can only match a real word, never the beginning of a longer one.
+ */
+function employerIs(company, employerRaw) {
+  const a = stripSuffix(squash(company));
+  const b = stripSuffix(squash(employerRaw));
+  if (a && b && a === b) return true;                     // same after suffix noise ("J.P. Morgan" / "JP Morgan")
+  const ct = tokens(company), et = tokens(employerRaw);
+  if (!ct.length || et.length < ct.length) return false;
+  return ct.every((t, i) => et[i] === t);                 // "Blue Signal" leads "Blue Signal Search"
+}
+
+/**
+ * Keep in step with the block in rename-buyers.mjs.
+ *
+ * Compares against the EMPLOYER named in the headline rather than scanning the whole string. A
+ * word-boundary scan is not enough: "Carta" is genuinely a word inside "Magna Carta Records", so
+ * any test that only asks "does this token appear" accepts a stranger at a different employer.
+ * LinkedIn headlines name the employer after "at" or "@", so that is what gets compared.
+ */
+export function companyMatches(company, headline) {
+  const co = squash(company);
+  if (!co) return false;
+  const head = String(headline || "");
+
+  // Employer candidates: everything after an "at" or "@", up to the next separator.
+  const employers = [...head.matchAll(/(?:\bat\b|@)\s*([^|·,•]+)/gi)]
+    .map((m) => String(m[1]).trim())
+    .filter(Boolean);
+
+  if (employers.length) {
+    return employers.some((e) => employerIs(company, e));
+  }
+
+  // No employer marker in the headline ("Controller, Acme Industries"): fall back to a
+  // word-boundary scan, which is safe here because there is no rival employer to confuse it with.
+  const coWords = String(company).replace(/[^a-zA-Z0-9 ]/g, " ").trim().replace(/\s+/g, "\\s+");
+  return coWords.length >= 3 && new RegExp(`\\b${coWords}\\b`, "i").test(head);
+}
+
 const DEFAULT_PATH = "/api/v1/search/people?name={query}&page={page}&limit=10";
 
 /** Pull the credentials the way every tool here does, so there is one shape to get wrong. */
@@ -79,6 +131,14 @@ export function classify(status, body) {
     const message = String(json.message || "");
     return { kind: /\b429\b|too many requests/i.test(message) ? "ratelimit" : "apifail", people: [], message };
   }
+  // A rate limit arrives at BOTH levels and both must back off rather than be read as transport
+  // failure: the provider's own throttle wears an HTTP 202 (above), while RapidAPI's per-minute
+  // plan limit is a real HTTP 429 whose body says "exceeded the rate limit per minute for your
+  // plan". Treating the latter as a generic http error meant no backoff and an immediate give-up.
+  if (status === 429) {
+    const message = String((json && json.message) || "rate limited");
+    return { kind: "ratelimit", people: [], message };
+  }
   if (status < 200 || status >= 300) return { kind: "http", people: [], message: `HTTP ${status}` };
   return { kind: "empty", people: [], message: "" };
 }
@@ -109,10 +169,18 @@ export async function searchPeople(api, query, opts = {}) {
     }
     const body = await res.text().catch(() => "");
     last = classify(res.status, body);
-    // Quota headers are worth surfacing: a caller that sees remaining fall to zero should stop
-    // rather than keep spending on refusals.
-    const remaining = Number(res.headers.get("x-ratelimit-requests-remaining"));
-    if (Number.isFinite(remaining)) last.remaining = remaining;
+    // Quota header, surfaced so a caller can stop rather than keep spending on refusals.
+    //
+    // PRESENCE CHECKED, not just parsed: RapidAPI omits this header on a 429, and
+    // `Number(null)` is 0, which reads as "quota exhausted" and made rename-buyers abandon the
+    // whole hunt on what was really a per-minute throttle. A missing header means unknown, and
+    // unknown must never look like empty. Same class of bug as the 202 envelope this file exists
+    // to fix, one layer up.
+    const rawRemaining = res.headers.get("x-ratelimit-requests-remaining");
+    if (rawRemaining != null && rawRemaining !== "") {
+      const remaining = Number(rawRemaining);
+      if (Number.isFinite(remaining)) last.remaining = remaining;
+    }
     if (last.kind === "people" || last.kind === "empty") return last;
     if (last.kind === "ratelimit") { await sleep(baseDelay * (i + 1)); continue; }
     return last;   // apifail / http: retrying the same bad request will not help

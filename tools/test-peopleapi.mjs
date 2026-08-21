@@ -75,4 +75,27 @@ test("only 'empty' is evidence about the world", () => {
   }
 });
 
+
+/* ---- rate limits arrive at two different levels, and both must back off ---- */
+
+const PLAN_429 = '{"message":"You have exceeded the rate limit per minute for your plan, PRO, by the API provider"}';
+
+test("RapidAPI's per-minute plan limit is a real HTTP 429 and must read as ratelimit", () => {
+  // The provider's own throttle wears an HTTP 202 (tested above); RapidAPI's plan limit is a
+  // genuine 429. Classifying the second as generic transport failure meant no backoff and an
+  // instant give-up, which is how a per-minute cap looked like a dead integration.
+  const r = classify(429, PLAN_429);
+  assert.equal(r.kind, "ratelimit", "a 429 must back off, not be treated as an http error");
+  assert.ok(/per minute/i.test(r.message), r.message);
+});
+
+test("a 429 body that is not JSON is still a rate limit", () => {
+  assert.equal(classify(429, "Too Many Requests").kind, "ratelimit");
+});
+
+test("other non-2xx statuses stay transport failures", () => {
+  assert.equal(classify(500, "boom").kind, "http");
+  assert.equal(classify(403, "denied").kind, "http");
+});
+
 console.log("\n" + passed + " passed");
