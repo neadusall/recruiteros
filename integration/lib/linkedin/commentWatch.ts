@@ -244,6 +244,22 @@ export interface ScenarioPreset {
   /** Role-based scenarios that are NOT about hiring pair the role with one of
    *  these topics for the Unipile post search, instead of "<role> hiring". */
   unipileTopics?: string[];
+  /**
+   * May the PUBLIC COMMENT lane act on this scenario? (owner decision 2026-08-21)
+   *
+   * Comments are now restricted to posts from people who are ACTIVELY HIRING one of our roles,
+   * and nothing else. This is deliberately its own flag rather than a reuse of `hiringIntent`:
+   * that field means "require hiring language in the post text before accepting the candidate"
+   * and is false on `struggling_to_fill`, which is unmistakably a hiring post ("third time
+   * posting", "hard to fill"). Overloading it would have silently dropped the single best
+   * scenario this desk has.
+   *
+   * The other scenarios keep earning their place in DISCOVERY and in the DM lane - a funding
+   * round or a new location really is a hiring signal, just not an advertised opening. What they
+   * no longer do is put a public comment under a post that never mentioned a job, which is what
+   * made the comment trail read as a desk commenting on everything.
+   */
+  commentEligible?: boolean;
 }
 
 export const SCENARIO_PRESETS: ScenarioPreset[] = [
@@ -251,19 +267,19 @@ export const SCENARIO_PRESETS: ScenarioPreset[] = [
     id: "hiring_role", label: "Posting an opening for a role I place",
     hint: "They announced they are hiring one of your roles",
     roleBased: true, orGroup: `hiring OR "open role" OR "open position" OR "looking for" OR "join our team"`,
-    hiringIntent: true, dmBank: "mpc",
+    hiringIntent: true, dmBank: "mpc", commentEligible: true,
   },
   {
     id: "urgent_backfill", label: "Urgent or backfill hires",
     hint: "Urgent, immediate, or backfill language on your roles",
     roleBased: true, orGroup: `urgent OR immediately OR backfill OR asap OR "start right away"`,
-    hiringIntent: true, dmBank: "mpc",
+    hiringIntent: true, dmBank: "mpc", commentEligible: true,
   },
   {
     id: "struggling_to_fill", label: "Struggling to fill a role",
     hint: "Complaining a search is hard: your MPC lands best here",
     roleBased: true, orGroup: `"struggling to hire" OR "hard to fill" OR "hard to find" OR "cannot find" OR "third time posting"`,
-    hiringIntent: false, dmBank: "mpc",
+    hiringIntent: false, dmBank: "mpc", commentEligible: true,
   },
   {
     id: "team_growth", label: "Announcing team growth",
@@ -1718,10 +1734,10 @@ const POST_COMMENT_RULES = `You write PUBLIC comments that a recruiting agency o
 Your goal is to make one hiring decision-maker think "this person actually runs these searches" and then give them one easy way to engage if they want help with the search: a reply, a message, a profile click. Everything below serves that.
 
 Rules:
-- Say ONE true, non-obvious thing about how their specific situation actually plays out, at the level of mechanism: where that talent is really sitting right now, which adjacent title converts and which one never does, what makes this search stall at the offer, what the counteroffer risk looks like, what the market reads into how the role is scoped. On a post about the work rather than a role, it is the same move applied to the problem they described. Never restate their post, never compliment it, never give generic hiring advice ("hiring is hard", "culture matters"). The line must be specific enough that it could be wrong.
+- Say ONE true, non-obvious thing about how their specific situation actually plays out, at the level of mechanism: where that talent is really sitting right now, which adjacent title converts and which one never does, what makes this search stall at the offer, what the counteroffer risk looks like, what the market reads into how the role is scoped. Never restate their post, never compliment it, never give generic hiring advice ("hiring is hard", "culture matters"). The line must be specific enough that it could be wrong.
 - Write the observation as "we", once, as the quiet tell that a desk sits behind it: "we keep seeing", "the ones we watch close", "we stopped sourcing those from". The closing invitation may speak as "I" ("happy to", "my inbox is open") or use "we" one more time, never beyond that. Never name the firm, never say "my agency", "my clients", "our candidates", "our bench", or any placement you have made.
 - NEVER invent a number. No comp bands, no time-to-fill, no counts, no percentages, unless the post itself stated them, in which case you may react to their number. If you have no specific fact, describe the pattern in words instead.
-- Close with ONE short, low-pressure invitation to engage if they want help with this search. It is a standing offer they can take or leave: "happy to compare notes on where those candidates are actually sitting if useful", "if you want a candid read on who is movable at that level, my inbox is open", "glad to share what we are seeing on this exact search, just ask". Vary the phrasing; never copy these examples verbatim. On a post about the work rather than a role, the invitation is peer-to-peer instead, to trade notes on the problem they wrote about, with no mention of hiring or candidates.
+- Close with ONE short, low-pressure invitation to engage if they want help with this search. It is a standing offer they can take or leave: "happy to compare notes on where those candidates are actually sitting if useful", "if you want a candid read on who is movable at that level, my inbox is open", "glad to share what we are seeing on this exact search, just ask". Vary the phrasing; never copy these examples verbatim.
 - The invitation must never beg, pressure, or sell: no fees, no availability talk, no "before someone else does", no links, no phone numbers, no email, no calendar, no naming the firm.
 - 20 to 55 words. Two or three sentences: the observation first, the invitation last.
 - No emoji, no hashtags, no exclamation marks, no long dashes, no all-caps.
@@ -2730,6 +2746,10 @@ export async function aiHunt(workspaceId: string, ask: string): Promise<{
       unipileQ: p,
       hiringIntent: false,
       dmBank: "mpc",
+      // The phrase builder above is explicitly hiring-side ("people posting about roles they need
+      // to fill"), so this lane may comment. It is still gated on the post TEXT showing hiring
+      // intent at draft time, which is what catches a phrase that drifted off target.
+      commentEligible: true,
     };
     try {
       const r = await scanWorkspace(workspaceId, combo);
@@ -2753,6 +2773,9 @@ interface ScanCombo {
   unipileQ: string;
   hiringIntent: boolean;
   dmBank: "mpc" | "growth";
+  /** Carried from the preset: may the PUBLIC COMMENT lane act on this post?
+   *  Only actively-hiring scenarios may (owner decision 2026-08-21). */
+  commentEligible?: boolean;
 }
 
 function scanCombos(workspaceId: string): ScanCombo[] {
@@ -2776,7 +2799,7 @@ function scanCombos(workspaceId: string): ScanCombo[] {
           key: `${p.label}: ${role}${topic ? ` (${topic})` : ""}`, id: p.id, role,
           serperQ: `site:linkedin.com/posts "${role}" (${p.orGroup})`,
           unipileQ: topic ? `${role} ${topic}` : `${role} hiring`,
-          hiringIntent: p.hiringIntent, dmBank: p.dmBank,
+          hiringIntent: p.hiringIntent, dmBank: p.dmBank, commentEligible: p.commentEligible,
         });
       });
     } else {
@@ -2784,7 +2807,7 @@ function scanCombos(workspaceId: string): ScanCombo[] {
         key: p.label, id: p.id,
         serperQ: `site:linkedin.com/posts ${p.orGroup.startsWith("(") ? p.orGroup : `(${p.orGroup})`}`,
         unipileQ: p.orGroup.replace(/["()]|\bOR\b/g, " ").replace(/\s+/g, " ").trim().slice(0, 80),
-        hiringIntent: p.hiringIntent, dmBank: p.dmBank,
+        hiringIntent: p.hiringIntent, dmBank: p.dmBank, commentEligible: p.commentEligible,
       });
     }
   }
@@ -3129,7 +3152,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, preIndexed: 0, viewCap: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, preIndexed: 0, viewCap: 0 };
   stats.searches += 1;
   stats.screened += candidates.length;
   for (const c of candidates) {
@@ -3346,23 +3369,24 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       // reads too close to one we already posted, the lead is dropped rather
       // than filled with something repeatable.
       //
-      // Two kinds of post reach this point and they need different framing. A
-      // hiring post has a role to react to; an industry post has none, and
-      // telling the model "the role they are hiring for is CFO" about someone
-      // writing on month-end close invents a job that was never mentioned and
-      // produces a comment that visibly misreads the post.
+      // HIRING POSTS ONLY (owner decision 2026-08-21). This lane used to comment on three kinds of
+      // post - an advertised opening, company news (a raise, a second location, a team doubling),
+      // and industry conversation - each with its own brief to stop the model inventing a job that
+      // was never mentioned. The desk now comments EXCLUSIVELY where someone is actively hiring one
+      // of our roles.
+      //
+      // Two reasons this is the right cut rather than a narrowing for its own sake. The comment is
+      // PUBLIC and, since auto-posting is on, goes out without anyone reading it first, so the only
+      // safe ground is a post where we have something concrete and provable to say. And the whole
+      // value of the lane is that the comment lands on the hiring post itself, reaching an author
+      // whose profile may not take a message - which is worth nothing on a post with no role in it.
+      //
+      // The other scenarios are untouched in DISCOVERY and in the DM lane: a funding round is still
+      // a real hiring signal, just not one to comment publicly under. Gated on BOTH the scenario
+      // and the post text, so a growth post that slipped into a hiring scenario is still refused.
+      if (!combo.commentEligible || !HIRING_INTENT_RE.test(c.text)) { g.commentNotHiring++; continue; }
       const author = [authorName, title, company ? `at ${company}` : undefined].filter(Boolean).join(", ");
-      // THREE kinds of post reach this point, not two. The growth scenarios
-      // (a raise, a second location, a team doubling) advertise no job either,
-      // and briefing them as "the role they are hiring for is CFO" invents an
-      // opening that was never mentioned - the same misread the industry brief
-      // exists to prevent. dmBank is the honest signal for which is which:
-      // "mpc" scenarios are the ones anchored on an actual role.
-      const brief = combo.id === "industry_conversation"
-        ? `They are not advertising a job here, so do NOT mention hiring, recruiting, candidates, or a search. React to the substance of what they wrote as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would, and make the closing invitation a peer one: an offer to trade notes on the problem they wrote about.`
-        : combo.dmBank === "growth"
-        ? `They are announcing company news here - growth, a new location, a raise - and are NOT advertising a specific job, so do not name a role, a search, or candidates. React to the news itself as a peer who works alongside ${jobTitle}s${city ? ` in ${city}` : ""} would, and close with a low-pressure invitation to keep in touch on how it goes.`
-        : `The role they are hiring for is ${jobTitle}${city ? ` in ${city}` : ""}.`;
+      const brief = `The role they are hiring for is ${jobTitle}${city ? ` in ${city}` : ""}.`;
       const userMsg = `THEIR POST (by ${author}):\n${c.text.slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId)}`;
       const drafted = await draft(POST_COMMENT_RULES, userMsg);
       if (!drafted || /^\s*SKIP\b/i.test(drafted)) { g.commentDraft++; continue; }
