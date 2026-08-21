@@ -105,6 +105,17 @@ async function run(req: Request) {
     onboarding = await auditPendingOnboards();
   } catch (e: any) { onboarding = { error: e?.message ?? "onboarding_audit_failed" }; }
 
+  // HEALTH LEDGER: observe every sending domain and Email ID, write today's row and
+  // open/close the typed events that explain why anything stopped. Runs AFTER the
+  // guard, the onboarding audit and the revive sweep, so a hold stamped a moment ago
+  // is already visible as a cause rather than showing up an hour late. Self-debounced,
+  // so a tighter tick cadence never re-pulls the warm-up fleet.
+  let ledger: unknown = null;
+  try {
+    const { recordLedgerTick } = await import("../../../../lib/senders/ledger");
+    ledger = await recordLedgerTick();
+  } catch (e: any) { ledger = { error: e?.message ?? "ledger_tick_failed" }; }
+
   // Sending-IP reputation alarm: a public blocklist listing (named by the receivers
   // themselves in the block ledger) stops mail at many receivers at once and puts the
   // sending DOMAINS at risk, so it pages the owner once per distinct listing state.
@@ -189,7 +200,7 @@ async function run(req: Request) {
     jobBlasts = await runJobBlastTickAll();
   } catch (e: any) { jobBlasts = { error: e?.message ?? "job_blast_tick_failed" }; }
 
-  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, outlook, revive, onboarding, ipReputation, variants, bounceFeedback, verdictSync, staffSuppression, replies, jobBlasts });
+  return NextResponse.json({ ok: true, ticked: results.length, results, seeds, setups, fleet, guard, outlook, revive, onboarding, ipReputation, ledger, variants, bounceFeedback, verdictSync, staffSuppression, replies, jobBlasts });
 }
 
 export const GET = run;
