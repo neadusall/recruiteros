@@ -38,6 +38,7 @@
 import { loadSnapshot, debouncedSaver } from "../db";
 import { nowIso, rid } from "../core/ids";
 import { classifyTitle } from "../signals/filters";
+import { jobSeekerReason } from "../outreach/jobSeeker";
 import { requestLinkedInAction } from "./os/engine";
 import { ensureAccount, listAccounts } from "./os/health";
 import { putPolicy } from "./os/policy";
@@ -242,7 +243,21 @@ export interface ScenarioPreset {
   orGroup: string;
   /** Gate hits through HIRING_INTENT_RE (true) or accept any real post. */
   hiringIntent: boolean;
-  dmBank: "mpc" | "growth";
+  /**
+   * Which DM bank this scenario may draw from.
+   *
+   * This is a CLAIM budget, not a tone setting. "growth" templates assert a fact
+   * about the reader ("saw the news about the team growing"), so only a scenario
+   * whose own match establishes that fact may use it - `team_growth`,
+   * `new_location` and `funding_growth` all require the announcement in the post
+   * text. "peer" asserts nothing at all and is the correct bank for a scenario
+   * that matched on subject matter rather than on an event.
+   *
+   * Getting this wrong is what produced "Saw the news about the team growing" to
+   * a man who had posted about cash-flow reporting (2026-08-21). He had
+   * announced nothing; we told him he had. See assertScenarioBanks().
+   */
+  dmBank: "mpc" | "growth" | "peer";
   /** Role-based scenarios that are NOT about hiring pair the role with one of
    *  these topics for the Unipile post search, instead of "<role> hiring". */
   unipileTopics?: string[];
@@ -312,7 +327,9 @@ export const SCENARIO_PRESETS: ScenarioPreset[] = [
     hint: "Finance leaders talking shop: comment as a peer, no opening needed",
     roleBased: true,
     orGroup: `"close the books" OR "month end close" OR "month-end close" OR forecasting OR "audit season" OR "cash flow" OR budgeting OR "cost cutting" OR "board deck"`,
-    hiringIntent: false, dmBank: "growth",
+    // "peer", not "growth": this scenario matches somebody discussing their
+    // CRAFT, which tells us nothing about whether they are growing or hiring.
+    hiringIntent: false, dmBank: "peer",
     unipileTopics: ["month end close", "forecasting", "cash flow", "budgeting", "audit season", "board deck", "cost cutting"],
   },
 ];
@@ -326,9 +343,44 @@ const GROWTH_DM_TEMPLATES = [
   "Your growth post caught my eye. I keep a bench of vetted {job_title}s from active searches. Glad to send a few names when useful.",
 ];
 
+/**
+ * Peer bank: for scenarios that matched on SUBJECT MATTER, where all we can
+ * honestly say is that we read their post and we recruit in their function.
+ *
+ * Every line here is constrained to two facts we actually hold: their post
+ * exists (we matched it), and this is the role we place. Nothing about their
+ * company, their team, or their plans - because at this point we know none of it.
+ */
+const PEER_DM_TEMPLATES = [
+  "Your post came up in my feed and it is the same thing I hear from finance leaders all week. I recruit {job_title}s, so if hiring ever comes up, happy to share who is genuinely good and available.",
+  "Good post, and a fair point. I run {job_title} searches for a living, so if you ever want a read on what the market looks like for that seat, just ask.",
+  "Read your post. I place {job_title}s, so I get a decent view of who is out there. Happy to be a resource if it is ever useful, no pitch either way.",
+];
+
+/**
+ * A scenario may only draw from a bank whose claims its own match establishes.
+ *
+ * This runs as a test rather than at import time so that a bad pairing fails a
+ * build instead of a live tick. The rule it encodes: a scenario that does not
+ * require an announcement in the post text cannot use templates that reference
+ * one. Exported so lib/linkedin/selftest.ts can assert it.
+ */
+export function assertScenarioBanks(): string[] {
+  const problems: string[] = [];
+  const assertsEvent = (id: string) => id === "growth";
+  // Scenarios whose orGroup literally requires the announcement being referenced.
+  const establishesEvent = new Set(["team_growth", "new_location", "funding_growth"]);
+  for (const p of SCENARIO_PRESETS) {
+    if (assertsEvent(p.dmBank) && !establishesEvent.has(p.id)) {
+      problems.push(`${p.id} uses the "growth" bank, whose templates claim the reader announced growth, but its match does not establish that.`);
+    }
+  }
+  return problems;
+}
+
 /** Deterministic template pick + fill; trims to the DM threshold. */
-function mpcDmFor(seed: string, jobTitle: string, firstName?: string, bank: "mpc" | "growth" = "mpc", city?: string): string {
-  const pool = bank === "growth" ? GROWTH_DM_TEMPLATES : MPC_DM_TEMPLATES;
+function mpcDmFor(seed: string, jobTitle: string, firstName?: string, bank: "mpc" | "growth" | "peer" = "mpc", city?: string): string {
+  const pool = bank === "growth" ? GROWTH_DM_TEMPLATES : bank === "peer" ? PEER_DM_TEMPLATES : MPC_DM_TEMPLATES;
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   let t = pool[h % pool.length];
@@ -1962,7 +2014,7 @@ function parseComment(c: Dict): RawComment | null {
  *  Accepts a provider id OR a public slug (linkedin.com/in/<slug>). */
 async function fetchProfileLite(account: LiAccountState, identifier: string): Promise<{
   providerId?: string; name?: string; headline?: string; publicUrl?: string; openProfile?: boolean; networkDistance?: string; location?: string;
-  summary?: string; currentRoles?: string[];
+  summary?: string; currentRoles?: string[]; openToWork?: boolean;
 }> {
   try {
     const { unipileRequest } = await import("./provider");
@@ -1985,6 +2037,10 @@ async function fetchProfileLite(account: LiAccountState, identifier: string): Pr
       headline: str(p.headline),
       publicUrl: str(p.public_identifier) ? `https://www.linkedin.com/in/${str(p.public_identifier)}` : undefined,
       openProfile: typeof p.is_open_profile === "boolean" ? p.is_open_profile : undefined,
+      // LinkedIn's own "I am looking for work" badge, returned by the SAME call
+      // that gives us the headline. Dropping it here is what let us pitch
+      // candidates to a Finance Director who was job-hunting (2026-08-21).
+      openToWork: typeof p.is_open_to_work === "boolean" ? p.is_open_to_work : undefined,
       networkDistance: str(p.network_distance),
       location: str(p.location),
       summary: str(p.summary) ?? str(p.about),
@@ -2779,7 +2835,7 @@ interface ScanCombo {
   serperQ: string;
   unipileQ: string;
   hiringIntent: boolean;
-  dmBank: "mpc" | "growth";
+  dmBank: "mpc" | "growth" | "peer";
   /** Carried from the preset: may the PUBLIC COMMENT lane act on this post?
    *  Only actively-hiring scenarios may (owner decision 2026-08-21). */
   commentEligible?: boolean;
@@ -3191,7 +3247,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, commentLowIntent: 0, preIndexed: 0, viewCap: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, jobSeeker: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, commentLowIntent: 0, preIndexed: 0, viewCap: 0 };
   // Headcount feeds the company-fit term of the intent score. Loaded ONCE per scan, not per
   // candidate: loadSizeMap is memoised but the lookup runs on every screened post, and a scan
   // reads hundreds. An unresolved company simply scores zero fit rather than being guessed at.
@@ -3377,6 +3433,29 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // joins the never-again cache too - otherwise dropping the pre-read stamp
     // would let the same individual contributor cost a fresh read every hunt.
     if (!intel.isDecisionMaker) { markClosed(prof.providerId); g.title++; continue; }
+
+    // THEY ARE LOOKING FOR WORK THEMSELVES.
+    //
+    // A director-level title says someone COULD authorize a search; it says
+    // nothing about whether they currently have a team or a budget. Someone
+    // between roles has neither, and offering them candidates reads exactly as
+    // badly as it sounds - "I am not hiring but I am looking for work" was the
+    // real reply that put this check here (2026-08-21).
+    //
+    // Deliberately a plain closed-profile entry, NOT a "wall:" never-again one:
+    // people get hired, and the cache expires after CLOSED_PROFILE_DAYS, so the
+    // same person is reconsidered in a month like any other cooled lead.
+    const seeker = jobSeekerReason({
+      openToWorkFlag: prof.openToWork,
+      headline: headline ?? undefined,
+      summary: prof.summary,
+    });
+    if (seeker) {
+      markClosed(prof.providerId);
+      g.jobSeeker++;
+      console.log(`[comment-radar] ${workspaceId}: skipped ${prof.publicUrl ?? c.authorRef} - ${seeker}`);
+      continue;
+    }
 
     const authorName = c.authorName ?? prof.name ?? "LinkedIn member";
 
