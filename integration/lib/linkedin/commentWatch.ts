@@ -795,6 +795,9 @@ interface WatchState {
   profileHints: Record<string, Record<string, { at: string; found: boolean; headline?: string; snippet?: string }>>;
   /** ws -> the exact profile-view capacity directive already applied. */
   profileViewsMandate: Record<string, string>;
+  /** ws -> account key -> when its people were last hunted. The ledger says a
+   *  company is hot; this stops the same company being re-hunted every tick. */
+  accountHuntAt: Record<string, Record<string, string>>;
 }
 
 /** Bumped 2026-08-19: drafts must close with a call to action (owner ask).
@@ -812,7 +815,7 @@ interface WatchState {
 const COMMENT_COPY_EPOCH = 5;
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, intentLedger: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {}, interactionsMandate: {}, sendLogTruthBuilt: {}, profileHints: {}, profileViewsMandate: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, intentLedger: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {}, interactionsMandate: {}, sendLogTruthBuilt: {}, profileHints: {}, profileViewsMandate: {}, accountHuntAt: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -901,6 +904,7 @@ async function hydrate(): Promise<void> {
           sendLogTruthBuilt: snap.sendLogTruthBuilt ?? {},
           profileHints: snap.profileHints ?? {},
           profileViewsMandate: snap.profileViewsMandate ?? {},
+          accountHuntAt: snap.accountHuntAt ?? {},
         };
       }
       hydrated = true;
@@ -3337,6 +3341,59 @@ async function candidatesFromDataForSeo(query: string): Promise<{ items: MarketC
   } catch (e) { return { items: [], error: `DataForSEO unreachable (${e instanceof Error ? e.message : e})` }; }
 }
 
+/** How long before a hot account's people are hunted again. */
+const ACCOUNT_HUNT_COOLDOWN_H = Math.max(1, Number(process.env.ROLE_HUNTER_ACCOUNT_COOLDOWN_H ?? 48));
+
+/**
+ * TURN A HOT ACCOUNT INTO THE RIGHT PERSON (owner ask 2026-08-21).
+ *
+ * The keyword rotation finds POSTS. That is how the desk ended up talking to a
+ * journalist: his post matched, so he got the comment, while the company he was
+ * writing about - the one with the actual demand - was never approached.
+ *
+ * The ledger already knows which companies are hot, and since the commentator
+ * wall it files that heat against the right company. This closes the loop: take
+ * the hottest account not hunted recently and search the index for posts that
+ * NAME it in an insider's voice ("we're hiring", "our team", "excited to
+ * announce"). Those posts belong to people who work there. Every existing gate
+ * then does its job on them - decision-maker, in-house, not a recruiter, not
+ * press - so what survives is the buyer, on their own post, where a comment
+ * belongs.
+ *
+ * One account per tick, on the same read budget as everything else.
+ */
+function hotAccountCombo(workspaceId: string, roles: string[]): ScanCombo | null {
+  const ledger = state.intentLedger[workspaceId];
+  if (!ledger) return null;
+  let ranked: RankedAccount[];
+  try { ranked = rankAccounts(ledger).filter((a) => a.hot); } catch { return null; }
+  if (!ranked.length) return null;
+
+  const seen = state.accountHuntAt[workspaceId] ?? (state.accountHuntAt[workspaceId] = {});
+  const cutoff = Date.now() - ACCOUNT_HUNT_COOLDOWN_H * 3_600_000;
+  const next = ranked.find((a) => {
+    const at = seen[a.key];
+    return !at || new Date(at).getTime() < cutoff;
+  });
+  if (!next) return null;
+
+  seen[next.key] = nowIso();
+  save();
+  // Insider language is the filter. A bare company-name search returns everyone
+  // writing ABOUT them, which is the trap this exists to escape.
+  const insider = `("we're hiring" OR "we are hiring" OR "join our team" OR "our team" OR "excited to announce" OR "welcome to the team" OR "growing our")`;
+  console.log(`[comment-radar] ${workspaceId}: hunting the people at "${next.company}" (heat ${Math.round(next.heat)}, ${next.signalCount} signal(s))`);
+  return {
+    key: `Account: ${next.company}`,
+    role: next.functions[0] ?? roles[0],
+    serperQ: `site:linkedin.com/posts "${next.company}" ${insider}`,
+    unipileQ: next.company,
+    hiringIntent: false,
+    dmBank: "mpc",
+    commentEligible: true,
+  };
+}
+
 async function scanPosters(workspaceId: string, accounts: LiAccountState[], adhoc?: ScanCombo): Promise<number> {
   // Multi-account rota: the search runs on the first seat, but each captured
   // lead is assigned round-robin across ALL connected seats, so profile reads
@@ -3932,6 +3989,19 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       totalCreated += await runCombo(combo, page);
     } catch (e) {
       console.log(`[comment-radar] market "${combo.key}" failed (${e instanceof Error ? e.message : e})`);
+    }
+  }
+
+  // After the keyword rotation, and only if the tick has budget left: hunt the
+  // people at the hottest account the ledger is holding.
+  if (!adhoc && readsThisScan < POSTER_READS_PER_SCAN && totalCreated < POSTER_NEW_PER_SCAN) {
+    const acct = hotAccountCombo(workspaceId, roles);
+    if (acct) {
+      try {
+        totalCreated += await runCombo(acct, 1);
+      } catch (e) {
+        console.log(`[comment-radar] account hunt "${acct.key}" failed (${e instanceof Error ? e.message : e})`);
+      }
     }
   }
 
