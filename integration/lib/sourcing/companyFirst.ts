@@ -37,6 +37,7 @@ import { loadSnapshot, saveSnapshot } from "../db";
 import { rid, nowIso } from "../core/ids";
 import { cred } from "../providers/http";
 import { DECISION_MAKER_TITLES, US_GEOS } from "./bulkList";
+import { PeopleSearchThrottled, isPeopleSearchThrottled } from "./discovery";
 
 /* ------------------------------------------------------------------ */
 /* Config                                                              */
@@ -68,8 +69,19 @@ async function rapidGet(path: string): Promise<any> {
   const res = await fetch(`https://${host}${path}`, {
     headers: { "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host, Accept: "application/json" },
   });
-  if (!res.ok && res.status !== 202) throw new Error(`rapidapi ${host} ${res.status}`);
-  const data = await res.json().catch(() => ({}));
+  if (!res.ok && res.status !== 202 && res.status !== 429) throw new Error(`rapidapi ${host} ${res.status}`);
+  const text = await res.text().catch(() => "");
+  let data: any = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+  // The HTTP-202 envelope, the same one discovery.ts documents at length:
+  //   {"success":false,"message":"Request failed with status 429: Too Many Requests"}
+  // Returned as an ordinary answer it becomes "nobody matched" and "this company has no
+  // profile" - and the caller CACHES the latter, so one busy second sized a company out
+  // of the band for the rest of the job. A refusal is thrown, never returned.
+  const wording = String((data && (data.message || data.error)) || "");
+  if (res.status === 429 || (data && data.success === false && /\b429\b|too many requests|rate limit/i.test(wording))) {
+    throw new PeopleSearchThrottled(`rapidapi ${host} throttled: ${wording || "too many requests"}`);
+  }
   return data;
 }
 
@@ -321,6 +333,9 @@ export async function stepCompanyFirst(ws: string, maxRequests = 8): Promise<Com
       requests++; job.requestsUsed++;
     } catch (e: any) {
       job.warnings.push(`people-search ${seg.title}/${seg.geo} p${job.page}: ${(e && e.message) || e}`);
+      // Busy is not exhausted. Leave the cursor and page where they are so this segment
+      // resumes on the next step, instead of being written off as having no more people.
+      if (isPeopleSearchThrottled(e)) break;
       job.cursor++; job.page = 1; continue;
     }
 
@@ -343,14 +358,19 @@ export async function stepCompanyFirst(ws: string, maxRequests = 8): Promise<Com
       let prof = job.companyCache[coName.toLowerCase()];
       if (prof === undefined) {
         if (requests >= maxRequests) break; // out of budget this step; revisit next step
+        let remember = true;
         try {
           prof = await companyProfile(coName);
           requests++; job.requestsUsed++; job.companiesProfiled++;
         } catch (e: any) {
           prof = null;
+          // Never cache a throttle as a verdict: "no profile" is what drops the company
+          // out of the size band, and this one would keep it out for the whole job over
+          // a refusal that clears in seconds. Left unresolved, it is simply retried.
+          remember = !isPeopleSearchThrottled(e);
           job.warnings.push(`profile ${coName}: ${(e && e.message) || e}`);
         }
-        job.companyCache[coName.toLowerCase()] = prof;
+        if (remember) job.companyCache[coName.toLowerCase()] = prof;
         if (prof && inBand(prof)) job.inBandCompanies++;
       }
       if (!prof || !inBand(prof)) continue; // OUT of the 100-5,000 band → drop

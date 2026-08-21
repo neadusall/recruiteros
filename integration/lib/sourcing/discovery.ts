@@ -151,12 +151,46 @@ export function isPeopleSearchFatal(e: unknown): e is PeopleSearchFatal {
 }
 
 /**
+ * A people-search refusal that is about US, not about the world: the provider's own
+ * scraper throttled the request, or RapidAPI's per-minute plan limit bit. Transient, so
+ * it must NEVER be recorded as "nobody matched".
+ *
+ * THIS IS THE HTTP-202 TRAP, found again one layer up from where it was first fixed.
+ * The listing does not use HTTP status to signal failure. It answers **202** and puts
+ * the outcome in the BODY:
+ *
+ *     {"success":false,"message":"Request failed with status 429: Too Many Requests","cost":1}
+ *
+ * On 2026-08-21 that envelope was caught silently turning the MPC tools' searches into
+ * "this person does not exist" - 1,286 false verdicts, fixed in tools/peopleapi.mjs. The
+ * SAME envelope was still reaching JD Sourcing through this file: res.ok is true at 202,
+ * extractList() finds no rows, and the run read a throttle as an exhausted page. It cost
+ * twice over, because "cost":1 means a refused call still bills a credit - so the old
+ * behaviour spent the plan AND lost the candidates AND left the engine looking healthy.
+ *
+ * Kinds below mirror tools/peopleapi.mjs on purpose: only an EMPTY answer is evidence
+ * about the world; a throttle is evidence about us.
+ */
+export class PeopleSearchThrottled extends Error {
+  readonly throttled = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "PeopleSearchThrottled";
+  }
+}
+
+/** True for a refusal that passes on its own - retry later, record nothing. */
+export function isPeopleSearchThrottled(e: unknown): e is PeopleSearchThrottled {
+  return Boolean(e && typeof e === "object" && (e as { throttled?: boolean }).throttled === true);
+}
+
+/**
  * Live one-shot health check for the Connected → JD Sourcing "Test connection".
  * Fires a tiny search and reports whether the listing actually answered — so the
  * button turns green on success and surfaces the real error (bad path / key /
  * captcha) instead of a confusing "no client" message.
  */
-export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: string; found?: number }> {
+export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: string; found?: number; throttled?: boolean }> {
   if (!RAPIDAPI_KEY()) return { ok: false, error: "Add your RapidAPI key first." };
   if (!PS_HOST()) return { ok: false, error: "Add the search host first." };
   try {
@@ -167,6 +201,10 @@ export async function verifySourcingSearch(): Promise<{ ok: boolean; error?: str
       "The people-search listing",
     );
   } catch (e: any) {
+    // A busy provider is not a broken key and must not be reported as one: the
+    // subscription is fine, the answer is "not right now". Flagged so the health watch
+    // can WATCH it instead of waking the owner over a throttle that clears itself.
+    if (isPeopleSearchThrottled(e)) return { ok: false, throttled: true, error: (e as Error).message };
     return { ok: false, error: (e && e.message) || "search request failed" };
   }
 }
@@ -264,6 +302,13 @@ const psDeadHosts = new Set<string>();
 /** One people-search transport target: which listing, which path shape, which verb. */
 interface PsConfig { host: string; path: string; method: string }
 
+/** One second, unless a test asks for the retry ladders without the waiting. Read per
+ *  call, not at module load, so a suite can set it after importing this file. */
+function psBackoffUnit(): number {
+  const n = parseInt(process.env.SOURCING_THROTTLE_BACKOFF_MS || "", 10);
+  return Number.isFinite(n) && n >= 0 ? n : 1000;
+}
+
 /**
  * Ride out per-second/minute burst limits: the breadth dial fans out many queries and
  * marketplace listings 429 the burst even with plenty of monthly credits left - each
@@ -271,7 +316,7 @@ interface PsConfig { host: string; path: string; method: string }
  * Honor Retry-After when sent, otherwise back off 2s/5s/12s before giving the query up.
  */
 async function fetchRetry429(doFetch: () => Promise<Response>): Promise<Response> {
-  const waits = [2000, 5000, 12000];
+  const waits = [2, 5, 12].map((n) => n * psBackoffUnit());
   let res = await doFetch();
   for (let i = 0; i < waits.length && res.status === 429; i++) {
     const ra = Number(res.headers.get("retry-after"));
@@ -280,6 +325,64 @@ async function fetchRetry429(doFetch: () => Promise<Response>): Promise<Response
     res = await doFetch();
   }
   return res;
+}
+
+/**
+ * What one people-search response actually MEANS.
+ *
+ * `empty` is the only kind that is evidence about the world and safe to act on; every
+ * other kind is a fact about us, to be retried and never recorded.
+ */
+type PsKind = "people" | "empty" | "ratelimit" | "apifail";
+
+/** Throttle wording, wherever the vendor decides to put it. */
+function readsAsThrottle(msg: string): boolean {
+  return /\b429\b|too many requests|rate limit/i.test(msg);
+}
+
+function classifyPeopleBody(status: number, data: any, found: number): { kind: PsKind; message: string } {
+  if (found > 0) return { kind: "people", message: "" };
+  // The failure envelope: a 2xx carrying success:false. This listing puts the wording in
+  // `message`, others in `error` - reading only `error` (as this file used to) let every
+  // throttled call through disguised as an empty page.
+  if (data && data.success === false) {
+    const message = String(data.message || data.error || "the search was refused");
+    return { kind: readsAsThrottle(message) ? "ratelimit" : "apifail", message };
+  }
+  // A rate limit arrives at BOTH levels: the provider's own throttle wears an HTTP 202
+  // (above), while RapidAPI's per-minute plan limit is a real 429. Both must back off.
+  if (status === 429) return { kind: "ratelimit", message: String((data && data.message) || "rate limited") };
+  return { kind: "empty", message: "" };
+}
+
+/**
+ * Throttle breaker, per listing host.
+ *
+ * A refused call still bills a credit, so grinding through a throttle storm spends the
+ * plan on nothing. Once the in-call retries are spent, the host is benched for a growing
+ * cool-down and every later query fails FAST and FREE until it clears - so a run reports
+ * "the people search was busy" in seconds instead of buying a thousand refusals.
+ */
+const PS_THROTTLE_RETRIES = 2;                        // in-call retries: 3 calls, worst case
+const PS_THROTTLE_BACKOFF = () => [4, 9].map((n) => n * psBackoffUnit());
+const PS_COOLDOWNS = [30_000, 60_000, 120_000, 300_000];
+const psThrottle = new Map<string, { until: number; streak: number }>();
+
+/** Milliseconds left on this host's bench; 0 when it is clear to call. */
+function throttleWaitMs(host: string): number {
+  const t = psThrottle.get(host);
+  return t ? Math.max(0, t.until - Date.now()) : 0;
+}
+
+function openThrottleBreaker(host: string): void {
+  const streak = (psThrottle.get(host)?.streak ?? 0) + 1;
+  const cool = PS_COOLDOWNS[Math.min(streak - 1, PS_COOLDOWNS.length - 1)];
+  psThrottle.set(host, { until: Date.now() + cool, streak });
+}
+
+/** Any real answer clears the bench: the streak measures a storm, not history. */
+function clearThrottleBreaker(host: string): void {
+  psThrottle.delete(host);
 }
 
 /** The effective path: the healed one for this host when a 404 was repaired. */
@@ -329,12 +432,22 @@ export async function rapidApiPeopleSearch(p: SearchParams): Promise<CandidateRo
 
 async function peopleSearchOn(cfg: PsConfig, p: SearchParams): Promise<CandidateRow[]> {
   const host = cfg.host;
+  // Benched by a throttle storm: refuse for free rather than buy another refusal.
+  const benched = throttleWaitMs(host);
+  if (benched > 0) {
+    throw new PeopleSearchThrottled(
+      `rapidapi ${host} throttled: paused for another ${Math.ceil(benched / 1000)}s after repeated "too many requests" answers from the provider.`
+    );
+  }
   const headers: Record<string, string> = {
     "X-RapidAPI-Key": RAPIDAPI_KEY(), "X-RapidAPI-Host": host,
     Accept: "application/json", "Content-Type": "application/json",
   };
 
   let res: Response;
+  // The resolved request, re-sendable: the throttle retries below repeat exactly what
+  // was sent, including a path healed mid-call.
+  let send: () => Promise<Response>;
   if (cfg.method === "POST") {
     // Body-based listing: the path is literal (no interpolation); search rides in the body.
     const bodyObj: Record<string, unknown> = { keywords: p.name, count: p.limit };
@@ -346,7 +459,8 @@ async function peopleSearchOn(cfg: PsConfig, p: SearchParams): Promise<Candidate
     const postTo = (path: string) => fetch(`https://${host}${path}`, { method: "POST", headers, body });
 
     const raw = effectivePsPath(cfg);
-    res = await fetchRetry429(() => postTo(raw));
+    send = () => postTo(effectivePsPath(cfg));
+    res = await fetchRetry429(send);
 
     // SELF-HEAL, same as the GET branch below. This used to be GET-only, so a POST
     // listing that renamed its endpoint had no recovery at all and every query in every
@@ -396,7 +510,8 @@ async function peopleSearchOn(cfg: PsConfig, p: SearchParams): Promise<Candidate
     };
 
     const raw = effectivePsPath(cfg);
-    res = await fetchRetry429(() => fetch(`https://${host}${buildPath(raw)}`, { headers }));
+    send = () => fetch(`https://${host}${buildPath(effectivePsPath(cfg))}`, { headers });
+    res = await fetchRetry429(send);
 
     // SELF-HEAL: a 404 on the configured path usually means the listing renamed its
     // endpoint (or Setup carries a stale path). Probe the common variants ONCE on the
@@ -419,25 +534,50 @@ async function peopleSearchOn(cfg: PsConfig, p: SearchParams): Promise<Candidate
       }
     }
   }
-  // Credit meter: every response (errors included, a 429 still reports the pool)
-  // carries the subscription's quota headers; remember the latest reading.
-  noteRapidQuota(host, res.headers);
-  if (!res.ok) {
-    // 401/403 = the key itself. Retrying, paging or moving to the next query cannot
-    // change the answer, so this ends the engine for the run rather than being logged
-    // once per query and buried. 402 is RapidAPI's "plan exhausted / not subscribed".
-    if (res.status === 401 || res.status === 403 || res.status === 402) {
-      throw new PeopleSearchFatal(
-        `rapidapi ${host} ${res.status} (the RapidAPI key was refused, or this account is not subscribed to this listing / has run out of plan requests). ` +
-        `Check the key and the subscription in Setup -> JD Sourcing.`
+  // Read the answer, and RE-ASK when the answer was only "not right now". The loop is
+  // what the status-only code could not do: this provider's throttle rides inside an
+  // HTTP 202, so nothing above ever saw it (see PeopleSearchThrottled).
+  for (let attempt = 0; ; attempt++) {
+    // Credit meter: every response (errors included, a 429 still reports the pool)
+    // carries the subscription's quota headers; remember the latest reading.
+    noteRapidQuota(host, res.headers);
+    // 429 is handled below as a throttle, not as a transport failure.
+    if (!res.ok && res.status !== 429) {
+      // 401/403 = the key itself. Retrying, paging or moving to the next query cannot
+      // change the answer, so this ends the engine for the run rather than being logged
+      // once per query and buried. 402 is RapidAPI's "plan exhausted / not subscribed".
+      if (res.status === 401 || res.status === 403 || res.status === 402) {
+        throw new PeopleSearchFatal(
+          `rapidapi ${host} ${res.status} (the RapidAPI key was refused, or this account is not subscribed to this listing / has run out of plan requests). ` +
+          `Check the key and the subscription in Setup -> JD Sourcing.`
+        );
+      }
+      throw new Error(`rapidapi ${host} ${res.status}`);
+    }
+    const text = await res.text().catch(() => "");
+    let data: any = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+    const rows = extractList(data).map(mapRow).filter((r): r is CandidateRow => Boolean(r));
+    const verdict = classifyPeopleBody(res.status, data, rows.length);
+    // A real answer - people, or genuinely nobody. Both are the truth; the bench lifts.
+    if (verdict.kind === "people" || verdict.kind === "empty") {
+      clearThrottleBreaker(host);
+      return rows;
+    }
+    // An explicit API-level failure (captcha, bad parameter): real, and asking the same
+    // question again will not change it.
+    if (verdict.kind === "apifail") throw new Error(`rapidapi ${host}: ${verdict.message}`);
+    if (attempt >= PS_THROTTLE_RETRIES) {
+      openThrottleBreaker(host);
+      throw new PeopleSearchThrottled(
+        `rapidapi ${host} throttled: ${verdict.message}. This is the provider refusing us, not the plan running out - ` +
+        `the listing is paused for ${Math.ceil(throttleWaitMs(host) / 1000)}s and the query is worth re-running later.`
       );
     }
-    throw new Error(`rapidapi ${host} ${res.status}`);
+    const ladder = PS_THROTTLE_BACKOFF();
+    await new Promise((r) => setTimeout(r, ladder[Math.min(attempt, ladder.length - 1)]));
+    res = await send();
   }
-  const data = await res.json().catch(() => ({}));
-  // Surface an explicit API-level failure (e.g. captcha) instead of silently returning [].
-  if (data && data.success === false && data.error) throw new Error(`rapidapi ${host}: ${String(data.error)}`);
-  return extractList(data).map(mapRow).filter((r): r is CandidateRow => Boolean(r));
 }
 
 /* ------------------------------------------------------------------ */
@@ -1030,6 +1170,9 @@ export async function runDiscovery(
   // endpoint, plan exhausted). Every later query skips the paid engine instead of
   // paying for the same refusal again.
   let rapidDead: string | null = null;
+  // Queries the provider refused as "too many requests". Counted apart from failures on
+  // purpose: busy and broken need opposite responses from whoever reads the run.
+  let rapidThrottled = 0;
   const useScraper = engines.includes("scraper") && scraperConfigured();
   // The free contact-database sweep (title + geo over the Business Email DB). Needs
   // the browser worker up AND holding KoldInfo creds; the probe is cheap and local.
@@ -1417,6 +1560,13 @@ export async function runDiscovery(
             pastCompany: pastId,
           }));
         } catch (err) {
+          if (isPeopleSearchThrottled(err)) {
+            // Transient. Under its own prefix so the zero-result diagnosis can tell
+            // "busy" from "broken" - one is worth re-running, the other needs an admin.
+            rapidThrottled++;
+            warnings.push(`people_search_busy: ${(err as Error).message}`);
+            break;
+          }
           if (isPeopleSearchFatal(err)) {
             // The listing is wrong, not busy. Retire the engine for the whole run and
             // say so under its own prefix, so the successful-run cleanup below (which
@@ -1576,6 +1726,7 @@ export async function runDiscovery(
     // the fatal path.
     if (rapidDead) reasons.push(`the paid people search is not usable for this workspace (${rapidDead})`);
     else if (rapid404) reasons.push(`the paid people search rejected ${rapid404} request(s) (its host/path in Setup points at a missing endpoint)`);
+    else if (rapidThrottled) reasons.push(`the paid people search was throttled by the provider on ${rapidThrottled} of the queries (plan credits are fine - this one clears on its own)`);
     // A run with no wide web search at all needs one of the two paid SERP keys. Don't
     // send anyone to Google CSE: it is closed to new signups and retires Jan 1, 2027.
     if (!useGoogle && !useSerper && !useDfs && engines.includes("serper") && !serperSearchConfigured() && !dataforseoSearchConfigured()) {
@@ -1611,6 +1762,8 @@ export async function runDiscovery(
         ? { code: "SRC-NOKEY", message: "The wide web search is not switched on for this workspace, so the main source never ran. An admin has to turn it on in Setup." }
       : rapidDead || rapid404
         ? { code: "SRC-PEOPLE", message: "The people search refused every request, because its key or its address in Setup is wrong. An admin has to correct it; re-running will not help." }
+      : rapidThrottled
+        ? { code: "SRC-PEOPLEBUSY", message: "The people search was busy and turned our requests away. Nothing is broken and nobody needs to fix it - run the search again in a few minutes." }
       : engines.includes("koldinfo") && !useKold
         ? { code: "SRC-CONTACTDB", message: "The contact database is offline, so nobody could be looked up. An admin has to bring it back." }
       : opts.excludeKeys?.size && scanned === 0

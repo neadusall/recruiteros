@@ -69,7 +69,9 @@ interface ProbeResult {
   ok: boolean;
   error?: string;
   found?: number;
-  /** Consecutive probes that answered cleanly but returned nobody. See liveProbe(). */
+  /** The provider refused us (its throttle), rather than answering with nobody. */
+  throttled?: boolean;
+  /** Consecutive TRANSIENT bad probes - empty answers or throttles. See liveProbe(). */
   emptyStreak?: number;
 }
 
@@ -195,7 +197,7 @@ const EMPTY_STREAK_TO_DOWN = 2;
  */
 async function liveProbe(
   key: string,
-  run: () => Promise<{ ok: boolean; error?: string; found?: number }>,
+  run: () => Promise<{ ok: boolean; error?: string; found?: number; throttled?: boolean }>,
 ): Promise<ProbeResult | undefined> {
   const prev = store.probes[key];
   const due = !prev || !prev.ok || Date.now() - new Date(prev.at).getTime() > PROBE_EVERY_MS;
@@ -203,13 +205,16 @@ async function liveProbe(
   const res = await run();
   // probeResult() reports an empty answer as ok:false WITH found:0; a hard failure has
   // no `found` at all. That is what separates "returned nobody" from "did not answer".
-  const empty = !res.ok && res.found === 0;
+  // "Answered but returned nobody" and "the provider throttled us" are both TRANSIENT,
+  // so they share the hysteresis below. A refused key or an HTTP error is neither.
+  const soft = !res.ok && (res.found === 0 || res.throttled === true);
   const next: ProbeResult = {
     at: nowIso(),
     ok: res.ok,
     error: res.error,
     found: res.found,
-    emptyStreak: empty ? (prev?.emptyStreak ?? 0) + 1 : 0,
+    throttled: res.throttled,
+    emptyStreak: soft ? (prev?.emptyStreak ?? 0) + 1 : 0,
   };
   store.probes[key] = next;
   return next;
@@ -217,8 +222,8 @@ async function liveProbe(
 
 /** The state an unhealthy probe maps to: watched while it might just be vendor noise. */
 function probeState(probe: ProbeResult): EngineState {
-  const empty = probe.found === 0;
-  return empty && (probe.emptyStreak ?? 0) < EMPTY_STREAK_TO_DOWN ? "stale" : "down";
+  const soft = probe.found === 0 || probe.throttled === true;
+  return soft && (probe.emptyStreak ?? 0) < EMPTY_STREAK_TO_DOWN ? "stale" : "down";
 }
 
 /**
@@ -243,29 +248,39 @@ async function checkRapidApi(workspaceId: string): Promise<EngineStatus> {
   if (!rapidApiSearchConfigured()) {
     return { engine: "rapidapi", state: "unconfigured", detail: "No RapidAPI people-search key/host set.", checkedAt };
   }
-  const host = peopleSearchHost();
-
   // 1) Does it actually answer? One billed request, at most every PROBE_EVERY_MS
   //    while healthy. The probe also refreshes the quota headers below for free.
   const probe = await liveProbe(`${workspaceId}:rapidapi`, verifySourcingSearch);
+  // Read AFTER the probe, never before. Whether the configured listing even has a
+  // people-search endpoint is only discovered by trying it, and naming the configured
+  // host in a failure the FALLBACK listing produced sends the reader to the wrong
+  // dashboard. Seen live 2026-08-21: "not answering on realtime-linkedin-fresh-data"
+  // when that listing had 404'd on every known path and the answer - a throttle - came
+  // from the fallback listing entirely.
+  const host = peopleSearchHost();
+  const serving = peopleSearchServing();
+  // Serving through the fallback listing means searches work but Setup is wrong: say
+  // both, so a working search never buries the stale config it is covering for.
+  const configNote = serving.viaFallback
+    ? ` The listing configured in Setup (${serving.configured}) has no people-search endpoint, so this ran on ${serving.serving} instead - fix the search host/path under Setup -> JD Sourcing.`
+    : "";
   if (probe && !probe.ok) {
     const state = probeState(probe);
-    return {
-      engine: "rapidapi", state, checkedAt,
-      detail: state === "stale"
+    // A throttle is the provider saying "not right now", NOT a key, a subscription or a
+    // spent plan. Reporting it as "down" sent an owner hunting a billing problem that
+    // did not exist, so it says which of the two this is in the first sentence.
+    const detail = probe.throttled
+      ? (state === "stale"
+        ? `${host} is throttling our requests (its own limit, not your plan's). Re-checking before anyone is alerted.`
+        : `${host} keeps throttling our requests: ${probe.error || "too many requests"} Your plan credits are not the problem; searches will thin out until the provider lets up.`)
+      : (state === "stale"
         ? `The people search on ${host} answered but returned nobody. Re-checking before anyone is alerted.`
-        : `The people search is not answering on ${host}: ${probe.error || "search request failed"}`,
-    };
+        : `The people search is not answering on ${host}: ${probe.error || "search request failed"}`);
+    return { engine: "rapidapi", state, checkedAt, detail: detail + configNote };
   }
-  // Serving through the fallback listing means searches work but Setup is wrong: say
-  // both, so the working search never buries the stale config it is covering for.
-  const serving = peopleSearchServing();
-  const fallbackNote = serving.viaFallback
-    ? ` NOTE: the configured listing (${serving.configured}) has no people-search endpoint; searches are being served by ${serving.serving} instead. Update the search host/path under Setup -> JD Sourcing.`
-    : "";
   const proof = (probe && probe.at === checkedAt
     ? `Live: search answered with ${probe.found ?? 0} result(s).`
-    : `Search answered at ${probe?.at}.`) + fallbackNote;
+    : `Search answered at ${probe?.at}.`) + configNote;
 
   // 2) How much plan is left on THIS listing?
   const row = await getRapidQuotaFor(host);
@@ -333,7 +348,13 @@ function alertBody(wsName: string, e: EngineStatus): string {
     return `${who} is not answering for ${wsName}: ${e.detail} ${impact} ${action}`;
   }
   if (e.engine === "rapidapi" && e.state === "down") {
-    return `${who} is refusing requests for ${wsName}: ${e.detail} JD Sourcing runs will skip the paid people search until this is fixed. Check the key, the listing subscription and the search host/path under Setup -> JD Sourcing.`;
+    // A throttled provider and a wrong key produce the same silence and need OPPOSITE
+    // actions. Sending an owner to re-check a key that is fine is how alerts stop being
+    // read at all - so the advice follows what the probe actually found.
+    const action = /throttl/i.test(e.detail)
+      ? `Nothing in Setup needs changing: the key and the plan are fine, and the provider lifts its own limit. The health watch re-probes on its own schedule and clears this when it does; still throttled a day from now is worth a support ticket on the listing.`
+      : `Check the key, the listing subscription and the search host/path under Setup -> JD Sourcing.`;
+    return `${who} is refusing requests for ${wsName}: ${e.detail} JD Sourcing runs will skip the paid people search until this clears. ${action}`;
   }
   if (e.state === "low") return `${who} is running low for ${wsName}. ${e.detail}`;
   if (e.state === "down") return `${who} is down for ${wsName}. ${e.detail}`;
