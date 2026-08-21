@@ -40,6 +40,7 @@ import { nowIso, rid } from "../core/ids";
 import { classifyTitle } from "../signals/filters";
 import { jobSeekerReason } from "../outreach/jobSeeker";
 import { employmentVerdict, notABuyerReason, type WorkEntry } from "../outreach/employment";
+import { advisoryPracticeReason, foreignPostingReason } from "../outreach/targetFit";
 import { requestLinkedInAction } from "./os/engine";
 import { ensureAccount, listAccounts } from "./os/health";
 import { putPolicy } from "./os/policy";
@@ -565,12 +566,24 @@ const FOREIGN_POST_RES = [
   new RegExp(`\\b(?:hiring|recruiting|role|roles|position|positions|job|jobs|opening|openings|vacancy|based|located|headquartered)\\s+in\\s+(${FOREIGN_COUNTRIES})\\b`, "i"),
   new RegExp(`[a-z][a-z .'-]{1,28},\\s*(${FOREIGN_COUNTRIES})\\b`, "i"),
 ];
-export function foreignPostReason(text: string): string | null {
+export function foreignPostReason(text: string, company?: string): string | null {
+  // The country-only forms this file has always used stay first: they are the
+  // narrow, deliberately-tuned ones and their behaviour must not shift.
   for (const re of FOREIGN_POST_RES) {
     const m = re.exec(text || "");
     if (m) return m[1].toLowerCase();
   }
-  return null;
+  // Then the cases they cannot see: a foreign CITY behind a location cue, and a
+  // foreign legal entity on the employer. "We're opening our new office in
+  // Barcelona" and a CFO at a company ending "AB" both cleared this screen on
+  // 2026-08-21 because it only ever matched country names.
+  return foreignPostingReason({
+    text,
+    company,
+    countries: envList("ROLE_HUNTER_OFF_MARKET").length
+      ? envList("ROLE_HUNTER_OFF_MARKET")
+      : OFF_MARKET_DEFAULT,
+  });
 }
 
 export type CommentTier = "hot" | "warm" | "community";
@@ -3351,7 +3364,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, jobSeeker: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, commentLowIntent: 0, preIndexed: 0, viewCap: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, jobSeeker: 0, advisory: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, commentLowIntent: 0, preIndexed: 0, viewCap: 0 };
   // Headcount feeds the company-fit term of the intent score. Loaded ONCE per scan, not per
   // candidate: loadSizeMap is memoised but the lookup runs on every screened post, and a scan
   // reads hundreds. An unresolved company simply scores zero fit rather than being guessed at.
@@ -3532,6 +3545,34 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       closedCache[c.authorRef] = `wall:${nowIso()}`;
       if (prof.providerId) closedCache[prof.providerId] = `wall:${nowIso()}`;
       g.peer++; stats.peersBlocked += 1; save(); continue;
+    }
+
+    // The market screen ran before the profile read, on the post text alone, so
+    // it could not see the EMPLOYER. Now that the headline is parsed, a foreign
+    // legal form on the company is decisive: a CFO at a company whose name ends
+    // "AB" is running a Swedish balance sheet, whatever the post said.
+    const foreignCo = company ? foreignPostReason("", company) : null;
+    if (foreignCo) {
+      markClosed(prof.providerId);
+      g.offMarket++;
+      console.log(`[comment-radar] ${workspaceId}: skipped ${prof.publicUrl ?? c.authorRef} - ${foreignCo}`);
+      continue;
+    }
+
+    // An advisory practice holds the title and clears every seniority check, and
+    // still has no team, no req and no headcount budget - the finance work they
+    // post about belongs to their clients. Counted on its own line so the volume
+    // it removes is visible rather than hidden inside the peer wall.
+    const advisory = advisoryPracticeReason({
+      title: title ?? undefined,
+      headline: headline ?? undefined,
+      currentRoles: prof.currentRoles,
+    });
+    if (advisory) {
+      markClosed(prof.providerId);
+      g.advisory++;
+      console.log(`[comment-radar] ${workspaceId}: skipped ${prof.publicUrl ?? c.authorRef} - ${advisory}`);
+      continue;
     }
     // A title is not going to reclassify next week, so a non-decision-maker
     // joins the never-again cache too - otherwise dropping the pre-read stamp

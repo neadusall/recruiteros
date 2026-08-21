@@ -23,6 +23,12 @@
  *     one of his eleven roles was open-ended, while his headline still read
  *     "Finance Director". The fixture in suite 6 is that real history.
  *
+ *  1c. Reading the eleven messages that carried the invented growth claim turned
+ *     up two more ways a "decision-maker" is not a buyer: advisory practices
+ *     (suite 7) and foreign postings from US-based people (suite 8). Both suites
+ *     are weighted toward the MUST-NOT-MATCH cases, because both guards remove
+ *     volume and a guard that removes the wrong volume is invisible.
+ *
  *  2. The message claimed "Saw the news about the team growing" to a man who had
  *     posted about cash-flow reporting. That was not a bad draft, it was a
  *     mis-wiring: a scenario matching on SUBJECT MATTER was pointed at a bank of
@@ -32,6 +38,7 @@
 
 import { jobSeekerVerdict } from "../outreach/jobSeeker";
 import { employmentVerdict, notABuyerReason, parseWorkDate, sameCompany } from "../outreach/employment";
+import { advisoryPracticeReason, foreignPostingReason } from "../outreach/targetFit";
 import { assertScenarioBanks, SCENARIO_PRESETS } from "./commentWatch";
 
 let pass = 0;
@@ -189,6 +196,81 @@ check("empty is null", parseWorkDate(""), null);
 check("company match ignores punctuation", sameCompany("Acme, Inc.", "Acme"), true);
 check("company match is not blind", sameCompany("Acme", "Acmetric Health"), false);
 check("blank never matches", sameCompany("", "Acme"), false);
+
+/* --------------------------------------- 7. advisory practices ------------- */
+/* A "Fractional CFO" holds the title and clears every seniority check, and has
+   no team to hire into. One of the eleven bad sends went to somebody whose post
+   described a CEO ringing THEM looking for a CFO. */
+
+function adv(label: string, input: Parameters<typeof advisoryPracticeReason>[0], want: boolean): void {
+  check(label, Boolean(advisoryPracticeReason(input)), want);
+}
+
+adv("fractional CFO", { headline: "Fractional CFO | Helping SaaS founders scale" }, true);
+adv("interim controller", { title: "Interim Controller" }, true);
+adv("outsourced CFO", { headline: "Outsourced CFO services for manufacturers" }, true);
+adv("part-time CFO", { headline: "Part-Time CFO for growing businesses" }, true);
+// The real headline from the incident sample.
+adv("CFO advisor for small business owners",
+  { headline: "CFO Advisor for Small Business Owners Doing $500K-$5M" }, true);
+adv("finance consultant", { title: "Finance Consultant" }, true);
+adv("advisor to founders", { headline: "Strategic advisor to founders and CEOs" }, true);
+adv("self-employed", { headline: "CFO | Self-Employed" }, true);
+adv("helping business owners", { headline: "I spend my days helping business owners fix their numbers" }, true);
+adv("caught on a current role", { currentRoles: ["Fractional CFO at Own Practice"] }, true);
+
+// MUST NOT MATCH. These are real buyers and losing them is the expensive error.
+adv("plain CFO", { title: "Chief Financial Officer", headline: "CFO at Northwind Health" }, false);
+adv("VP finance at a consultancy", { title: "VP Finance", headline: "VP Finance at Acme Consulting Group" }, false);
+adv("director of finance", { title: "Finance Director", headline: "Finance Director | FP&A and Forecasting" }, false);
+adv("helping MY team is not a service", { headline: "CFO | helping my team do their best work" }, false);
+adv("advises the board, still an operator", { headline: "CFO | advisor to the board at Northwind" }, false);
+adv("controller, no advisory language", { title: "Assistant Controller" }, false);
+adv("empty", {}, false);
+
+/* --------------------------------------- 8. foreign postings --------------- */
+/* The market screen matched COUNTRY names only, so a US-based executive
+   announcing an office in Barcelona sailed through, as did a CFO at a company
+   whose name ends "AB". The collisions below are why the city list is short. */
+
+const COUNTRIES = ["spain", "sweden", "germany", "india", "canada", "united kingdom"];
+function fp(label: string, input: Parameters<typeof foreignPostingReason>[0], want: boolean): void {
+  check(label, Boolean(foreignPostingReason({ countries: COUNTRIES, ...input })), want);
+}
+
+// The two that actually got through.
+fp("the Barcelona office post", { text: "We're opening Wordsmith AI's new office in Barcelona. Barcelona is where we worked side by side." }, true);
+fp("a company registered in Sweden", { company: "Einride AB" }, true);
+
+fp("hiring in Bengaluru", { text: "We are hiring in Bengaluru for three finance roles." }, true);
+fp("team based out of Toronto", { text: "Our finance team is based out of Toronto and growing." }, true);
+fp("GmbH", { company: "Personio GmbH" }, true);
+fp("Pty Ltd", { company: "Canva Pty Ltd" }, true);
+fp("country behind a cue still works", { text: "We are hiring in Germany for a controller." }, true);
+
+// MUST NOT MATCH.
+fp("a bare mention is not a posting", { text: "I read a great piece about how Barcelona runs its transit." }, false);
+fp("US state present means domestic", { text: "Our new office in London supports the Dallas, TX finance team." }, false);
+fp("US city, no foreign anything", { text: "We are hiring in Charlotte for an FP&A Director." }, false);
+fp("plain US company", { company: "Northwind Health, Inc." }, false);
+// Legal forms only count as SUFFIXES. These are American companies whose names
+// begin with letter pairs that are foreign entity forms elsewhere.
+fp("SL Green Realty is in New York", { company: "SL Green Realty Corp" }, false);
+fp("SAS Institute is in North Carolina", { company: "SAS Institute" }, false);
+fp("AG Insurance Services", { company: "AG Insurance Services LLC" }, false);
+fp("NV is also Nevada", { company: "NV Energy" }, false);
+fp("ABC does not contain AB", { company: "ABC Supply Co" }, false);
+fp("trailing punctuation still reads as a suffix", { company: "Einride AB." }, true);
+fp("GmbH & Co. KG", { company: "Muster Handels GmbH & Co. KG" }, true);
+fp("Pte Ltd", { company: "Grab Holdings Pte Ltd" }, true);
+fp("no text and no company", {}, false);
+// The omitted cities: these are US places and must never match on the name.
+for (const [city, state] of [["Manchester", "NH"], ["Birmingham", "AL"], ["Dublin", "OH"], ["Naples", "FL"], ["Bristol", "TN"]]) {
+  fp(`${city} is a US city too`, { text: `We are hiring in ${city} for a controller.` }, false);
+  check(`${city} not in the city list at all`,
+    Boolean(foreignPostingReason({ countries: [], text: `office in ${city}` })), false);
+  void state;
+}
 
 /* -------------------------------------------------------------- report ----- */
 
