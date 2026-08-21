@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="assets/css/campaign-studio.css?v=ee5486c59c" />
   <link rel="stylesheet" href="assets/css/vetting.css?v=208ee6fda1" />
   <link rel="stylesheet" href="assets/css/linkedin-os.css?v=93c8856df9" />
+  <link rel="stylesheet" href="assets/css/post-recruiter.css?v=511d4f95b6" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232e5bd7'/><text x='50' y='69' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Arial' font-weight='bold'>R</text></svg>" />
   <!-- Apply the saved light/dark theme before paint (no flash). With no saved
        preference, follow the operating system's appearance. -->
@@ -147,6 +148,10 @@
              database (Loxo warehouse). Old #data deep links redirect here. -->
         <a class="nav-item" data-route="prospects" data-motion-only="recruiting"><span class="ni"><svg><use href="#i-users"/></svg></span> Candidates</a>
         <a class="nav-item" data-route="linkedin" data-motion-only="recruiting" data-cap="outreach:send"><span class="ni"><svg><use href="#i-link"/></svg></span> Role Hunter<span class="ni-badge" data-badge="linkedin"></span></a>
+        <!-- Post Recruiter: Role Hunter's twin, pointed at candidates. Finds
+             people who are open to work rather than people who are hiring, so
+             it lives beside Candidates rather than under BD Tools. -->
+        <a class="nav-item" data-route="postrecruiter" data-motion-only="recruiting" data-cap="outreach:send"><span class="ni"><svg><use href="#i-users"/></svg></span> Post Recruiter<span class="ni-badge" data-badge="postrecruiter"></span></a>
         <a class="nav-item" data-route="campaigns"><span class="ni"><svg><use href="#i-target"/></svg></span> Campaigns</a>
         <a class="nav-item" data-route="jdsourcing" data-motion-only="recruiting" data-cap="sourcing:run"><span class="ni"><svg><use href="#i-search"/></svg></span> JD Sourcing</a>
         <a class="nav-item" data-route="joblibrary" data-motion-only="recruiting" data-cap="prospects:view"><span class="ni"><svg><use href="#i-book"/></svg></span> Job Library</a>
@@ -274,9 +279,10 @@
   <script src="assets/js/local-backend.js?v=9b80b467b1"></script>
   <script src="assets/js/session-bridge.js?v=2727497284"></script>
   <script src="assets/js/wl-theme.js?v=1c8caa379d"></script>
-  <script src="assets/js/command.js?v=e5d8dfd8fd"></script>
+  <script src="assets/js/command.js?v=11b8afb2cd"></script>
   <script src="assets/js/command-ux.js?v=c352fca6c3"></script>
   <script src="assets/js/bd-phone.js?v=b54e28e288"></script>
   <script src="assets/js/linkedin-os.js?v=e56015e8df"></script>
+  <script src="assets/js/post-recruiter.js?v=aeadbe4630"></script>
 </body>
 </html>
