@@ -104,7 +104,12 @@ export function toPublic(m: SenderInbox): SenderInboxPublic {
     dailyCap: coldCapFor(m), sentToday: m.sentToday, remaining: Math.max(0, coldCapFor(m) - m.sentToday),
     hasSmtpCreds: !!m.smtpPassEnc,
     status: m.status, warmExternal: m.warmExternal,
-    sent: m.sent, bounced: m.bounced, lastSendAt: m.lastSendAt, lastError: m.lastError,
+    sent: m.sent, bounced: m.bounced,
+    coldSent: m.coldSent, coldBounced: m.coldBounced,
+    bounceRatePct: typeof m.coldSent === "number" && m.coldSent > 0
+      ? Math.round(((m.coldBounced || 0) / m.coldSent) * 1000) / 10
+      : null,
+    lastSendAt: m.lastSendAt, lastError: m.lastError,
     pausedReason: m.pausedReason,
     autoHold: m.autoHold, autoHoldReason: m.autoHoldReason,
     warmupRepPct: m.warmupRepPct, warmupStatus: m.warmupStatus,

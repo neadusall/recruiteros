@@ -26,9 +26,18 @@ function domainOf(email) {
   return m ? m.toLowerCase().trim() : "";
 }
 
-// 1) Send results from the real logs, bucketed per SENDING domain.
+// 1) Send results from the real logs, bucketed per SENDING domain AND per SENDING BOX.
+//
+// The per-box tally exists because nothing else could produce one. This sender is a host
+// script; it never calls back into the app, so every Email ID in the registry carried
+// sent=0 forever while the bounce sweep happily wrote bounced=N onto the same row. That
+// is not a cosmetic gap: a per-mailbox bounce RATE is uncomputable without a denominator,
+// so the health guard's bounce rule could never fire on this lane, and the board rendered
+// a blank that reads like a clean bill. The send log has always known which box sent what;
+// it just was not being counted. Now it is, and the app reconciles the registry from it.
 function sendFacts() {
   const byDomain = new Map(); // domain -> { sent, accepted, failed }
+  const byBox = new Map();    // from address -> { sent, accepted, failed, lastAt, sentToday }
   let total = 0, accepted = 0, failed = 0, infra = 0, firstAt = null, lastAt = null;
   const today = new Date().toISOString().slice(0, 10);
   let sentToday = 0, acceptedToday = 0;
@@ -50,10 +59,18 @@ function sendFacts() {
         if (at) { if (!firstAt || at < firstAt) firstAt = at; if (!lastAt || at > lastAt) lastAt = at; }
         if (at.slice(0, 10) === today) { sentToday++; if (ok) acceptedToday++; }
         if (d) { const e = byDomain.get(d) || { sent: 0, accepted: 0, failed: 0 }; e.sent++; ok ? e.accepted++ : e.failed++; byDomain.set(d, e); }
+        const box = String(r.from || "").toLowerCase().trim();
+        if (box) {
+          const b = byBox.get(box) || { sent: 0, accepted: 0, failed: 0, lastAt: null, sentToday: 0 };
+          b.sent++; ok ? b.accepted++ : b.failed++;
+          if (at && (!b.lastAt || at > b.lastAt)) b.lastAt = at;
+          if (at.slice(0, 10) === today) b.sentToday++;
+          byBox.set(box, b);
+        }
       }
     }
   }
-  return { total, accepted, failed, infra, firstAt, lastAt, sentToday, acceptedToday, byDomain };
+  return { total, accepted, failed, infra, firstAt, lastAt, sentToday, acceptedToday, byDomain, byBox };
 }
 
 // 2) Bounce + complaint DSNs from our own inboxes (real post-send failures the receiver reported).
@@ -145,6 +162,16 @@ async function main() {
   const inbox = inboxSignals();
   const warm = await warmupByDomain();
   // Authenticate only the domains that actually send (keeps DNS lookups bounded).
+  // Per-box bounce counts from the fleet NDR sweep (campaign bounces only; warm-up NDRs
+  // are tracked separately and must never be charged against a mailbox's cold rate).
+  const ndrPerBox = new Map();
+  try {
+    const n = JSON.parse(readFileSync(process.env.MPC_NDR_FILE || "/data/snap_mpc_ndr_v1.json", "utf8"));
+    for (const [box, v] of Object.entries(n.perBox || {})) {
+      ndrPerBox.set(String(box).toLowerCase(), typeof v === "number" ? v : ((v && v.bounces) || 0));
+    }
+  } catch { /* no sweep yet: sends still publish, bounces read 0 */ }
+
   const auth = await authByDomain([...send.byDomain.keys()]);
 
   let replyRate = null, repliesTotal = null;
@@ -201,6 +228,15 @@ async function main() {
     generatedAt: new Date().toISOString(),
     overall,
     byDomain,
+    // Per-mailbox truth: sends from the send log, bounces from the NDR sweep, so a rate
+    // is finally computable. The app reconciles its registry counters from this.
+    byBox: [...send.byBox.entries()].map(([email, b]) => ({
+      email,
+      sent: b.sent, accepted: b.accepted, failed: b.failed,
+      sentToday: b.sentToday, lastAt: b.lastAt,
+      bounces: ndrPerBox.get(email) || 0,
+      bounceRatePct: b.sent > 0 ? Math.round(((ndrPerBox.get(email) || 0) / b.sent) * 1000) / 10 : null,
+    })).sort((a, b) => b.sent - a.sent),
     history,
     placement: {
       method: "smartlead-warmup-proxy",

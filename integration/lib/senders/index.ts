@@ -35,6 +35,9 @@ export type { SendingAcSyncReport } from "./sendingAcSync";
 export { sendingAcConfigured, sendingAcIsSandbox, sendingAcKeyHint, pingSendingAc } from "./sendingAcApi";
 export type { SendingAcPing } from "./sendingAcApi";
 
+export { reconcileSenderCounters } from "./reconcile";
+export type { ReconcileReport } from "./reconcile";
+
 export { runSenderHealthGuard, guardStatus } from "./healthGuard";
 export type { GuardReport, GuardAction } from "./healthGuard";
 

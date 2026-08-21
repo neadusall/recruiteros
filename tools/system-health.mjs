@@ -610,6 +610,22 @@ add(GROUP_WATCH, "ndr-fresh", "Bounce data freshness", !ndr ? "bad" : ageMin(ndr
     "Warming boxes auto-activate at 14d (provider) / 30d (internal) once reputation holds 95%+");
 }
 
+// Per-mailbox send counters. A mailbox holding bounces with no sends has no computable
+// bounce rate, which silently disarms the health guard's bounce rule for that box. This
+// was universal on the cold lane until the deliverability tool started publishing a
+// per-box tally; if it comes back, something is transmitting through an unlogged path.
+{
+  const d = readJson(`${VOL}/snap_mpc_deliverability_v1.json`);
+  const boxes = Array.isArray(d?.byBox) ? d.byBox : null;
+  const s = readJson(`${VOL}/snap_senders_v1.json`);
+  const unfed = (s?.inboxes || []).filter((m) => (m.bounced || 0) > 0 && (m.sent || 0) === 0).length;
+  add(GROUP_SEND, "box-counters", "Per-mailbox send counters fed",
+    !boxes ? "bad" : unfed > 0 ? "amber" : "good",
+    !boxes ? "deliverability tool publishes no per-box tally" : `${boxes.length} mailboxes tallied from the send log · ${unfed} still holding bounces with no sends`,
+    !boxes ? "Redeploy tools/mpc-deliverability.mjs: without byBox no mailbox has a bounce denominator and the guard's bounce rule cannot fire." :
+    unfed > 0 ? "Those mailboxes sent through a path no send log we read covers. Find it; a blank rate reads as a clean bill." : "");
+}
+
 // Sender health ledger: the living record behind Infrastructure > Health Ledger.
 // Two ways it can lie and both are checked here: it stops observing (the board goes
 // stale while looking confident), or it observes but nothing has been recorded, which

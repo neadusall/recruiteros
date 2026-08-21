@@ -46,7 +46,22 @@ export interface SenderInbox {
 
   // Health / counters
   sent: number;
+  /** Delivery notices SEEN in this mailbox. NOT "bounces this mailbox caused":
+   *  the IMAP reply sweep counts every DSN that lands here, and on a warmed fleet
+   *  most of those are warm-up traffic, a different population from our campaign
+   *  sends. Dividing `bounced` by `sent` therefore compares two different things
+   *  and can exceed 100% (it read 10,400% on the ariel@ boxes, 2026-08-21).
+   *  Use the MATCHED pair below for any rate. */
   bounced: number;
+  /** MATCHED PAIR — campaign sends and campaign bounces for this mailbox, both
+   *  attributed by the same process over the same population, so their ratio is a
+   *  real bounce rate. Sends come from the send log, bounces from the NDR sweep's
+   *  campaign matching (warm-up NDRs deliberately excluded). Written only by
+   *  lib/senders/reconcile from the tally the deliverability tool publishes;
+   *  absent means "not measured", never "zero". */
+  coldSent?: number;
+  coldBounced?: number;
+  coldStatsAt?: string;
   lastSendAt?: string;
   lastError?: string;
   /** Consecutive transport failures; 3 flips the inbox to "error" until the
@@ -69,6 +84,10 @@ export interface SenderInbox {
   healthCheckedAt?: string;
   guardBaseSent?: number;     // bounce window baseline (reset on each revive)
   guardBaseBounced?: number;
+  /** Same baselines for the matched pair, so a revived inbox is judged on what it
+   *  has done SINCE the revive rather than on the incident that held it. */
+  guardBaseColdSent?: number;
+  guardBaseColdBounced?: number;
   activatedAt?: string;       // stamped at warm graduation; own-smtp cold ramp counts from here, not from createdAt
 
   // Onboarding audit (set ONLY by lib/senders/onboarding): every imported Email ID
@@ -107,6 +126,11 @@ export interface SenderInboxPublic {
   warmExternal: boolean;
   sent: number;
   bounced: number;
+  /** Matched campaign pair; absent = not measured. Any bounce RATE shown to a
+   *  person must come from these two, never from `bounced` over `sent`. */
+  coldSent?: number;
+  coldBounced?: number;
+  bounceRatePct?: number | null;
   lastSendAt?: string;
   lastError?: string;
   pausedReason?: string;

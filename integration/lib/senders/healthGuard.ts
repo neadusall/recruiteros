@@ -176,11 +176,33 @@ function ageDays(m: SenderInbox, acct?: SmartleadAccount): number {
   return Number.isFinite(t) ? Math.max(0, (Date.now() - t) / 86_400_000) : 0;
 }
 
-/** Windowed bounce rate since the last revive (or lifetime before the first). */
-function windowBounce(m: SenderInbox): { rate: number; sample: number } {
+/**
+ * Windowed bounce rate since the last revive (or lifetime before the first).
+ *
+ * THE PAIR MUST MATCH. `m.bounced` counts every delivery notice that LANDS in the
+ * mailbox, warm-up traffic included; `m.sent` counts campaign sends. Dividing one by
+ * the other compares two different populations and can exceed 100% (10,400% on the
+ * ariel@ boxes on 2026-08-21, where 208 warm-up notices sat against 2 campaign sends).
+ * While `sent` was stuck at 0 that arithmetic was merely dormant. The moment counter
+ * reconciliation gave it a denominator it would have auto-held most of the fleet on a
+ * number that was never real.
+ *
+ * So: the matched campaign pair decides whenever it exists. The legacy counters remain
+ * the fallback ONLY for inboxes the app itself sends through, where recordSend and
+ * recordBounce write both halves over the same population and the ratio is honest.
+ */
+function windowBounce(m: SenderInbox): { rate: number; sample: number; source: "campaign" | "app" } {
+  if (typeof m.coldSent === "number") {
+    const sent = Math.max(0, m.coldSent - (m.guardBaseColdSent || 0));
+    const bounced = Math.max(0, (m.coldBounced || 0) - (m.guardBaseColdBounced || 0));
+    return { rate: sent > 0 ? bounced / sent : 0, sample: sent, source: "campaign" };
+  }
   const sent = Math.max(0, (m.sent || 0) - (m.guardBaseSent || 0));
   const bounced = Math.max(0, (m.bounced || 0) - (m.guardBaseBounced || 0));
-  return { rate: sent > 0 ? bounced / sent : 0, sample: sent };
+  // A ratio above 1 is arithmetically impossible for one population, so it is proof
+  // the halves disagree. Refuse to act on it rather than hold the inbox on nonsense.
+  if (sent > 0 && bounced > sent) return { rate: 0, sample: 0, source: "app" };
+  return { rate: sent > 0 ? bounced / sent : 0, sample: sent, source: "app" };
 }
 
 /** The hold reason for an inbox right now, or null when healthy. */
@@ -345,6 +367,8 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
             m.recoverStreak = 0;
             m.guardBaseSent = m.sent || 0;
             m.guardBaseBounced = m.bounced || 0;
+            m.guardBaseColdSent = m.coldSent || 0;
+            m.guardBaseColdBounced = m.coldBounced || 0;
             revived.push({ workspaceId: ws, email: m.email, action: "revived", reason: "health recovered, back on the warm-up ramp", at });
           } else {
             m.recoverStreak = streak;
@@ -375,6 +399,8 @@ export async function runSenderHealthGuard(): Promise<GuardReport> {
           m.activatedAt = at; // own-smtp cold ramp (limits.coldCapFor) counts from here
           m.guardBaseSent = m.sent || 0;
           m.guardBaseBounced = m.bounced || 0;
+          m.guardBaseColdSent = m.coldSent || 0;
+          m.guardBaseColdBounced = m.coldBounced || 0;
           dirty = true;
           graduated.push({ workspaceId: ws, email: m.email, action: "graduated", reason: `warm-up complete: day ${Math.floor(ageDays(m, acct))}, reputation ${rep}%`, at });
         }
