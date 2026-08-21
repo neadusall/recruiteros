@@ -1622,6 +1622,8 @@ export const __throttleTestHooks = {
   robotTellReason,
   hasClosingInvite,
   scrub,
+  commentatorWall,
+  subjectCompany,
   /** The indexed pre-read screen and the read rota (2026-08-21). */
   preReadVeto,
   pickReadSeat,
@@ -1993,6 +1995,72 @@ function recruiterWall(o: { title?: string; headline?: string; company?: string;
   if (recruiterTitled) {
     const verifiedInHouse = !!o.company && companyMentionedInPost(o.company, o.postText ?? "");
     if (!verifiedInHouse) return "recruiter-titled and not verifiably hiring for their own company";
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ *
+ * WHO IS THIS POST ACTUALLY ABOUT? (owner catch 2026-08-21)
+ *
+ * The lane assumed the author of a post is the buyer. On a hiring post that
+ * holds. On a NEWS post it is exactly wrong, and it produced the worst comment
+ * this desk has sent: a recruiter telling a technology journalist that the comp
+ * bands in his article were compressing the candidate pool. He is not hiring
+ * anyone. The company he wrote about is, and they never heard from us.
+ *
+ * The intent score could not catch it, by design: authority is a 15-point BONUS
+ * out of 100, so that post cleared the 60-point engage threshold on event,
+ * language and recency alone, with no authority at all. A bonus cannot express
+ * "this person can never be the buyer". That needs a veto.
+ * ------------------------------------------------------------------ */
+
+/** Titles that report ON companies rather than run one. Deliberately narrow:
+ *  "investor", "partner" and "capital" are NOT here, because a CFO at a fund is
+ *  a real buyer and a false veto costs a real lead. */
+const COMMENTATOR_TITLE_RE = /\b(journalist|reporter|editor|correspondent|columnist|staff writer|contributing writer|newsletter|podcast|publisher|press officer|media relations|anchor|broadcaster)\b/i;
+
+/** A post written ABOUT someone: the grammar of reporting. */
+const REPORTING_RE = /(^|\s)(exclusive|breaking|scoop)\s*:|\btells (me|us|[A-Z]\w+)\b|\baccording to\b|\breports? that\b|\bin an interview\b|\bwe covered\b|\bstory (is )?(live|up)\b/i;
+
+/**
+ * The company a third-party post is ABOUT, when it names one.
+ *
+ * Worth extracting even when we refuse to comment: the intent ledger records
+ * signals by company, and before this it was filing a funding round under the
+ * REPORTER's employer. The heat belongs to the company that raised the money.
+ */
+export function subjectCompany(text: string): string | undefined {
+  const t = String(text || "").slice(0, 600);
+  const pats: RegExp[] = [
+    /\b(?:startup|company|firm|platform|maker)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,2})\b/,
+    /\b([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,2})\s+(?:has |have )?(?:raised|closed|secured|landed|banked|announced)\b/,
+    /\bCEO\s+[A-Z]\w+(?:\s+[A-Z]\w+)?\s+(?:of|at)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,2})\b/,
+  ];
+  for (const re of pats) {
+    const m = re.exec(t);
+    const name = m?.[1]?.trim();
+    // Guard against grabbing a sentence opener or a person's name.
+    if (name && name.length >= 3 && !/^(The|This|We|Our|I|A|An|Exclusive|Breaking)$/i.test(name)) return name;
+  }
+  return undefined;
+}
+
+/**
+ * Is the author commenting on someone ELSE's news? Returns the reason to
+ * refuse, or null. Two independent vetoes, both high precision:
+ *   1. the author reports for a living, or
+ *   2. the post is written in the grammar of reporting AND names a company
+ *      that is not the author's own.
+ */
+function commentatorWall(o: { title?: string; headline?: string; company?: string; postText?: string }): string | null {
+  const who = `${o.title ?? ""} ${o.headline ?? ""}`;
+  if (COMMENTATOR_TITLE_RE.test(who)) return "the author reports on companies, they do not hire for one";
+  const text = o.postText ?? "";
+  if (REPORTING_RE.test(text)) {
+    const subject = subjectCompany(text);
+    const own = o.company ?? "";
+    const aboutSomeoneElse = !!subject && (!own || !companyMentionedInPost(subject, own));
+    if (aboutSomeoneElse) return `the post reports on ${subject}, which is not the author's company`;
   }
   return null;
 }
@@ -3216,6 +3284,10 @@ function preReadVeto(hint: { found: boolean; headline?: string; snippet?: string
   const { title, company } = parseHeadline(hint.headline ?? "");
   const wall = recruiterWall({ title, headline: blob, company });
   if (wall) return wall;
+  // A journalist's headline says so. No reason to spend a profile view finding
+  // out that the person writing about the funding round cannot hire anyone.
+  const press = commentatorWall({ title, headline: blob, company });
+  if (press) return press;
   return null;
 }
 
@@ -3365,7 +3437,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, jobSeeker: 0, advisory: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, commentLowIntent: 0, preIndexed: 0, viewCap: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, jobSeeker: 0, advisory: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, commentNotHiring: 0, commentLowIntent: 0, preIndexed: 0, viewCap: 0, commentator: 0 };
   // Headcount feeds the company-fit term of the intent score. Loaded ONCE per scan, not per
   // candidate: loadSizeMap is memoised but the lookup runs on every screened post, and a scan
   // reads hundreds. An unresolved company simply scores zero fit rather than being guessed at.
@@ -3537,7 +3609,8 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // Layer 4 (deep verification): their profile summary and current jobs,
     // read from the same profile call - no extra credits. Wall-hits join the
     // never-again cache so future hunts spend nothing on them.
-    const wallHit = recruiterWall({ title, headline, company, postText: c.text })
+    const wallHit = commentatorWall({ title, headline, company, postText: c.text })
+      ?? recruiterWall({ title, headline, company, postText: c.text })
       ?? deepRecruiterSignals(prof.summary, prof.currentRoles)
       ?? (looksLikePeer(title, company) ? "staffing peer" : null);
     if (wallHit) {
@@ -3545,7 +3618,9 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       // recruiter stays skipped whether or not the comment lane is on.
       closedCache[c.authorRef] = `wall:${nowIso()}`;
       if (prof.providerId) closedCache[prof.providerId] = `wall:${nowIso()}`;
-      g.peer++; stats.peersBlocked += 1; save(); continue;
+      if (/reports on companies|the post reports on/.test(wallHit)) g.commentator++;
+      else { g.peer++; stats.peersBlocked += 1; }
+      save(); continue;
     }
 
     // The market screen ran before the profile read, on the post text alone, so
@@ -3742,13 +3817,21 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       // track band exists precisely so a company that is not yet worth a public comment still
       // accumulates heat, and the third weak signal in a fortnight is what puts an account at the
       // top of the list before anyone else has noticed it.
-      if (intent.primary && company) {
+      // The heat belongs to the company the post is ABOUT. On a hiring post that
+      // is the author's own employer; on a news post it is whoever raised the
+      // money, and filing that under the reporter's masthead is how a real
+      // signal gets lost. Author's company only when the post names no other.
+      const heatCompany = subjectCompany(c.text) ?? company;
+      if (intent.primary && heatCompany) {
         if (!state.intentLedger[workspaceId]) state.intentLedger[workspaceId] = {};
         recordSignal(state.intentLedger[workspaceId], {
-          company, domain: undefined, read: intent,
+          company: heatCompany, domain: undefined, read: intent,
           postUrl: c.postUrl, postAt: c.postAt,
           authorName, authorTitle: title ?? headline, excerpt: c.text.slice(0, 240),
         });
+        if (heatCompany !== company) {
+          console.log(`[comment-radar] ${workspaceId}: signal filed against "${heatCompany}" (the post's subject), not "${company ?? "unknown"}" (the author's employer)`);
+        }
       }
 
       // Comment only from the engage band up. Below it the company is watched, not spoken to.

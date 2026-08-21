@@ -342,5 +342,71 @@ check("a long dash becomes a comma WITH its spacing", () => {
     "a space before punctuation survived scrub");
 });
 
+/* ---------------------------------------------------------------------- *
+ * WHO IS THE POST ABOUT (2026-08-21).
+ *
+ * The live failure, verbatim: a recruiter told a technology journalist that
+ * the comp bands in his article were compressing the candidate pool. He does
+ * not hire anyone. The company he wrote about does, and never heard from us.
+ * The intent score could not stop it - authority is a 15-point bonus out of
+ * 100, so the post cleared the 60-point engage gate without it.
+ * ---------------------------------------------------------------------- */
+
+const AMBROOK_POST = "Exclusive: startup Ambrook has raised a $30M Series B led by Lachy Groom. "
+  + "CEO Mackenzie Burnett tells Upstarts how she's bringing her expenses and bookkeeping software, "
+  + "already a QuickBooks killer for farms, to more of the real economy, from general contractors to truckers. "
+  + "Used by 8,000 farms and businesses, up from 2,500 a year ago.";
+
+check("the journalist who wrote the funding story is walled", () => {
+  const why = hooks.commentatorWall({
+    title: "Founder and Editor",
+    headline: "Founder and Editor of Upstarts Media",
+    company: "Upstarts Media",
+    postText: AMBROOK_POST,
+  });
+  assert.ok(why, "the exact live failure went through again");
+  assert.ok(/reports on companies/.test(why ?? ""), `wrong reason: ${why}`);
+});
+
+check("the heat is filed against the company that raised, not the masthead", () => {
+  assert.equal(hooks.subjectCompany(AMBROOK_POST), "Ambrook");
+});
+
+check("reporting grammar about someone else is walled even without a media title", () => {
+  const why = hooks.commentatorWall({
+    title: "Analyst",
+    headline: "Analyst",
+    company: "Someshop Research",
+    postText: "Breaking: Northwind Logistics has raised a $40M Series C, according to people familiar.",
+  });
+  assert.ok(why, "third-party reporting slipped through");
+});
+
+check("a real buyer announcing their OWN news is never walled", () => {
+  assert.equal(hooks.commentatorWall({
+    title: "CFO",
+    headline: "CFO at Redwood Manufacturing",
+    company: "Redwood Manufacturing",
+    postText: "We're hiring a Controller in Medford. Six-month contract to start, hands-on role.",
+  }), null, "a genuine hiring post was walled");
+
+  assert.equal(hooks.commentatorWall({
+    title: "CEO",
+    headline: "CEO at Ambrook",
+    company: "Ambrook",
+    postText: "We raised a $30M Series B and we're hiring across finance and ops.",
+  }), null, "a founder announcing their own raise was walled");
+});
+
+check("an investor or partner title is NOT treated as press", () => {
+  // A CFO at a fund is a real buyer; a false veto here costs a real lead.
+  assert.equal(hooks.commentatorWall({
+    title: "Partner",
+    headline: "Partner at Cameron Ventures",
+    company: "Cameron Ventures",
+    postText: "We're growing the finance team and looking for a Controller.",
+  }), null, "an investor was mistaken for a journalist");
+});
+
 console.log(failures ? `\n${failures} failing` : "\nall passing");
 process.exit(failures ? 1 : 0);
