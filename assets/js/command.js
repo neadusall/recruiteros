@@ -1649,7 +1649,7 @@
     // utilization) with two contextual nav entrances. BD > Tools and
     // Recruiting > Build both open this same route; the active motion sets the
     // default context. Not motionOnly: it belongs to both business units.
-    linkedin: { title: "LinkedIn", crumb: "Tools", action: null, render: renderLinkedInOs, cap: "outreach:send", tool: "linkedin" },
+    linkedin: { title: "Role Hunter", crumb: "Business development", action: null, render: renderLinkedInOs, cap: "outreach:send", tool: "linkedin" },
     linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd", cap: "outreach:send", tool: "linkedinposter" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run", tool: "builder" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation, cap: "outreach:send", tool: "automation" },

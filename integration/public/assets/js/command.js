@@ -1376,6 +1376,10 @@
         var pp = d.poolParams || {};
         var rules = guard.rules || {};
         var provName = { "sending-ac": "Provisioned pool", "own-smtp": "Own mail server", google: "Google", outlook: "Microsoft", other: "Other" };
+        // The cold-outreach ledger the SENDER publishes. Absent means "not published", never
+        // "fall back to the app-lane sum" — that fallback is what made this page overstate.
+        var cold = cap.cold || null;
+        var laneName = { sendingac: "Provisioned pool (Sending.ac)", google: "Google (Zapmail)", internal: "Own mail server", other: "Other" };
         function ago(iso) {
           var t = iso ? Date.parse(iso) : NaN;
           if (!isFinite(t)) return "not yet run";
@@ -1407,19 +1411,39 @@
           tile("Healthy + sending", n(healthy), "var(--ok)") +
           tile("In recovery (auto-held)", n(holding), holding ? "var(--warn)" : "var(--ok)") +
           tile("Auto-revived this week", n(guard.revivedThisWeek || 0)) +
-          tile("Cold sends available today", n(cap.coldRemaining || 0) + '<span style="font-size:12px;color:var(--text-dim)"> / ' + n(cap.coldCapacity || 0) + "</span>", "var(--info)") +
+          tile("Cold sends left today", cold ? n(cold.remainingToday) + '<span style="font-size:12px;color:var(--text-dim)"> / ' + n(cold.capToday) + "</span>" : '<span style="font-size:13px;color:var(--text-dim)">not published</span>', "var(--info)") +
           "</div>";
 
-        // Today's send capacity, spelled out from Email IDs x domains.
-        body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cap.coldCapacity || 0) + " cold emails/day</b> available today" + (cap.matureCapacity && cap.matureCapacity > cap.coldCapacity ? ' <span style="color:var(--text-dim)">(' + n(cap.matureCapacity) + "/day at full ramp, as warming mailboxes mature)</span>" : "") + " across <b>" + n(cap.inboxes || 0) + " sendable Email IDs</b> on <b>" + n(cap.domains || 0) + " domains</b>" +
-          (cap.benchedInboxes ? ', with <b style="color:#b26a00">' + n(cap.benchedInboxes) + ' Email IDs benched</b> on ' + n(cap.restingDomains || 0) + " resting domains (they rejoin automatically as the bounce bench lifts)" : "") +
-          (cap.warmingPerDay ? ', plus about ' + n(cap.warmingPerDay) + " external warm-up sends/day that build reputation (not outreach)." : ".") + "</div>";
-        var provRows = (cap.byProvider || []).map(function (p) {
-          var nm = provName[p.provider] || p.provider;
-          var model = p.capModel === "flat" ? "flat " + (pp.sendingAcPerInbox || 2) + "/day each" : "ramped";
-          return '<div style="font-size:12px;color:var(--text-dim);padding:1px 0">' + esc(nm) + ": " + n(p.inboxes) + " Email IDs on " + n(p.domains) + " domains · " + esc(model) + " · " + n(p.coldCapacity) + "/day</div>";
-        }).join("");
-        if (provRows) body += '<div style="margin-bottom:12px">' + provRows + "</div>";
+        // TODAY'S COLD CEILING. One number, published by the sender that applies the caps
+        // (tools/batch.mjs --capacity). The app-lane ramp below is a DIFFERENT thing and is
+        // labelled as such: showing it as "cold sends/day" is what put 1,422 on this page
+        // against a fleet carrying 832 (2026-08-20).
+        if (cold) {
+          var boundTxt = cold.boundBy === "reputation"
+            ? "held there by the reputation ramp (the fleet could carry " + n(cold.ceiling) + ")"
+            : cold.boundBy === "fleet"
+              ? "held there by the mailboxes (reputation would allow " + n(cold.ramp.cap) + ")"
+              : "the fleet and the reputation ramp agree";
+          body += '<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:6px"><b style="color:var(--text)">' + n(cold.capToday) + " cold emails/day</b> today, " + esc(boundTxt) + ", across <b>" + n(cold.usableBoxes) + " usable Email IDs</b>" +
+            " · <b>" + n(cold.sentToday) + " sent</b>, <b>" + n(cold.remainingToday) + " left</b>" +
+            (cold.benchedBoxes ? ', with <b style="color:#b26a00">' + n(cold.benchedBoxes) + ' Email IDs benched</b> on ' + n((cold.restingDomains || []).length) + " resting domains holding back " + n(cold.benchedCeiling) + "/day (they rejoin automatically as the bounce bench lifts)" : "") +
+            ((cold.lanesParked || []).length ? ' · <b style="color:#b26a00">' + esc(cold.lanesParked.join(", ")) + '</b> lane parked, contributing 0' : "") +
+            ".</div>";
+          var laneRows = (cold.lanes || []).map(function (l) {
+            var nm = laneName[l.lane] || l.lane;
+            return '<div style="font-size:12px;color:var(--text-dim);padding:1px 0">' + esc(nm) + ": <b>" + n(l.ceiling) + "/day</b> across " + n(l.usableBoxes) + " Email IDs · " + n(l.sentToday) + " sent, " + n(l.boxesWithHeadroom) + " boxes still under their own cap" +
+              (l.benchedBoxes ? " · " + n(l.benchedBoxes) + " benched holding " + n(l.benchedCeiling) + "/day" : "") + "</div>";
+          }).join("");
+          if (laneRows) body += '<div style="margin-bottom:8px">' + laneRows + "</div>";
+          if (cold.stale) body += '<div style="font-size:12px;color:#b26a00;margin-bottom:10px">These numbers are ' + n(cold.ageMinutes) + ' minutes old. The send loop publishes every 20 minutes, so the cold lane is not running right now.</div>';
+        } else {
+          body += '<div style="font-size:12.5px;color:#b26a00;margin-bottom:10px">The sender has not published a capacity ledger yet, so the cold ceiling for today is unknown. It is written every send tick by <code>batch.mjs --capacity</code>.</div>';
+        }
+        // The app lane is the portal's OWN sending (job blasts, replies, sequences) on its
+        // warm-up ramp. It counts the whole pool, including boxes the cold lane cannot draw.
+        body += '<div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">App lane (job blasts, replies, sequences), a separate ramp over the whole pool: ' + n(cap.coldCapacity || 0) + "/day across " + n(cap.inboxes || 0) + " Email IDs on " + n(cap.domains || 0) + " domains" +
+          (cap.matureCapacity && cap.matureCapacity > cap.coldCapacity ? " (" + n(cap.matureCapacity) + "/day at full ramp)" : "") +
+          (cap.warmingPerDay ? " · about " + n(cap.warmingPerDay) + " external warm-up sends/day build reputation and are not outreach" : "") + ".</div>";
 
         // The set parameters the whole fleet runs on.
         var rampTxt = (pp.ramp || [5, 10, 15]).join(", then ") + ", then " + (pp.coldMax || 20) + "/day max";
@@ -1625,7 +1649,7 @@
     // utilization) with two contextual nav entrances. BD > Tools and
     // Recruiting > Build both open this same route; the active motion sets the
     // default context. Not motionOnly: it belongs to both business units.
-    linkedin: { title: "LinkedIn", crumb: "Tools", action: null, render: renderLinkedInOs, cap: "outreach:send", tool: "linkedin" },
+    linkedin: { title: "Role Hunter", crumb: "Business development", action: null, render: renderLinkedInOs, cap: "outreach:send", tool: "linkedin" },
     linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd", cap: "outreach:send", tool: "linkedinposter" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run", tool: "builder" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation, cap: "outreach:send", tool: "automation" },
@@ -1796,6 +1820,74 @@
           card("~ Catch-all", n(f.catchAll), "kept, unconfirmed", "var(--warn)") +
           card("Email hit-rate", hit + "%", "verified ÷ emails", hit < 20 ? "var(--danger)" : "var(--ok)") +
           "</div>";
+
+        // 2b) COUPLED OUTREACH · corporate numbers. Outbound is email AND a voice drop to the
+        //     employer's switchboard, so the pipeline has to show call coverage next to email
+        //     coverage rather than in a separate tab nobody opens. `Pairable` is the operative
+        //     number: contactable rows (named + an address) whose company also has a dialable
+        //     number, i.e. the people who can get BOTH touches today. The unattempted count is
+        //     the free backlog, since a switchboard resolves from the employer's own site.
+        var vc = f.voice || {};
+        var pairPct = Math.round((vc.pairableRate || 0) * 100);
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Coupled outreach · corporate numbers</h3>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          card("Email + call ready", n(vc.pairable), "of " + n(vc.contactable) + " contactable", pairPct >= 40 ? "var(--ok)" : "var(--warn)") +
+          card("Pairing rate", pairPct + "%", "contactable rows we can also dial", pairPct >= 40 ? "var(--ok)" : "var(--warn)") +
+          card("Employers with a number", n(vc.domainsWithPhone), "of " + n(vc.domains) + " company domains") +
+          card("Never looked up", n(vc.domainsUnattempted), "free to resolve", (vc.domainsUnattempted || 0) > 0 ? "var(--warn)" : "var(--ok)") +
+          card("Resolver hit-rate", Math.round((vc.resolverRate || 0) * 100) + "%", n(vc.resolverResolved) + " of " + n(vc.resolverAttempts) + " tried") +
+          "</div>" +
+          '<div class="ob-note">Numbers are cached per EMPLOYER domain, so one lookup covers every prospect at that company. A domain that has never been tried is worth resolving; one already tried and missed is cached negative and is not.</div>';
+
+        // 2c) TARGETING ORG CHART. The rule that decides who gets the email and the voice drop for
+        //     any posted job. Rendered from the snapshot the targeting module itself publishes, so
+        //     this sheet cannot drift from what the sender actually does. Grouped by function with
+        //     a row per company-size tier, because the size tier is the part that changes the
+        //     answer and is the part people get wrong.
+        var oc = f.orgchart;
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Targeting org chart · who gets the email and the voice drop</h3>';
+        if (!oc || !oc.rows || !oc.rows.length) {
+          html += '<div class="ob-note">Not published yet. It is written by the daily run (tools/orgchart-print.mjs --json), and the sender enforces the same model either way.</div>';
+        } else {
+          html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">';
+          for (var ti = 0; ti < oc.tiers.length; ti++) {
+            var tr = oc.tiers[ti];
+            html += '<div class="panel-card" style="flex:1 1 260px;padding:10px 12px">' +
+              '<div style="font-weight:600;font-size:13px;margin-bottom:4px">' + esc(tr.label) + '</div>' +
+              '<div style="font-size:12px;color:var(--text-dim);line-height:1.45">' + esc(tr.what) + '</div></div>';
+          }
+          html += '</div>';
+
+          var fns = oc.functions.slice().sort();
+          html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">' +
+            '<thead><tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Function</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Posted job</th>' +
+            oc.tiers.map(function (t) { return '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">' + esc(t.label) + '</th>'; }).join('') +
+            '</tr></thead><tbody>';
+          for (var i = 0; i < fns.length; i++) {
+            var fnName = fns[i];
+            var levels = ["IC", "Manager", "Director", "VP"];
+            for (var j = 0; j < levels.length; j++) {
+              var lvl = levels[j];
+              html += '<tr>' +
+                '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--text-dim);vertical-align:top">' + (j === 0 ? '<b style="color:var(--text)">' + esc(fnName) + '</b>' : '') + '</td>' +
+                '<td style="padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top">' + esc(lvl) + '-level</td>';
+              for (var k = 0; k < oc.tiers.length; k++) {
+                var row = null;
+                for (var m = 0; m < oc.rows.length; m++) {
+                  var r0 = oc.rows[m];
+                  if (r0.functionGroup === fnName && r0.tier === oc.tiers[k].key && r0.reqLevelName === lvl) { row = r0; break; }
+                }
+                if (!row) { html += '<td style="padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top">-</td>'; continue; }
+                var band = row.buyerLevels.join(" → ") + (row.ownerBuys ? " + owner" : "");
+                html += '<td style="padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top" title="' + esc(row.why) + '"><div>' + esc(band) + '</div>' +
+                  '<div style="color:var(--text-dim)">' + esc(row.buyerTitles.slice(0, 2).join(" / ")) + '</div></td>';
+              }
+              html += '</tr>';
+            }
+          }
+          html += '</tbody></table></div>' +
+            '<div class="ob-note">Read a row as: for this kind of posted job, at a company this size, contact this seat. The band is the part that moves: the same job at 200 employees reaches the owner, and at 2,000 it stops at the Director. Hover a cell for the reason. Never contacted for a normal req: anyone below Manager, a leader of a different function, and above 250 employees the CEO, unless the req itself is a C-suite search or the owner search came back empty.</div>';
+        }
 
         // 2a) WHERE THE BACKLOG IS STUCK. The video fleet renders `renderable` and nothing else, so
         //     when video output falls to zero this row says which gate is holding the rest — instead
@@ -3337,20 +3429,36 @@
   // LinkedIn Daily Ops: the daily non-negotiables behind the LinkedIn tabs.
   // Open tasks light up the LinkedIn and LinkedIn Poster nav items (red count)
   // until the day's work is done; the panels inside both tabs carry the list.
+  // Two independent counts share the LinkedIn tab's badge: the day's open
+  // touches, and posters who replied to one of our comments and are waiting on
+  // an answer (owner ask 2026-08-20 — a live conversation must not sit unseen
+  // behind a tab). Each poller caches its own number so the slower one never
+  // wipes the faster one's.
+  var liOpsOpen = 0, liReplyOpen = 0, liPosterOpen = 0;
+  function setB(name, n) {
+    Array.prototype.forEach.call(document.querySelectorAll('.ni-badge[data-badge="' + name + '"]'), function (bd) {
+      bd.textContent = n > 0 ? String(n) : "";
+      bd.classList.add("due");
+      bd.classList.toggle("show", n > 0);
+    });
+  }
+  function liPaintBadges() {
+    setB("linkedin", liOpsOpen + liReplyOpen);
+    setB("linkedinposter", liPosterOpen);
+  }
   function liOpsSetBadges(d) {
-    function setB(name, n) {
-      Array.prototype.forEach.call(document.querySelectorAll('.ni-badge[data-badge="' + name + '"]'), function (bd) {
-        bd.textContent = n > 0 ? String(n) : "";
-        bd.classList.add("due");
-        bd.classList.toggle("show", n > 0);
-      });
-    }
-    setB("linkedin", (d && d.openOutreach) || 0);
-    setB("linkedinposter", (d && d.openContent) || 0);
+    liOpsOpen = (d && d.openOutreach) || 0;
+    liPosterOpen = (d && d.openContent) || 0;
+    liPaintBadges();
   }
   function liOpsRefreshBadges() {
     if (!can("outreach:send")) return;
     apiQuiet("/linkedin/dailyops").then(function (d) { if (d) liOpsSetBadges(d); });
+    apiQuiet("/linkedin/comments?summary=1").then(function (d) {
+      if (!d) return; // a count we cannot fetch is not worth a red notice
+      liReplyOpen = (d.trackedTally && d.trackedTally.followUpsOpen) || 0;
+      liPaintBadges();
+    });
   }
   liOpsRefreshBadges();
   setInterval(liOpsRefreshBadges, 180000);
@@ -3966,6 +4074,14 @@
       if (t.responseStatus === "failed") return '<span class="lie-chip bad">Did not post</span>';
       return '<span class="lie-chip mut">Posted</span>';
     }
+    // Whose seat a thread belongs to. An admin watching the whole desk has to
+    // know whose voice they are about to answer in: the reply always posts
+    // from the seat that made the comment, whoever clicks the button.
+    var trackSeats = {};
+    function seatLabel(t) {
+      var name = t.accountId && trackSeats[t.accountId];
+      return name ? ' <span class="lie-chip mut">' + esc(name) + "'s seat</span>" : "";
+    }
     function trackRow(t) {
       // A reply you have not answered or dismissed stays "open": their words
       // on top, an EMPTY box below. Nothing is drafted for you here; what you
@@ -3975,12 +4091,20 @@
         (t.title || t.company ? ' <span class="muted">' + esc([t.title, t.company].filter(Boolean).join(" · ")) + "</span>" : "");
       var postLink = t.postUrl ? ' · <a href="' + esc(t.postUrl) + '" target="_blank" rel="noopener">View the post</a>' : "";
       var out = '<div class="lie-row' + (open ? "" : " done") + '" data-id="' + esc(t.id) + '">' +
-        '<div class="lie-who">' + who + " " + trackChip(t) + "</div>" +
+        '<div class="lie-who">' + who + " " + trackChip(t) + seatLabel(t) + "</div>" +
         '<div class="lie-post muted">Commented ' + esc(trackDay(t.commentPostedAt || t.updatedAt)) + ': "' +
           esc((t.commentDraft || "").slice(0, 200)) + '"' + postLink + "</div>";
       if (t.responseStatus === "responded") {
         out += '<div class="lie-post"><b>' + esc((t.authorName || "").split(/\s+/)[0] || "They") + ' replied' +
           (t.responseAt ? " " + esc(trackDay(t.responseAt)) : "") + ':</b> "' + esc((t.responseText || "").slice(0, 400)) + '"</div>';
+        // What the desk already did about it, without being asked: the
+        // invitation goes out from the same seat the moment they answer.
+        if (t.replyConnectStatus === "queued") {
+          out += '<div><span class="lie-chip ok">Connection request sent from your account</span>' +
+            (t.replyConnectReason ? ' <span class="muted">' + esc(t.replyConnectReason) + "</span>" : "") + "</div>";
+        } else if (t.replyConnectStatus === "skipped") {
+          out += '<div><span class="lie-chip mut">No invitation: ' + esc(t.replyConnectReason || "skipped") + "</span></div>";
+        }
         if (open) {
           if (t.followUpStatus === "blocked") {
             out += '<div><span class="lie-chip bad">' + esc(t.reason || "Reply blocked") + "</span></div>";
@@ -4008,10 +4132,11 @@
     function trackerCard(d) {
       var tr = (d && d.tracked) || [];
       var tally = (d && d.trackedTally) || {};
+      trackSeats = (d && d.seatNames) || {};
       if (!tr.length && !(tally.postedTotal > 0)) return "";
       return '<div class="card liops-card">' +
         '<div class="liops-head"><div><b>Comments posted</b>' +
-          '<div class="muted liops-sub">Every comment that went out, tallied and watched. Each thread is re-checked around the clock; when the poster replies, their exact words land here with a space for you to answer in your own. Nothing is drafted for you. Quiet threads move to the email follow-up campaign automatically.</div></div>' +
+          '<div class="muted liops-sub">Every comment that went out, tallied and watched. Each thread is re-checked around the clock; when the poster replies, their exact words land here with a space for you to answer in your own. Nothing is drafted for you. You also get an email the moment they reply (and a text where your cell is set), and a connection request goes out from the same account while the thread is live. Quiet threads move to the email follow-up campaign automatically.</div></div>' +
           (tally.followUpsOpen ? '<span class="liops-progress">' + tally.followUpsOpen + (tally.followUpsOpen === 1 ? " reply" : " replies") + " to answer</span>" : "") +
         "</div>" +
         '<div class="lie-actions">' +
@@ -6853,18 +6978,31 @@
       return css + '<div class="syscap"><div class="syscap-h"><h3>Sending system</h3><span class="sub">your domains, Email IDs, and daily cold-send capacity</span></div>' +
         '<div class="empty" style="margin-top:12px">No Email IDs yet. <a href="#senders">Import your inboxes</a> and assign them to recruiters, then this shows the model: <b>domains → Email IDs → ' + (cap.coldPerInbox || 2) + ' cold sends/day each</b>, draining live as you send.</div></div>';
     }
-    var pct = cap.coldCapacity ? Math.min(100, Math.round((cap.coldUsedToday / cap.coldCapacity) * 100)) : 0;
+    // The gauge reads the SENDER's published ledger, so it drains as mail actually goes out.
+    // cap.coldUsedToday is the app lane's own counter and stays 0 all day while the MPC
+    // sender (a host tool that never calls recordSend) does the sending.
+    var cold = cap.cold || null;
+    var capToday = cold ? cold.capToday : cap.coldCapacity;
+    var usedToday = cold ? cold.sentToday : cap.coldUsedToday;
+    var leftToday = cold ? cold.remainingToday : cap.coldRemaining;
+    var usableIds = cold ? cold.usableBoxes : cap.inboxes;
+    var pct = capToday ? Math.min(100, Math.round((usedToday / capToday) * 100)) : 0;
+    var perIdNote = cold
+      ? (cold.lanes || []).map(function (l) { return (l.usableBoxes ? Math.round(l.ceiling / l.usableBoxes) : 0) + '/day × ' + sqFmt(l.usableBoxes); }).join(' + ')
+      : sqFmt(cap.inboxes) + ' × ' + cap.coldPerInbox;
     var flow =
       '<div class="syscap-flow">' +
         '<div class="syscap-step"><div class="n">' + sqFmt(cap.domains) + '</div><div class="l">Domains</div><div class="s">' + cap.inboxesPerDomain + ' Email IDs each</div></div>' +
         '<div class="syscap-arrow">→</div>' +
-        '<div class="syscap-step"><div class="n">' + sqFmt(cap.inboxes) + '</div><div class="l">Email IDs</div><div class="s">' + cap.coldPerInbox + ' cold + ' + cap.warmingPerInbox + ' warm / day</div></div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(usableIds) + '</div><div class="l">Email IDs sending</div><div class="s">' + (cold && cold.benchedBoxes ? sqFmt(cold.benchedBoxes) + ' more benched' : 'all in rotation') + '</div></div>' +
         '<div class="syscap-arrow">→</div>' +
-        '<div class="syscap-step"><div class="n">' + sqFmt(cap.coldCapacity) + '</div><div class="l">Cold sends / day</div><div class="s">hard cap · ' + sqFmt(cap.inboxes) + ' × ' + cap.coldPerInbox + '</div></div>' +
+        '<div class="syscap-step"><div class="n">' + sqFmt(capToday) + '</div><div class="l">Cold sends / day</div><div class="s">' + (cold ? esc(cold.boundBy === "reputation" ? "reputation ramp · fleet could carry " + sqFmt(cold.ceiling) : cold.boundBy === "fleet" ? "fleet limit · ramp allows " + sqFmt(cold.ramp.cap) : "fleet and ramp agree") : esc(perIdNote)) + '</div></div>' +
       '</div>';
     var meter =
       '<div class="syscap-meter"><div class="track"><div class="fill" style="width:' + pct + '%"></div></div>' +
-        '<div class="lbl"><span><b>' + sqFmt(cap.coldUsedToday) + '</b> sent today</span><span><b>' + sqFmt(cap.coldRemaining) + '</b> left · ' + pct + '% of capacity used</span></div></div>';
+        '<div class="lbl"><span><b>' + sqFmt(usedToday) + '</b> sent today</span><span><b>' + sqFmt(leftToday) + '</b> left · ' + pct + '% of capacity used</span></div></div>' +
+      (cold && cold.benchedBoxes ? '<div class="syscap-warm">' + sqFmt(cold.benchedBoxes) + ' Email IDs are benched on ' + sqFmt((cold.restingDomains || []).length) + ' resting domains, holding back <b>' + sqFmt(cold.benchedCeiling) + '/day</b> until the bounce bench lifts.</div>' : '') +
+      (cold && cold.stale ? '<div class="syscap-warm">Published ' + sqFmt(cold.ageMinutes) + ' minutes ago. The send loop refreshes every 20 minutes, so the cold lane is not running right now.</div>' : '');
     var warm = '<div class="syscap-warm">+ <b>' + sqFmt(cap.warmingPerDay) + '</b> warming emails/day handled by <b>the warm-up engine</b> (' + cap.warmingPerInbox + '/inbox), kept separate from your cold sends.</div>';
     var rows = (cap.byRecruiter || []).map(function (r) {
       var rp = r.coldCapacity ? Math.min(100, Math.round((r.coldUsedToday / r.coldCapacity) * 100)) : 0;
@@ -9973,6 +10111,15 @@
     var box = $("#sndProvBox"); if (!box) return;
     var cap = sndData.capacity || {}, list = cap.byProvider || [];
     if (!list.length) { box.innerHTML = ""; return; }
+    // Cold-lane truth per lane, from the sender's published ledger. The byProvider rows
+    // below describe the APP lane's ramp over the same boxes and are labelled that way:
+    // rendering the app-lane number under a "cold sends/day" heading is what let this
+    // panel advertise 810/day from 54 Zapmail boxes that the cold lane caps at 8/day each.
+    var coldByLane = {};
+    if (cap.cold && cap.cold.lanes) {
+      cap.cold.lanes.forEach(function (l) { coldByLane[l.lane] = l; });
+    }
+    var laneOf = { "sending-ac": "sendingac", "own-smtp": "internal", google: "google", other: "google" };
     var notes = {
       "sending-ac": "Sending.ac model: every mailbox sends a flat 2 cold emails/day, warmed externally. More volume means more mailboxes, not higher caps.",
       "own-smtp": "Your internal SMTP server: each mailbox ramps 5, 10, 15, then " + (cap.coldPerInbox || 20) + "/day over its first four weeks once activated. Mailboxes still warming send the day-one floor until you activate them.",
@@ -9986,8 +10133,12 @@
         // Benched boxes sit on domains resting after bounce trouble: real inventory,
         // zero capacity today. Shown, never blended into the sends/day number.
         var benched = p.benchedInboxes ? ' · <span style="color:#b26a00">' + fmt(p.benchedInboxes) + ' benched on resting domains</span>' : '';
+        var lane = coldByLane[laneOf[p.provider] || p.provider] || null;
+        var coldTxt = lane
+          ? ' · <b>' + fmt(lane.ceiling) + '</b> cold sends/day (' + fmt(lane.sentToday) + ' sent, ' + fmt(lane.remaining != null ? lane.remaining : Math.max(0, lane.ceiling - lane.sentToday)) + ' left)'
+          : ' · <span style="color:#b26a00">no cold volume today</span>';
         return '<div class="snd-split-row">' + sndProviderBadge(p.provider) +
-          '<span class="snd-split-meta">' + p.inboxes + ' sendable Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + ' · <b>' + fmt(p.coldCapacity) + '</b> cold sends/day' + (ramps ? ' <span class="muted">(ramps to <b>' + fmt(p.matureCapacity) + '</b>/day at full ramp)</span>' : '') + ' · ' + fmt(p.coldRemaining) + ' left today' + benched + '</span>' +
+          '<span class="snd-split-meta">' + p.inboxes + ' sendable Email ID' + (p.inboxes === 1 ? "" : "s") + ' · ' + p.domains + ' domain' + (p.domains === 1 ? "" : "s") + coldTxt + ' <span class="muted">· app lane ' + fmt(p.coldCapacity) + '/day' + (ramps ? ' (ramps to ' + fmt(p.matureCapacity) + ')' : '') + '</span>' + benched + '</span>' +
           (notes[p.provider] ? '<span class="snd-split-note">' + esc(notes[p.provider]) + '</span>' : '') +
         '</div>';
       }).join("") + '</div>';
@@ -25842,6 +25993,28 @@
     if (em) { em.value = ""; em.focus(); }
   }
 
+  /* Mint a per-tab session for one recruiter and open their portal in its own
+     tab. Shared by the account-menu roster and the picker modal: the token is
+     handed over in the fragment (never a query string, which would land in
+     server logs), and each recruiter gets their own named tab so an admin can
+     keep several open side by side. */
+  function enterRecruiterPortal(userId, onFail, onDone) {
+    return send("/team/impersonate", "POST", { userId: userId }).then(function (r) {
+      if (!r.ok || !r.data || !r.data.token) {
+        if (onFail) onFail();
+        toast("Could not open portal (" + ((r.data && r.data.error) || r.status) + ")");
+        return;
+      }
+      var handoff = {
+        token: r.data.token,
+        ctx: { user: r.data.user, workspace: r.data.workspace, role: r.data.role, capabilities: r.data.capabilities, session: r.data.session }
+      };
+      var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(handoff))));
+      if (onDone) onDone();
+      window.open("/recruiter#imp=" + encodeURIComponent(b64), "ros-rec-" + userId);
+    }).catch(function () { if (onFail) onFail(); toast("Could not reach the server."); });
+  }
+
   /* Admin "view as recruiter": pick a recruiter and drop straight into their
      Recruiter Portal, exactly what they see, no password. Lists the workspace's
      members (recruiters only) and mints a per-tab impersonation session for the
@@ -25872,20 +26045,9 @@
           btn.addEventListener("click", function () {
             var uid = btn.getAttribute("data-uid");
             btn.disabled = true; btn.style.opacity = ".6";
-            send("/team/impersonate", "POST", { userId: uid }).then(function (r) {
-              if (!r.ok || !r.data || !r.data.token) {
-                btn.disabled = false; btn.style.opacity = "";
-                toast("Could not open portal (" + ((r.data && r.data.error) || r.status) + ")");
-                return;
-              }
-              var handoff = {
-                token: r.data.token,
-                ctx: { user: r.data.user, workspace: r.data.workspace, role: r.data.role, capabilities: r.data.capabilities, session: r.data.session }
-              };
-              var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(handoff))));
-              close();
-              window.open("/recruiter#imp=" + encodeURIComponent(b64), "ros-rec-" + uid);
-            }).catch(function () { btn.disabled = false; btn.style.opacity = ""; toast("Could not reach the server."); });
+            enterRecruiterPortal(uid, function () {
+              btn.disabled = false; btn.style.opacity = "";
+            }, close);
           });
         });
       }).catch(function () { var l = root.querySelector("#rpList"); if (l) l.innerHTML = needsSetup(); });
@@ -29069,6 +29231,30 @@
       if (openAdmin) openAdmin.addEventListener("click", function () { window.open("/admin", "ros-admin"); });
       // Pick WHICH recruiter to dive into (view-as), no password needed.
       if (openRecruiter) openRecruiter.addEventListener("click", function () { setOpen(false); openRecruiterPicker(); });
+      // The desk itself, one row per recruiter, right here in the toolbar
+      // (owner ask 2026-08-20). One click lands in their portal as them, so
+      // answering a comment thread in their voice never costs a sign-out. The
+      // picker above stays for the empty-portal preview.
+      var people = $("#portalSwitchPeople");
+      if (people) {
+        apiQuiet("/team").then(function (d) {
+          var mates = ((d && d.members) || []).filter(function (m) { return m.role === "member"; });
+          if (!mates.length) return;
+          people.innerHTML = mates.map(function (m) {
+            return '<button type="button" class="acct-item" role="menuitem" data-enter-uid="' + esc(m.userId) + '">' +
+              '<span class="acct-avatar" style="width:20px;height:20px;font-size:9px;background:' + colorFor(m.name) + '">' +
+                esc(initials(m.name)) + "</span> " + esc(m.name) + "</button>";
+          }).join("");
+          Array.prototype.forEach.call(people.querySelectorAll("[data-enter-uid]"), function (btn) {
+            btn.addEventListener("click", function () {
+              btn.disabled = true; btn.style.opacity = ".6";
+              enterRecruiterPortal(btn.getAttribute("data-enter-uid"), function () {
+                btn.disabled = false; btn.style.opacity = "";
+              }, function () { setOpen(false); });
+            });
+          });
+        });
+      }
     }
     var so = $("#acctSignOut");
     if (so) so.addEventListener("click", signOut);
