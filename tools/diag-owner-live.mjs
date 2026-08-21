@@ -64,7 +64,7 @@ console.log(`${jobs.length} in-band companies whose rows are held on a decision-
 
 const api = peopleApiFrom(JSON.parse(readFileSync(CREDS, "utf8")), LUME_WS);
 const kinds = {};
-const stage = { returned: 0, company: 0, fn: 0, gate: 0 };
+const stage = { returned: 0, company: 0, fn: 0, gate: 0, elig: 0 };
 const found = [];
 const dropExamples = [];
 let remaining = null;
@@ -85,7 +85,7 @@ for (const job of jobs) {
   stage.returned += r.people.length;
 
   const coSq = squash(job.company);
-  let co = 0, fnOk = 0, gate = 0, hitName = "";
+  let co = 0, fnOk = 0, gate = 0, elig = 0, hitName = "";
   for (const h of r.people) {
     if (!companyMatches(job.company, h.headline)) {
       if (dropExamples.length < 10) dropExamples.push(`company-filter  "${h.headline.slice(0, 62)}"  (wanted ${job.company})`);
@@ -100,14 +100,19 @@ for (const job of jobs) {
     }
     fnOk++;
     const probe = assessProspect({ ...job.sample, managerName: h.fullName, managerTitle: title, likelyEmail: `x.y@${job.sample.domain}`, emailValidated: true, emailInvalid: false, emailCatchAll: false });
-    const bad = probe.failures.find((x) => /decision-maker|different company|core band/.test(x));
+    const bad = probe.failures.find((x) => /decision-maker|different company|core band|org chart/.test(x));
     if (bad) {
-      if (dropExamples.length < 10) dropExamples.push(`gate            "${title.slice(0, 44)}" -> ${bad.slice(0, 60)}`);
+      if (dropExamples.length < 10) dropExamples.push(`buyer-rules     "${title.slice(0, 44)}" -> ${bad.slice(0, 60)}`);
       continue;
     }
-    gate++; hitName = `${h.fullName} (${title})`;
+    gate++;
+    // PRODUCTION now demands FULL eligibility before spending a Reoon credit (the stricter probe
+    // from the 18:36 box commit), so report that separately: it is the number that decides whether
+    // a hunt actually converts into a contactable person.
+    if (probe.eligible) { elig++; if (!hitName) hitName = `${h.fullName} (${title})`; }
+    else if (dropExamples.length < 10) dropExamples.push(`full-gate       "${title.slice(0, 40)}" -> ${(probe.failures[0]||"").slice(0, 58)}`);
   }
-  stage.company += co; stage.fn += fnOk; stage.gate += gate;
+  stage.company += co; stage.fn += fnOk; stage.gate += gate; stage.elig += elig;
   console.log(`  ${String(r.people.length).padStart(2)} people -> ${co} co -> ${fnOk} fn -> ${gate} gate  | ${q}${hitName ? `  => ${hitName}` : ""}`);
   if (hitName) found.push(`${job.company}: ${hitName}`);
 }
@@ -121,7 +126,8 @@ console.log(`\nFUNNEL over the ${answered} answered`);
 console.log(`  people returned   ${stage.returned}`);
 console.log(`  survive company   ${stage.company}`);
 console.log(`  survive function  ${stage.fn}`);
-console.log(`  survive the gate  ${stage.gate}`);
+console.log(`  pass buyer rules  ${stage.gate}`);
+console.log(`  FULLY eligible    ${stage.elig}   <- what production will spend a credit on`);
 console.log(`  owners named      ${found.length} of ${answered} answered  (${answered ? Math.round((found.length / answered) * 100) : 0}%)`);
 if (remaining != null) console.log(`\nAPI quota remaining: ${remaining}`);
 if (found.length) { console.log(`\nOWNERS FOUND:`); for (const f of found) console.log("  " + f); }
