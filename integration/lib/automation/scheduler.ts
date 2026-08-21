@@ -241,6 +241,19 @@ async function tickCommentListener(): Promise<void> {
   await tickCommentWatch();
 }
 
+/**
+ * Post Recruiter: the candidate-side twin of Role Hunter. Works the desk's saved
+ * searches, confirms open-to-work on the profile, and queues the touch.
+ *
+ * Offset well away from linkedin_comments: both lanes read profiles on the SAME
+ * five seats, and two bursts landing in the same minute is the shape LinkedIn
+ * notices, whatever the daily totals say.
+ */
+async function tickPostRecruiterScan(): Promise<void> {
+  const { tickPostRecruiter } = await import("../linkedin/postRecruiter");
+  await tickPostRecruiter();
+}
+
 async function tickResumeInbox(): Promise<void> {
   const { sweepAllResumeInboxes } = await import("../vetting/inbox");
   await sweepAllResumeInboxes();
@@ -302,6 +315,7 @@ const TICKS: TickSpec[] = [
   { key: "meet_recordings", label: "Meeting recordings -> summary + role brief", env: "RECRUITEROS_MEET_RECORDINGS_TICK_MS", defaultMs: 5 * 60_000, firstDelayMs: 130_000, fn: tickMeetRecordings },
   { key: "linkedin_engage", label: "LinkedIn BD engagement queue (daily drafts)", env: "RECRUITEROS_LINKEDIN_ENGAGE_TICK_MS", defaultMs: 60 * 60_000, firstDelayMs: 110_000, fn: tickLinkedinEngage },
   { key: "linkedin_comments", label: "LinkedIn comment listener (own posts)", env: "RECRUITEROS_LINKEDIN_COMMENTS_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 150_000, fn: tickCommentListener },
+  { key: "post_recruiter", label: "Post Recruiter (open-to-work candidates)", env: "RECRUITEROS_POST_RECRUITER_TICK_MS", defaultMs: 20 * 60_000, firstDelayMs: 420_000, fn: tickPostRecruiterScan },
   { key: "voice", label: "Voicemail drops", env: "RECRUITEROS_VOICE_TICK_MS", defaultMs: 15 * 60_000, firstDelayMs: 45_000, fn: tickVoice },
   { key: "nurture_enroll", label: "Auto-enroll into nurture", env: "RECRUITEROS_NURTURE_ENROLL_TICK_MS", defaultMs: 30 * 60_000, firstDelayMs: 50_000, fn: tickNurtureEnroll },
   { key: "nurture", label: "24-month nurture drip", env: "RECRUITEROS_NURTURE_TICK_MS", defaultMs: 6 * 60 * 60_000, firstDelayMs: 60_000, fn: tickNurture },

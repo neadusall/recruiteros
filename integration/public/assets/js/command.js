@@ -1651,6 +1651,10 @@
     // default context. Not motionOnly: it belongs to both business units.
     linkedin: { title: "Role Hunter", crumb: "Tools", action: null, render: renderLinkedInOs, cap: "outreach:send", tool: "linkedin" },
     linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd", cap: "outreach:send", tool: "linkedinposter" },
+    // Post Recruiter: the candidate-side twin of Role Hunter. Same shared
+    // engine, accounts and ledger; it hunts people who are open to work rather
+    // than people who are hiring, so it sits under Build beside Candidates.
+    postrecruiter: { title: "Post Recruiter", crumb: "Build", action: null, render: renderPostRecruiter, motionOnly: "recruiting", cap: "outreach:send", tool: "postrecruiter" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run", tool: "builder" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation, cap: "outreach:send", tool: "automation" },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
@@ -3524,6 +3528,17 @@
   }
   liOpsRefreshBadges();
   setInterval(liOpsRefreshBadges, 180000);
+
+  // Post Recruiter lights its own tab when candidates are waiting on a decision.
+  function prRefreshBadge() {
+    if (!can("outreach:send")) return;
+    apiQuiet("/post-recruiter?summary=1").then(function (d) {
+      if (!d || !d.tallies) return; // a count we cannot fetch is not a red notice
+      setB("postrecruiter", d.tallies.drafts || 0);
+    });
+  }
+  prRefreshBadge();
+  setInterval(prRefreshBadge, 180000);
 
   // The in-tab worksheet. `group` picks which half of the day renders here:
   // "content" (LinkedIn Poster) or "outreach" (LinkedIn).
@@ -28179,6 +28194,30 @@
       tries++;
       if (tries > 40) {
         host.innerHTML = '<div class="empty">The LinkedIn tool failed to load. Refresh the page.</div>';
+        return;
+      }
+      setTimeout(mount, 125);
+    })();
+  }
+
+  /* Post Recruiter mounts the same way the LinkedIn tool does: this route is a
+     thin host, and assets/js/post-recruiter.js owns everything inside it. */
+  function renderPostRecruiter(el) {
+    var crumbEl = $("#crumb");
+    if (crumbEl) crumbEl.textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + "Build";
+    el.innerHTML = '<div class="pr-host"></div>';
+    var host = $(".pr-host", el);
+    var tries = 0;
+    (function mount() {
+      if (!document.body.contains(host)) return;
+      if (window.__PostRecruiter && window.__PostRecruiter.render) {
+        window.__PostRecruiter.render(host);
+        return;
+      }
+      // Cold deep link: post-recruiter.js loads after command.js; wait briefly.
+      tries++;
+      if (tries > 40) {
+        host.innerHTML = '<div class="empty">Post Recruiter failed to load. Refresh the page.</div>';
         return;
       }
       setTimeout(mount, 125);
