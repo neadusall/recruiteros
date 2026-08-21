@@ -677,6 +677,30 @@ export interface CurationFunnel {
   /** Whether the two levers over `catchAllParked` / `invalidParked` are currently armed, so the
    *  panel shows a stuck bucket next to the switch that drains it. */
   levers: { catchAllContactable: boolean; residualFinder: boolean };
+  /**
+   * VOICE PAIRING (2026-08-21). Outreach is coupled: a prospect should get the cold email AND a
+   * voice drop to their employer's switchboard. So the funnel has to answer "of the people we are
+   * about to mail, how many can we also CALL", stage by stage, rather than reporting a single
+   * aggregate of numbers held. `pairable` is the number that matters day to day: contactable rows
+   * (named + an address) whose company also has a confirmed, dialable number.
+   *
+   * `unattempted` is the actionable gap. A domain the resolver has never tried is free to try,
+   * unlike a domain it tried and missed, so this is what the coverage backlog should be worked
+   * against. Phones are cached per DOMAIN (positive 90d, negative 14d), which is why the domain
+   * counts are the honest denominator: many curated rows share one employer.
+   */
+  voice: {
+    curatedWithPhone: number;      // curated rows whose company has a dialable number
+    contactable: number;           // contactable rows (the email-sendable population)
+    pairable: number;              // ...of those, how many can ALSO be called
+    pairableRate: number;          // pairable / contactable
+    domains: number;               // distinct company domains across curated rows
+    domainsWithPhone: number;      // ...with a confirmed dialable number
+    domainsUnattempted: number;    // ...the resolver has never tried (the free backlog)
+    resolverAttempts: number;      // domains tried overall
+    resolverResolved: number;      // ...that produced a dialable number
+    resolverRate: number;          // resolved / attempts
+  };
   /** Daily throughput toward the 5,000 valid-emails/day goal, so consistency is measurable. */
   daily: {
     target: number;                  // 5,000
@@ -767,6 +791,37 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     .map(([date, v]) => ({ date, valid: v.valid, contactable: v.contactable }))
     .sort((a, b) => (a.date < b.date ? 1 : -1))
     .slice(0, 7);
+  // VOICE PAIRING (2026-08-21). Computed here rather than in a separate route so the email funnel
+  // and the call funnel can never disagree about the same population: one pass over `rows`, one
+  // definition of "contactable". See the `voice` field on CurationFunnel.
+  let dialable = new Set<string>();
+  let phoneAttempted = new Set<string>();
+  let phoneStats = { attempts: 0, resolved: 0, rate: 0 };
+  try {
+    const cp = await import("./companyPhone");
+    [dialable, phoneAttempted, phoneStats] = await Promise.all([
+      cp.dialableDomains(), cp.attemptedDomains(), cp.companyPhoneStats(),
+    ]);
+  } catch { /* no phone cache yet: the block reports zeros rather than breaking the funnel */ }
+  let curatedWithPhone = 0, contactableRows = 0, pairableRows = 0;
+  const allDomains = new Set<string>();
+  const domainsWithPhone = new Set<string>();
+  for (const r of rows) {
+    const d = (r.domain || "").toLowerCase().trim();
+    // "contactable" is the email-sendable population: a named person with an address on file.
+    const isContactable = !!(r.likelyEmail && r.managerName);
+    if (isContactable) contactableRows++;
+    if (!d) continue;
+    allDomains.add(d);
+    if (dialable.has(d)) {
+      curatedWithPhone++;
+      domainsWithPhone.add(d);
+      if (isContactable) pairableRows++;
+    }
+  }
+  let domainsUnattempted = 0;
+  for (const d of allDomains) if (!phoneAttempted.has(d)) domainsUnattempted++;
+
   return {
     total: rows.length,
     byStatus,
@@ -792,6 +847,18 @@ export async function curationFunnel(): Promise<CurationFunnel> {
     emailBySource: [...src.entries()].map(([source, v]) => ({ source, ...v })).sort((a, b) => b.total - a.total),
     blocked,
     levers: { catchAllContactable: catchAllContactableEnabled(), residualFinder: await residualFinderEnabled() },
+    voice: {
+      curatedWithPhone,
+      contactable: contactableRows,
+      pairable: pairableRows,
+      pairableRate: contactableRows ? Math.round((pairableRows / contactableRows) * 1000) / 1000 : 0,
+      domains: allDomains.size,
+      domainsWithPhone: domainsWithPhone.size,
+      domainsUnattempted,
+      resolverAttempts: phoneStats.attempts,
+      resolverResolved: phoneStats.resolved,
+      resolverRate: phoneStats.rate,
+    },
     daily: {
       target: DAILY_TARGET,
       validToday: todayRow.valid,

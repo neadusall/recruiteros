@@ -213,6 +213,32 @@ export function assessProspect(p) {
   const staffing = staffingFirmSignal(p);
   if (staffing) failures.push(`${p.company} is a staffing/recruiting firm (${staffing}); competitors are never pitched`);
 
+  // HEADCOUNT TIER, resolved BEFORE the owner rules because it changes how strict they are
+  // (owner decision 2026-08-21). The band opens to 2,500, but the extra headroom is granted ONLY
+  // where we can name the exact owner of THAT posting.
+  //
+  // The reasoning is about how hiring actually works at each size. At 100-1,000 a CEO or a CHRO
+  // plausibly IS in the loop on an individual req, which is why transition mode lets those rows
+  // send when nobody better is known. At 1,001-2,500 they are not: a req that size is owned by its
+  // own function leader, and mailing the CEO about a Staff Accountant opening reads as a blast.
+  // So the extended band carries no fallbacks at all - no whole-company exec, no ambiguous senior,
+  // no company-level buyer row, and no talent-leader carve-out for a normal req. Exact owner or
+  // hold. Executive searches keep their carve-out at every size, because for a VP+/C-suite req the
+  // CEO genuinely is the buyer.
+  //
+  // Measured before shipping: the extended band is 1,498 curated rows, +22% on the 6,686 in the
+  // core band. It is NOT the whole 8,671-row over-1,000 pile - 7,173 of those sit above 2,500 and
+  // stay rejected.
+  const minHeads = Number(process.env.MPC_MIN_HEADCOUNT || 100);
+  const coreMaxHeads = Number(process.env.MPC_MAX_HEADCOUNT || 1000);
+  const extMaxHeads = Math.max(coreMaxHeads, Number(process.env.MPC_EXT_HEADCOUNT || 2500));
+  const headCount = Number(p.employeeCount);
+  const headsKnown = Number.isFinite(headCount) && headCount > 0;
+  // An UNCONFIRMED size is never treated as extended: we only demand the stricter rule where we
+  // positively know the company is above the core band, so resolver coverage can never silently
+  // tighten targeting on a company that was in the core band all along.
+  const extendedBand = headsKnown && headCount > coreMaxHeads && headCount <= extMaxHeads;
+
   const dmText = (p.managerName || "") + " " + (p.managerTitle || "");
   if (!p.managerName || !p.managerName.trim()) {
     failures.push("no named decision-maker");
@@ -251,14 +277,22 @@ export function assessProspect(p) {
     //                rejected in BOTH modes is a clearly different-function exec, which was
     //                never defensible.
     // Flip with MPC_TARGETING_MODE=strict in .env.production. No code change needed.
-    const strictOwner = (process.env.MPC_TARGETING_MODE || "transition").toLowerCase() === "strict";
+    // The extended headcount band (1,001-2,500) forces strict owner rules on that row REGARDLESS
+    // of the global mode: that headroom was granted on the condition that we name the exact hiring
+    // manager for the posting, so it cannot inherit transition mode's fallbacks.
+    const strictOwner = (process.env.MPC_TARGETING_MODE || "transition").toLowerCase() === "strict" || extendedBand;
     const isOwner = !!(dmFn && dmFn !== "universal" && dmFn === roleFn);
+    // EXACT OWNER ONLY. A normal req at 1,001-2,500 employees has exactly one acceptable
+    // recipient: the leader of the function the role sits in. No whole-company exec, no ambiguous
+    // senior, no company-level buyer row, and no talent-leader carve-out. An executive search is
+    // excluded from this because for a VP+/C-suite req the CEO really is the buyer at any size.
+    const exactOwnerOnly = extendedBand && !execReq;
     // The talent leader buys hiring for every function (see isTalentBuyer). STRICT mode still
     // holds a company-level buyer row, because strict exists to demand a buyer resolved against
     // THIS req and those rows never were: they are the CHRO mined once per company carrying
     // whatever req happened to be in hand, and 45.7% of the store looks like that. In transition
     // mode, which is what runs today, they send, and that is where the unlocked volume comes from.
-    const talentBuyer = isTalentBuyer(p.managerTitle) && !(strictOwner && p.companyBuyerRow);
+    const talentBuyer = isTalentBuyer(p.managerTitle) && !exactOwnerOnly && !(strictOwner && p.companyBuyerRow);
     if (execReq) {
       // A leadership hire: the whole-company exec or that function's own exec both qualify,
       // and so does the talent leader, who typically runs executive search at that company.
@@ -267,6 +301,11 @@ export function assessProspect(p) {
       }
     } else if (isOwner || talentBuyer) {
       /* the owner of the req, or the talent leader who buys hiring for every function */
+    } else if (exactOwnerOnly) {
+      // Named separately from the generic owner failures so the reason is unambiguous in the
+      // hold logs: this row is only here because the band was widened, and it did not meet the
+      // condition the widening was granted on.
+      failures.push(`${p.company} has ${headCount} employees, above the ${coreMaxHeads} core band: reqs that size are owned by their own function leader, so we need the ${roleFn} owner and "${p.managerTitle || "?"}" is not it`);
     } else if (!strictOwner) {
       // Transition: everything except a clearly different-function exec.
       if (dmFn && dmFn !== "universal" && dmFn !== roleFn) {
@@ -286,26 +325,25 @@ export function assessProspect(p) {
     }
   }
 
-  // HEADCOUNT BAND (owner mandate 2026-08-20): only companies of 100-1,000 employees. This is a
-  // CONFIRMED-size gate and it fails closed — an unconfirmed company is held, never mailed on a
-  // guess. tools/company-size.mjs resolves real LinkedIn headcounts into the shared size cache,
-  // and batch.mjs attaches them to the prospect before this runs.
-  // A company we have POSITIVELY CONFIRMED is outside 100-1,000 is rejected in BOTH modes: that is
+  // HEADCOUNT BAND (owner mandate 2026-08-20, widened 2026-08-21): companies of 100 up to
+  // MPC_EXT_HEADCOUNT (2,500). The tier itself was resolved at the top of this function, because
+  // 1,001-2,500 is only open where the exact owner of the posting is named; see extendedBand.
+  // This is a CONFIRMED-size gate and it fails closed — an unconfirmed company is held, never
+  // mailed on a guess. tools/company-size.mjs resolves real LinkedIn headcounts into the shared
+  // size cache, and batch.mjs attaches them to the prospect before this runs.
+  // A company we have POSITIVELY CONFIRMED is outside the band is rejected in BOTH modes: that is
   // not unused data, it is data telling us not to send. Only the treatment of an UNCONFIRMED size
   // differs: strict holds it (never mail on a guess), transition lets it through with a warning so
   // the desk is not throttled by resolver coverage while the cache fills in.
-  const minHeads = Number(process.env.MPC_MIN_HEADCOUNT || 100);
-  const maxHeads = Number(process.env.MPC_MAX_HEADCOUNT || 1000);
   const sizeStrict = (process.env.MPC_SIZE_MODE || "known-bad-only").toLowerCase() === "confirmed";
-  const heads = Number(p.employeeCount);
-  if (!Number.isFinite(heads) || heads <= 0) {
+  if (!headsKnown) {
     if (sizeStrict) {
-      failures.push(`company size for ${p.company} is unconfirmed; the ${minHeads}-${maxHeads} employee mandate needs a verified headcount`);
+      failures.push(`company size for ${p.company} is unconfirmed; the ${minHeads}-${extMaxHeads} employee mandate needs a verified headcount`);
     } else {
       warnings.push(`${p.company} size unconfirmed (sent under transition mode; run tools/company-size.mjs to resolve it)`);
     }
-  } else if (heads < minHeads || heads > maxHeads) {
-    failures.push(`${p.company} has ${heads} employees, outside the ${minHeads}-${maxHeads} employee target band`);
+  } else if (headCount < minHeads || headCount > extMaxHeads) {
+    failures.push(`${p.company} has ${headCount} employees, outside the ${minHeads}-${extMaxHeads} employee target band`);
   }
   const foreign = foreignAffiliation(p.managerTitle || "", p.company);
   if (foreign) failures.push(`decision-maker works at a different company ("${foreign}"), not ${p.company}`);

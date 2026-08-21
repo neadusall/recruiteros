@@ -387,6 +387,20 @@ const GROUP_SUPPLY = "Supply pipeline";
     : freshReady === 0 ? `Nothing is queued to send. Held right now: ${sp.heldGuessed} guessed addresses, ${sp.heldUnvalidated} unvalidated, ${sp.buyerHolds} pointing at the wrong buyer, ${sp.heldSourcePaused} on a paused rung. Capacity is irrelevant until this is above zero.`
     : freshReady < 25 ? `Only ${freshReady} rows are sendable, so today's volume is capped by SUPPLY, not by fleet capacity or reputation. The buyer rename and the KoldInfo finder are what refill this.`
     : `${sp.buyerOverridesApplied} rows re-targeted by the buyer rename. Guessed addresses are held by policy (${sp.heldGuessed}) and only the finder converts them.`);
+
+  // VOICE PAIRING (2026-08-21): outreach is coupled, so a sendable row that carries no dialable
+  // corporate number is half a touch. Amber rather than red on purpose: a low pairing rate costs
+  // reach, it does not break the email lane, and the fix (resolve more switchboards) is free.
+  const pairable = sp?.voicePairable ?? 0;
+  const pairRate = freshReady ? pairable / freshReady : 0;
+  add(GROUP_SUPPLY, "voicepairing", "Voice Drops pairing (email + call coverage)",
+    !sp ? "amber" : freshReady === 0 ? "amber" : pairRate < 0.25 ? "amber" : "good",
+    !sp ? "not published"
+      : `${pairable} of ${freshReady} sendable rows also dialable (${Math.round(pairRate * 100)}%) · ${sp.voiceDialableDomains ?? 0} employer numbers on file`,
+    !sp ? "batch.mjs publishes this every send tick alongside the supply funnel"
+    : freshReady === 0 ? "Nothing is queued to send, so there is nothing to pair a call with yet"
+    : pairRate < 0.25 ? "Most of today's batch would get an email but no call. Company phones resolve free from the employer's own site, so this gap is worked by running the resolver over curated domains it has never tried, not by buying data."
+    : `Coupled outreach is covered for most of the batch. Numbers are cached per employer domain, so one lookup serves every prospect at that company.`);
 }
 
 const eng = readJson(`${VOL}/snap_inmarket_engine_health_v1.json`);

@@ -558,6 +558,36 @@ export async function resolveCompanyPhone(
   return result;
 }
 
+/**
+ * The Voice Drops PAIRING SET: every domain that has a confirmed number this deployment can
+ * actually dial (added 2026-08-21). Outreach is coupled — a prospect gets the cold email AND a
+ * voice drop — so the pipeline has to be able to answer "how many of the people we are about to
+ * mail can we also call", per stage, not just "how many numbers do we hold" in aggregate.
+ *
+ * Returns lowercased domains so callers can join straight against a prospect's `domain`, and
+ * filters through isDialableHere so a non-NANP number never counts as pairable on a US dialer.
+ */
+export async function dialableDomains(): Promise<Set<string>> {
+  const c = await ensureCache();
+  const out = new Set<string>();
+  for (const [d, row] of c) {
+    if (row?.ok && row.phone && isDialableHere(row.phone)) out.add(d.toLowerCase());
+  }
+  return out;
+}
+
+/**
+ * Every domain the resolver has ALREADY tried, hit or miss. The complement of this against the
+ * curated domains is the free backlog: a domain never tried can still yield a number, while one
+ * tried and missed is cached negative for 14 days and is not worth re-queuing.
+ */
+export async function attemptedDomains(): Promise<Set<string>> {
+  const c = await ensureCache();
+  const out = new Set<string>();
+  for (const d of c.keys()) out.add(d.toLowerCase());
+  return out;
+}
+
 /** Coverage stats for the Clients tab / health board: how many domains we've tried and hit. */
 export async function companyPhoneStats(): Promise<{ attempts: number; resolved: number; rate: number }> {
   const c = await ensureCache();

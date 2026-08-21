@@ -182,11 +182,11 @@ test("owner-only: the CEO IS the buyer for an executive-search req", () => {
   const r = assessProspect(p);
   assert.equal(r.eligible, true, r.failures.join("; "));
 });
-test("headcount band: under 100, over 1,000, and unconfirmed are all held", () => {
+test("headcount band: under 100, over 2,500, and unconfirmed are all held", () => {
   const small = base(); small.employeeCount = 40;
-  assert.ok(assessProspect(small).failures.some(f => /outside the 100-1000/.test(f)));
+  assert.ok(assessProspect(small).failures.some(f => /outside the 100-2500/.test(f)));
   const big = base(); big.employeeCount = 3800;   // the Ping Identity class of company
-  assert.ok(assessProspect(big).failures.some(f => /outside the 100-1000/.test(f)));
+  assert.ok(assessProspect(big).failures.some(f => /outside the 100-2500/.test(f)));
   const unknown = base(); delete unknown.employeeCount;
   assert.ok(assessProspect(unknown).failures.some(f => /unconfirmed/.test(f)), "unknown size must fail closed");
   const edgeLow = base(); edgeLow.employeeCount = 100;
@@ -194,6 +194,7 @@ test("headcount band: under 100, over 1,000, and unconfirmed are all held", () =
   const edgeHigh = base(); edgeHigh.employeeCount = 1000;
   assert.equal(assessProspect(edgeHigh).eligible, true);
 });
+
 
 /* ---- classifier recall: the families and titles that used to fall through ---- */
 
@@ -281,6 +282,65 @@ test("buyerFit agrees with assessProspect and names the recoverable holds", () =
  * ---------------------------------------------------------------------------------------- */
 process.env.MPC_TARGETING_MODE = "transition";
 process.env.MPC_SIZE_MODE = "known-bad-only";
+
+/* ---- extended band 1,001-2,500 (owner decision 2026-08-21) ----
+   The headroom above the core band was granted on ONE condition: we name the exact hiring
+   manager for that posting. So every fallback that transition mode allows at 100-1,000 is off
+   for these rows, and only an executive search keeps its CEO carve-out. base() is already the
+   exact owner (a CFO on an accounting req), which is what makes the contrast tests meaningful. */
+
+test("extended band: the exact function owner sends at 1,001-2,500", () => {
+  const p = base(); p.employeeCount = 1500;
+  assert.equal(assessProspect(p).eligible, true, assessProspect(p).failures.join("; "));
+  const edge = base(); edge.employeeCount = 2500;
+  assert.equal(assessProspect(edge).eligible, true, "2,500 is inside the extended band");
+  const over = base(); over.employeeCount = 2501;
+  assert.equal(assessProspect(over).eligible, false, "2,501 is outside it");
+});
+
+test("extended band: a whole-company exec does NOT send on a normal req", () => {
+  // The same row would pass at 900 employees under transition mode. That is the whole point.
+  const p = base(); p.employeeCount = 1500;
+  p.managerName = "Dave Girouard"; p.managerTitle = "Chief Executive Officer";
+  p.likelyEmail = "dave.girouard@upstart.com";
+  const r = assessProspect(p);
+  assert.equal(r.eligible, false);
+  assert.ok(r.failures.some(f => /above the 1000 core band/.test(f)), r.failures.join("; "));
+
+  const smaller = { ...p, employeeCount: 900 };
+  assert.equal(assessProspect(smaller).eligible, true, "at 900 the CEO still sends under transition mode");
+});
+
+test("extended band: the talent leader carve-out is off for a normal req", () => {
+  // A CHRO buys hiring for every function at 100-1,000. At 1,001-2,500 a Staff Accountant req is
+  // owned by the CFO, and mailing the CHRO about it is exactly the blast we are avoiding.
+  const p = base(); p.employeeCount = 1500;
+  p.managerName = "Sam Reyes"; p.managerTitle = "Chief Human Resources Officer";
+  p.likelyEmail = "sam.reyes@upstart.com";
+  const r = assessProspect(p);
+  assert.equal(r.eligible, false, r.failures.join("; "));
+
+  const smaller = { ...p, employeeCount: 900 };
+  assert.equal(assessProspect(smaller).eligible, true, "at 900 the talent leader still buys");
+});
+
+test("extended band: an executive search keeps the CEO as a valid buyer", () => {
+  const p = base(); p.employeeCount = 1500; p.role = "VP of Finance";
+  p.managerName = "Dave Girouard"; p.managerTitle = "Chief Executive Officer";
+  p.likelyEmail = "dave.girouard@upstart.com";
+  const r = assessProspect(p);
+  assert.equal(r.eligible, true, r.failures.join("; "));
+});
+
+test("extended band: an UNCONFIRMED size is never treated as extended", () => {
+  // Resolver coverage must not silently tighten targeting on a company that was in the core band
+  // all along, so an unknown headcount keeps the core rules (and its own unconfirmed warning).
+  const p = base(); delete p.employeeCount;
+  p.managerName = "Dave Girouard"; p.managerTitle = "Chief Executive Officer";
+  p.likelyEmail = "dave.girouard@upstart.com";
+  const r = assessProspect(p);
+  assert.ok(!r.failures.some(f => /core band/.test(f)), r.failures.join("; "));
+});
 
 test("transition: a CEO may send when nobody better is known", () => {
   const p = base(); p.managerName = "Dave Girouard"; p.managerTitle = "Chief Executive Officer";

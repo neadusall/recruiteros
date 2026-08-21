@@ -51,6 +51,7 @@ function loadBlockedCohorts() {
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
 const SUPPLY_SNAP = process.env.MPC_SUPPLY_SNAPSHOT || "/data/snap_mpc_supply_v1.json";
+const PHONE_SNAP = process.env.MPC_PHONE_SNAPSHOT || "/data/snap_inmarket_company_phone_v1.json";
 const SENDERS = process.env.MPC_SENDERS_FILE || "/data/snap_senders_v1.json";
 const OUT = process.env.MPC_OUT_DIR || "/out";
 const LUME_WS = "ws_mqf6o989003";
@@ -648,6 +649,30 @@ async function main() {
   // Ordering note: the buckets below are EXCLUSIVE and measured at the point each one bites, so
   // they do not sum to `curated` (a row rejected at the gate is never tested for an address).
   // `freshReady` is the only number that means "could have been sent this run".
+  // VOICE PAIRING on the send side (2026-08-21). Outreach is coupled: the same prospect should get
+  // the cold email AND a voice drop to their employer's switchboard, so the sender reports how many
+  // of the rows it is ABOUT TO MAIL can also be dialled. The app's funnel reports the same idea
+  // across the whole store; this one is the send-time slice, which is the number that decides how
+  // much of today's batch the dialer can actually follow.
+  // Phones are cached per DOMAIN (positive 90d, negative 14d) and only a +1 number is dialable on
+  // this deployment, matching isDialableHere() on the app side.
+  let phonePairable = 0, phoneGated = 0, phoneDomains = 0;
+  try {
+    const raw = JSON.parse(readFileSync(PHONE_SNAP, "utf8"));
+    const pmap = (raw && (raw.data || raw)) || {};
+    const dialable = new Set();
+    for (const [d, row] of Object.entries(pmap)) {
+      if (row && row.ok && row.phone && String(row.phone).startsWith("+1")) dialable.add(d.toLowerCase());
+    }
+    phoneDomains = dialable.size;
+    const has = (p) => { const d = (p.domain || "").toLowerCase().trim(); return !!d && dialable.has(d); };
+    phonePairable = fresh.filter(has).length;
+    phoneGated = gated.filter(has).length;
+  } catch { /* no phone cache yet: report zeros rather than break the run */ }
+  if (fresh.length) {
+    console.log(`  voice pairing: ${phonePairable} of ${fresh.length} sendable rows also have a dialable corporate number (${Math.round((phonePairable / fresh.length) * 100)}%)`);
+  }
+
   try {
     const supply = {
       version: 1,
@@ -664,6 +689,10 @@ async function main() {
       heldSourcePaused: skippedSourcePaused,
       heldGuessed: skippedPattern,
       freshReady: fresh.length,
+      // Voice Drops pairing: what the dialer can follow the email with.
+      voicePairable: phonePairable,
+      voicePairableOfGated: phoneGated,
+      voiceDialableDomains: phoneDomains,
     };
     writeFileSync(SUPPLY_SNAP, JSON.stringify(supply, null, 1));
   } catch { /* never let a reporting write break a send run */ }

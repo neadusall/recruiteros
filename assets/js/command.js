@@ -1821,6 +1821,24 @@
           card("Email hit-rate", hit + "%", "verified ÷ emails", hit < 20 ? "var(--danger)" : "var(--ok)") +
           "</div>";
 
+        // 2b) COUPLED OUTREACH · corporate numbers. Outbound is email AND a voice drop to the
+        //     employer's switchboard, so the pipeline has to show call coverage next to email
+        //     coverage rather than in a separate tab nobody opens. `Pairable` is the operative
+        //     number: contactable rows (named + an address) whose company also has a dialable
+        //     number, i.e. the people who can get BOTH touches today. The unattempted count is
+        //     the free backlog, since a switchboard resolves from the employer's own site.
+        var vc = f.voice || {};
+        var pairPct = Math.round((vc.pairableRate || 0) * 100);
+        html += '<h3 style="margin:18px 0 8px;font-size:14px;color:var(--text-muted)">Coupled outreach · corporate numbers</h3>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          card("Email + call ready", n(vc.pairable), "of " + n(vc.contactable) + " contactable", pairPct >= 40 ? "var(--ok)" : "var(--warn)") +
+          card("Pairing rate", pairPct + "%", "contactable rows we can also dial", pairPct >= 40 ? "var(--ok)" : "var(--warn)") +
+          card("Employers with a number", n(vc.domainsWithPhone), "of " + n(vc.domains) + " company domains") +
+          card("Never looked up", n(vc.domainsUnattempted), "free to resolve", (vc.domainsUnattempted || 0) > 0 ? "var(--warn)" : "var(--ok)") +
+          card("Resolver hit-rate", Math.round((vc.resolverRate || 0) * 100) + "%", n(vc.resolverResolved) + " of " + n(vc.resolverAttempts) + " tried") +
+          "</div>" +
+          '<div class="ob-note">Numbers are cached per EMPLOYER domain, so one lookup covers every prospect at that company. A domain that has never been tried is worth resolving; one already tried and missed is cached negative and is not.</div>';
+
         // 2a) WHERE THE BACKLOG IS STUCK. The video fleet renders `renderable` and nothing else, so
         //     when video output falls to zero this row says which gate is holding the rest — instead
         //     of the answer being "somewhere upstream". Buckets are exclusive and sum to Curated.
