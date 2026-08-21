@@ -183,6 +183,10 @@ done
 
 # 6. Containers: everything that should run is running, nothing is unhealthy.
 RUNNING=$(docker ps --format '{{.Names}}')
+# Names listed in RETIRED_FILE (one per line) are services we chose to switch off, and are
+# skipped. Retiring something should never need an edit to the loop below - that is how the
+# recruitersos-mail stack went on paging CRITICAL for 23h after we deliberately stopped it.
+RETIRED_FILE=/etc/ros-sentinel/retired-containers
 for c in recruiteros-app-1 recruiteros-taltxt-1 recruiteros-caddy-1 recruiteros-db-1 \
          recruiteros-lume-jobs-1 recruiteros-laxis-worker-1 recruiteros-autoheal-1 \
          recruiteros-searxng-1 mytal-web landlinedb-svc; do
@@ -191,7 +195,16 @@ for c in recruiteros-app-1 recruiteros-taltxt-1 recruiteros-caddy-1 recruiteros-
   # stop-dead-mail-stack.sh 2026-08-20. Smartlead/Sending.ac are the real senders. Do NOT
   # re-add it here: a stack we chose to stop is not an outage, and paging CRITICAL on it
   # masked every real signal in the same email.
-  echo "$RUNNING" | grep -qx "$c" || fail "CONTAINER-DOWN" "$c is not running"
+  if [ -r "$RETIRED_FILE" ] && grep -qxF "$c" "$RETIRED_FILE" 2>/dev/null; then continue; fi
+  echo "$RUNNING" | grep -qx "$c" && continue
+  # Not running. "Stopped" and "does not exist" need completely different fixes, so never
+  # report them with the same words: one is an outage, the other is this list being stale.
+  if docker inspect "$c" >/dev/null 2>&1; then
+    CST=$(docker inspect "$c" --format '{{.State.Status}}, exit code {{.State.ExitCode}}' 2>/dev/null || echo unknown)
+    fail "CONTAINER-DOWN" "$c is not running ($CST)"
+  else
+    fail "CONTAINER-MISSING" "$c does not exist on this host at all - it was renamed, removed or retired without updating the sentinel. Fix the required-container list in ops/ros-sentinel.sh, or add the name to $RETIRED_FILE"
+  fi
 done
 UNHEALTHY=$(docker ps --filter health=unhealthy --format '{{.Names}}')
 [ -z "$UNHEALTHY" ] || fail "CONTAINER-UNHEALTHY" "unhealthy: $(echo "$UNHEALTHY" | tr '\n' ' ')"
@@ -328,7 +341,13 @@ if [ "$VN" = "0" ]; then
     if [ "${VREJECT:-0}" -gt "$GN" ] 2>/dev/null; then GATE="${VREJECT} named people had every guessed address rejected and need a residual email finder"; GN=${VREJECT:-0}; fi
     if [ "${VEPEND:-0}" -gt "$GN" ] 2>/dev/null; then GATE="${VEPEND} named people are waiting on an email to be found"; GN=${VEPEND:-0}; fi
     if [ "${VCATCH:-0}" -gt "$GN" ] 2>/dev/null; then GATE="${VCATCH} named people are on catch-all domains whose specific mailbox cannot be confirmed"; GN=${VCATCH:-0}; fi
-    fail "VIDEO-SUPPLY-EMPTY" "0 videos produced in the last 30 minutes because the queue is empty: every contactable role already has a video. The gate upstream is: ${GATE}. Full breakdown - unnamed ${VUNNAMED}, rejected-address ${VREJECT}, email-pending ${VEPEND}, catch-all ${VCATCH}"
+    # Only say supply has dried up once it ACTUALLY has. Output is a bursty trickle, so an
+    # empty queue in any single 30-minute window is ordinary - keyed on that, this warning
+    # flapped against the GREEN all-clear every few minutes, which is its own kind of noise:
+    # an all-clear that arrives every hour stops meaning anything. Require a sustained drought.
+    if [ "${VLAST:-999999}" -ge "${VIDEO_SUPPLY_QUIET_MIN:-180}" ] 2>/dev/null; then
+      fail "VIDEO-SUPPLY-EMPTY" "no video has been produced for ${VLAST} minutes and the queue is empty: every contactable role already has a video. The gate upstream is: ${GATE}. Full breakdown - unnamed ${VUNNAMED}, rejected-address ${VREJECT}, email-pending ${VEPEND}, catch-all ${VCATCH}"
+    fi
   fi
 fi
 
@@ -407,15 +426,28 @@ fi
 CURSTATS=$(docker exec recruiteros-app-1 node -e "
 try{const h=require('/data/snap_inmarket_engine_health_v1.json');
 const age=(Date.now()-Date.parse(h.lastCurationAt||h.bootAt||0))/6e4;
-console.log(age.toFixed(0)+' '+(h.lastCurationOk===false?'bad':'ok'));}catch(e){console.log('ERR')}" 2>/dev/null || echo ERR)
-if [ "$CURSTATS" != "ERR" ] && [ -n "$CURSTATS" ] && { [ "$MROLE" = "all" ] || [ -z "$MROLE" ]; }; then
-  CAGE=${CURSTATS%% *}; COK=${CURSTATS##* }
+console.log(age.toFixed(0)+' '+(h.lastCurationOk===false?'bad':'ok')+' '+(h.lastCurationAt||'none'));}catch(e){console.log('ERR ERR ERR')}" 2>/dev/null || echo "ERR ERR ERR")
+if [ "${CURSTATS%% *}" != "ERR" ] && [ -n "$CURSTATS" ] && { [ "$MROLE" = "all" ] || [ -z "$MROLE" ]; }; then
+  CAGE=${CURSTATS%% *}; CURREST=${CURSTATS#* }; COK=${CURREST%% *}; CAT=${CURREST#* }
+  # One abandoned tick is ordinary noise on a 2-core box - this alert's own text has always
+  # said REPEATED abandons are the Aug-14 signature, but it used to fire on a single one.
+  # It also re-counted the SAME tick on every run: the sentinel samples every 5 min while a
+  # tick takes ~10, so one bad tick looked like two or three. Count DISTINCT ticks, keyed on
+  # lastCurationAt, and only page once a real streak forms.
+  CURSTATE=/var/lib/ros-sentinel/curation.state
+  CPREVAT=""; CSTREAK=0
+  if [ -r "$CURSTATE" ]; then read -r CPREVAT CSTREAK < "$CURSTATE" 2>/dev/null || true; fi
+  case "${CSTREAK:-}" in ''|*[!0-9]*) CSTREAK=0;; esac
+  if [ "$CAT" != "$CPREVAT" ]; then
+    if [ "$COK" = "bad" ]; then CSTREAK=$((CSTREAK+1)); else CSTREAK=0; fi
+    printf '%s %s\n' "$CAT" "$CSTREAK" > "$CURSTATE" 2>/dev/null || true
+  fi
   APPSTART=$(docker inspect recruiteros-app-1 --format '{{.State.StartedAt}}' 2>/dev/null)
   UPMIN=$(( ( $(date -u +%s) - $(date -u -d "$APPSTART" +%s 2>/dev/null || date -u +%s) ) / 60 ))
   if [ "${UPMIN:-0}" -ge 45 ] && [ "${CAGE:-0}" -ge 45 ] 2>/dev/null; then
     fail "MPC-CURATION-STALLED" "no curation tick has completed in ${CAGE} min with the app up ${UPMIN} min (normal cadence: ~10 min) - DM naming and email validation are not running, cold-email supply is flatlining"
-  elif [ "$COK" = "bad" ]; then
-    fail "MPC-CURATION-FAILING" "the last curation tick was abandoned by its watchdog - repeated abandons are the Aug-14 supply-drought signature; check INMARKET_CURATE_WATCHDOG_SEC headroom and app logs"
+  elif [ "$COK" = "bad" ] && [ "$CSTREAK" -ge "${MPC_CURATION_BAD_STREAK:-3}" ] 2>/dev/null; then
+    fail "MPC-CURATION-FAILING" "the last ${CSTREAK} consecutive curation ticks were abandoned by their watchdog - repeated abandons are the Aug-14 supply-drought signature; check INMARKET_CURATE_WATCHDOG_SEC headroom (the tick needs ~13 uninterrupted min) and app logs"
   fi
 fi
 # 15c. Sends flatline: on a weekday after 17:00 UTC (the daily unit fires 15:00),
@@ -561,6 +593,24 @@ explain() {
     CONTAINER-UNHEALTHY) NAME="Platform component"; SEV="CRITICAL"
       MEANING="A piece of the platform is running but reporting itself as unhealthy."
       IMPACT="The feature it powers is failing or about to fail.";;
+    CONTAINER-MISSING) NAME="Platform component"; SEV="CRITICAL"
+      MEANING="A container this monitor requires does not exist on this host at all - not stopped, absent."
+      IMPACT="Either the service was renamed or removed and this monitor was never told, or it never got created. Until the required-container list matches reality, this check cannot tell a real outage from stale configuration - so fix the list, do not just restart something.";;
+    MPC-CURATION-FAILING) NAME="Cold-email supply curation"; SEV="WARNING"
+      MEANING="The curation tick - the job that researches decision-maker names and validates their email addresses - has now been killed by its own watchdog several times in a row before it could finish."
+      IMPACT="Every abandoned tick throws that batch of research away, so no new contactable people are produced. Supply drains from the top and surfaces hours later as an empty video queue and falling send volume. One abandon is normal; a streak means the tick cannot finish inside its watchdog window, usually because the box is CPU-starved.";;
+    MPC-CURATION-STALLED) NAME="Cold-email supply curation"; SEV="CRITICAL"
+      MEANING="No curation tick has completed at all for 45+ minutes, on an app that has been up long enough to have run several (normal cadence is about 10 minutes)."
+      IMPACT="Decision-maker naming and email validation are not running at all. Cold-email supply is flatlining, and videos and send volume follow it down a few hours later.";;
+    MPC-ENRICHMENT-OFF) NAME="Cold-email supply enrichment"; SEV="WARNING"
+      MEANING="Enrichment is switched OFF by configuration: INMARKET_ROLE is not set to all, so this instance does no decision-maker research and no email validation."
+      IMPACT="No new contactable people are produced at all. Harmless if this was a deliberate pause; if it was not, cold-email supply starves until it is switched back on and the app is recreated.";;
+    MPC-SENDS-FLATLINE) NAME="Cold email sending"; SEV="CRITICAL"
+      MEANING="It is a weekday afternoon, well past the time the daily cold-email run fires, and almost no send attempts have been logged."
+      IMPACT="A day of outreach is being lost. Either the daily job died, or the supply funnel upstream has nothing left to send to - the detail line and the supply checks say which.";;
+    MPC-API-ERRORS) NAME="Cold email sending"; SEV="WARNING"
+      MEANING="Sends are being rejected by the Mailbox API with 404 or 429 errors: a mailbox or lane is misconfigured, or the provider is throttling."
+      IMPACT="Those attempts are burned - they count as work done but reach nobody. The 404 signature usually means follow-ups aimed at mailboxes that no longer exist at the provider.";;
     DB-DOWN) NAME="Database"; SEV="CRITICAL"
       MEANING="The main database is not accepting connections."
       IMPACT="The entire portal is effectively down: logins, candidates, campaigns, everything.";;

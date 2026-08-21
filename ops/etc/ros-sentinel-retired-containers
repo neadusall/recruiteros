@@ -1,0 +1,18 @@
+# Containers we deliberately switched off. The sentinel SKIPS every name listed here,
+# so a service we chose to retire can never page CONTAINER-DOWN again.
+#
+# One container name per line. Comments and blank lines are ignored by the grep -qxF
+# match only in the sense that they will never equal a container name.
+#
+# Retiring a service: add its name here. Bringing one back: remove the line AND make
+# sure it is in the required-container list in ops/ros-sentinel.sh.
+#
+# 2026-08-20 - the recruitersos-mail stack (Azure ACS MVP). Up 7 weeks, sent 0 mail,
+# burned ~1/3 of a core on a 2-core box. Stopped by stop-dead-mail-stack.sh (--undo
+# restores it). Smartlead / Sending.ac are the real senders. It then paged 4x CRITICAL
+# every 5 minutes for 23 hours, which forced every alert email to RED and buried the
+# real signals underneath it.
+recruitersos-mail-mail-api-1
+recruitersos-mail-mail-web-1
+recruitersos-mail-mail-redis-1
+recruitersos-mail-mail-postgres-1
