@@ -23,8 +23,22 @@ docker run --rm -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:r
 
 # 0.5) Grow the FREE ATS directory: discover + validate new employer boards so free sourcing
 #      compounds toward thousands of employers at $0 (no JSearch credits).
-docker run --rm -e ATS_MAX_VALIDATE=4000 -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro \
+#
+#      2026-08-21: this step had quietly stopped compounding. It ran with NO env file, so the
+#      tool logged "serper: no key, skipping enumeration" on every run and its highest-confidence
+#      rung never fired: the site: searches against the board hosts return live apply URLs, which
+#      are PROVEN-real slugs needing no validation probe at all. The keyless aggregators alone
+#      yielded "0 high-confidence apply-URL slugs" because their links now point at their own
+#      redirectors rather than at ATS boards. The key is already in .env.production (step 0.93
+#      passes it), so this is purely a plumbing fix. SERPER_MAX_QUERIES bounds the spend.
+#
+#      The tool also had no memory of FAILED candidates, so it re-probed the same head of the
+#      pool every day: 27,181 name-candidates harvested, directory 2,447 -> 2,448. It now keeps
+#      a tried-ledger and advances through the pool (see discover-ats-slugs.mjs).
+grep -E '^(SERPER_API_KEY|SERPER_MAX_QUERIES|ATS_[A-Z_]+)=' .env.production > /tmp/ats.env 2>/dev/null || true
+docker run --rm --env-file /tmp/ats.env -e ATS_MAX_VALIDATE=4000 -v recruiteros_app_data:/data -v /opt/recruiteros/tools:/tools:ro \
   --entrypoint node recruiteros-app /tools/discover-ats-slugs.mjs >> "$LOG" 2>&1 || true
+rm -f /tmp/ats.env
 
 # 0.9) Domain rest fail-safe, PRE-SEND pass: evaluate yesterday's audit so today's batch never
 #      sends through a domain that is bouncing, reputation-damaged, or auth-broken. Benched

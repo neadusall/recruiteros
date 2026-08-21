@@ -17,6 +17,13 @@ import { readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
 
 const OUT_FILE = process.env.ATS_EXT_FILE || "/data/snap_inmarket_ats_slugs_ext_v1.json";
 const MAX_VALIDATE = Number(process.env.ATS_MAX_VALIDATE || 3000); // cap name-candidate probes per run
+// TRIED LEDGER (2026-08-21). Only slugs that VALIDATE were ever remembered, so a candidate that
+// failed was re-probed on every future run. Combined with `.slice(0, MAX_VALIDATE)` over a set in
+// stable insertion order, that meant each run probed the SAME first few thousand names for ever:
+// the directory grew 2,447 -> 2,448 on a day that harvested 27,181 candidates, and names past the
+// cap were never reached at all. Remembering failures is what makes this rung compound.
+const TRIED_FILE = process.env.ATS_TRIED_FILE || "/data/snap_inmarket_ats_tried_v1.json";
+const RETRY_DAYS = Number(process.env.ATS_RETRY_DAYS || 30); // a miss gets another chance eventually
 const CONC = Number(process.env.ATS_CONCURRENCY || 12);
 const UA = { "user-agent": "Mozilla/5.0", Accept: "application/json, text/xml, */*" };
 
@@ -186,17 +193,40 @@ async function main() {
   // Apply-URL slugs are already proven real (they came from live apply links) — accept directly.
   for (const s of urlSlugs) known.add(s);
 
-  // Validate a capped batch of NEW name-candidates concurrently.
-  const toCheck = [...candidates].filter((s) => s.length >= 3 && !known.has(s)).slice(0, MAX_VALIDATE);
+  // Validate a capped batch of NEW name-candidates concurrently. A candidate is eligible only if
+  // it is not already known AND has not been probed inside the retry window, so successive runs
+  // ADVANCE through the candidate pool instead of re-probing the same head of it every day.
+  const now = Date.now();
+  const retryMs = RETRY_DAYS * 24 * 60 * 60 * 1000;
+  let tried = {};
+  try {
+    if (existsSync(TRIED_FILE)) {
+      const j = JSON.parse(readFileSync(TRIED_FILE, "utf8"));
+      if (j && typeof j.tried === "object" && j.tried) tried = j.tried;
+    }
+  } catch { /* a corrupt ledger just means we re-probe; never fatal */ }
+
+  const fresh = [...candidates].filter((s) => s.length >= 3 && !known.has(s));
+  const eligible = fresh.filter((s) => !(tried[s] && now - tried[s] < retryMs));
+  const toCheck = eligible.slice(0, MAX_VALIDATE);
   let validated = 0, i = 0;
   async function worker() { while (i < toCheck.length) { const s = toCheck[i++]; if (await isRealBoard(s)) { known.add(s); validated++; } } }
   await Promise.all(Array.from({ length: CONC }, () => worker()));
+
+  // Stamp everything probed this run, hit or miss. Misses are the whole point of the ledger.
+  for (const s of toCheck) tried[s] = now;
+  try {
+    const ttmp = TRIED_FILE + ".tmp";
+    writeFileSync(ttmp, JSON.stringify({ version: 1, at: new Date(now).toISOString(), tried }));
+    renameSync(ttmp, TRIED_FILE);
+  } catch (e) { console.log("tried-ledger write failed:", e.message); }
 
   const all = [...known].sort();
   const tmp = OUT_FILE + ".tmp";
   writeFileSync(tmp, JSON.stringify(all));
   renameSync(tmp, OUT_FILE);
-  console.log(`external directory: ${before} -> ${all.length} slugs (+${urlSlugs.size} url-direct, +${validated} validated). File: ${OUT_FILE}`);
+  console.log(`external directory: ${before} -> ${all.length} slugs (+${urlSlugs.size} url-direct, +${validated} validated of ${toCheck.length} probed). File: ${OUT_FILE}`);
+  console.log(`candidate pool: ${fresh.length} unknown | ${fresh.length - eligible.length} probed within ${RETRY_DAYS}d (skipped) | ${Math.max(0, eligible.length - toCheck.length)} still queued behind this run's cap of ${MAX_VALIDATE}`);
 }
 
 main().catch((e) => { console.error(e); process.exitCode = 1; });
