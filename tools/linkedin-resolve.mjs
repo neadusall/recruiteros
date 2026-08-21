@@ -14,6 +14,7 @@
 // fresh-linkedin-scraper 20k/mo pool, + abort after 5 consecutive API errors.
 
 import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
+import { searchPeople as apiSearchPeople } from "/tools/peopleapi.mjs";
 
 const OUT = process.env.MPC_OUT_DIR || "/out";
 const LEDGER = `${OUT}/leads-linkedin.jsonl`;
@@ -112,16 +113,17 @@ async function main() {
   for (const lead of pending.slice(0, budget)) {
     if (errors >= 5) { console.log("[linkedin] 5 consecutive API errors; stopping this run"); break; }
     const query = `${lead.to_name} ${lead.company}`.trim();
-    const path = api.path.replace("{query}", encodeURIComponent(query)).replace("{page}", "1");
     let row = { at: new Date().toISOString(), to_email: lead.to_email, to_name: lead.to_name, company: lead.company, role: lead.role };
     try {
-      const res = await fetch(`https://${api.host}${path}`, {
-        headers: { "X-RapidAPI-Key": api.key, "X-RapidAPI-Host": api.host },
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Via the shared client (2026-08-21). This provider answers errors with HTTP 202 and
+      // `success:false` in the body, so `!res.ok` never fired: a throttled call read as an empty
+      // people list and was written to the ledger as `no_match`, i.e. "this person has no LinkedIn
+      // profile". Only a genuine empty result is evidence about the person; everything else is
+      // evidence about us, and must be retried rather than recorded.
+      const r = await apiSearchPeople(api, query, { attempts: 3, baseDelayMs: 8000, timeoutMs: 20_000 });
+      if (r.kind !== "people" && r.kind !== "empty") throw new Error(`${r.kind}: ${r.message || ""}`);
       errors = 0;
-      const people = extractPeople(await res.json());
+      const people = r.people.map((p) => ({ name: p.fullName, url: p.url, headline: p.headline }));
       const hit = people.find((p) => nameMatches(lead.to_name, p.name));
       if (hit) { row = { ...row, status: "found", linkedin_url: hit.url.split("?")[0], matched_name: hit.name }; found++; }
       else { row = { ...row, status: "no_match", candidates: people.length }; misses++; }

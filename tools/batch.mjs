@@ -512,10 +512,19 @@ async function main() {
   // Exhaustion also EXPIRES. People change jobs and the free naming sources keep improving, so a
   // pair that came back empty months ago is re-hunted rather than permanently downgraded to the
   // C-suite. MPC_OWNER_EXHAUSTED_DAYS (60) is that window.
+  // TRUST FLOOR (2026-08-21, same day as the ladder shipped). Every `no_name` written before this
+  // date is UNRELIABLE and must not unlock the fallback. The people-search client read this
+  // provider's failure envelope — HTTP 202 carrying `success:false`, including its rate limits — as
+  // an empty result, so a throttled call was recorded as "this company has no such leader". 1,286
+  // pairs carry that verdict and there is no way to tell a real absence from a refusal inside them.
+  // The client now classifies refusals as api_ratelimit / api_error and records no verdict at all,
+  // so verdicts written from here on are trustworthy; the floor simply refuses to build targeting
+  // decisions on the ones that came before. Clear it only when the ledger has been re-earned.
+  const TRUST_FLOOR = Date.parse(process.env.MPC_OWNER_EXHAUSTED_SINCE || "2026-08-21T17:00:00Z");
   const exhausted = new Set();
   try {
     const days = Number(process.env.MPC_OWNER_EXHAUSTED_DAYS || 60);
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const cutoff = Math.max(Date.now() - days * 24 * 60 * 60 * 1000, TRUST_FLOOR);
     const latest = new Map();                       // company|fn -> { ts, outcome }, last write wins
     for (const line of readFileSync(`${OUT}/renamed-buyers.jsonl`, "utf8").split("\n")) {
       const s = line.trim();

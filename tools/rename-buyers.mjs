@@ -24,6 +24,7 @@ import {
   assessProspect, roleFamily, roleFunctionGroup, dmFunction, companyKeyOf,
 } from "/tools/gates.mjs";
 import { targetFor } from "/tools/orgchart.mjs";
+import { searchPeople as apiSearchPeople } from "/tools/peopleapi.mjs";
 
 const CURATION = process.env.MPC_CURATION_FILE || "/data/snap_inmarket_curation_v1.json";
 const CREDS = process.env.MPC_CREDS_FILE || "/data/snap_integration_credentials_v1.json";
@@ -59,27 +60,33 @@ async function peopleGate() {
   nextPeopleAt = Math.max(now, nextPeopleAt) + PACE_MS;
   if (wait) await sleep(wait);
 }
+/**
+ * Search, via the shared client so failures cannot be mistaken for absence.
+ *
+ * WHAT WAS WRONG (fixed 2026-08-21). This provider answers errors with HTTP 202 and
+ * `{"success":false,"message":"Request failed with status 429..."}`. The old body of this function
+ * checked `res.ok` (202 passes), read `j.data` (absent) and returned `[]` — which the caller then
+ * recorded as `no_name`, i.e. "this company has no such leader". 1,286 company+function pairs
+ * carry that verdict, and the `res.status === 429` backoff above could never fire because the
+ * status was 202. Diagnosed at a 6.9% owner find-rate with 12,382 of 20,000 monthly requests
+ * still available: the quota was fine, the provider's own scraper was throttled, and every refusal
+ * still cost a credit.
+ *
+ * Returns the client's kind so the caller can tell the three cases apart:
+ *   { kind: "people" | "empty" }      a real answer, safe to act on and to record
+ *   { kind: "ratelimit"|"apifail"|"http" }  our problem, not the company's: record NOTHING
+ * `null` still means the local budget is spent, which is also not a verdict about the company.
+ */
 async function searchPeople(api, query) {
   if (peopleSpent >= PEOPLE_BUDGET) return null; // people budget exhausted (pool-reuse jobs continue)
-  const path = api.path.replace("{query}", encodeURIComponent(query)).replace("{page}", "1");
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await peopleGate();
-    const res = await fetch(`https://${api.host}${path}`, {
-      headers: { "X-RapidAPI-Key": api.key, "X-RapidAPI-Host": api.host, Accept: "application/json" },
-      signal: AbortSignal.timeout(25_000),
-    }).catch(() => null);
-    if (res && res.status === 429) { await sleep(attempt === 0 ? 8_000 : 30_000); continue; }
-    if (!res || !res.ok) return [];
-    peopleSpent++;
-    const j = await res.json().catch(() => ({}));
-    const list = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
-    return list.map((o) => ({
-      fullName: String(o.full_name || o.fullName || o.name || "").trim(),
-      headline: String(o.title || o.headline || "").trim(),
-      url: String(o.url || o.profile_url || o.linkedin_url || "").split("?")[0],
-    })).filter((p) => p.fullName && !/^linkedin member$/i.test(p.fullName));
+  await peopleGate();
+  const r = await apiSearchPeople(api, query, { attempts: 3, baseDelayMs: 8000 });
+  peopleSpent++;   // a throttled call still costs a credit, so it still counts against the budget
+  if (Number.isFinite(r.remaining) && r.remaining <= 0) {
+    console.log("people API: monthly quota exhausted, stopping the hunt");
+    peopleSpent = PEOPLE_BUDGET;
   }
-  return null; // three 429s in a row — skip this job, keep the run alive
+  return r;
 }
 
 /* ---------------- Reoon (contract mirrors integration/lib/inmarket/emailVerify.ts) -------- */
@@ -292,11 +299,21 @@ async function processJob(job) {
   if (!person) {
     const band = targetFor({ role: sample.role, functionGroup: fn, headcount: sample.employeeCount });
     const hunts = band.titles.length ? [...new Set(band.titles)] : [HUNT[fn]];
-    let hits = null;
+    // Walk the rungs until one ANSWERS. A refusal is not an answer: recording it would write a
+    // false "no owner exists" for this company and, since 2026-08-21, would also unlock the
+    // C-suite fallback in gates.mjs on evidence that never existed.
+    let hits = [];
+    let refusal = null;
     for (const huntTitle of hunts) {
-      hits = await searchPeople(api, `${huntTitle} ${c.company}`);
-      if (hits === null) { ledger({ companyKey: ck, company: c.company, fn, outcome: "people_budget" }); return; }
-      if (hits.length) break;
+      const r = await searchPeople(api, `${huntTitle} ${c.company}`);
+      if (r === null) { ledger({ companyKey: ck, company: c.company, fn, outcome: "people_budget" }); return; }
+      if (r.kind === "people") { hits = r.people; refusal = null; break; }
+      if (r.kind === "empty") { hits = []; refusal = null; continue; }
+      refusal = r;   // ratelimit / apifail / http: try the next rung, but remember why
+    }
+    if (refusal) {
+      ledger({ companyKey: ck, company: c.company, fn, outcome: refusal.kind === "ratelimit" ? "api_ratelimit" : "api_error", detail: String(refusal.message || "").slice(0, 120) });
+      return;
     }
     const coSq = squash(c.company);
     for (const h of hits) {
