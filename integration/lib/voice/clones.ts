@@ -223,7 +223,10 @@ export async function renderSegment(
   }
 
   const client = getVoiceClientFor(voice.provider);
-  const out = await client.synthesize(seg.text, voice.voiceId);
+  const out = await client.synthesize(seg.text, voice.voiceId, {
+    previousText: seg.prev,
+    nextText: seg.next,
+  });
   if (out.dryRun || !out.audio) {
     // No audio in dry-run; still hand back a URL so the playlist is complete and
     // the engine runs end to end. Not cached (nothing was rendered).

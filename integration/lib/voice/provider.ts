@@ -115,6 +115,29 @@ async function synthRequest(url: string, init: RequestInit): Promise<Response> {
   throw new Error("voice_clone_exhausted");
 }
 
+/**
+ * The words either side of this fragment, for ElevenLabs "request stitching".
+ *
+ * WHY THIS EXISTS. A voicemail is assembled from cached fragments so that only a
+ * NEW first name or job title ever costs a credit. Synthesized bare, a fragment
+ * is read as a COMPLETE UTTERANCE: the model gives it a sentence-final fall and
+ * pads it, so the stitched result has a tiny recital of each name in the middle
+ * of a sentence. Measured on the live account 2026-08-21, the phrase "the vice
+ * president of sales" rendered 2.12s alone and 1.70s with its surrounding
+ * sentence supplied -- a fifth shorter, because in context it is a phrase rather
+ * than a speech.
+ *
+ * previous_text / next_text condition the delivery without being spoken, and the
+ * same measurement showed them costing NOTHING: both calls billed identically
+ * (only `text` is charged). So there is no reason not to always send them.
+ */
+export interface SynthContext {
+  /** Text that precedes this fragment in the finished message. Not spoken. */
+  previousText?: string;
+  /** Text that follows it. Not spoken. */
+  nextText?: string;
+}
+
 export interface SynthResult {
   /** Rendered audio bytes (undefined on dry-run). */
   audio?: Buffer;
@@ -197,7 +220,7 @@ export interface VoiceCloneClient {
   /** Live check that the API key actually works (so we know it'll deploy, not just dry-run). */
   verify(): Promise<{ ok: boolean; error?: string }>;
   /** Synthesize one line in `voiceId` (defaults to the configured voice). */
-  synthesize(text: string, voiceId?: string): Promise<SynthResult>;
+  synthesize(text: string, voiceId?: string, ctx?: SynthContext): Promise<SynthResult>;
   /** Mint a cloned voice from consent recordings (operator's own voice only). */
   createVoice(input: CreateVoiceInput): Promise<CreateVoiceResult>;
   /** Remove a cloned voice from the vendor account (frees a voice slot). */
@@ -269,7 +292,7 @@ class ElevenLabsClient implements VoiceCloneClient {
     return { ok: false, error: hint };
   }
 
-  async synthesize(text: string, voiceId?: string): Promise<SynthResult> {
+  async synthesize(text: string, voiceId?: string, ctx?: SynthContext): Promise<SynthResult> {
     const vid = voiceId || this.defaultVoice();
     if (!this.configured() || !vid) {
       console.info(`[voice-clone:dry] synth "${text.slice(0, 48)}" (voice=${vid || "unset"})`);
@@ -286,6 +309,10 @@ class ElevenLabsClient implements VoiceCloneClient {
       body: JSON.stringify({
         text,
         model_id: s.model,
+        // Sentence context (free, never spoken) so a spliced fragment is read as
+        // part of its sentence instead of as its own little announcement.
+        ...(ctx?.previousText ? { previous_text: ctx.previousText.slice(-600) } : {}),
+        ...(ctx?.nextText ? { next_text: ctx.nextText.slice(0, 600) } : {}),
         voice_settings: {
           stability: s.stability,
           similarity_boost: s.similarity,

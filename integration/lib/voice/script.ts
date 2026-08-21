@@ -155,6 +155,12 @@ export interface ScriptSegment {
   key: string;
   /** The literal text to synthesize for this segment (a full sentence). */
   text: string;
+  /** What comes before this fragment in the finished message. Sent to the voice
+   *  engine as unspoken context so the fragment is read in-sentence (see
+   *  SynthContext in provider.ts). Not part of what gets billed. */
+  prev?: string;
+  /** What comes after it. */
+  next?: string;
   /** Kept for the cache-stats rollup; sentences are "static" (reused by exact text). */
   kind: "static" | "first_name" | "role" | "company";
 }
@@ -242,13 +248,53 @@ export function spliceSegments(template: string, vars: MergeVars, persona: Voice
     pushStatic(withPersona.slice(last, m.index));
     const slot = m[1] as "first_name" | "role" | "company";
     const value = slotValue(slot);
-    // Slot clips are keyed by VALUE ONLY (not the surrounding text) so the same
-    // name/title is reused across every script and campaign in this voice.
-    segs.push({ key: `${slot}:${value.toLowerCase().replace(/\s+/g, " ").trim()}`, text: value, kind: slot });
+    // Slot clips carry the words either side so they are SPOKEN in sentence
+    // context, and are keyed by value + a short fingerprint of that context.
+    //
+    // The key used to be the value alone, which meant one recording of "Hector"
+    // was replayed wherever the name appeared, in any script, with whatever
+    // intonation it happened to be given the first time. Names spliced in that
+    // way are the classic tell of a synthetic call: the surrounding sentence
+    // flows and the name lands as a separate, slightly-too-emphatic announcement.
+    // Folding the context into the key costs almost no reuse in practice, because
+    // a campaign runs one template, so every lead in it shares the same
+    // surrounding words and therefore the same key.
+    const prev = withPersona.slice(0, m.index).replace(/\s+/g, " ").trim();
+    const next = withPersona.slice(m.index + m[0].length).replace(/\s+/g, " ").trim();
+    segs.push({
+      key: `${slot}:${value.toLowerCase().replace(/\s+/g, " ").trim()}|${ctxTag(prev, next)}`,
+      text: value,
+      kind: slot,
+      prev,
+      next,
+    });
     last = m.index + m[0].length;
   }
   pushStatic(withPersona.slice(last));
+
+  // Static prose gets its neighbours too: the same treatment matters at the seams
+  // between fixed sentences, where a fragment ending on a falling tone butts up
+  // against one that starts cold.
+  for (let i = 0; i < segs.length; i++) {
+    if (segs[i].prev === undefined) segs[i].prev = segs.slice(0, i).map((x) => x.text).join(" ").trim() || undefined;
+    if (segs[i].next === undefined) segs[i].next = segs.slice(i + 1).map((x) => x.text).join(" ").trim() || undefined;
+  }
   return segs;
+}
+
+/**
+ * Short, stable fingerprint of the words a slot sits between. Only the nearest
+ * few words on each side matter to delivery, so the tag uses those: it keeps the
+ * cache keys short and keeps a clip reusable across scripts that happen to phrase
+ * the run-up identically.
+ */
+function ctxTag(prev: string, next: string): string {
+  const tail = prev.split(" ").slice(-6).join(" ").toLowerCase();
+  const head = next.split(" ").slice(0, 6).join(" ").toLowerCase();
+  const key = `${tail}\u0000${head}`;
+  let h = 5381;
+  for (let i = 0; i < key.length; i++) h = ((h << 5) + h + key.charCodeAt(i)) | 0;
+  return "c" + (h >>> 0).toString(36);
 }
 
 /** Tiny stable string hash (FNV-1a, base36) — disambiguates long, similar text. */

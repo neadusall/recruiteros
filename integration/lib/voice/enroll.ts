@@ -86,26 +86,45 @@ export function qualityReport(row: VoiceEnrollment | undefined): QualityReport {
         message: `${label} is only ${Math.round(t.durationSec)}s. Read the whole passage — at least ${p.minSec}s.`,
       });
     }
-    // Peak is measured client-side on the raw take. Below ~0.05 the mic barely
-    // registered and the clone fits mostly room tone; at 1.0 the take is clipped
-    // and the distortion is baked in permanently.
-    if (typeof t.peak === "number") {
-      if (t.peak < 0.05) {
+    // Levels are measured on the RAW take, before the browser normalises it.
+    //
+    // RMS is the honest measure of "was there a voice here": one door slam can
+    // peak a take that is otherwise room tone, and a clone fitted on room tone is
+    // the thin, breathy result people describe as sounding synthetic. Clipping is
+    // judged on peak and is the one fault normalising cannot repair, because the
+    // waveform was already flattened on the way in.
+    if (typeof t.peak === "number" && t.peak > 0.99) {
+      issues.push({
+        scope: t.promptId, severity: "block",
+        message: `${label} is clipping. Move back from the mic or turn its gain down and record it again — that distortion cannot be removed later and the clone will copy it.`,
+      });
+    }
+    if (typeof t.rms === "number") {
+      if (t.rms < 0.006) {
         issues.push({
           scope: t.promptId, severity: "block",
-          message: `${label} came in almost silent. Check which mic Windows is using, move closer, and read it again.`,
+          message: `${label} is almost all room noise. Check which mic Windows is using, move closer, and read it again.`,
         });
-      } else if (t.peak > 0.985) {
+      } else if (t.rms < 0.02) {
         issues.push({
           scope: t.promptId, severity: "warn",
-          message: `${label} is clipping. Back off the mic a few inches or turn input gain down, then re-record.`,
-        });
-      } else if (t.peak < 0.12) {
-        issues.push({
-          scope: t.promptId, severity: "warn",
-          message: `${label} is quiet. Louder takes clone better.`,
+          message: `${label} is quiet enough that room tone will be part of the voice. Closer to the mic is better.`,
         });
       }
+    } else if (typeof t.peak === "number" && t.peak < 0.05) {
+      // Older takes carry peak only.
+      issues.push({
+        scope: t.promptId, severity: "block",
+        message: `${label} came in almost silent. Check which mic Windows is using, move closer, and read it again.`,
+      });
+    }
+    // The engine asks for 44.1 kHz or better. Anything lower has already thrown
+    // away the top of the voice before cloning ever sees it.
+    if (typeof t.sampleRate === "number" && t.sampleRate < 44100) {
+      issues.push({
+        scope: t.promptId, severity: "warn",
+        message: `${label} was captured at ${Math.round(t.sampleRate / 1000)} kHz. Recording again on a device that gives 44 kHz or better makes a noticeably more convincing voice.`,
+      });
     }
   }
 
@@ -242,6 +261,8 @@ export interface SaveTakeInput {
   mime: "audio/mpeg" | "audio/wav";
   durationSec: number;
   peak?: number;
+  rms?: number;
+  sampleRate?: number;
   /** The verbatim consent wording, sent with the consent take only. */
   consentStatement?: string;
   actorEmail: string;
@@ -275,6 +296,8 @@ export async function saveEnrollmentTake(input: SaveTakeInput): Promise<VoiceEnr
     bytes: input.audio.length,
     durationSec: Math.max(0, Math.round(input.durationSec)),
     peak: typeof input.peak === "number" ? Number(input.peak.toFixed(4)) : undefined,
+    rms: typeof input.rms === "number" ? Number(input.rms.toFixed(5)) : undefined,
+    sampleRate: typeof input.sampleRate === "number" ? Math.round(input.sampleRate) : undefined,
     createdAt: nowIso(),
   };
 

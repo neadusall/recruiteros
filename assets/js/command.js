@@ -19053,6 +19053,63 @@
       new Int16Array(buf, 44).set(pcm);
       return { blob: new Blob([buf], { type: "audio/wav" }), peak: peak, seconds: Math.round(outLen / outRate) };
     }
+    /* Full-rate mono 16-bit WAV for VOICE CLONE TRAINING, plus loudness measurement.
+
+       Deliberately NOT vrEncodeWav. That one resamples to 16 kHz, which is right
+       for a pitch recording (it is going down a phone line, which is 8 kHz anyway)
+       and wrong for a clone: 16 kHz discards everything above 8 kHz, which is
+       exactly the sibilance and air that makes a particular person's voice
+       recognisable, and its nearest-sample decimation aliases on top of that. The
+       engine wants 44.1 kHz or better, so this keeps whatever the microphone gave
+       us (48 kHz on most machines).
+
+       It also NORMALISES. The engine asks for roughly -23 to -18 dBFS RMS with
+       peaks a few dB below full scale; nobody sets their input gain to hit that,
+       and a quiet take clones badly. So rather than nag, scale the take to land at
+       -20 dBFS RMS, with a ceiling that keeps peaks off 0 dBFS. The ORIGINAL
+       levels are returned too, so a genuinely dead or clipped take is still
+       caught rather than amplified into noise. */
+    function vsEncodeWav(chunks, inRate) {
+      var len = 0; chunks.forEach(function (c) { len += c.length; });
+      var all = new Float32Array(len); var off = 0;
+      chunks.forEach(function (c) { all.set(c, off); off += c.length; });
+
+      var peak = 0, sumSq = 0;
+      for (var i = 0; i < all.length; i++) {
+        var v = all[i] || 0, a = v < 0 ? -v : v;
+        if (a > peak) peak = a;
+        sumSq += v * v;
+      }
+      var rms = all.length ? Math.sqrt(sumSq / all.length) : 0;
+
+      // Target -20 dBFS RMS, but never push peaks past -1 dBFS (0.891).
+      var TARGET_RMS = 0.1;
+      var gain = rms > 0.0005 ? TARGET_RMS / rms : 1;
+      if (peak * gain > 0.891) gain = 0.891 / (peak || 1);
+      if (!isFinite(gain) || gain <= 0) gain = 1;
+
+      var pcm = new Int16Array(all.length);
+      for (var j = 0; j < all.length; j++) {
+        var x = (all[j] || 0) * gain;
+        x = x < -1 ? -1 : x > 1 ? 1 : x;
+        pcm[j] = x < 0 ? x * 0x8000 : x * 0x7fff;
+      }
+
+      var rate = Math.round(inRate) || 48000;
+      var buf = new ArrayBuffer(44 + pcm.length * 2), dv = new DataView(buf);
+      function wstr(o2, str) { for (var k = 0; k < str.length; k++) dv.setUint8(o2 + k, str.charCodeAt(k)); }
+      wstr(0, "RIFF"); dv.setUint32(4, 36 + pcm.length * 2, true); wstr(8, "WAVE");
+      wstr(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+      dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+      wstr(36, "data"); dv.setUint32(40, pcm.length * 2, true);
+      new Int16Array(buf, 44).set(pcm);
+      return {
+        blob: new Blob([buf], { type: "audio/wav" }),
+        peak: peak, rms: rms, gain: gain, rate: rate,
+        seconds: Math.round(all.length / rate)
+      };
+    }
+
     function paintRecordings(body) {
       body.innerHTML = loading();
       loadRecordings(function () {
@@ -20234,15 +20291,23 @@
           var lv = $("#vsLevel"); if (lv) lv.style.display = "none";
           // Same guards as the recordings tab: a silent or clipped take is caught
           // here, before it can be uploaded and then quietly ruin a clone.
-          var out = vrEncodeWav(r.chunks, r.rate);
+          var out = vsEncodeWav(r.chunks, r.rate);
           if (out.peak < 0.004) { msg("That take was silent. Check which microphone Windows is using, then try again.", true); return; }
           if (out.seconds < prompt.minSec) {
             msg("That was only " + out.seconds + "s. Read the whole passage, at least " + prompt.minSec + "s.", true); return;
           }
-          vsState.take = { blob: out.blob, durationSec: out.seconds, peak: out.peak };
+          vsState.take = { blob: out.blob, durationSec: out.seconds, peak: out.peak, rms: out.rms, sampleRate: out.rate };
           var pl = $("#vsPlay"); if (pl) pl.style.display = "";
           var nx = $("#vsNext"); if (nx) nx.disabled = false;
-          msg("Recorded ~" + out.seconds + "s" + (out.peak > 0.985 ? " but it is clipping, back off the mic and try again for a cleaner voice." : ". Play it back, then save."), out.peak > 0.985);
+          // Clipping is the one thing normalising cannot undo: the waveform was
+          // already flattened on the way in, and that distortion clones with it.
+          if (out.peak > 0.99) {
+            msg("Recorded ~" + out.seconds + "s, but the take is clipping. Move back a few inches or turn the microphone gain down and record it again, otherwise the distortion becomes part of your voice.", true);
+          } else if (out.rms < 0.006) {
+            msg("Recorded ~" + out.seconds + "s, but it came in very quiet, so it is mostly room noise. Move closer to the microphone and record it again.", true);
+          } else {
+            msg("Recorded ~" + out.seconds + "s at " + Math.round(out.rate / 1000) + " kHz, levels look good. Play it back, then save.");
+          }
           return;
         }
         var AC = window.AudioContext || window.webkitAudioContext;
@@ -20308,6 +20373,8 @@
             mime: "audio/wav",
             durationSec: vsState.take.durationSec,
             peak: vsState.take.peak,
+            rms: vsState.take.rms,
+            sampleRate: vsState.take.sampleRate,
             consentStatement: prompt.consent ? text : undefined
           }).then(function (r) {
             nx.disabled = false;

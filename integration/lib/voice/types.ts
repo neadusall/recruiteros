@@ -249,8 +249,15 @@ export interface EnrollmentTake {
   mime: "audio/mpeg" | "audio/wav";
   bytes: number;
   durationSec: number;
-  /** Peak amplitude 0..1, measured client-side; drives the loudness gate. */
+  /** Peak amplitude 0..1 of the RAW take, before normalisation. Above ~0.99 the
+   *  take was clipping, which normalising cannot undo and a clone bakes in. */
   peak?: number;
+  /** RMS level 0..1 of the RAW take. This, not peak, is what "too quiet" means:
+   *  one loud consonant can peak a take that is otherwise mostly room noise. */
+  rms?: number;
+  /** Capture rate. The engine wants 44.1 kHz or better; below that the clone
+   *  loses the high end that makes a specific person recognisable. */
+  sampleRate?: number;
   createdAt: string;
 }
 

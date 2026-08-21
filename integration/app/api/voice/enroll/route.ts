@@ -143,6 +143,8 @@ export async function POST(req: Request) {
         mime,
         durationSec,
         peak: Number.isFinite(b?.peak) ? Number(b.peak) : undefined,
+        rms: Number.isFinite(b?.rms) ? Number(b.rms) : undefined,
+        sampleRate: Number.isFinite(b?.sampleRate) ? Number(b.sampleRate) : undefined,
         consentStatement: typeof b?.consentStatement === "string" ? b.consentStatement : undefined,
         actorEmail: me,
       });
