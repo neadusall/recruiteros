@@ -193,22 +193,52 @@ interface RestRecord { state?: string; reason?: string; since?: string; until?: 
 interface FuseFleet { tripped?: boolean; scope?: string; domains?: string[]; reason?: string; since?: string }
 interface ProviderBlock { fleet?: string; provider?: string; count?: number; lastSeen?: string; blockedIp?: string | null; blocklist?: string | null; sample?: string | null }
 
+/**
+ * Where a lane's mail actually leaves from, and when that last changed.
+ *
+ * THIS IS THE FIX FOR THE MOST EXPENSIVE KIND OF WRONG A MONITORING BOARD CAN BE:
+ * showing a resolved incident as live. The internal SMTP lane's egress was moved off
+ * a Spamhaus-listed address on 2026-08-20; every receiver refusal in the block ledger
+ * names the RETIRED address and predates the cutover. A naive freshness window reads
+ * those as a live emergency for a week after they stopped being true, buries the real
+ * signal, and inverts the priority list on the board.
+ *
+ * Both snapshots are host-owned; the app only reads them (no hydration risk).
+ */
+interface LaneEgress {
+  cutoverAt?: string;
+  egressIp?: string;
+  retiredIp?: string;
+}
+interface EgressStatus {
+  at?: string;
+  newIp?: string;
+  egressSeen?: string;
+  rulePos1?: boolean;
+  oldIpMentions?: number;
+  receivers?: Record<string, { accepted?: number; rejected?: number; deferred?: number; rateLimited?: number }>;
+  dnsbl?: Record<string, string>;
+}
+
 interface Sources {
   deliverability: { generatedAt?: string; byDomain: DeliverabilityDomain[] } | null;
   rest: Record<string, RestRecord>;
   fuse: FuseFleet | null;
   providerBlocks: Record<string, ProviderBlock>;
   capacity: Awaited<ReturnType<typeof coldCapacity>>;
-  guardHolds: Set<string>;
+  egress: LaneEgress | null;
+  egressStatus: EgressStatus | null;
 }
 
 async function readSources(workspaceId: string): Promise<Sources> {
-  const [deliv, rest, fuse, blocks, cap] = await Promise.all([
+  const [deliv, rest, fuse, blocks, cap, egress, egressStatus] = await Promise.all([
     loadSnapshot<{ generatedAt?: string; byDomain?: DeliverabilityDomain[] }>("mpc_deliverability_v1").catch(() => null),
     loadSnapshot<{ domains?: Record<string, RestRecord> }>("mpc_domain_rest_v1").catch(() => null),
     loadSnapshot<{ fleet?: FuseFleet }>("mpc_send_fuse_v1").catch(() => null),
     loadSnapshot<{ blocks?: Record<string, ProviderBlock> }>("provider_blocks_v1").catch(() => null),
     coldCapacity(workspaceId).catch(() => null),
+    loadSnapshot<LaneEgress>("internal_egress_v1").catch(() => null),
+    loadSnapshot<EgressStatus>("internal_egress_status_v1").catch(() => null),
   ]);
   return {
     deliverability: deliv ? { generatedAt: deliv.generatedAt, byDomain: deliv.byDomain || [] } : null,
@@ -216,14 +246,80 @@ async function readSources(workspaceId: string): Promise<Sources> {
     fuse: fuse?.fleet || null,
     providerBlocks: blocks?.blocks || {},
     capacity: cap,
-    guardHolds: new Set<string>(),
+    egress: egress && egress.cutoverAt ? egress : null,
+    egressStatus,
   };
+}
+
+/** The egress monitor is only evidence while it is fresh; a stale one proves nothing. */
+const EGRESS_STATUS_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+function freshEgressStatus(src: Sources): EgressStatus | null {
+  const st = src.egressStatus;
+  if (!st?.at) return null;
+  return Date.now() - Date.parse(st.at) <= EGRESS_STATUS_MAX_AGE_MS ? st : null;
 }
 
 /** Receiver-level refusals that are still fresh enough to act on (7 days). */
 function activeProviderBlocks(blocks: Record<string, ProviderBlock>): ProviderBlock[] {
   const cutoff = Date.now() - 7 * DAY_MS;
   return Object.values(blocks).filter((b) => b?.lastSeen && Date.parse(b.lastSeen) >= cutoff && (b.count || 0) > 0);
+}
+
+/**
+ * Refusals that are still TRUE, not merely recent. Recency is not evidence on its own:
+ * a refusal is only live if the thing it refused is still how we send.
+ *
+ *   - a refusal naming an address the lane has retired is history
+ *   - a refusal recorded before the lane's egress cutover is history
+ *
+ * Anything dropped here is still a real event that happened; it is simply not an OPEN
+ * condition, and the ledger's own closed-event trail is where its story belongs.
+ */
+function liveProviderBlocks(src: Sources, infra: string): ProviderBlock[] {
+  const hits = activeProviderBlocks(src.providerBlocks).filter((b) => matchesFleet(b, infra));
+  if (!hits.length) return hits;
+  // Only the internal lane publishes an egress record today; other lanes have no
+  // cutover to invalidate against, so their blocks stand on recency alone.
+  const eg = infra === "internal-smtp" ? src.egress : null;
+  if (!eg) return hits;
+  const cut = Date.parse(eg.cutoverAt || "");
+  return hits.filter((b) => {
+    if (eg.retiredIp && b.blockedIp && b.blockedIp === eg.retiredIp) return false;
+    if (Number.isFinite(cut) && b.lastSeen && Date.parse(b.lastSeen) < cut) return false;
+    return true;
+  });
+}
+
+/**
+ * What the receivers are doing RIGHT NOW on a lane that publishes live telemetry.
+ * This outranks the block ledger: the ledger is a record of what once happened, the
+ * monitor is a reading of what is happening. Where both exist, the monitor wins.
+ */
+function egressReceiverBlockers(st: EgressStatus | null, infra: string): Blocker[] {
+  if (!st || infra !== "internal-smtp") return [];
+  const out: Blocker[] = [];
+  if (st.oldIpMentions || st.rulePos1 === false || (st.newIp && st.egressSeen && st.egressSeen !== st.newIp)) {
+    out.push(mk("egress.regressed",
+      `The lane should send as ${st.newIp || "its pinned address"} but the monitor saw ${st.egressSeen || "another address"}` +
+      `${st.rulePos1 === false ? ", and the pinning rule is no longer in first position" : ""}` +
+      `${st.oldIpMentions ? `, with ${st.oldIpMentions} fresh rejection${st.oldIpMentions === 1 ? "" : "s"} still naming the retired address` : ""}.`,
+      st.at));
+  }
+  for (const [name, r] of Object.entries(st.receivers || {})) {
+    const acc = r?.accepted || 0, rej = r?.rejected || 0;
+    const total = acc + rej;
+    if (total < 20 || !rej) continue;
+    const pct = (rej / total) * 100;
+    if (pct < 10) continue;
+    out.push(mk("provider.block",
+      `${name === "google" ? "Gmail" : name === "microsoft" ? "Outlook" : name} rejected ${rej.toLocaleString()} of ${total.toLocaleString()} attempts in the last 24 hours (${round1(pct)}%), measured at the mail server itself rather than read off an old bounce.`,
+      st.at));
+  }
+  const listed = Object.entries(st.dnsbl || {}).filter(([, v]) => String(v).toLowerCase() === "listed").map(([k]) => k);
+  if (listed.length) {
+    out.push(mk("blocklist.listed", `The lane's sending IP ${st.newIp || ""} answers on ${listed.join(", ")}, checked from the mail server's own resolver rather than a public one that refuses these queries.`.trim(), st.at));
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -268,13 +364,17 @@ function mk(code: string, detail: string, since?: string): Blocker {
  * push the most specific one first.
  */
 function sortBlockers(list: Blocker[]): Blocker[] {
-  const seen = new Set<string>();
-  const uniq: Blocker[] = [];
+  // On a collision the MORE SPECIFIC observation wins. A mailbox bouncing on its own
+  // account and a mailbox sitting on a bouncing domain share a code; keeping the
+  // inherited one would hide the mailbox's own problem behind its domain's and, worse,
+  // suppress its event entirely, since inherited conditions are never journalled.
+  const byCode = new Map<string, Blocker>();
   for (const b of list) {
-    if (seen.has(b.code)) continue;
-    seen.add(b.code);
-    uniq.push(b);
+    const prev = byCode.get(b.code);
+    if (!prev) { byCode.set(b.code, b); continue; }
+    if (prev.inherited && !b.inherited) byCode.set(b.code, b);
   }
+  const uniq = [...byCode.values()];
   return uniq.sort((a, b) =>
     (b.blocking ? 1 : 0) - (a.blocking ? 1 : 0) ||
     SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
@@ -505,6 +605,11 @@ interface ResolveCtx {
   rest: RestRecord | null;
   fuseHit: boolean;
   providerHits: ProviderBlock[];
+  /** Live receiver + pin evidence, which outranks the historical block ledger. */
+  egressBlockers: Blocker[];
+  /** When this lane's sending address was last replaced, if ever. */
+  egressCutoverAt: string | null;
+  egressIp: string | null;
   lanesParked: string[];
   prevDnsMask: number;
   prevRep: number | null;
@@ -528,7 +633,11 @@ function domainLevelBlockers(domain: string, ctx: ResolveCtx, rep: number | null
     const daysLeft = until ? Math.max(0, Math.ceil((until.getTime() - ctx.now) / DAY_MS)) : null;
     out.push(mk("domain.resting", `Benched by the rest fail-safe${ctx.rest.reason ? `: ${ctx.rest.reason}` : ""}.${daysLeft != null ? ` It lifts on its own in ${daysLeft} day${daysLeft === 1 ? "" : "s"} (${until!.toISOString().slice(0, 10)}).` : ""}`, ctx.rest.since));
   }
-  if (ctx.providerHits.length) {
+  // Live monitor first. When it is speaking, the historical ledger does not get a
+  // second vote on the same question.
+  for (const b of ctx.egressBlockers) out.push(b);
+  const liveSpoke = ctx.egressBlockers.some((b) => b.code === "provider.block");
+  if (ctx.providerHits.length && !liveSpoke) {
     // One condition, however many receivers are refusing: the operator needs the
     // whole picture in a sentence, not one chip per provider.
     const name = (p?: string) => (p === "google" ? "Gmail" : p === "microsoft" ? "Outlook" : p || "a receiver");
@@ -644,8 +753,8 @@ export async function recordLedgerTick(opts: { force?: boolean } = {}): Promise<
     const delivByDomain = new Map((src.deliverability?.byDomain || []).map((r) => [r.domain.toLowerCase(), r]));
     const fuse = src.fuse;
     const fuseDomains = new Set((fuse?.domains || []).map((x) => String(x).toLowerCase()));
-    const pblocks = activeProviderBlocks(src.providerBlocks);
     const lanesParked = src.capacity?.lanesParked || [];
+    const egressStatus = freshEgressStatus(src);
 
     for (const [domain, boxes] of byDomain) {
       const accounts = fleet.filter((a) => domainOf(a.email) === domain);
@@ -663,17 +772,34 @@ export async function recordLedgerTick(opts: { force?: boolean } = {}): Promise<
 
       const infra = classifyInfraKind(boxes, accounts, dns);
       const readyAfterDays = infra === "internal-smtp" ? 30 : 14;
+      // TRUST IS ANCHORED TO THE ADDRESS THE MAIL LEAVES FROM, NOT TO MAILBOX AGE.
+      // When a lane's egress IP is replaced, its domains re-earn reputation from zero
+      // at the receivers however old the mailboxes are. Reading 25-day-old boxes as
+      // "day 25 of 30" one day after a cutover is the exact mistake that puts a fleet
+      // back in front of the receivers that just refused it.
+      const cutoverAt = infra === "internal-smtp" ? (src.egress?.cutoverAt || null) : null;
+      const cutoverMs = cutoverAt ? Date.parse(cutoverAt) : NaN;
+      const warmFromMs = Number.isFinite(cutoverMs)
+        ? Math.max(cutoverMs, youngest ? Date.parse(youngest) : cutoverMs)
+        : (youngest ? Date.parse(youngest) : NaN);
+      const warmDays = Number.isFinite(warmFromMs) ? round1((now - warmFromMs) / DAY_MS) : null;
+      const clockReset = Number.isFinite(cutoverMs) && !!youngest && Date.parse(youngest) < cutoverMs;
 
       const domRec = ensureRecord(ws, "domain", domain, domain, { infra });
       const prev = lastDomainDay(domRec);
 
       const ctx: ResolveCtx = {
         now, src, dns, deliv, rest, fuseHit,
-        providerHits: pblocks.filter((b) => matchesFleet(b, infra)),
+        providerHits: liveProviderBlocks(src, infra),
+        egressBlockers: egressReceiverBlockers(egressStatus, infra),
+        egressCutoverAt: cutoverAt,
+        egressIp: src.egress?.egressIp || null,
         lanesParked,
         prevDnsMask: prev ? prev.dns : -1,
         prevRep: prev ? prev.rep : null,
-        ageDays, readyAfterDays,
+        // Age judged for reputation purposes is age ON THE CURRENT ADDRESS.
+        ageDays: warmDays,
+        readyAfterDays,
       };
 
       const dBlockers = domainLevelBlockers(domain, ctx, rep);
@@ -695,8 +821,16 @@ export async function recordLedgerTick(opts: { force?: boolean } = {}): Promise<
       if (lanesParked.includes(laneOf(infra))) {
         dBlockers.push(mk("lane.parked", `The ${laneOf(infra)} lane is parked today, so every mailbox on this domain carries zero cold capacity whatever its own health.`));
       }
-      if (ageDays != null && ageDays < readyAfterDays && !dBlockers.some((b) => b.code === "domain.resting")) {
-        dBlockers.push(mk("warming", `Day ${Math.floor(ageDays)} of the ${readyAfterDays}-day warm for ${infra === "internal-smtp" ? "an internal SMTP" : "a provider-run"} domain.`));
+      if (clockReset && cutoverAt) {
+        dBlockers.push(mk("egress.rewarming",
+          `This lane's sending address was replaced on ${cutoverAt.slice(0, 10)}${src.egress?.egressIp ? ` (now ${src.egress.egressIp}${src.egress.retiredIp ? `, was ${src.egress.retiredIp}` : ""})` : ""}. ` +
+          `The mailboxes here are ${ageDays != null ? Math.floor(ageDays) : "?"} days old, but only ${warmDays != null ? round1(warmDays) : "?"} days of that reputation was earned at the current address, so readiness counts from the cutover.`,
+          cutoverAt));
+      }
+      if (warmDays != null && warmDays < readyAfterDays && !dBlockers.some((b) => b.code === "domain.resting")) {
+        dBlockers.push(mk("warming",
+          `Day ${Math.floor(warmDays)} of the ${readyAfterDays}-day warm for ${infra === "internal-smtp" ? "an internal SMTP" : "a provider-run"} domain` +
+          (clockReset ? ", counted from the egress cutover rather than from when the mailboxes were created" : "") + "."));
       }
       if (boxes.length === 0 && accounts.length > 0) {
         dBlockers.push(mk("not.imported", `${accounts.length} mailbox${accounts.length === 1 ? " is" : "es are"} warming on this domain but none is imported as an Email ID here, so none can ever be picked to send.`));
@@ -731,7 +865,7 @@ export async function recordLedgerTick(opts: { force?: boolean } = {}): Promise<
 
       const dObs: Observation = {
         kind: "domain", id: domain, domain, workspaceId: ws, infra,
-        ageDays, rep,
+        ageDays: warmDays, rep,
         wSent, wSpam, cSent, cFailed, bounces,
         boxes: boxes.length || accounts.length, sending,
         dns: dnsMask(dns), blocklists: dns?.dnsbl?.lists || [],
@@ -783,7 +917,12 @@ function classifyInfraKind(boxes: SenderInbox[], accounts: SmartleadAccount[], d
 
 /** Everything that stops ONE mailbox, on top of whatever stops its whole domain. */
 function mailboxBlockers(m: SenderInbox, acct: SmartleadAccount | undefined, domainBlockers: Blocker[], ctx: ResolveCtx, infra: string): Blocker[] {
-  const out: Blocker[] = domainBlockers.filter((b) => b.code !== "not.imported").map((b) => ({ ...b }));
+  // Inherited from the domain (and through it, the lane). Kept in the mailbox's own
+  // "why" list because it genuinely is the reason this mailbox is not sending, but
+  // marked so the journal records it once against the domain instead of once per box.
+  const out: Blocker[] = domainBlockers
+    .filter((b) => b.code !== "not.imported")
+    .map((b) => ({ ...b, inherited: true }));
   if (m.status === "error") {
     out.push(mk("smtp.auth", `SMTP login is failing${m.lastError ? `: ${String(m.lastError).slice(0, 180)}` : ""}.`, m.updatedAt));
   }
@@ -811,6 +950,10 @@ function mailboxBlockers(m: SenderInbox, acct: SmartleadAccount | undefined, dom
   const bouncePct = m.sent > 0 ? (m.bounced / m.sent) * 100 : null;
   if (bouncePct != null && m.sent >= 25 && bouncePct > 5) {
     out.push(mk("bounce.rate.high", `${m.bounced} bounces on ${m.sent} sends from this mailbox (${round1(bouncePct)}%).`));
+  } else if (m.bounced > 0 && m.sent === 0) {
+    // Say the number cannot be computed rather than rendering a blank that reads as
+    // a clean bill. A silent gap in a monitoring board is worse than a loud one.
+    out.push(mk("counters.unfed", `${m.bounced.toLocaleString()} bounces recorded against 0 recorded sends, so this mailbox has no computable bounce rate here. Judge it on its domain's numbers instead.`));
   }
   return out;
 }
@@ -863,10 +1006,11 @@ function commit(rec: IdentityRecord, o: Observation, at: string, report: LedgerT
   if (o.rep != null) lt.repPeak = lt.repPeak == null ? o.rep : Math.max(lt.repPeak, o.rep);
   rec.lastSeen = at;
 
-  const openNow = new Set(o.blockers.map((b) => b.code));
+  const openNow = new Set(o.blockers.filter((b) => !b.inherited).map((b) => b.code));
   const wasOpen = new Set(Object.keys(rec.open));
 
   for (const b of o.blockers) {
+    if (b.inherited) continue;   // journalled against the domain that owns it
     if (wasOpen.has(b.code)) continue;
     openEvent(rec, b, {
       rep: o.rep, cSent: o.cSent, bounces: o.bounces, dns: dnsNames(o.dns),
@@ -1042,11 +1186,17 @@ export async function ledgerFleet(workspaceId: string): Promise<LedgerFleet> {
   const openEvents = events.events.filter((e) => e.workspaceId === workspaceId && !e.closedAt);
 
   const causeMap = new Map<string, { domains: number; mailboxes: number; oldest: string | null }>();
-  for (const e of openEvents) {
-    const c = causeMap.get(e.code) || { domains: 0, mailboxes: 0, oldest: null };
-    if (e.kind === "domain") c.domains++; else c.mailboxes++;
-    if (!c.oldest || Date.parse(e.openedAt) < Date.parse(c.oldest)) c.oldest = e.openedAt;
-    causeMap.set(e.code, c);
+  const bump = (code: string, kind: IdentityKind, at?: string) => {
+    const c = causeMap.get(code) || { domains: 0, mailboxes: 0, oldest: null };
+    if (kind === "domain") c.domains++; else c.mailboxes++;
+    if (at && (!c.oldest || Date.parse(at) < Date.parse(c.oldest))) c.oldest = at;
+    causeMap.set(code, c);
+  };
+  for (const e of openEvents) bump(e.code, e.kind, e.openedAt);
+  // Inherited conditions have no event of their own by design, so the count of how
+  // many Email IDs a cause is actually holding comes from the resolved blockers.
+  for (const m of mailboxes) {
+    for (const b of m.lastBlockers || []) if (b.inherited) bump(b.code, "mailbox", b.since);
   }
   const byCause = [...causeMap.entries()].map(([code, c]) => {
     const def = CAUSE_BY_CODE[code];
