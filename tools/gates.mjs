@@ -178,6 +178,20 @@ export function rescueDecisionMaker(p) {
   return { ...p, managerName: found.name, managerTitle: found.title, rescuedFrom: n || "(empty)" };
 }
 
+/** Words that only ever appear in a JOB TITLE, never as a standalone employer name. A captured
+ *  tail made ENTIRELY of these is a second title component, not a different company. Kept to whole
+ *  words so a real employer that merely contains one ("Talent Solutions Group") still registers:
+ *  its other tokens are not title words, so the all-words test below fails and the tail is treated
+ *  as a company exactly as before. */
+const TITLE_WORD = /^(senior|sr|junior|jr|deputy|associate|assistant|acting|interim|global|corporate|regional|executive|chief|head|vice|group|general|managing|co|founder|owner|president|vp|svp|evp|cfo|ceo|coo|cto|cmo|cio|cro|chro|cpo|cgo|cao|director|partner|principal|controller|comptroller|manager|gm|officer|counsel|administrator|architect|architecture|recruiting|recruitment|talent|people|hr|human|resources|staff|operations|ops|solutions|strategy|finance|financial|accounting|tax|audit|marketing|sales|engineering|technology|technical|product|legal|compliance|risk|nursing|clinical|medical|quality|safety|manufacturing|production|supply|chain|logistics|procurement|purchasing|facilities|maintenance|construction|field|customer|support|business|development|partnerships|underwriting|claims|admissions|education|research|training|administration|program|project|retail|ecommerce|digital|content|brand|communications|services|affairs|success|experience|acquisition|planning|management|revenue|of|and|the|for|to|&)$/i;
+
+/** True when every word of a captured tail is a title word, i.e. it is a stacked second title
+ *  rather than an employer. Bounded at 6 words so a long company name never trips it. */
+function isTitleFragment(s) {
+  const w = String(s || "").toLowerCase().replace(/[^a-z& ]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  return w.length > 0 && w.length <= 6 && w.every((x) => TITLE_WORD.test(x));
+}
+
 function normCompany(s) {
   return (s || "")
     .toLowerCase()
@@ -215,6 +229,18 @@ export function foreignAffiliation(managerTitle, company) {
       const raw = m[1].trim();
       if (/^(finance|accounting|operations|strategy|talent|people)$/i.test(raw)) continue;
       if (titleGrammar && FUNCTION_TAIL.test(raw)) continue;
+      // A SECOND TITLE, not an employer (found 2026-08-21). "of X" / ", X" / "- X" is also how a
+      // person stacks two titles, and the capture above was reading that second title as a company:
+      //   "Chief Financial Officer, CFO"  -> employer "CFO"              (JCW Group)
+      //   "Founder, President"            -> employer "President"        (GR0)
+      //   "Founder - Managing Partner"    -> employer "Managing Partner" (ITAC Solutions)
+      //   "Director of Recruiting"        -> employer "Recruiting"
+      //   "Vice President, Solutions Architecture" -> employer "Solutions Architecture"
+      // Each one rejected the correct buyer as working somewhere else, and CFOs listing their
+      // credential first were hit hardest. Only the title-grammar patterns are affected; "at X" /
+      // "@ X" keep their strict read, so "CEO and Co Founder - Big Basin Labs" at Marqeta and
+      // "Sr. Director of Sales at CIRCOR International" at AssetWatch stay correctly rejected.
+      if (titleGrammar && isTitleFragment(raw)) continue;
       const claimed = normCompany(raw);
       if (claimed && co && claimed !== co && !claimed.includes(co) && !co.includes(claimed)) return raw;
     }

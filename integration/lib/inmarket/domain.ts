@@ -330,17 +330,57 @@ const clearbitSuggest = (company: string) =>
 const brandfetchSuggest = (company: string) =>
   suggest(`https://api.brandfetch.io/v2/search/${encodeURIComponent(company)}`);
 
+/** Affixes a real company wraps its own brand in ("Jobber" → getjobber.com, "Linear" → linearhq.com).
+ *  These are the ONLY leftovers tolerated around a brand; anything else means a different company. */
+const BRAND_PREFIX = /^(get|try|join|use|go|my|the|hey|with|team|meet|hi)$/;
+const BRAND_SUFFIX = /^(hq|app|io|ai|inc|co|hr|now|one)$/;
+
+/**
+ * True when a domain root really IS this company's brand, rather than merely a string that happens
+ * to CONTAIN it.
+ *
+ * THE BUG THIS FIXES (2026-08-21). The test here used to be a bare substring check —
+ * `root.includes(t) || t.includes(root)` — so the autocomplete providers' first suggestion was
+ * accepted whenever it shared a prefix with the company name. Every one of these was a real,
+ * confidently-wrong resolution in the live pool:
+ *
+ *     "Warp"         → warpedspeed.com          "Loop"   → loopnet.com
+ *     "Alma"         → almanac.com              "Suki"   → suki-kira.com
+ *     "Modernhealth" → modernhealthcare.com
+ *
+ * A wrong domain is worse than no domain: the email pattern-builder and the owner finder both then
+ * hunt the WRONG company, so every address they produce is junk (it bounces or fails validation,
+ * after we have already paid Reoon credits and a people-search call for it) and every owner search
+ * comes back "no_name". That poisons the pool at its source and surfaces downstream looking like
+ * over-strict send gates. Requiring an exact brand match — optionally wrapped in a KNOWN affix, so
+ * getjobber.com still resolves for "Jobber" — costs a few long-tail resolutions and removes the
+ * entire class of wrong-company ones. Anything rejected here falls through to the homepage
+ * on-brand verify, which actually reads the page before believing it.
+ */
+function rootIsBrand(root: string, brands: string[]): boolean {
+  if (!root) return false;
+  for (const b of brands) {
+    if (b.length < 3) continue;
+    if (root === b) return true;
+    if (root.startsWith(b) && BRAND_SUFFIX.test(root.slice(b.length))) return true;
+    if (root.endsWith(b) && BRAND_PREFIX.test(root.slice(0, root.length - b.length))) return true;
+  }
+  return false;
+}
+
 /** Pick the first brand-matched domain from an autocomplete list. `requireDomainMatch` (backup
- *  provider) demands the DOMAIN ROOT share a company token, rejecting wrong-company hits whose only
+ *  provider) demands the DOMAIN ROOT be the brand, rejecting wrong-company hits whose only
  *  match is the returned name (e.g. Brandfetch returning name "Vena Solutions" → exceleratesummit.com). */
-function pickDomain(list: Array<{ name?: string; domain?: string }>, tokens: string[], requireDomainMatch = false): string | null {
+function pickDomain(list: Array<{ name?: string; domain?: string }>, tokens: string[], requireDomainMatch = false, anchor = ""): string | null {
+  const brands = [...new Set([anchor, ...tokens].filter((b) => b && b.length >= 3))];
+  if (!brands.length) return null;
   for (const cand of list.slice(0, 3)) {
     const dom = (cand.domain || "").toLowerCase().trim();
     if (!dom || !dom.includes(".") || !isCompanyHost(dom)) continue;
     const root = domainRoot(dom) || dom.split(".")[0];
     const nameHay = (cand.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const domHit = tokens.some((t) => t.length >= 3 && (root.includes(t) || t.includes(root)));
-    const nameHit = tokens.some((t) => t.length >= 3 && nameHay.includes(t));
+    const domHit = rootIsBrand(root, brands);
+    const nameHit = rootIsBrand(nameHay, brands);
     if (domHit || (!requireDomainMatch && nameHit)) return domainBase(dom);
   }
   return null;
@@ -352,7 +392,7 @@ async function acResolution(
   suggester: (c: string) => Promise<Array<{ name?: string; domain?: string }>>,
   strict: boolean, via: string, conf: number,
 ): Promise<DomainResolution | null> {
-  const dom = pickDomain(await suggester(company), tokens, strict);
+  const dom = pickDomain(await suggester(company), tokens, strict, companyAnchor(company));
   if (!dom) return null;
   const mx = await hasMx(dom).catch(() => false);
   return { domain: dom, confidence: conf, via, mx };

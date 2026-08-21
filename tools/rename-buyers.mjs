@@ -251,7 +251,13 @@ for (const p of rows) {
   const f = res.failures.join(" | ");
   const dmIssue = /decision-maker|no named decision-maker|different company/.test(f);
   const roleIssue = /is not a professional hire|staffing\/recruiting firm/.test(f);
-  if (!dmIssue || roleIssue) continue;
+  // SIZE (2026-08-21): a company we have CONFIRMED is outside the headcount band can never send,
+  // however good a buyer we name for it. Hunting one costs a people-search call and up to 4 Reoon
+  // credits, and the row still dies at the size gate afterwards. The 08-21 gate x-ray measured the
+  // result: 1,500 Reoon credits spent that day unlocked ZERO additional sendable rows. Skipping
+  // these here points the whole budget at companies that can actually be mailed.
+  const sizeIssue = /employee target band/.test(f);
+  if (!dmIssue || roleIssue || sizeIssue) continue;
   const fn = roleFunctionGroup(roleFamily(p.role));
   if (!HUNT[fn]) continue;
   if (!c.buckets.has(fn)) c.buckets.set(fn, []);
@@ -336,8 +342,13 @@ async function processJob(job) {
       // Dry-run the gate with this person before spending a single Reoon credit.
       const probeRow = { ...sample, managerName: cleanName(h.fullName), managerTitle: title, likelyEmail: `x.y@${domain}`, emailValidated: true, emailInvalid: false, emailCatchAll: false };
       const probe = assessProspect(probeRow);
-      const dmClean = !probe.failures.some((x) => /decision-maker|different company/.test(x));
-      if (dmClean) { person = { fullName: cleanName(h.fullName), headline: title, via: "people-api" }; break; }
+      // 2026-08-21: this used to check ONLY the decision-maker failures, so a hit that cleared the
+      // buyer rules but whose row still failed some OTHER gate went on to burn a people-search call
+      // and up to 4 Reoon credits, and was then rejected at send time anyway. The probe row already
+      // carries a synthetic validated address at the company domain, so every email check passes
+      // here by construction and `eligible` is exactly "would this row send once we find a real
+      // address" — which is the only question worth spending credits to answer.
+      if (probe.eligible) { person = { fullName: cleanName(h.fullName), headline: title, via: "people-api" }; break; }
     }
   }
   if (!person) { ledger({ companyKey: ck, company: c.company, fn, outcome: "no_name" }); return; }

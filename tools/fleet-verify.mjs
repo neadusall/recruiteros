@@ -181,6 +181,14 @@ const boxRows = [];
       const domRow = domainRows.find((x) => x.domain === info.domain);
 
       if (exists === false) { reasons.push("Mailbox does not exist at the provider (404)"); fixes.push("Re-provision this mailbox at Sending.ac or remove it from the senders roster"); }
+      // NEVER CONFIRMED (2026-08-21). A box we could not probe used to inherit its parent domain's
+      // verdict and report HEALTHY, which made the board state something it had never checked. On
+      // 08-21 the touch-2 video run failed 17 of 19 sends with Microsoft "No such mailbox" against
+      // boxes this file was calling healthy; 51 boxes fleet-wide carry exists=null. Unknown is not
+      // healthy: say so, so the board stops vouching for boxes nothing has verified. Deliberately a
+      // WARNING and not unhealthy — an unprobed box is unproven, not proven dead, and benching 51
+      // senders on absent evidence would cut real capacity.
+      if (exists === null) { reasons.push("Mailbox existence never confirmed (no provider probe covers this lane)"); fixes.push("Send a canary through this box, or move it behind a lane that exposes a mailbox check"); }
       if (boxBounces >= 3) { reasons.push(`${boxBounces} recent bounce notices from this mailbox`); fixes.push("Rotation already spreads volume; if this repeats tomorrow, retire the address"); }
       if (domRow && domRow.verdict === "unhealthy") { reasons.push(`Parent domain ${info.domain} is unhealthy`); fixes.push("Fix the domain first; the mailbox inherits its fate"); }
       // A resting parent is expected, transient, and already tracked on the domain row: the
