@@ -185,9 +185,12 @@ done
 RUNNING=$(docker ps --format '{{.Names}}')
 for c in recruiteros-app-1 recruiteros-taltxt-1 recruiteros-caddy-1 recruiteros-db-1 \
          recruiteros-lume-jobs-1 recruiteros-laxis-worker-1 recruiteros-autoheal-1 \
-         recruiteros-searxng-1 mytal-web landlinedb-svc \
-         recruitersos-mail-mail-api-1 recruitersos-mail-mail-web-1 \
-         recruitersos-mail-mail-redis-1 recruitersos-mail-mail-postgres-1; do
+         recruiteros-searxng-1 mytal-web landlinedb-svc; do
+  # NOTE: the recruitersos-mail stack (mail-api/web/redis/postgres) is DELIBERATELY stopped.
+  # It ran 7 weeks, sent 0 mail, and burned ~1/3 of a core on this 2-core box; retired by
+  # stop-dead-mail-stack.sh 2026-08-20. Smartlead/Sending.ac are the real senders. Do NOT
+  # re-add it here: a stack we chose to stop is not an outage, and paging CRITICAL on it
+  # masked every real signal in the same email.
   echo "$RUNNING" | grep -qx "$c" || fail "CONTAINER-DOWN" "$c is not running"
 done
 UNHEALTHY=$(docker ps --filter health=unhealthy --format '{{.Names}}')
@@ -261,6 +264,8 @@ const f=rd('/data/snap_inmarket_autovideo_fails_v1.json');
 const cur=rd('/data/snap_inmarket_curation_v1.json');
 const rows=Array.isArray(cur)?cur:Object.values(cur);
 const made=Object.values(m).filter(e=>e&&e.at&&Date.parse(e.at)>Date.now()-30*60*1000).length;
+let lastAt=0;for(const e of Object.values(m)){if(!e||!e.at)continue;const t=Date.parse(e.at);if(Number.isFinite(t)&&t>lastAt)lastAt=t;}
+const lastMin=lastAt?Math.round((Date.now()-lastAt)/6e4):999999;
 const WF=/browser|chromium|closed|disconnected|Protocol error|Target/i, MAXT=4, now=Date.now();
 const benched=e=>{if(!e)return false;if(WF.test(e.reason||''))return false;if(e.benched||e.tries>=MAXT)return true;
 const w=now-Date.parse(e.at||'');if(!Number.isFinite(w))return false;
@@ -279,9 +284,9 @@ if(m[k]||benched(f[k]))continue;pending++;}
 const tday=new Date().toISOString().slice(0,10);
 const bu=(bud&&bud.day===tday&&bud.used)?bud.used:0;
 const bc=(bud&&bud.cap)?bud.cap:0;
-console.log([made,pending,unnamed,rejected,epending,catchall,bu,bc].join(' '));
-}catch(e){console.log('ERR ERR ERR ERR ERR ERR ERR ERR')}" 2>/dev/null || echo "ERR ERR ERR")
-read VN VPEND VUNNAMED VREJECT VEPEND VCATCH VBUSED VBCAP <<SENTINEL_VSTATS
+console.log([made,pending,unnamed,rejected,epending,catchall,bu,bc,lastMin].join(' '));
+}catch(e){console.log('ERR ERR ERR ERR ERR ERR ERR ERR ERR')}" 2>/dev/null || echo "ERR ERR ERR ERR ERR ERR ERR ERR ERR")
+read VN VPEND VUNNAMED VREJECT VEPEND VCATCH VBUSED VBCAP VLAST <<SENTINEL_VSTATS
 $VSTATS
 SENTINEL_VSTATS
 
@@ -299,8 +304,20 @@ if [ "${VBCAP:-0}" -gt 0 ] 2>/dev/null; then
 fi
 
 if [ "$VN" = "0" ]; then
-  if [ "$VPEND" = "ERR" ] || [ "${VPEND:-0}" -gt 0 ] 2>/dev/null; then
-    fail "VIDEO-OUTPUT-STALLED" "0 videos produced in the last 30 minutes while ${VPEND} roles are queued and claimable (normal rate is 100+/hour) - the render fleet is not consuming its queue"
+  # A 30-minute window with no video is NOT evidence of a dead fleet. Output here is
+  # SUPPLY-limited, not capacity-limited: measured 2026-08-21 it is ~86 videos/day (~3.6/hr),
+  # so most half-hours are legitimately empty while 1-6 roles sit briefly claimable between
+  # ticks. The old rule fired CRITICAL on exactly that, and flapped against VIDEO-SUPPLY-EMPTY
+  # every 5 minutes - each flip re-alerting as NEW, which is what buried the real signal.
+  # The fleet is only dead if it has produced NOTHING for VIDEO_STALL_MIN minutes with work
+  # actually waiting.
+  if [ "$VPEND" = "ERR" ]; then
+    fail "VIDEO-OUTPUT-STALLED" "the render-queue probe failed, so neither queue depth nor output can be read - the app container or its /data snapshots are unreachable"
+  elif [ "${VPEND:-0}" -gt 0 ] 2>/dev/null && [ "${VLAST:-999999}" -ge "${VIDEO_STALL_MIN:-90}" ] 2>/dev/null; then
+    fail "VIDEO-OUTPUT-STALLED" "no video has been produced for ${VLAST} minutes while ${VPEND} roles are queued and claimable - the render fleet is not consuming its queue"
+  elif [ "${VPEND:-0}" -gt 0 ] 2>/dev/null; then
+    : # Supply trickle: work is queued but the fleet produced ${VLAST} min ago and is draining
+      # it normally. Nothing is wrong; stay quiet rather than page on a sampling artifact.
   else
     # Name the gate ACTUALLY holding supply. The old text said "waiting on a decision-maker email"
     # for every stuck role, which was wrong in the most common case by a whole stage: a role with no
