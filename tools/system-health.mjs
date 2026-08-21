@@ -773,7 +773,40 @@ try {
     hasKey ? "good" : "bad", hasKey ? "configured" : "missing",
     hasKey ? "" : "No ElevenLabs credential on the prospect workspace; synthesis cannot run.");
 
-  // 3. the on-send trigger itself
+  // 3. per-recruiter enrollment coverage. A workspace voice exists or it does not,
+  // but the question that decides whether a DESK can run this motion is how many
+  // recruiters have their own approved voice: everyone else's drops fall back to
+  // the house voice (or dry-run), and a drop in the wrong person's voice that
+  // introduces itself with a different name is worse than no drop at all.
+  const enrolled = (vd.enrollments || []).filter((e) => e && e.workspaceId === ws);
+  const approved = enrolled.filter((e) => e.voiceId && e.approvedAt);
+  const awaiting = enrolled.filter((e) => e.voiceId && !e.approvedAt);
+  add(GROUP_API, "voice-enrollment", "Voice studio: recruiters with their own voice",
+    approved.length ? "good" : enrolled.length ? "amber" : "amber",
+    `${approved.length} approved` + (awaiting.length ? `, ${awaiting.length} awaiting approval` : ""),
+    approved.length
+      ? (awaiting.length ? `${awaiting.length} recruiter(s) created a voice but have not listened and approved it, so their drops still fall back to the workspace voice. They approve it in Voice Drops -> Voice studio.` : "")
+      : "No recruiter has recorded and approved their own voice yet. Every drop uses the single workspace voice (or dry-runs if there is none). Record in Voice Drops -> Voice studio, about two minutes per person.");
+
+  // 4. the audio behind those voices is actually on the persistent volume. This
+  // row exists because of a real fault: the clone cache resolved to a path INSIDE
+  // the container image, so every deploy silently destroyed the recruiters'
+  // recordings and the whole reusable-clip archive, re-billing the vendor from
+  // zero and failing any campaign that played a saved pitch. Missing files here
+  // mean that regression is back.
+  const wantFiles = [];
+  for (const e of enrolled) for (const t of (e.takes || [])) if (t && t.file) wantFiles.push(t.file);
+  for (const r of (vd.recordings || [])) if (r && r.file && r.workspaceId === ws) wantFiles.push(r.file);
+  const cacheDir = envVal("VOICE_CLONE_CACHE_DIR") || `${VOL}/voice-clones`;
+  const gone = wantFiles.filter((f) => !existsSync(`${cacheDir}/${f}`));
+  add(GROUP_API, "voice-audio-durable", "Voice studio: recordings survived the last deploy",
+    wantFiles.length === 0 ? "good" : gone.length ? "bad" : "good",
+    wantFiles.length === 0 ? "nothing stored yet" : `${wantFiles.length - gone.length}/${wantFiles.length} present`,
+    gone.length
+      ? `${gone.length} voice file(s) referenced by a recruiter's enrollment or pitch library are missing from ${cacheDir}. That is the ephemeral-cache fault: the audio directory must resolve onto the /data volume, not the container filesystem. Affected people must re-record.`
+      : "");
+
+  // 5. the on-send trigger itself
   const on = /^(1|true|yes|on)$/i.test(envVal("RECRUITEROS_ROLE_VM_ON_SEND"));
   add(GROUP_API, "role-vm-on-send", "Voicemail drop: follow-up on email send",
     on ? "good" : "amber", on ? "armed" : "off",

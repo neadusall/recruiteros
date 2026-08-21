@@ -11,6 +11,7 @@
 import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import type { Motion } from "../../../../lib/core/types";
 import { testDrop, DEFAULT_PERSONA } from "../../../../lib/voice";
+import { requesterEmail } from "../../../../lib/inmarket/ownership";
 
 export async function POST(req: Request) {
   const g = requireCapability(req, "voice:dial");
@@ -40,6 +41,9 @@ export async function POST(req: Request) {
       company: b?.company,
       scriptTemplate,
       persona,
+      // A test drop is the recruiter checking how THEIR drop sounds, so it
+      // resolves their enrolled voice unless they pinned an explicit voiceId.
+      ownerEmail: requesterEmail(g.ctx),
       voiceId: b?.voiceId,
       messageMode,
       recordingId: b?.recordingId,

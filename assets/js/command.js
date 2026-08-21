@@ -18480,7 +18480,7 @@
       '<div class="vd-summary" style="margin:0 0 14px;padding:12px 14px;border-radius:12px;background:var(--surface-2);font-size:12.5px;line-height:1.55">' +
       '<b style="font-size:13px">Run it in 5 steps</b>' +
       '<div class="muted" style="margin-top:6px">' +
-      '<b>1 · Voice</b> tab: add your cloned voice id (your ElevenLabs voice), it reads every intro and script.<br>' +
+      '<b>1 · Voice studio</b> tab: record your own voice once (three short reads, about two minutes) and approve it. From then on the voicemails sent for you are in your voice, and every recruiter on the desk gets their own.<br>' +
       '<b>2 · Message</b>: either upload/record your pitch in the <b>Recordings</b> tab (the AI then speaks a personal intro with the prospect’s first name and job title before your recording plays), or write a merge-slot script in <b>Scripts</b> and the AI voice reads the whole thing.<br>' +
       '<b>3 · Campaigns</b> tab: create a campaign, pick your caller-ID number and the message, then <b>Import</b> your list (first name, job title, company, phone, city/state). Mobile numbers are stripped automatically.<br>' +
       '<b>4 · Attest consent</b> on the campaign card, then <b>Launch</b>. Drops go out 7-9 PM in each lead’s own local time; <b>Run now</b> fires the current window by hand (Test mode ignores the clock while you trial it).<br>' +
@@ -18496,7 +18496,7 @@
       '<div id="vdBody">' + loading() + "</div>";
 
     function tabBar() {
-      var tabs = [["campaigns", "Campaigns"], ["tracker", "Tracker"], ["recordings", "Recordings"], ["intel", "Find people"], ["scripts", "Scripts"], ["voice", "Voice"], ["test", "Test"]];
+      var tabs = [["campaigns", "Campaigns"], ["tracker", "Tracker"], ["voice", "Voice studio"], ["recordings", "Recordings"], ["intel", "Find people"], ["scripts", "Scripts"], ["test", "Test"]];
       $(".vd-tabs", el).innerHTML = tabs.map(function (t) {
         return '<button class="vd-tab' + (vd.tab === t[0] ? " active" : "") + '" data-vdtab="' + t[0] + '">' + t[1] + "</button>";
       }).join("");
@@ -18513,7 +18513,7 @@
       if (vd.tab === "recordings") return paintRecordings(body);
       if (vd.tab === "intel") return paintIntel(body);
       if (vd.tab === "scripts") return paintScripts(body);
-      if (vd.tab === "voice") return paintVoice(body);
+      if (vd.tab === "voice") return paintVoiceStudio(body);
       return paintTest(body);
     }
 
@@ -18661,6 +18661,7 @@
         if (!document.body.contains(body)) return;
         d = d || {};
         var t = d.totals || {}, rows = d.rows || [], arch = d.archive || {};
+        var byRec = (t.byRecruiter || []).filter(function (r) { return r.contacts > 0; });
         var filter = vd.trackerFilter || "all";
         function kpi(n, label, col) {
           return '<div style="min-width:118px"><div style="font-size:22px;font-weight:650;line-height:1.1' + (col ? ";color:" + col : "") + '">' + n + '</div><div class="muted" style="font-size:11.5px;margin-top:2px">' + label + "</div></div>";
@@ -18686,6 +18687,25 @@
           kpi(t.liveHumans || 0, "live answers") +
           kpi(t.filteredMobile || 0, "mobiles filtered") +
           "</div></div>" +
+
+          // Whose drops land. Voice Drops is per-recruiter now (each speaks in
+          // their own cloned voice), so a single workspace-wide delivery rate
+          // hides the thing you actually act on: one person's voice or list
+          // performing differently from the rest.
+          (byRec.length > 1
+            ? '<div class="card" style="margin-top:14px"><h3>By recruiter</h3>' +
+              '<p class="muted" style="font-size:13px;margin:4px 0 10px">Each recruiter\'s drops go out in their own voice from their own number. This is how those compare.</p>' +
+              '<div style="overflow-x:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse">' +
+              "<tr class='muted' style='text-align:left'><th style='padding:5px 8px'>Recruiter</th><th style='padding:5px 8px'>Contacts</th><th style='padding:5px 8px'>Reached a phone</th><th style='padding:5px 8px'>Voicemails left</th><th style='padding:5px 8px'>Delivery rate</th></tr>" +
+              byRec.map(function (r) {
+                return "<tr style='border-top:1px solid var(--border)'>" +
+                  "<td style='padding:6px 8px'><b>" + esc(r.recruiter === "unassigned" ? "Not assigned" : r.recruiter) + "</b></td>" +
+                  "<td style='padding:6px 8px'>" + (r.contacts || 0) + "</td>" +
+                  "<td style='padding:6px 8px'>" + (r.dialed || 0) + "</td>" +
+                  "<td style='padding:6px 8px'>" + (r.voicemailsLeft || 0) + "</td>" +
+                  "<td style='padding:6px 8px'>" + (r.dialed ? Math.round((r.deliveryRate || 0) * 100) + "%" : "-") + "</td></tr>";
+              }).join("") + "</table></div></div>"
+            : "") +
 
           // Credit archive card: the reusable clip library.
           '<div class="card" style="margin-top:14px;border-color:var(--brand-2)"><h3>Voice clip archive (credit saver)</h3>' +
@@ -19909,6 +19929,500 @@
     }
 
     /* ---- Voice tab: bring-your-own ElevenLabs / Cartesia / Hume voice id ---- */
+    /* ---- Voice studio: per-recruiter voice enrollment ----
+       The whole point of this tab is that a voice belongs to a PERSON. It shows
+       every recruiter on the desk, what each still owes, and walks whoever is
+       signed in through recording their own three reads and hearing the result
+       before a single drop can go out in it. Everything a member can do here acts
+       on their own row; owner/admin additionally get the oversight actions. */
+
+    var vsState = { data: null, wizard: null, take: null, rec: null, player: null };
+
+    function vsStopPlayer() {
+      if (vsState.player) { try { vsState.player.pause(); } catch (e) {} vsState.player = null; }
+    }
+    function vsStopRec() {
+      var r = vsState.rec; if (!r) return null;
+      vsState.rec = null;
+      clearInterval(r.timer);
+      try { r.node.disconnect(); r.src.disconnect(); } catch (e) {}
+      r.stream.getTracks().forEach(function (t) { t.stop(); });
+      try { r.ctx.close(); } catch (e) {}
+      return r;
+    }
+
+    var VS_PILL = {
+      cloned_live: ["Live for drops", "var(--accent-green)"],
+      cloned_unapproved: ["Listen and approve", "var(--accent-amber)"],
+      ready: ["Ready to create", "var(--brand)"],
+      recording: ["Part way through", "var(--text-dim)"],
+      not_started: ["Not recorded yet", "var(--text-dim)"],
+      failed: ["Needs another go", "var(--danger)"]
+    };
+    function vsPillFor(r) {
+      if (r.status === "cloned") return VS_PILL[r.approvedAt ? "cloned_live" : "cloned_unapproved"];
+      return VS_PILL[r.status] || VS_PILL.not_started;
+    }
+    function vsNum(n) { return (n == null ? "-" : String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",")); }
+
+    function vsStyles() {
+      return "<style>" +
+        ".vs-strip{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;font-size:12.5px;color:var(--text-dim);margin-top:8px}" +
+        ".vs-strip b{color:var(--text)}" +
+        ".vs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:12px}" +
+        ".vs-card{border:1.5px solid var(--border);border-radius:12px;padding:14px;background:var(--bg-soft);display:flex;flex-direction:column;gap:9px}" +
+        ".vs-card.me{border-color:var(--brand)}" +
+        ".vs-card.live{border-color:var(--accent-green)}" +
+        ".vs-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap}" +
+        ".vs-name{font-size:14px;font-weight:650;color:var(--text)}" +
+        ".vs-pill{font-size:10.5px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:999px;white-space:nowrap;color:#0b0b0b}" +
+        ".vs-meter{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}" +
+        ".vs-meter span{display:block;height:100%;background:var(--brand);transition:width .25s}" +
+        ".vs-acts{display:flex;gap:7px;flex-wrap:wrap;margin-top:2px}" +
+        ".vs-read{font-size:16px;line-height:1.72;color:var(--text);background:var(--bg-soft);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin:10px 0}" +
+        ".vs-steps{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 4px}" +
+        ".vs-step{font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:var(--bg-soft);color:var(--text-dim)}" +
+        ".vs-step.on{border-color:var(--brand);color:var(--text);font-weight:600}" +
+        ".vs-step.done{border-color:var(--accent-green);color:var(--text)}" +
+        ".vs-level{display:inline-block;width:120px;height:9px;border-radius:5px;background:var(--surface-2);overflow:hidden;vertical-align:middle}" +
+        ".vs-level i{display:block;height:100%;width:0%;background:var(--accent-green)}" +
+        ".vs-issue{font-size:12.5px;line-height:1.5;padding:8px 11px;border-radius:9px;margin-top:7px}" +
+        ".vs-issue.block{background:color-mix(in srgb,var(--danger) 12%,transparent);color:var(--text)}" +
+        ".vs-issue.warn{background:color-mix(in srgb,var(--accent-amber) 16%,transparent);color:var(--text)}" +
+        "</style>";
+    }
+
+    function paintVoiceStudio(body) {
+      body.innerHTML = loading();
+      api("/voice/enroll").then(function (d) {
+        vsState.data = d || {};
+        if (vsState.wizard) vsPaintWizard(body); else vsPaintBoard(body);
+      }).catch(function () { body.innerHTML = needsSetup(); });
+    }
+
+    /* ---------------------------------------------------------- the board -- */
+    function vsPaintBoard(body) {
+      vsStopPlayer(); vsStopRec();
+      var d = vsState.data || {};
+      var roster = d.roster || [];
+      var acct = d.account || {};
+      var you = d.you || {};
+      var live = roster.filter(function (r) { return r.liveForDrops; }).length;
+      var slotsLeft = (acct.voiceSlotLimit != null && acct.voiceSlotsUsed != null)
+        ? acct.voiceSlotLimit - acct.voiceSlotsUsed : null;
+
+      var acctBits = [];
+      acctBits.push("Voice engine: <b>" + (acct.configured ? "connected" : "not connected") + "</b>");
+      if (acct.tier) acctBits.push("plan <b>" + esc(acct.tier) + "</b>");
+      if (slotsLeft != null) acctBits.push("<b>" + slotsLeft + "</b> voice slot" + (slotsLeft === 1 ? "" : "s") + " free");
+      if (acct.characterLimit != null) {
+        acctBits.push("<b>" + vsNum(acct.charactersUsed) + "</b> of " + vsNum(acct.characterLimit) + " characters used this month");
+      }
+
+      var warn = "";
+      if (!acct.configured) {
+        warn = '<div class="vs-issue block">The voice engine is not connected for this workspace, so no voice can be created yet. Connect the key in <b>Setup → Voice</b> first. Everything else here still works, nothing will dial.</div>';
+      } else if (slotsLeft != null && slotsLeft < roster.filter(function (r) { return !r.voiceId; }).length) {
+        warn = '<div class="vs-issue warn">Only ' + slotsLeft + ' voice slot' + (slotsLeft === 1 ? "" : "s") + ' left on the plan, and ' +
+          roster.filter(function (r) { return !r.voiceId; }).length + ' people still need one. Free a slot on the voice engine account or upgrade the plan before everyone records.</div>';
+      }
+
+      var modeRow = you.isAdmin
+        ? '<label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-size:13px;cursor:pointer">' +
+          '<input type="checkbox" id="vsMode" style="margin-top:3px"' + (d.perRecruiterVoice ? " checked" : "") + " /> " +
+          "<span>Each recruiter's drops speak in their own voice " +
+          '<span class="muted">(off means every drop uses the one workspace voice below, whoever sent it)</span></span></label>'
+        : "";
+
+      var cards = roster.map(function (r) {
+        var pill = vsPillFor(r);
+        var cls = "vs-card" + (r.isYou ? " me" : "") + (r.liveForDrops ? " live" : "");
+        var acts = [];
+        if (r.isYou) {
+          acts.push('<button class="btn btn-sm btn-primary" data-vsact="record" data-vsemail="' + esc(r.email) + '">' +
+            (r.status === "not_started" ? "Record my voice" : r.voiceId ? "Record again" : "Continue recording") + "</button>");
+          if (r.voiceId && !r.approvedAt) {
+            acts.push('<button class="btn btn-sm btn-primary" data-vsact="approve" data-vsemail="' + esc(r.email) + '">This sounds like me</button>');
+          }
+        } else if (you.isAdmin && r.status === "ready") {
+          acts.push('<button class="btn btn-sm btn-primary" data-vsact="clone" data-vsemail="' + esc(r.email) + '">Create their voice</button>');
+        }
+        if (r.previewUrl) {
+          acts.push('<button class="btn btn-sm" data-vsact="play" data-vsurl="' + esc(r.previewUrl) + '">Hear it</button>');
+        } else if (r.voiceId && (r.isYou || you.isAdmin)) {
+          acts.push('<button class="btn btn-sm" data-vsact="preview" data-vsemail="' + esc(r.email) + '">Hear it</button>');
+        }
+        if (r.voiceId && r.approvedAt && (r.isYou || you.isAdmin)) {
+          acts.push('<button class="btn btn-ghost btn-sm" data-vsact="unapprove" data-vsemail="' + esc(r.email) + '">Pause this voice</button>');
+        }
+        if ((r.isYou || you.isAdmin) && r.status !== "not_started") {
+          acts.push('<button class="btn btn-ghost btn-sm" data-vsact="reset" data-vsemail="' + esc(r.email) + '">Start over</button>');
+        }
+
+        var sub;
+        if (r.liveForDrops) sub = "Drops sent for " + esc(r.name.split(" ")[0]) + " speak in this voice.";
+        else if (r.voiceId) sub = "Voice created. It will not be used on any drop until " + (r.isYou ? "you listen and approve it." : "they listen and approve it.");
+        else if (r.status === "ready") sub = "All three reads are in. " + (r.isYou ? "Create your voice." : you.isAdmin ? "You can create their voice now." : "Waiting on them to create it.");
+        else if (r.status === "recording") sub = Math.round(r.quality.totalSec) + "s recorded of the " + (d.minTotalSec || 45) + "s needed.";
+        else sub = "Has not recorded yet. Drops sent for them fall back to the workspace voice.";
+
+        return '<div class="' + cls + '">' +
+          '<div class="vs-top"><span class="vs-name">' + esc(r.name) + "</span>" +
+          (r.isYou ? '<span class="muted" style="font-size:11.5px">you</span>' : "") +
+          '<span style="flex:1"></span>' +
+          '<span class="vs-pill" style="background:' + pill[1] + '">' + pill[0] + "</span></div>" +
+          '<div class="muted" style="font-size:12px">' + esc(r.email) + "</div>" +
+          '<div class="vs-meter"><span style="width:' + (r.voiceId ? 100 : r.quality.score) + '%;background:' +
+            (r.liveForDrops ? "var(--accent-green)" : "var(--brand)") + '"></span></div>' +
+          '<div class="muted" style="font-size:12.5px;line-height:1.5">' + sub + "</div>" +
+          (r.error ? '<div class="vs-issue block">' + esc(r.error) + "</div>" : "") +
+          '<div class="vs-acts">' + acts.join("") + "</div></div>";
+      }).join("");
+
+      body.innerHTML = vsStyles() +
+        '<div class="card" style="border-color:var(--brand-2)"><h3>Team voices</h3>' +
+        '<p class="muted" style="font-size:13px;margin:4px 0 0">Every recruiter records their own voice once, right here, and from then on the voicemails sent on their behalf are in their voice. It takes about two minutes: three short reads, then you listen to yourself and approve it. Nothing dials in a voice its owner has not approved.</p>' +
+        '<div class="vs-strip"><span><b>' + live + "</b> of <b>" + roster.length + "</b> recruiters ready</span>" +
+        acctBits.map(function (b) { return "<span>" + b + "</span>"; }).join("") + "</div>" +
+        warn + modeRow + "</div>" +
+        '<div class="vs-grid">' + (cards || '<div class="card"><p class="muted">No one is on this workspace yet.</p></div>') + "</div>" +
+        '<div class="card" style="margin-top:14px"><h3>Engine and manual voices</h3>' +
+        '<p class="muted" style="font-size:13px;margin:4px 0 10px">Pick which engine speaks, or paste a voice id you already own elsewhere. Most desks never need to open this.</p>' +
+        '<div id="vsAdvanced">' + loading() + "</div></div>";
+
+      var adv = $("#vsAdvanced");
+      if (adv) paintVoice(adv);
+
+      var modeBox = $("#vsMode");
+      if (modeBox) modeBox.addEventListener("change", function () {
+        send("/voice/enroll", "POST", { action: "set-mode", perRecruiterVoice: !!modeBox.checked }).then(function (r) {
+          toast(r.ok ? (modeBox.checked ? "Each recruiter uses their own voice" : "One workspace voice for everyone") : "Could not change that");
+        });
+      });
+
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vsact]"), function (btn) {
+        btn.addEventListener("click", function () { vsBoardAction(body, btn); });
+      });
+    }
+
+    function vsBoardAction(body, btn) {
+      var act = btn.getAttribute("data-vsact");
+      var email = btn.getAttribute("data-vsemail");
+
+      if (act === "play") {
+        vsStopPlayer();
+        vsState.player = new Audio(btn.getAttribute("data-vsurl"));
+        vsState.player.play().catch(function () { toast("Tap again to allow audio"); });
+        return;
+      }
+      if (act === "record") {
+        vsState.wizard = { email: email, step: 0, busy: false, msg: "" };
+        vsState.take = null;
+        return vsPaintWizard(body);
+      }
+      if (act === "reset") {
+        if (!confirm("Delete these recordings and the voice made from them? The recruiter can record again from scratch.")) return;
+        btn.disabled = true;
+        return send("/voice/enroll", "POST", { action: "reset", targetEmail: email }).then(function (r) {
+          if (r.ok) { toast("Cleared"); paintVoiceStudio(body); }
+          else { btn.disabled = false; toast("Could not clear that"); }
+        });
+      }
+
+      btn.disabled = true;
+      var label = btn.textContent;
+      btn.textContent = act === "clone" ? "Creating..." : act === "preview" ? "Rendering..." : "Saving...";
+      send("/voice/enroll", "POST", { action: act, targetEmail: email }).then(function (r) {
+        btn.disabled = false; btn.textContent = label;
+        if (!r.ok) {
+          toast((r.data && r.data.detail) || "That did not work");
+          return paintVoiceStudio(body);
+        }
+        if (act === "clone" && r.data && r.data.preview) {
+          vsStopPlayer();
+          vsState.player = new Audio(r.data.preview);
+          vsState.player.play().catch(function () {});
+          toast("Voice created, have a listen");
+        } else if (act === "preview" && r.data && r.data.url) {
+          vsStopPlayer();
+          vsState.player = new Audio(r.data.url);
+          vsState.player.play().catch(function () { toast("Tap Hear it again to allow audio"); });
+        } else if (act === "approve") {
+          toast("Approved, your drops now speak in your voice");
+        } else if (act === "unapprove") {
+          toast("Paused, drops fall back to the workspace voice");
+        }
+        paintVoiceStudio(body);
+      }).catch(function () { btn.disabled = false; btn.textContent = label; toast("Could not reach the server"); });
+    }
+
+    /* --------------------------------------------------------- the wizard -- */
+    function vsPaintWizard(body) {
+      vsStopPlayer(); vsStopRec();
+      var d = vsState.data || {};
+      var w = vsState.wizard;
+      var prompts = d.prompts || [];
+      var row = (d.roster || []).filter(function (r) { return r.email === w.email; })[0] || { takes: [], quality: {} };
+      var done = {};
+      (row.takes || []).forEach(function (t) { done[t.promptId] = t; });
+
+      // The wizard walks the reads that are still missing, then lands on review.
+      var total = prompts.length;
+      var atReview = w.step >= total;
+      var prompt = atReview ? null : prompts[w.step];
+
+      var steps = prompts.map(function (p, i) {
+        var cls = "vs-step" + (done[p.id] ? " done" : "") + (!atReview && i === w.step ? " on" : "");
+        return '<span class="' + cls + '">' + (done[p.id] ? "&#10003; " : "") + esc(p.title) + "</span>";
+      }).join("") + '<span class="vs-step' + (atReview ? " on" : "") + '">Review</span>';
+
+      var head =
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">' +
+        '<button class="btn btn-ghost btn-sm" id="vsBack">&larr; All voices</button>' +
+        '<span class="muted" style="font-size:12.5px">Recording as <b>' + esc(row.name || w.email) + "</b></span></div>";
+
+      if (atReview) return vsPaintReview(body, head, steps, row);
+
+      var first = String(row.name || "").trim().split(/\s+/)[0] || "there";
+      var today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+      var text = String(prompt.text || "")
+        .replace(/\{name\}/g, row.name || w.email)
+        .replace(/\{first\}/g, first)
+        .replace(/\{date\}/g, today);
+
+      var existing = done[prompt.id];
+      var takeInfo = vsState.take
+        ? "New take: ~" + vsState.take.durationSec + "s. Play it back, then keep it or record again."
+        : existing
+          ? "Already recorded (~" + existing.durationSec + "s). Record again to replace it, or move on."
+          : "";
+
+      body.innerHTML = vsStyles() +
+        '<div class="card">' + head +
+        '<div class="vs-steps">' + steps + "</div>" +
+        "<h3 style='margin:8px 0 2px'>" + esc(prompt.title) + "</h3>" +
+        '<p class="muted" style="font-size:13px;margin:0">' + esc(prompt.hint) + "</p>" +
+        '<div class="vs-read">' + esc(text) + "</div>" +
+        (prompt.consent
+          ? '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer;margin-bottom:10px">' +
+            '<input type="checkbox" id="vsConsentBox" style="margin-top:3px" /> <span>I am the person speaking, and I authorize this copy of my voice.</span></label>'
+          : "") +
+        '<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">' +
+        '<button class="btn btn-primary btn-sm" id="vsRec">' + (existing || vsState.take ? "Record again" : "Start recording") + "</button>" +
+        '<span class="vs-level" id="vsLevel" style="display:none"><i id="vsLevelFill"></i></span>' +
+        '<button class="btn btn-sm" id="vsPlay"' + (vsState.take || existing ? "" : ' style="display:none"') + ">Play it back</button>" +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn-sm" id="vsNext"' + (existing || vsState.take ? "" : " disabled") + ">" +
+          (w.step === total - 1 ? "Save and review" : "Save and continue") + "</button></div>" +
+        '<div class="muted" id="vsMsg" style="font-size:12.5px;margin-top:9px;min-height:18px">' + esc(takeInfo) + "</div>" +
+        "</div>";
+
+      $("#vsBack").addEventListener("click", function () {
+        vsState.wizard = null; vsState.take = null; paintVoiceStudio(body);
+      });
+
+      function msg(t, bad) {
+        var m = $("#vsMsg"); if (!m) return;
+        m.textContent = t || ""; m.style.color = bad ? "var(--danger)" : "";
+      }
+
+      var recBtn = $("#vsRec");
+      recBtn.addEventListener("click", function () {
+        if (vsState.rec) {
+          var r = vsStopRec();
+          recBtn.textContent = "Record again";
+          var lv = $("#vsLevel"); if (lv) lv.style.display = "none";
+          // Same guards as the recordings tab: a silent or clipped take is caught
+          // here, before it can be uploaded and then quietly ruin a clone.
+          var out = vrEncodeWav(r.chunks, r.rate);
+          if (out.peak < 0.004) { msg("That take was silent. Check which microphone Windows is using, then try again.", true); return; }
+          if (out.seconds < prompt.minSec) {
+            msg("That was only " + out.seconds + "s. Read the whole passage, at least " + prompt.minSec + "s.", true); return;
+          }
+          vsState.take = { blob: out.blob, durationSec: out.seconds, peak: out.peak };
+          var pl = $("#vsPlay"); if (pl) pl.style.display = "";
+          var nx = $("#vsNext"); if (nx) nx.disabled = false;
+          msg("Recorded ~" + out.seconds + "s" + (out.peak > 0.985 ? " but it is clipping, back off the mic and try again for a cleaner voice." : ". Play it back, then save."), out.peak > 0.985);
+          return;
+        }
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          msg("This browser cannot record. Use Chrome or Edge.", true); return;
+        }
+        var ctx = new AC(); ctx.resume();
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+          var src = ctx.createMediaStreamSource(stream);
+          var node = ctx.createScriptProcessor(4096, 1, 1);
+          var chunks = [];
+          node.onaudioprocess = function (ev) {
+            var dd = ev.inputBuffer.getChannelData(0);
+            chunks.push(new Float32Array(dd));
+            var peak = 0;
+            for (var i = 0; i < dd.length; i += 16) { var a = Math.abs(dd[i]); if (a > peak) peak = a; }
+            var fill = $("#vsLevelFill"); if (fill) fill.style.width = Math.min(100, Math.round(peak * 260)) + "%";
+          };
+          src.connect(node); node.connect(ctx.destination);
+          vsState.rec = { ctx: ctx, stream: stream, node: node, src: src, chunks: chunks, rate: ctx.sampleRate, t0: Date.now(), timer: 0 };
+          vsState.rec.timer = setInterval(function () {
+            if (!vsState.rec) return;
+            var s = Math.round((Date.now() - vsState.rec.t0) / 1000);
+            msg("Recording... " + s + "s. Click Stop when you finish the passage.");
+            if (s >= 90) recBtn.click();
+          }, 500);
+          recBtn.textContent = "Stop";
+          var lv = $("#vsLevel"); if (lv) lv.style.display = "inline-block";
+          msg("Recording... read the passage above.");
+        }).catch(function () {
+          try { ctx.close(); } catch (e) {}
+          msg("The microphone was blocked. Allow it for this site and try again.", true);
+        });
+      });
+
+      var playBtn = $("#vsPlay");
+      if (playBtn) playBtn.addEventListener("click", function () {
+        vsStopPlayer();
+        var url = vsState.take ? URL.createObjectURL(vsState.take.blob) : (existing ? existing.url : "");
+        if (!url) return;
+        vsState.player = new Audio(url);
+        vsState.player.play().catch(function () { msg("Tap again to allow audio.", true); });
+      });
+
+      $("#vsNext").addEventListener("click", function () {
+        var nx = $("#vsNext");
+        // Nothing new recorded: this read is already on file, just move on.
+        if (!vsState.take) {
+          if (!existing) { msg("Record the passage first.", true); return; }
+          vsState.wizard.step++; vsState.take = null; return vsPaintWizard(body);
+        }
+        if (prompt.consent && !(($("#vsConsentBox") || {}).checked)) {
+          msg("Tick the box confirming this is you before saving the consent read.", true); return;
+        }
+        nx.disabled = true; msg("Saving...");
+        var fr = new FileReader();
+        fr.onload = function () {
+          var b64 = String(fr.result || "").split(",")[1] || "";
+          send("/voice/enroll", "POST", {
+            action: "take",
+            promptId: prompt.id,
+            audio: b64,
+            mime: "audio/wav",
+            durationSec: vsState.take.durationSec,
+            peak: vsState.take.peak,
+            consentStatement: prompt.consent ? text : undefined
+          }).then(function (r) {
+            nx.disabled = false;
+            if (!r.ok) { msg((r.data && r.data.detail) || "That did not save.", true); return; }
+            vsState.take = null;
+            vsState.wizard.step++;
+            api("/voice/enroll").then(function (dd) { vsState.data = dd || {}; vsPaintWizard(body); });
+          }).catch(function () { nx.disabled = false; msg("Could not reach the server.", true); });
+        };
+        fr.onerror = function () { nx.disabled = false; msg("Could not read that take.", true); };
+        fr.readAsDataURL(vsState.take.blob);
+      });
+    }
+
+    /* --------------------------------------------------------- the review -- */
+    function vsPaintReview(body, head, steps, row) {
+      var d = vsState.data || {};
+      var q = row.quality || { issues: [], score: 0, totalSec: 0 };
+      var blockers = (q.issues || []).filter(function (i) { return i.severity === "block"; });
+      var warns = (q.issues || []).filter(function (i) { return i.severity === "warn"; });
+
+      var takeRows = (row.takes || []).map(function (t) {
+        return '<div style="display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--bg-soft);margin-top:7px">' +
+          "<b style='font-size:13px'>" + esc(t.promptTitle) + "</b>" +
+          '<span class="muted" style="font-size:12px">~' + t.durationSec + "s</span>" +
+          '<span style="flex:1"></span>' +
+          '<button class="btn btn-ghost btn-sm" data-vsplay="' + esc(t.url) + '">Play</button>' +
+          '<button class="btn btn-ghost btn-sm" data-vsredo="' + esc(t.promptId) + '">Re-record</button></div>';
+      }).join("") || '<p class="muted" style="font-size:13px">Nothing recorded yet.</p>';
+
+      var already = Boolean(row.voiceId);
+
+      body.innerHTML = vsStyles() +
+        '<div class="card">' + head +
+        '<div class="vs-steps">' + steps + "</div>" +
+        "<h3 style='margin:8px 0 2px'>Review and create</h3>" +
+        '<p class="muted" style="font-size:13px;margin:0 0 4px">' + Math.round(q.totalSec || 0) + "s recorded across " +
+          (row.takes || []).length + " read" + ((row.takes || []).length === 1 ? "" : "s") +
+          ". Around " + (d.goodTotalSec || 70) + "s is where a cloned voice stops sounding synthetic.</p>" +
+        '<div class="vs-meter" style="margin:10px 0"><span style="width:' + (q.score || 0) + '%"></span></div>' +
+        blockers.map(function (i) { return '<div class="vs-issue block">' + esc(i.message) + "</div>"; }).join("") +
+        warns.map(function (i) { return '<div class="vs-issue warn">' + esc(i.message) + "</div>"; }).join("") +
+        takeRows +
+        '<div style="margin-top:14px;display:flex;gap:9px;flex-wrap:wrap;align-items:center">' +
+        '<button class="btn btn-primary btn-sm" id="vsClone"' + (q.canClone ? "" : " disabled") + ">" +
+          (already ? "Create my voice again" : "Create my voice") + "</button>" +
+        (already ? '<button class="btn btn-sm" id="vsHear">Hear my current voice</button>' : "") +
+        '<span class="muted" id="vsRevMsg" style="font-size:12.5px"></span></div>' +
+        (already
+          ? '<p class="muted" style="font-size:12.5px;margin:10px 0 0">Creating it again replaces your current voice and you will need to approve the new one before it is used.</p>'
+          : '<p class="muted" style="font-size:12.5px;margin:10px 0 0">This uses one voice slot on the voice engine account. You will hear the result straight away and nothing goes out until you approve it.</p>') +
+        "</div>";
+
+      $("#vsBack").addEventListener("click", function () {
+        vsState.wizard = null; vsState.take = null; paintVoiceStudio(body);
+      });
+      function rmsg(t, bad) {
+        var m = $("#vsRevMsg"); if (!m) return;
+        m.textContent = t || ""; m.style.color = bad ? "var(--danger)" : "";
+      }
+
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vsplay]"), function (b) {
+        b.addEventListener("click", function () {
+          vsStopPlayer();
+          vsState.player = new Audio(b.getAttribute("data-vsplay"));
+          vsState.player.play().catch(function () { rmsg("Tap again to allow audio.", true); });
+        });
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-vsredo]"), function (b) {
+        b.addEventListener("click", function () {
+          var pid = b.getAttribute("data-vsredo");
+          var idx = (vsState.data.prompts || []).map(function (p) { return p.id; }).indexOf(pid);
+          vsState.wizard.step = idx < 0 ? 0 : idx;
+          vsState.take = null;
+          vsPaintWizard(body);
+        });
+      });
+
+      var hear = $("#vsHear");
+      if (hear) hear.addEventListener("click", function () {
+        if (row.previewUrl) {
+          vsStopPlayer();
+          vsState.player = new Audio(row.previewUrl);
+          vsState.player.play().catch(function () { rmsg("Tap again to allow audio.", true); });
+          return;
+        }
+        hear.disabled = true; rmsg("Rendering...");
+        send("/voice/enroll", "POST", { action: "preview" }).then(function (r) {
+          hear.disabled = false;
+          if (!r.ok || !r.data || !r.data.url) { rmsg((r.data && r.data.detail) || "Could not render that.", true); return; }
+          rmsg("");
+          vsStopPlayer();
+          vsState.player = new Audio(r.data.url);
+          vsState.player.play().catch(function () { rmsg("Tap Hear again to allow audio.", true); });
+        });
+      });
+
+      var cl = $("#vsClone");
+      cl.addEventListener("click", function () {
+        cl.disabled = true; rmsg("Creating your voice, this takes a few seconds...");
+        send("/voice/enroll", "POST", { action: "clone" }).then(function (r) {
+          cl.disabled = false;
+          if (!r.ok) { rmsg((r.data && r.data.detail) || "The voice could not be created.", true); return; }
+          vsState.wizard = null; vsState.take = null;
+          toast("Voice created, have a listen");
+          if (r.data && r.data.preview) {
+            vsStopPlayer();
+            vsState.player = new Audio(r.data.preview);
+            vsState.player.play().catch(function () {});
+          }
+          paintVoiceStudio(body);
+        }).catch(function () { cl.disabled = false; rmsg("Could not reach the server.", true); });
+      });
+    }
+
     function paintVoice(body) {
       body.innerHTML = loading();
       api("/voice/clones").then(function (d) {

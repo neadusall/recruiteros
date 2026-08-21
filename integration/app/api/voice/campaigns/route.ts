@@ -49,7 +49,12 @@ export async function PUT(req: Request) {
     if (!rec) return fail("recording_not_found", 404);
     if (!canUseRecording(rec, requesterEmail(g.ctx), isWorkspaceAdmin(g.ctx))) return fail("forbidden", 403);
   }
-  const c = upsertCampaign(g.ctx.workspace.id, b);
+  // Stamp the creating recruiter on NEW campaigns only: this is what makes the
+  // drop speak in their cloned voice and what the tracker attributes outcomes to.
+  // An edit never re-stamps, or an admin opening someone's campaign to fix a typo
+  // would silently move the whole campaign onto the admin's voice.
+  const input = b?.id ? b : { ...b, ownerEmail: b?.ownerEmail || requesterEmail(g.ctx) };
+  const c = upsertCampaign(g.ctx.workspace.id, input);
   return ok({ campaign: { ...c, stats: campaignStats(c.id) } });
 }
 

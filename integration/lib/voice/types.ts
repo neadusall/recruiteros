@@ -106,8 +106,19 @@ export interface VoiceConsent {
   agentName: string;
   /** Which TTS vendor this voice id belongs to (default elevenlabs). */
   provider?: VoiceProvider;
-  /** Provider voice id — pasted by the user (bring-your-own-voice). */
+  /** Provider voice id — pasted by the user, or minted by the Voice Studio. */
   voiceId?: string;
+  /**
+   * WHOSE voice this is, as a lowercased email. This is the join key that makes
+   * Voice Drops per-recruiter: a drop sent on Sam's behalf resolves Sam's voice,
+   * not "whatever the workspace pinned last". Absent on legacy rows (pre-2026-08-21
+   * paste-an-id voices), which stay available as the shared workspace fallback.
+   */
+  ownerEmail?: string;
+  /** Workspace user id for the same person, when known. */
+  userId?: string;
+  /** Set when the voice was minted by the in-app enrollment wizard (not pasted). */
+  enrollmentId?: string;
   /** Where the recorded consent clip is stored. */
   consentClipUrl?: string;
   /** The exact consent statement the operator recorded. */
@@ -125,6 +136,13 @@ export interface VoiceConsent {
  * saved last". A campaign may still override with its own voiceId.
  */
 export interface VoiceSettings {
+  /**
+   * When true (the default once any recruiter has enrolled), a drop speaks in the
+   * voice of the RECRUITER it is sent on behalf of, falling back to the workspace
+   * voice below only for people who have not enrolled. Set false to force every
+   * drop through the single pinned workspace voice.
+   */
+  perRecruiterVoice?: boolean;
   /**
    * The TTS engine the operator picked — the prominent, provider-level choice.
    * When set, every drop synthesizes on this vendor (using the voice pinned in
@@ -185,6 +203,148 @@ export interface VoiceRecording {
   createdBy: string;
 }
 
+/* ============================ voice enrollment =============================
+   Cloning a recruiter's voice is a PERSON-level act, not a workspace setting.
+   An enrollment is that person's file: the guided reads they recorded (the
+   consent statement among them), the clone those reads produced, and the state
+   in between. One per recruiter per workspace, keyed by lowercased email so a
+   drop sent on their behalf can resolve their voice without a lookup table.  */
+
+/** Where a recruiter is in the enrollment flow. */
+export type EnrollmentStatus =
+  | "not_started"  // no takes recorded yet
+  | "recording"    // some takes in, not enough to clone
+  | "ready"        // enough good audio + consent recorded; awaiting "Create my voice"
+  | "cloned"       // a provider voice id exists and is wired to this person
+  | "failed";      // the last clone attempt errored (see `error`)
+
+/**
+ * One guided read. Recruiters are prompted with specific passages rather than
+ * "say something for a minute": an instant clone fits the delivery it hears, so
+ * the passages are written in the register the voice will actually be used in
+ * (an unhurried business voicemail), and the consent read doubles as the
+ * compliance artifact proving the person authorized their own clone.
+ */
+export interface EnrollmentPrompt {
+  id: string;
+  title: string;
+  /** What the recruiter reads aloud, verbatim. */
+  text: string;
+  /** Coaching shown under the prompt. */
+  hint: string;
+  /** Target length; the quality gate enforces `minSec`. */
+  targetSec: number;
+  minSec: number;
+  /** True for the read that records consent (required before a clone runs). */
+  consent?: boolean;
+}
+
+/** One recorded take against a prompt. */
+export interface EnrollmentTake {
+  id: string;
+  /** EnrollmentPrompt.id this take answers. */
+  promptId: string;
+  /** Audio in the voice cache (enr_*.wav / .mp3), served via /api/voice/audio. */
+  file: string;
+  mime: "audio/mpeg" | "audio/wav";
+  bytes: number;
+  durationSec: number;
+  /** Peak amplitude 0..1, measured client-side; drives the loudness gate. */
+  peak?: number;
+  createdAt: string;
+}
+
+/** A recruiter's voice file: their reads, and the clone minted from them. */
+export interface VoiceEnrollment {
+  id: string;
+  workspaceId: string;
+  /** The recruiter, lowercased email. The join key for per-recruiter voices. */
+  email: string;
+  /** Workspace user id, when the person is a member (blank for invited-by-email). */
+  userId?: string;
+  /** Name spoken and shown, e.g. "Sam Wagner". */
+  displayName: string;
+  status: EnrollmentStatus;
+  takes: EnrollmentTake[];
+  /** The exact consent wording the recruiter read, stored verbatim. */
+  consentStatement?: string;
+  /** Take id of the consent read. */
+  consentTakeId?: string;
+  consentAt?: string;
+  /** The minted clone. */
+  provider?: VoiceProvider;
+  voiceId?: string;
+  clonedAt?: string;
+  /** The VoiceConsent row this enrollment owns (kept in sync on clone/reset). */
+  consentId?: string;
+  /** Rendered "hear yourself" line, so the recruiter approves before any dial. */
+  previewFile?: string;
+  previewAt?: string;
+  /** The recruiter listened and approved. Nothing dials in an unapproved voice. */
+  approvedAt?: string;
+  /** Last clone failure, in plain language. */
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+/**
+ * The guided script. Roughly 75 seconds total, which is where instant-clone
+ * quality plateaus — asking for more is friction that buys nothing, and asking
+ * for much less produces the thin, buzzy clone that makes a drop sound synthetic.
+ */
+export const ENROLLMENT_PROMPTS: EnrollmentPrompt[] = [
+  {
+    id: "consent",
+    title: "1 · Consent",
+    text:
+      "My name is {name}. I am recording this on {date}. " +
+      "I authorize RecruitersOS to create a synthetic copy of my voice, and to use it for business outreach that I authorize, including voicemail messages I approve. " +
+      "I confirm this is my own voice and that I am the person speaking.",
+    hint:
+      "Read it exactly as written, at your normal speaking pace. This take is your consent record and it is kept.",
+    targetSec: 20,
+    minSec: 10,
+    consent: true,
+  },
+  {
+    id: "voicemail",
+    title: "2 · A voicemail, the way you leave one",
+    text:
+      "Hey, it's {first} over at Lume. I saw you're hiring, and I wanted to reach out directly because I came across somebody who honestly made me think of your search. " +
+      "I sent you a quick email with a couple of details. If you get a minute to look, let me know what you think and we can go from there. " +
+      "Either way, thanks, and I hope the search is going well. Talk soon.",
+    hint:
+      "This is the one that matters most. Say it like you would to a real person, unhurried, warm. Do not read it like a script.",
+    targetSec: 30,
+    minSec: 15,
+  },
+  {
+    id: "range",
+    title: "3 · Range",
+    text:
+      "Numbers, names and questions all sit differently in a voice, so this passage covers them. " +
+      "We placed a Vice President of Engineering in Charlotte in nineteen days, and two Directors of Finance in Phoenix last quarter. " +
+      "Does Thursday at two thirty work, or would sometime early next week be easier? " +
+      "Either way, I'll follow up in writing so you have it all in one place.",
+    hint:
+      "Let the question at the end actually rise. That is what teaches the clone your natural inflection.",
+    targetSec: 30,
+    minSec: 15,
+  },
+];
+
+/** Total seconds of audio below which an instant clone reliably sounds thin. */
+export const ENROLLMENT_MIN_TOTAL_SEC = 45;
+/** Where quality stops improving; the UI stops asking for more past this. */
+export const ENROLLMENT_GOOD_TOTAL_SEC = 70;
+
+/** The line a freshly cloned voice speaks back, so the recruiter can approve it. */
+export const ENROLLMENT_PREVIEW_LINE =
+  "Hey, it's {first}. This is what your voice sounds like on a voicemail drop. " +
+  "If this sounds like you, you're ready to go.";
+
 /** How a campaign's voicemail message is built. */
 export type VoiceMessageMode = "script" | "recording";
 
@@ -198,6 +358,12 @@ export interface VoiceCampaign {
   workspaceId: string;
   motion: Motion;
   name: string;
+  /**
+   * The recruiter this campaign goes out on behalf of (lowercased email), stamped
+   * from the creator. Decides which cloned voice speaks and which recruiter the
+   * tracker attributes every outcome to. Absent = the workspace voice.
+   */
+  ownerEmail?: string;
   status: "draft" | "scheduled" | "running" | "paused" | "done";
   persona: VoicePersona;
   /** Templated VM body ({first_name}/{role}/{company}). */
@@ -283,6 +449,8 @@ export interface VoiceCampaignInput {
   id?: string;
   motion?: Motion;
   name?: string;
+  /** Recruiter this campaign speaks and reports as. Stamped from the creator. */
+  ownerEmail?: string;
   status?: VoiceCampaign["status"];
   persona?: Partial<VoicePersona>;
   scriptTemplate?: string;

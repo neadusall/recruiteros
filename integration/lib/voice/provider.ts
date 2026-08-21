@@ -128,6 +128,40 @@ export interface CreateVoiceResult {
   error?: string;
 }
 
+/** One consent/enrollment take handed to the cloner. */
+export interface VoiceSampleInput {
+  audio: Buffer;
+  /** File name the vendor sees, e.g. "take-1.wav". The extension matters to them. */
+  filename: string;
+  contentType?: string;
+}
+
+/**
+ * What a clone is minted from. `sample` is the single-take legacy shape kept for
+ * the old paste-a-clip path; `samples` is what the enrollment wizard sends. An
+ * instant voice clone is materially better from several varied takes than from
+ * one, so the studio records a consent read plus two passages and posts all of
+ * them in a single call.
+ */
+export interface CreateVoiceInput {
+  name: string;
+  /** Legacy single take. */
+  sample?: Buffer;
+  contentType?: string;
+  /** Multiple takes (preferred). Overrides `sample` when present. */
+  samples?: VoiceSampleInput[];
+  /** Shown on the vendor dashboard so a human can tell the voices apart. */
+  description?: string;
+  /** Vendor-side labels, e.g. { workspace, recruiter }. */
+  labels?: Record<string, string>;
+  /**
+   * Ask the vendor to strip room tone / hiss before fitting the clone. Laptop-mic
+   * enrollments are noisy, and that noise otherwise bakes into the voice, where it
+   * is audible on every drop and cannot be removed after the fact.
+   */
+  removeBackgroundNoise?: boolean;
+}
+
 /** One selectable voice on the provider account (for the pick-a-voice browser). */
 export interface ProviderVoice {
   voiceId: string;
@@ -136,6 +170,19 @@ export interface ProviderVoice {
   category?: string;
   /** Short public MP3 URL the UI can play as a sample, when the provider gives one. */
   previewUrl?: string;
+}
+
+/** Vendor-account headroom, surfaced in the studio so a clone never fails blind. */
+export interface VoiceAccountStatus {
+  configured: boolean;
+  tier?: string;
+  charactersUsed?: number;
+  characterLimit?: number;
+  /** When the monthly character allowance resets (ISO). */
+  resetsAt?: string;
+  voiceSlotsUsed?: number;
+  voiceSlotLimit?: number;
+  error?: string;
 }
 
 export interface ListVoicesResult {
@@ -151,8 +198,12 @@ export interface VoiceCloneClient {
   verify(): Promise<{ ok: boolean; error?: string }>;
   /** Synthesize one line in `voiceId` (defaults to the configured voice). */
   synthesize(text: string, voiceId?: string): Promise<SynthResult>;
-  /** Mint a cloned voice from a consent recording (operator's own voice only). */
-  createVoice(input: { name: string; sample: Buffer; contentType?: string }): Promise<CreateVoiceResult>;
+  /** Mint a cloned voice from consent recordings (operator's own voice only). */
+  createVoice(input: CreateVoiceInput): Promise<CreateVoiceResult>;
+  /** Remove a cloned voice from the vendor account (frees a voice slot). */
+  deleteVoice?(voiceId: string): Promise<{ ok: boolean; error?: string }>;
+  /** Account headroom: how many voice slots and characters are left. */
+  accountStatus?(): Promise<VoiceAccountStatus>;
   /** The voices on this account, for the desk-form voice browser. Optional: not
    *  every provider exposes a listing, and callers must handle its absence. */
   listVoices?(): Promise<ListVoicesResult>;
@@ -248,26 +299,105 @@ class ElevenLabsClient implements VoiceCloneClient {
     return { audio, contentType: "audio/mpeg", dryRun: false };
   }
 
-  async createVoice(input: { name: string; sample: Buffer; contentType?: string }): Promise<CreateVoiceResult> {
+  async createVoice(input: CreateVoiceInput): Promise<CreateVoiceResult> {
     if (!this.configured()) {
       console.info(`[voice-clone:dry] createVoice "${input.name}"`);
       return { dryRun: true };
     }
+    // Prefer the multi-take shape; fall back to the legacy single sample.
+    const takes: VoiceSampleInput[] = input.samples?.length
+      ? input.samples
+      : input.sample
+        ? [{ audio: input.sample, filename: "consent.mp3", contentType: input.contentType || "audio/mpeg" }]
+        : [];
+    if (!takes.length) return { dryRun: false, error: "voice_clone_no_samples" };
+
     const form = new FormData();
     form.append("name", input.name);
-    form.append(
-      "files",
-      new Blob([new Uint8Array(input.sample)], { type: input.contentType || "audio/mpeg" }),
-      "consent.mp3",
-    );
-    const res = await fetch(`${this.base}/voices/add`, {
-      method: "POST",
-      headers: { "xi-api-key": this.key() },
-      body: form as any,
-    });
-    if (!res.ok) return { dryRun: false, error: `voice_clone_${res.status}` };
+    for (const t of takes) {
+      form.append(
+        "files",
+        new Blob([new Uint8Array(t.audio)], { type: t.contentType || "audio/wav" }),
+        t.filename,
+      );
+    }
+    if (input.description) form.append("description", input.description.slice(0, 500));
+    if (input.labels) form.append("labels", JSON.stringify(input.labels));
+    if (input.removeBackgroundNoise) form.append("remove_background_noise", "true");
+
+    let res: Response;
+    try {
+      res = await fetch(`${this.base}/voices/add`, {
+        method: "POST",
+        headers: { "xi-api-key": this.key() },
+        body: form as any,
+      });
+    } catch (e: any) {
+      return { dryRun: false, error: `voice_clone_network: ${e?.message || "fetch failed"}` };
+    }
+    if (!res.ok) {
+      // Surface WHY, not just the status. The two failures a recruiter actually
+      // hits are "no voice slots left on the plan" and "this plan cannot clone",
+      // and a bare voice_clone_401 sends someone hunting the wrong problem.
+      const raw = await res.text().catch(() => "");
+      let detail = "";
+      try {
+        const d = JSON.parse(raw)?.detail;
+        detail = d && typeof d === "object" ? String(d.message || d.status || "") : typeof d === "string" ? d : "";
+      } catch {
+        detail = raw.slice(0, 200);
+      }
+      if (/voice_limit|maximum.*voices|voice slots/i.test(detail)) return { dryRun: false, error: "voice_slots_full" };
+      if (/instant_voice_cloning|subscription|upgrade/i.test(detail)) return { dryRun: false, error: "plan_cannot_clone" };
+      console.error(`[voice-clone:elevenlabs] createVoice -> ${res.status}; ${detail.slice(0, 200)}`);
+      return {
+        dryRun: false,
+        error: detail ? `voice_clone_${res.status}: ${detail.slice(0, 160)}` : `voice_clone_${res.status}`,
+      };
+    }
     const data: any = await res.json().catch(() => ({}));
-    return { voiceId: data?.voice_id, dryRun: false };
+    if (!data?.voice_id) return { dryRun: false, error: "voice_clone_no_id" };
+    return { voiceId: data.voice_id, dryRun: false };
+  }
+
+  async deleteVoice(voiceId: string): Promise<{ ok: boolean; error?: string }> {
+    if (!this.configured()) return { ok: false, error: "no_api_key" };
+    try {
+      const res = await fetch(`${this.base}/voices/${encodeURIComponent(voiceId)}`, {
+        method: "DELETE",
+        headers: { "xi-api-key": this.key() },
+      });
+      return res.ok ? { ok: true } : { ok: false, error: `voice_delete_${res.status}` };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || "voice_delete_failed" };
+    }
+  }
+
+  async accountStatus(): Promise<VoiceAccountStatus> {
+    if (!this.configured()) return { configured: false, error: "no_api_key" };
+    try {
+      const res = await fetch(`${this.base}/user/subscription`, { headers: { "xi-api-key": this.key() } });
+      if (!res.ok) {
+        // A key scoped to Text-to-Speech only cannot read the subscription. That
+        // is not an outage (synthesis and cloning still work), so report the
+        // account as configured with unknown headroom rather than as broken.
+        return { configured: true, error: res.status === 401 ? "no_subscription_scope" : `elevenlabs_${res.status}` };
+      }
+      const d: any = await res.json();
+      return {
+        configured: true,
+        tier: d?.tier,
+        charactersUsed: d?.character_count,
+        characterLimit: d?.character_limit,
+        resetsAt: d?.next_character_count_reset_unix
+          ? new Date(d.next_character_count_reset_unix * 1000).toISOString()
+          : undefined,
+        voiceSlotsUsed: d?.voice_slots_used,
+        voiceSlotLimit: d?.voice_limit,
+      };
+    } catch (e: any) {
+      return { configured: true, error: e?.message || "elevenlabs_error" };
+    }
   }
 
   async listVoices(): Promise<ListVoicesResult> {

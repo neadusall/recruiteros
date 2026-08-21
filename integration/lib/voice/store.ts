@@ -18,8 +18,8 @@ import type { Motion } from "../core/types";
 import {
   type VoiceCampaign, type VoiceCampaignInput, type VoiceLead,
   type VoiceConsent, type VoiceScript, type DropOutcome, type VoiceSettings,
-  type VoiceRecording,
-  DEFAULT_PERSONA, DEFAULT_WINDOW,
+  type VoiceRecording, type VoiceEnrollment, type EnrollmentTake, type EnrollmentStatus,
+  DEFAULT_PERSONA, DEFAULT_WINDOW, ENROLLMENT_MIN_TOTAL_SEC,
 } from "./types";
 import { DEFAULT_VOICE_SCRIPTS } from "./seedScripts";
 import type { VoiceProvider } from "./provider";
@@ -66,6 +66,8 @@ const store = {
   scripts: [] as VoiceScript[],
   /** Pre-recorded pitches (personal artifacts, owner-stamped). */
   recordings: [] as VoiceRecording[],
+  /** Per-recruiter voice enrollments (samples + the clone they produced). */
+  enrollments: [] as VoiceEnrollment[],
   drops: [] as DropLog[],
   pending: {} as Record<string, PendingDrop>,
   /** Per-workspace settings (the chosen active voice/engine). */
@@ -87,6 +89,7 @@ function hydrate(s: any) {
   store.consent = s.consent ?? [];
   store.scripts = s.scripts ?? [];
   store.recordings = s.recordings ?? [];
+  store.enrollments = s.enrollments ?? [];
   store.drops = s.drops ?? [];
   store.pending = s.pending ?? {};
   store.settings = s.settings ?? {};
@@ -141,6 +144,7 @@ export function upsertCampaign(workspaceId: string, input: VoiceCampaignInput): 
     workspaceId,
     motion: input.motion ?? existing?.motion ?? "recruiting",
     name: input.name ?? existing?.name ?? "Untitled voice campaign",
+    ownerEmail: (input.ownerEmail ?? existing?.ownerEmail)?.trim().toLowerCase() || undefined,
     status: input.status ?? existing?.status ?? "draft",
     persona,
     scriptTemplate: input.scriptTemplate ?? existing?.scriptTemplate ?? "",
@@ -286,6 +290,9 @@ export function upsertConsent(workspaceId: string, input: Partial<VoiceConsent> 
     agentName: input.agentName,
     provider: input.provider ?? existing?.provider,
     voiceId: input.voiceId ?? existing?.voiceId,
+    ownerEmail: (input.ownerEmail ?? existing?.ownerEmail)?.trim().toLowerCase() || undefined,
+    userId: input.userId ?? existing?.userId,
+    enrollmentId: input.enrollmentId ?? existing?.enrollmentId,
     consentClipUrl: input.consentClipUrl ?? existing?.consentClipUrl,
     statement: input.statement,
     attestedBy: input.attestedBy,
@@ -390,9 +397,34 @@ export function setActiveProvider(workspaceId: string, provider: VoiceProvider |
  *   3. else the most recently saved voice;
  *   4. else empty (the env default provider + voice).
  */
-export function activeVoiceRef(workspaceId: string): { provider?: VoiceProvider; voiceId?: string } {
+/**
+ * Which voice speaks a given drop.
+ *
+ * Order, most specific first:
+ *  1. the RECRUITER the drop goes out on behalf of, if they have enrolled a voice
+ *     (this is the whole point of per-recruiter voices: Sam's drops sound like
+ *     Sam, not like whoever the workspace pinned last),
+ *  2. the workspace's pinned engine + voice,
+ *  3. the most recently saved voice,
+ *  4. nothing — the caller then runs as a dry-run rather than dialing silence.
+ *
+ * Step 1 is skipped when the workspace explicitly turned per-recruiter voices off
+ * (`perRecruiterVoice === false`), which forces one house voice for everyone.
+ */
+export function activeVoiceRef(
+  workspaceId: string,
+  ownerEmail?: string,
+): { provider?: VoiceProvider; voiceId?: string } {
   const settings = store.settings[workspaceId] ?? {};
   const consent = store.consent.filter((c) => c.workspaceId === workspaceId && c.voiceId);
+
+  const who = (ownerEmail || "").trim().toLowerCase();
+  if (who && settings.perRecruiterVoice !== false) {
+    const mine = consent.filter((c) => (c.ownerEmail || "").toLowerCase() === who);
+    const latest = mine[mine.length - 1];
+    if (latest) return { provider: latest.provider ?? "elevenlabs", voiceId: latest.voiceId };
+  }
+
   const pinned = settings.activeVoiceId ? consent.find((c) => c.id === settings.activeVoiceId) : undefined;
 
   if (settings.activeProvider) {
@@ -608,6 +640,10 @@ export interface TrackerRow {
   status: string;
   /** The recommended next step, so the operator knows where to go from here. */
   nextAction: string;
+  /** Recruiter this drop went out on behalf of (campaign owner), lowercased email. */
+  recruiter?: string;
+  /** Which cloned voice actually spoke it, so a bad voice is traceable to drops. */
+  voiceId?: string;
 }
 
 export interface TrackerTotals {
@@ -621,6 +657,14 @@ export interface TrackerTotals {
   failed: number;
   /** voicemailsLeft / dialed, 0-1. */
   deliveryRate: number;
+  /** Per-recruiter split, so "whose drops land" is answerable at a glance. */
+  byRecruiter: Array<{
+    recruiter: string;
+    contacts: number;
+    dialed: number;
+    voicemailsLeft: number;
+    deliveryRate: number;
+  }>;
 }
 
 /** Plain-language status + the next step to take, per outcome. */
@@ -667,6 +711,8 @@ export function voiceTracker(workspaceId: string, motion?: Motion, limit = 500):
         phone: l.phone, lineType: l.lineType, outcome: l.outcome,
         attempts: l.attempts, lastAttemptAt: l.lastAttemptAt,
         status: g.status, nextAction: g.nextAction,
+        recruiter: c.ownerEmail,
+        voiceId: c.voiceId ?? activeVoiceRef(workspaceId, c.ownerEmail).voiceId,
       });
     }
   }
@@ -679,7 +725,11 @@ export function voiceTracker(workspaceId: string, motion?: Motion, limit = 500):
   const totals: TrackerTotals = {
     contacts: rows.length, dialed: 0, voicemailsLeft: 0, liveHumans: 0,
     noAnswer: 0, queued: 0, filteredMobile: 0, failed: 0, deliveryRate: 0,
+    byRecruiter: [],
   };
+  // Per-recruiter tallies are built over ALL rows, not the truncated page, so the
+  // split stays honest once a workspace has more leads than the row limit.
+  const per = new Map<string, { contacts: number; dialed: number; voicemailsLeft: number }>();
   for (const r of rows) {
     if (r.outcome === "voicemail_delivered") { totals.voicemailsLeft++; totals.dialed++; }
     else if (r.outcome === "human_answered") { totals.liveHumans++; totals.dialed++; }
@@ -687,10 +737,139 @@ export function voiceTracker(workspaceId: string, motion?: Motion, limit = 500):
     else if (r.outcome === "queued" || r.outcome === "scheduled") totals.queued++;
     else if (r.outcome === "filtered_mobile") totals.filteredMobile++;
     else if (r.outcome === "failed") totals.failed++;
+
+    const key = r.recruiter || "unassigned";
+    const p = per.get(key) ?? { contacts: 0, dialed: 0, voicemailsLeft: 0 };
+    p.contacts++;
+    if (r.outcome === "voicemail_delivered") { p.voicemailsLeft++; p.dialed++; }
+    else if (r.outcome === "human_answered" || r.outcome === "no_answer") p.dialed++;
+    per.set(key, p);
   }
   totals.deliveryRate = totals.dialed ? totals.voicemailsLeft / totals.dialed : 0;
+  totals.byRecruiter = [...per.entries()]
+    .map(([recruiter, p]) => ({
+      recruiter,
+      contacts: p.contacts,
+      dialed: p.dialed,
+      voicemailsLeft: p.voicemailsLeft,
+      deliveryRate: p.dialed ? p.voicemailsLeft / p.dialed : 0,
+    }))
+    .sort((a, b) => b.contacts - a.contacts);
 
   return { rows: rows.slice(0, limit), totals };
+}
+
+/* ---------------- voice enrollments (per-recruiter voices) ----------------
+   One row per recruiter per workspace, keyed by lowercased email. Everything the
+   Voice Studio shows and every per-recruiter voice resolution reads from here. */
+
+function normEmail(e: string): string {
+  return (e || "").trim().toLowerCase();
+}
+
+export function listEnrollments(workspaceId: string): VoiceEnrollment[] {
+  return store.enrollments
+    .filter((e) => e.workspaceId === workspaceId)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+export function getEnrollment(workspaceId: string, email: string): VoiceEnrollment | undefined {
+  const key = normEmail(email);
+  return store.enrollments.find((e) => e.workspaceId === workspaceId && e.email === key);
+}
+
+export function getEnrollmentById(workspaceId: string, id: string): VoiceEnrollment | undefined {
+  return store.enrollments.find((e) => e.workspaceId === workspaceId && e.id === id);
+}
+
+/** Create-or-update a recruiter's enrollment. Never clobbers takes not passed. */
+export function upsertEnrollment(
+  workspaceId: string,
+  email: string,
+  patch: Partial<Omit<VoiceEnrollment, "id" | "workspaceId" | "email" | "createdAt">>,
+): VoiceEnrollment {
+  const key = normEmail(email);
+  let row = getEnrollment(workspaceId, key);
+  const now = nowIso();
+  if (!row) {
+    row = {
+      id: rid("venr"),
+      workspaceId,
+      email: key,
+      displayName: patch.displayName || key,
+      status: "not_started",
+      takes: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.enrollments.push(row);
+  }
+  Object.assign(row, patch, { updatedAt: now });
+  row.status = deriveEnrollmentStatus(row);
+  persist();
+  return row;
+}
+
+/**
+ * Status is DERIVED, never set by a caller, so the board can't drift out of sync
+ * with the audio actually on file: delete the last take of a cloned voice and it
+ * still reads "cloned" (the clone exists), but drop the clone and it falls back
+ * to whatever the takes justify.
+ */
+export function deriveEnrollmentStatus(row: VoiceEnrollment): EnrollmentStatus {
+  if (row.voiceId) return "cloned";
+  if (row.error) return "failed";
+  if (!row.takes.length) return "not_started";
+  const total = row.takes.reduce((n, t) => n + (t.durationSec || 0), 0);
+  const hasConsent = Boolean(row.consentTakeId && row.takes.some((t) => t.id === row.consentTakeId));
+  return hasConsent && total >= ENROLLMENT_MIN_TOTAL_SEC ? "ready" : "recording";
+}
+
+export function addEnrollmentTake(workspaceId: string, email: string, take: EnrollmentTake): VoiceEnrollment | undefined {
+  const row = getEnrollment(workspaceId, email);
+  if (!row) return undefined;
+  // One take per prompt: re-recording replaces, so a recruiter can redo a bad
+  // read without accumulating rejects that would drag the clone down.
+  row.takes = row.takes.filter((t) => t.promptId !== take.promptId);
+  row.takes.push(take);
+  row.takes.sort((a, b) => a.promptId.localeCompare(b.promptId));
+  row.updatedAt = nowIso();
+  row.status = deriveEnrollmentStatus(row);
+  persist();
+  return row;
+}
+
+export function removeEnrollmentTake(workspaceId: string, email: string, takeId: string): EnrollmentTake | undefined {
+  const row = getEnrollment(workspaceId, email);
+  if (!row) return undefined;
+  const take = row.takes.find((t) => t.id === takeId);
+  if (!take) return undefined;
+  row.takes = row.takes.filter((t) => t.id !== takeId);
+  if (row.consentTakeId === takeId) {
+    row.consentTakeId = undefined;
+    row.consentAt = undefined;
+  }
+  row.updatedAt = nowIso();
+  row.status = deriveEnrollmentStatus(row);
+  persist();
+  return take;
+}
+
+/** Drop a recruiter's enrollment row entirely (audio cleanup is the caller's). */
+export function deleteEnrollment(workspaceId: string, email: string): VoiceEnrollment | undefined {
+  const row = getEnrollment(workspaceId, email);
+  if (!row) return undefined;
+  store.enrollments = store.enrollments.filter((e) => e !== row);
+  persist();
+  return row;
+}
+
+/** Turn per-recruiter voices on or off for a workspace. */
+export function setPerRecruiterVoice(workspaceId: string, on: boolean): VoiceSettings {
+  const settings = store.settings[workspaceId] ?? (store.settings[workspaceId] = {});
+  settings.perRecruiterVoice = on;
+  persist();
+  return settings;
 }
 
 /* ---------------- pending per-call playback plan ---------------- */

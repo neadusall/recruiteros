@@ -27,6 +27,7 @@ import { getCore } from "../core/repository";
 import { withWorkspaceCreds } from "../connected";
 import { classifyLine } from "../signals/phoneClassify";
 import { toE164 } from "../voice/phone";
+import { listMembers } from "../auth/team";
 import {
   activeVoiceRef, spliceSegments, assembleSplicedDrop, DEFAULT_PERSONA,
   type VoicePersona,
@@ -47,11 +48,35 @@ function roleVmTemplate(): string {
   return (process.env.RECRUITEROS_ROLE_VM_TEMPLATE || "").trim() || DEFAULT_ROLE_VM_TEMPLATE;
 }
 
-function personaFor(): VoicePersona {
+/**
+ * Who the voicemail says it is from.
+ *
+ * When the prospect has an owning recruiter, the message states THAT recruiter's
+ * name — because the voice speaking it is that recruiter's cloned voice, and the
+ * honest-identification rule is not satisfied by a message in Sam's voice that
+ * introduces itself as Ryan. Falls back to the workspace-wide persona envs for
+ * prospects nobody owns.
+ */
+function personaFor(recruiterName?: string): VoicePersona {
   return {
-    agentName: (process.env.RECRUITEROS_VOICE_AGENT_NAME || DEFAULT_PERSONA.agentName).trim(),
+    agentName: (recruiterName || process.env.RECRUITEROS_VOICE_AGENT_NAME || DEFAULT_PERSONA.agentName).trim(),
     agentCompany: (process.env.RECRUITEROS_VOICE_AGENT_COMPANY || DEFAULT_PERSONA.agentCompany).trim(),
     signoff: DEFAULT_PERSONA.signoff,
+  };
+}
+
+/**
+ * Resolve the prospect's owning recruiter to (email, first name). The email picks
+ * their cloned voice; the first name is what the message says out loud. Returns
+ * empty when the prospect is unowned or the owner has left the workspace.
+ */
+function ownerOf(workspaceId: string, p: Prospect): { email?: string; name?: string } {
+  if (!p.ownerId) return {};
+  const member = listMembers(workspaceId).find((m) => m.userId === p.ownerId);
+  if (!member) return {};
+  return {
+    email: (member.email || "").trim().toLowerCase() || undefined,
+    name: (member.firstName || member.name || "").trim() || undefined,
   };
 }
 
@@ -87,9 +112,10 @@ export async function assembleRoleVoicemail(
   workspaceId: string, p: Prospect,
 ): Promise<{ url?: string; role: string; dryRun: boolean }> {
   const role = roleForProspect(p);
-  const persona = personaFor();
+  const owner = ownerOf(workspaceId, p);
+  const persona = personaFor(owner.name);
   const vars = { firstName: p.firstName || p.fullName?.split(/\s+/)[0] || "", role, company: p.company };
-  const voice = activeVoiceRef(workspaceId);
+  const voice = activeVoiceRef(workspaceId, owner.email);
   const segments = spliceSegments(roleVmTemplate(), vars, persona);
   const drop = await withWorkspaceCreds(workspaceId, () => assembleSplicedDrop(segments, voice));
   return { url: drop.playlist[0], role, dryRun: drop.dryRun };

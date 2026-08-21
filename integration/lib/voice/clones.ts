@@ -40,8 +40,29 @@ function voiceKey(voice: VoiceRef): string {
   return `${voice.provider || "el"}_${voice.voiceId || "default"}_${voiceSettingsTag(voice.provider)}`;
 }
 
+/**
+ * Where rendered clone segments and uploaded pitch recordings live.
+ *
+ * MUST resolve onto the persistent data volume, not the container filesystem.
+ * Until 2026-08-21 this fell back to `process.cwd()/.data`, which inside the
+ * production image is `/app/integration/.data` — a container layer. Every deploy
+ * (the watcher rebuilds on each new commit) therefore threw away the whole clone
+ * archive AND every recruiter's uploaded pitch recording: the cache re-billed
+ * ElevenLabs from zero, and a campaign in `recording` mode failed its leads on a
+ * file that no longer existed. Same resolution rules as lib/db and
+ * lib/phone/voicemail.ts (ROS_DATA_DIR, else /data in production).
+ */
 function cacheDir(): string {
-  return process.env.VOICE_CLONE_CACHE_DIR || join(process.cwd(), ".data", "voice-clones");
+  if (process.env.VOICE_CLONE_CACHE_DIR) return process.env.VOICE_CLONE_CACHE_DIR;
+  const base =
+    process.env.ROS_DATA_DIR ??
+    (process.env.NODE_ENV === "production" ? "/data" : join(process.cwd(), ".data"));
+  return join(base, "voice-clones");
+}
+
+/** The resolved cache directory, for health checks that assert durability. */
+export function voiceCacheDir(): string {
+  return cacheDir();
 }
 
 function appUrl(): string {
@@ -122,6 +143,48 @@ export async function saveRecordingAudio(id: string, bytes: Buffer, ext: "mp3" |
   await fs.mkdir(cacheDir(), { recursive: true });
   await fs.writeFile(join(cacheDir(), file), bytes);
   m.entries[file] = { key: `recording:${id}`, voiceId: "recording", bytes: bytes.length, createdAt: new Date().toISOString() };
+  await saveManifest();
+  return file;
+}
+
+/* ---------------- enrollment takes (the raw voice samples) -----------------
+   A recruiter's enrollment reads live in the SAME durable cache volume as clone
+   segments, so they inherit the public serve route, the file-volume persistence
+   and the cache accounting. They are the evidence behind a cloned voice — the
+   recorded consent statement is one of them — so they are kept after cloning,
+   not discarded, and only removed when the recruiter re-records or resets. */
+
+/** Persist one enrollment take; returns the servable file name. */
+export async function saveEnrollmentAudio(id: string, bytes: Buffer, ext: "mp3" | "wav"): Promise<string> {
+  const m = await loadManifest();
+  const file = `enr_${id.replace(/[^a-z0-9_-]+/gi, "_")}.${ext}`;
+  await fs.mkdir(cacheDir(), { recursive: true });
+  await fs.writeFile(join(cacheDir(), file), bytes);
+  m.entries[file] = { key: `enrollment:${id}`, voiceId: "enrollment", bytes: bytes.length, createdAt: new Date().toISOString() };
+  await saveManifest();
+  return file;
+}
+
+/** Read one enrollment take back, to post it to the cloner. */
+export async function readEnrollmentAudio(file: string): Promise<Buffer | null> {
+  return readSegment(file);
+}
+
+/** Delete an enrollment take's audio + manifest entry (best-effort on the file). */
+export async function deleteEnrollmentAudio(file: string): Promise<void> {
+  const m = await loadManifest();
+  delete m.entries[file];
+  await saveManifest();
+  await fs.unlink(join(cacheDir(), file)).catch(() => {});
+}
+
+/** Persist a rendered "hear yourself" preview for a freshly cloned voice. */
+export async function savePreviewAudio(id: string, bytes: Buffer): Promise<string> {
+  const m = await loadManifest();
+  const file = `prev_${id.replace(/[^a-z0-9_-]+/gi, "_")}.mp3`;
+  await fs.mkdir(cacheDir(), { recursive: true });
+  await fs.writeFile(join(cacheDir(), file), bytes);
+  m.entries[file] = { key: `preview:${id}`, voiceId: "preview", bytes: bytes.length, createdAt: new Date().toISOString() };
   await saveManifest();
   return file;
 }

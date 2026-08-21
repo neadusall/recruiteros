@@ -16,6 +16,7 @@
 
 import { body, ok, fail, requireCapability } from "../../../../lib/api";
 import { withWorkspaceCreds } from "../../../../lib/connected";
+import { requesterEmail } from "../../../../lib/inmarket/ownership";
 import {
   getCampaign, activeVoiceRef, assembleMessage, DEFAULT_PERSONA, DEFAULT_INTRO,
   type VoiceProvider, type VoiceMessageMode,
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
   // previews the exact provider + voice that real tests and sends will use
   // (deterministic — same resolver the campaign send path uses).
   if (!voiceId) {
-    const active = activeVoiceRef(ws);
+    const active = activeVoiceRef(ws, requesterEmail(g.ctx));
     if (active.voiceId || active.provider) { voiceId = active.voiceId; provider = active.provider; }
   }
 

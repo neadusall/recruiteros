@@ -39,17 +39,25 @@ import {
 /**
  * Pick which voice (provider + id) to synthesize a campaign/test in, in priority:
  *   1. an explicit voiceId (a campaign/test override) always wins;
- *   2. the workspace's chosen ACTIVE voice — the engine the operator pinned in
+ *   2. the CAMPAIGN OWNER's own cloned voice, when that recruiter has enrolled
+ *      one in the Voice Studio — a drop sent on Sam's behalf must sound like Sam,
+ *      and must not sound like whoever the workspace happened to pin;
+ *   3. the workspace's chosen ACTIVE voice — the engine the operator pinned in
  *      setup, so tests and live sends are deterministic, not "whatever was saved
  *      last";
- *   3. the most recently saved voice (back-compat for workspaces that never set
+ *   4. the most recently saved voice (back-compat for workspaces that never set
  *      an active one);
- *   4. empty, so the provider's env default voice is used.
+ *   5. empty, so the provider's env default voice is used.
  * Provider routing happens inside assembleDrop.
  */
-function resolveVoiceRef(workspaceId: string, voiceId?: string, voiceProvider?: VoiceRef["provider"]): VoiceRef {
+function resolveVoiceRef(
+  workspaceId: string,
+  voiceId?: string,
+  voiceProvider?: VoiceRef["provider"],
+  ownerEmail?: string,
+): VoiceRef {
   if (voiceId) return { provider: voiceProvider, voiceId };
-  return activeVoiceRef(workspaceId);
+  return activeVoiceRef(workspaceId, ownerEmail);
 }
 import type { VoiceCampaign, VoiceLead, DropOutcome, VoiceMessageMode, VoicePersona } from "./types";
 import { DEFAULT_INTRO } from "./types";
@@ -278,7 +286,7 @@ export async function runDueDrops(
   const sum: RunSummary = { dialed: 0, scheduled: 0, skipped: 0, filtered: 0, synthesized: 0, cached: 0, dryRun: false };
   if (!c || c.status === "paused") return sum;
 
-  const voice = resolveVoiceRef(workspaceId, c.voiceId, c.voiceProvider);
+  const voice = resolveVoiceRef(workspaceId, c.voiceId, c.voiceProvider, c.ownerEmail);
   const client = getVoiceClientFor(voice.provider);
   const leads = getLeads(campaignId);
 
@@ -401,6 +409,8 @@ export interface TestDropInput {
   /** Script mode: the whole message. Recording mode: the intro template. */
   scriptTemplate: string;
   persona: VoiceCampaign["persona"];
+  /** Recruiter the test speaks as, so "Listen first" previews THEIR voice. */
+  ownerEmail?: string;
   voiceId?: string;
   voiceProvider?: VoiceRef["provider"];
   /** "recording" = personalized AI intro + the pre-recorded pitch. */
@@ -416,7 +426,7 @@ export interface TestDropInput {
  * own line) but still classifies, assembles, and dials exactly like production.
  */
 export async function testDrop(workspaceId: string, motion: Motion, input: TestDropInput) {
-  const voice = resolveVoiceRef(workspaceId, input.voiceId, input.voiceProvider);
+  const voice = resolveVoiceRef(workspaceId, input.voiceId, input.voiceProvider, input.ownerEmail);
   const vars: MergeVars = { firstName: input.firstName, role: input.role, company: input.company };
   const mode: VoiceMessageMode = input.messageMode === "recording" ? "recording" : "script";
   let rendered = renderScript(input.scriptTemplate, vars, input.persona);
