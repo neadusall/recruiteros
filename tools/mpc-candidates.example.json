@@ -1,0 +1,71 @@
+{
+  "_README": [
+    "TEMPLATE, not live data. Copy to the box as /data/mpc-candidates.json (or point",
+    "MPC_CANDIDATE_BANK at it) and replace every record with people you actually represent.",
+    "Validate with: node tools/mpc-bank.mjs --check --bank <path>",
+    "",
+    "Four fields do the work:",
+    "  proof   Exactly two facts, and they must be a PAIRING, not a duty list. Two things",
+    "          that are ordinary alone and hard to find in one person. 'Owned month-end",
+    "          close' proves nothing because every applicant says it. 'Took a manual close",
+    "          to five days' plus 'ran the ERP migration underneath it' is a person.",
+    "  pitchFor  Optional. Titles this person should answer, matched as substrings of the open",
+    "          role. Without it a record only answers reqs whose title shares a real word with",
+    "          its own, so a Controller is never pitched as a Junior Accountant. Use pitchFor",
+    "          to widen that on purpose.",
+    "  reason  Why someone this good is available. This is the sentence that turns a claim",
+    "          into a human being, and it is the one thing no model can infer. Without it",
+    "          the email falls back to 'they're looking quietly', which persuades nobody.",
+    "  metro   Where they are. Omit for a person open anywhere, or set remoteOk true.",
+    "  family  Optional. Inferred from the title when absent. Must match the open role's",
+    "          family for the record to be used, so a Controller is never pitched into a",
+    "          sales req.",
+    "",
+    "Numbers are allowed ONLY here. Anything in a proof line goes into the email verbatim,",
+    "and the render gate blocks every quantity the writer produces on its own. So a number",
+    "in a sent email is always a number you typed."
+  ],
+  "candidates": [
+    {
+      "title": "Controller",
+      "family": "Accounting",
+      "metro": "Dallas, TX",
+      "remoteOk": true,
+      "proof": [
+        "Took a manual close down to five days",
+        "Ran the ERP migration underneath it"
+      ],
+      "reason": "Their CFO seat went to an outside hire",
+      "status": "taking calls this week",
+      "pitchFor": [
+        "controller",
+        "assistant controller",
+        "accounting manager",
+        "director of accounting"
+      ]
+    },
+    {
+      "title": "VP of Sales",
+      "family": "Sales",
+      "metro": "Denver, CO",
+      "remoteOk": true,
+      "proof": [
+        "Built the enterprise team from two reps",
+        "Carried a number themselves the whole time"
+      ],
+      "reason": "Their company pivoted to product-led and cut the enterprise motion",
+      "status": "exploring quietly"
+    },
+    {
+      "title": "FP&A Manager",
+      "family": "Finance",
+      "remoteOk": true,
+      "proof": [
+        "Owns the model and the board deck",
+        "Came up through accounting, so the numbers tie"
+      ],
+      "reason": "Their CFO left and the new one brought their own bench",
+      "status": "looking quietly"
+    }
+  ]
+}

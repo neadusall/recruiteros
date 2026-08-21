@@ -1,6 +1,7 @@
 // Tests for the MPC quality gates. Plain node: node scripts/mpc/test-gates.mjs
 import assert from "node:assert/strict";
 import { assessProspect, foreignAffiliation, metroOf, checkRenderedEmail, roleFamily, roleFunctionGroup, dmFunction, buyerFit, buildCompanyKnowledge, isTalentBuyer } from "./gates.mjs";
+import { titleFits, matchCandidate } from "./writer.mjs";
 
 let passed = 0;
 function test(name, fn) {
@@ -171,6 +172,18 @@ test("render gate holds first person plural", () => {
     "I'm representing a Design Engineer in your space, runner-up on a search we just closed.\n\nOwned firmware architecture for grid infrastructure.\n\nThey're available now. Want their profile?");
   assert.equal(r.ok, false);
   assert.ok(r.problems.some((x) => /first person plural/.test(x)), r.problems.join("; "));
+});
+test("render gate holds a close that ran to three sentences", () => {
+  const r = checkRenderedEmail("senior controller, ready now",
+    "I'm representing a Controller in Dallas.\n\nTook a manual close down to five days. Ran the ERP migration underneath it.\n\nTheir CFO seat went to an outside hire. They're ready to move now, not in six months. Worth a look?");
+  assert.equal(r.ok, false);
+  assert.ok(r.problems.some((x) => /close runs 3 sentences/.test(x)), r.problems.join("; "));
+});
+test("render gate passes the convincing bank-backed MPC", () => {
+  const r = checkRenderedEmail("controller, taking calls",
+    "I'm representing a Controller in Dallas.\n\nTook a manual close down to five days. Ran the ERP migration underneath it.\n\nTheir CFO seat went to an outside hire. Worth a look?",
+    { allowNumbers: true });   // "five days" came from the bank record, so it is a real number
+  assert.equal(r.ok, true, r.problems.join("; "));
 });
 test("render gate passes a clean email", () => {
   const r = checkRenderedEmail("your assistant controller search, Vernon",
@@ -424,6 +437,43 @@ test("talent leader: must be IN-HOUSE, never an agency or another employer", () 
   const r = assessProspect(elsewhere);
   assert.equal(r.eligible, false, "a talent leader at another employer is not this req's buyer");
   assert.ok(r.failures.some((f) => /different company/.test(f)), r.failures.join("; "));
+});
+
+/* ------------------------------------------------------------------------------------------
+ * CANDIDATE BANK MATCHING (2026-08-21)
+ *
+ * A bank record carries facts about a REAL person. Pitching those facts under a different
+ * person's title is a false claim, not a near miss, so family alone can never be enough.
+ * ---------------------------------------------------------------------------------------- */
+test("titleFits: a Controller answers Controller reqs, never a Junior Accountant req", () => {
+  const ctrl = { title: "Controller", family: "Accounting" };
+  assert.equal(titleFits(ctrl, "Onsite Senior Controller"), true);
+  assert.equal(titleFits(ctrl, "Controller"), true);
+  assert.equal(titleFits(ctrl, "Junior Accountant"), false);
+  assert.equal(titleFits(ctrl, "Payroll Specialist"), false);
+  assert.equal(titleFits(ctrl, "Senior AP & T&E Accountant"), false);
+});
+test("titleFits: a shared GENERIC word is not a match", () => {
+  // Both end in "Manager", and they are completely different people.
+  assert.equal(titleFits({ title: "FP&A Manager" }, "Tax Manager"), false);
+  assert.equal(titleFits({ title: "Tax Manager" }, "Accounting Manager"), false);
+});
+test("titleFits: pitchFor widens reach on purpose", () => {
+  const ctrl = { title: "Controller", pitchFor: ["controller", "accounting manager"] };
+  assert.equal(titleFits(ctrl, "Accounting Manager"), true);
+  assert.equal(titleFits(ctrl, "Junior Accountant"), false);
+});
+test("matchCandidate: family must match too, and no bank means no record", () => {
+  const bank = [{ title: "Controller", family: "Accounting", remoteOk: true, proof: ["a", "b"] }];
+  assert.equal(matchCandidate("Senior Controller", null, bank, "seed").title, "Controller");
+  assert.equal(matchCandidate("VP of Sales", null, bank, "seed"), null);
+  assert.equal(matchCandidate("Senior Controller", null, [], "seed"), null);
+});
+test("matchCandidate: a metro-pinned record never lands in another metro", () => {
+  const bank = [{ title: "Controller", family: "Accounting", metro: "Dallas, TX", proof: ["a", "b"] }];
+  assert.equal(matchCandidate("Controller", "Dallas, TX", bank, "seed").title, "Controller");
+  assert.equal(matchCandidate("Controller", "Tampa, FL", bank, "seed"), null);
+  assert.equal(matchCandidate("Controller", null, bank, "seed"), null); // remote req, not remoteOk
 });
 
 console.log("\n" + passed + " passed");

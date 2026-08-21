@@ -640,6 +640,10 @@ const LECTURE = [
 // invented ("1,200+ accounts", "ten-figure transactions", both seen on 2026-08-20). Standard
 // form and standard names carry digits without being quantities, so they are stripped first.
 const FORM_TOKEN = /\b(401\s*\(?k\)?|403\s*\(?b\)?|1099s?|w-?2s?|w-?9s?|k-?1s?|10-?[kq]s?|8-?k|s-?1|409a|asc\s*\d{3}|ifrs\s*\d+|sox\s*\d{3}|section\s*\d{3}[a-z]?|form\s*\d+|soc\s*[12]|type\s*(?:i|ii)|iso\s*\d+|24\/7)\b/gi;
+// Spelled-out counts are the same claim as digits and leaked past the digit check on
+// 2026-08-21 ("fifteen-plus entity structures", "seven acquisitions", "two ERP migrations").
+// "one" is left out on purpose: it is a pronoun far more often than a count.
+const SPELLED_COUNT = /\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|eighteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|dozen)\b/i;
 const QUANTITY = /\b\d+\b|\$\s*\d|\b(?:six|seven|eight|nine|ten)[- ]figure\b|\bmulti-?million\b|\b(?:dozens|hundreds|thousands|millions)\s+of\b/i;
 
 // The render gate. A written email may be QUEUED only if this passes. Pass { remote: true }
@@ -673,8 +677,11 @@ export function checkRenderedEmail(subject, body, opts = {}) {
   }
   // A number the writer invented is worse than a vague email: it is a claim about a person we
   // cannot back. Pass allowNumbers when a candidate-bank record actually supplied the proof.
-  if (opts.shape !== false && !opts.allowNumbers && QUANTITY.test(b.replace(FORM_TOKEN, " "))) {
-    problems.push("a quantity we cannot back (no candidate record supplied it)");
+  if (opts.shape !== false && !opts.allowNumbers) {
+    const scrubbed = b.replace(FORM_TOKEN, " ");
+    if (QUANTITY.test(scrubbed) || SPELLED_COUNT.test(scrubbed)) {
+      problems.push("a quantity we cannot back (no candidate record supplied it)");
+    }
   }
   // One recruiter is writing, not a firm. "we just closed a search" turns a personal note into
   // a company blast, which is the exact tone this format exists to avoid.
@@ -687,6 +694,12 @@ export function checkRenderedEmail(subject, body, opts = {}) {
   if (opts.shape !== false && process.env.MPC_REQUIRE_PARAGRAPHS !== "0") {
     const paras = b.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
     if (paras.length !== 3) problems.push(`not the 3-paragraph MPC shape (${paras.length} paragraph${paras.length === 1 ? "" : "s"})`);
+    // The close carries the why and the ask, nothing else. A third sentence there is always the
+    // writer restating availability it already covered, and it is where the word count goes.
+    if (paras.length === 3) {
+      const closeSentences = paras[2].split(/(?<=[.!?])\s+/).filter((x) => x.trim()).length;
+      if (closeSentences > 2) problems.push(`close runs ${closeSentences} sentences (max 2)`);
+    }
   }
   // Exactly ONE soft CTA: a second question is the writer stacking closes ("Worth a call?
   // Open to a sync this week?"), which reads as pushy template output.
