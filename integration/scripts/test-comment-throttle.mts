@@ -118,5 +118,89 @@ check("a week cap below the day base is raised, never left unreachable", async (
   assert.ok(l.perWeek >= l.perDay, `perWeek ${l.perWeek} below perDay ${l.perDay}`);
 });
 
+/* ---------------------------------------------------------------------- *
+ * Reservation is not a send (2026-08-21).
+ *
+ * The lane counted a comment the moment the LinkedIn engine ACCEPTED it, and
+ * accepted means reserved: the engine schedules the action into the seat's
+ * working-hours window and posts it later. Three of five seats spent a day
+ * showing a full posted count on the card with nothing on LinkedIn at all.
+ * These pin the split so it cannot come back.
+ * ---------------------------------------------------------------------- */
+
+const SEAT = "seat_test_1";
+const nowIso = (): string => new Date().toISOString();
+const resetSeat = (): void => {
+  hooks.setLog(`${WS}::${SEAT}`, []);
+  hooks.setReservations(WS, SEAT, []);
+  hooks.setEngineRoom(WS, SEAT, null);
+};
+
+check("a reservation counts as committed but never as sent", () => {
+  resetSeat();
+  hooks.setReservations(WS, SEAT, [nowIso(), nowIso(), nowIso()]);
+  const t = commentThrottleFor(WS, SEAT);
+  assert.equal(t.todaySent, 0, "a reserved comment was reported as posted");
+  assert.equal(t.todayQueued, 3);
+  assert.equal(t.todayUsed, 3, "reservations must still count against the day");
+});
+
+check("a confirmed send counts as sent and as committed", () => {
+  resetSeat();
+  hooks.setLog(`${WS}::${SEAT}`, [nowIso(), nowIso()]);
+  const t = commentThrottleFor(WS, SEAT);
+  assert.equal(t.todaySent, 2);
+  assert.equal(t.todayQueued, 0);
+  assert.equal(t.todayUsed, 2);
+});
+
+check("reservations and sends together fill the day, so the lane cannot over-commit", () => {
+  resetSeat();
+  hooks.setLimits(WS, { enabled: true, perDay: 4, perWeek: 40 });
+  hooks.setLog(`${WS}::${SEAT}`, [new Date(Date.now() - 6 * 3_600_000).toISOString()]);
+  hooks.setReservations(WS, SEAT, [
+    new Date(Date.now() - 5 * 3_600_000).toISOString(),
+    new Date(Date.now() - 4 * 3_600_000).toISOString(),
+    new Date(Date.now() - 3 * 3_600_000).toISOString(),
+  ]);
+  const t = commentThrottleFor(WS, SEAT);
+  assert.equal(t.todaySent, 1);
+  assert.equal(t.todayQueued, 3);
+  assert.ok(t.blockedReason, "1 sent + 3 reserved against an allowance of 4 must block");
+  assert.ok(/waiting in the engine/.test(t.blockedReason ?? ""),
+    `the block must say what is actually happening, got: ${t.blockedReason}`);
+  hooks.setLimits(WS, { enabled: true, perDay: 8, perWeek: 35 });
+});
+
+check("the engine's daily target clamps the lane's own allowance", () => {
+  resetSeat();
+  hooks.setLimits(WS, { enabled: true, perDay: 16, perWeek: 110 });
+  hooks.setEngineRoom(WS, SEAT, { target: 6, ceiling: 20, committed: 0 });
+  const t = commentThrottleFor(WS, SEAT);
+  assert.equal(t.todayAllowance, 6, `asked for 16 against an engine target of 6, got ${t.todayAllowance}`);
+  hooks.setLimits(WS, { enabled: true, perDay: 8, perWeek: 35 });
+});
+
+check("the engine's target and ceiling each block, and say which", () => {
+  resetSeat();
+  hooks.setEngineRoom(WS, SEAT, { target: 10, ceiling: 20, committed: 10 });
+  const atTarget = commentThrottleFor(WS, SEAT);
+  assert.ok(/daily target reached/.test(atTarget.blockedReason ?? ""),
+    `expected the engine target block, got: ${atTarget.blockedReason}`);
+
+  hooks.setEngineRoom(WS, SEAT, { target: 10, ceiling: 20, committed: 20 });
+  const atCeiling = commentThrottleFor(WS, SEAT);
+  assert.ok(/hard ceiling/.test(atCeiling.blockedReason ?? ""),
+    `expected the engine ceiling block, got: ${atCeiling.blockedReason}`);
+  resetSeat();
+});
+
+check("with no engine reading yet, the lane falls back to its own allowance", () => {
+  resetSeat();
+  const t = commentThrottleFor(WS, SEAT);
+  assert.ok(t.todayAllowance >= 1, "a cold mirror must not zero the allowance and jam the lane");
+  assert.equal(t.blockedReason, undefined);
+});
+
 console.log(failures ? `\n${failures} failing` : "\nall passing");
 process.exit(failures ? 1 : 0);

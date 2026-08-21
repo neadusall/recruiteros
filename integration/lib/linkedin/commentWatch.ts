@@ -536,6 +536,13 @@ export interface CommentLeadItem {
    */
   /** Ledger record id of the comment_post action; how posting is confirmed. */
   commentActionId?: string;
+  /** When the ENGINE reserved a slot for this comment. A reservation is not a
+   *  send: the engine schedules it into the seat's working-hours window and
+   *  posts it later. Counted as in-flight by the throttle, never as posted. */
+  commentReservedAt?: string;
+  /** When this comment was counted against the seat's day/week, which happens
+   *  once, on the engine confirming it actually went out. */
+  commentCountedAt?: string;
   /** Stamped when the ledger shows the provider accepted the comment. */
   commentPostedAt?: string;
   /** Our posted comment's provider id (ledger providerMessageId). */
@@ -672,6 +679,13 @@ interface WatchState {
    *  limits mandate: it applies once, a later UI edit wins, and a NEW
    *  directive value applies once again. */
   scenarioMandate: Record<string, string>;
+  /** ws -> the exact engine-capacity directive already applied (see
+   *  ROLE_HUNTER_INTERACTIONS_MANDATE). One-shot by value, like the others. */
+  interactionsMandate: Record<string, string>;
+  /** ws -> the send log has been rebuilt from engine-confirmed posts, once.
+   *  Before 2026-08-21 it was written at reservation time and so counted
+   *  comments that had not gone out (and, for three seats, never had). */
+  sendLogTruthBuilt: Record<string, boolean>;
 }
 
 /** Bumped 2026-08-19: drafts must close with a call to action (owner ask).
@@ -689,7 +703,7 @@ interface WatchState {
 const COMMENT_COPY_EPOCH = 4;
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {}, interactionsMandate: {}, sendLogTruthBuilt: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -773,6 +787,8 @@ async function hydrate(): Promise<void> {
           limitsMandate: snap.limitsMandate ?? {},
           seatLogBuilt: snap.seatLogBuilt ?? {},
           scenarioMandate: snap.scenarioMandate ?? {},
+          interactionsMandate: snap.interactionsMandate ?? {},
+          sendLogTruthBuilt: snap.sendLogTruthBuilt ?? {},
         };
       }
       hydrated = true;
@@ -965,7 +981,12 @@ export interface CommentThrottle {
   perWeek: number;
   /** Today's jittered allowance: stable for the whole day, different tomorrow. */
   todayAllowance: number;
+  /** Committed today: confirmed sends PLUS reservations still in the engine. */
   todayUsed: number;
+  /** Confirmed out on LinkedIn today. The honest number. */
+  todaySent: number;
+  /** Reserved with the engine today and not yet confirmed out. */
+  todayQueued: number;
   weekUsed: number;
   /** Set when spacing is the thing holding the next comment back. */
   nextSlotAt?: string;
@@ -1041,6 +1062,50 @@ function dayAllowanceFor(workspaceId: string, day: string, accountId?: string): 
   const r = (seedHash(`${workspaceId}:${accountId ? `${accountId}:` : ""}${day}:allow`) % 1000) / 1000;
   const factor = 1 - COMMENT_DAY_JITTER + r * 2 * COMMENT_DAY_JITTER;
   return Math.max(1, Math.round(perDay * factor));
+}
+
+/**
+ * THE LINKEDIN ENGINE'S OWN CAPACITY, mirrored once per scan.
+ *
+ * The lane used to carry its own idea of how many comments a seat could post
+ * in a day (a jittered 14-16) while the engine carried a different one (a
+ * daily target of 10 for the `interactions` category, hard ceiling 20). The
+ * engine wins every argument, because it is the thing that actually posts, so
+ * the disagreement did not show up as an error - it showed up as 22 comments
+ * refused for one seat on 8/21 while the card read green.
+ *
+ * There is one source of capacity now and it is the engine's. This mirror
+ * exists only because commentThrottleFor is synchronous and reachable from
+ * the view; it is refreshed at the top of every scan, before anything is
+ * approved. An empty mirror means "not read yet" and clamps nothing, so a
+ * cold start behaves exactly as before rather than blocking the whole lane.
+ */
+interface SeatEngineRoom { day: string; target: number; ceiling: number; committed: number }
+const engineRoom = new Map<string, SeatEngineRoom>();
+
+async function refreshEngineRoom(workspaceId: string, accounts: LiAccountState[]): Promise<void> {
+  try {
+    const [{ getPolicy }, { capacityFactor }, store, { categoryCounts, policyDay }] = await Promise.all([
+      import("./os/policy"), import("./os/health"), import("./os/store"), import("./os/ledger"),
+    ]);
+    const all = await store.ledger.all();
+    const states = await store.accounts.all();
+    for (const a of accounts) {
+      const policy = await getPolicy(workspaceId, a.accountId);
+      const acctState = states.find((x) => x.workspaceId === workspaceId && x.accountId === a.accountId) ?? null;
+      const factor = capacityFactor(acctState);
+      const day = policyDay(policy.timezone);
+      const c = categoryCounts(all, a.accountId, "interactions", day);
+      engineRoom.set(seatLogKey(workspaceId, a.accountId), {
+        day,
+        target: Math.floor(policy.categories.interactions.dailyTarget * factor),
+        ceiling: policy.categories.interactions.hardCeiling,
+        committed: c.used + c.reserved,
+      });
+    }
+  } catch (e) {
+    console.log(`[comment-radar] ${workspaceId}: engine capacity read failed (${e instanceof Error ? e.message : e})`);
+  }
 }
 
 /** Per-seat send-log key. The bare workspace key stays the all-seats log. */
@@ -1183,9 +1248,34 @@ function gapMinutesFor(workspaceId: string, lastIso: string, remaining?: number)
   return Math.round(lo + r * (hi - lo));
 }
 
-/** Day count, rolling-week count, and the most recent send. With an
- *  accountId the counts are that seat's own; without, the whole desk's. */
-function commentUsage(workspaceId: string, accountId?: string): { today: number; week: number; last?: string } {
+/** Comments this seat has RESERVED with the engine and that have not been
+ *  confirmed out yet. They are real commitments against LinkedIn - the engine
+ *  will post them - so every wall has to see them, even though none of them
+ *  may be counted as posted. */
+function inflightReservations(workspaceId: string, accountId?: string): string[] {
+  const out: string[] = [];
+  for (const i of state.items) {
+    if (i.workspaceId !== workspaceId) continue;
+    if (i.commentStatus !== "approved" || i.responseStatus !== "pending") continue;
+    if (accountId && i.accountId !== accountId) continue;
+    const at = i.commentReservedAt ?? i.updatedAt;
+    if (at) out.push(at);
+  }
+  return out.sort();
+}
+
+/**
+ * Day count, rolling-week count, and the most recent commitment. With an
+ * accountId the counts are that seat's own; without, the whole desk's.
+ *
+ * `today`/`week` count CONFIRMED sends plus RESERVATIONS still in flight.
+ * Both halves are needed and they are needed for different reasons: counting
+ * only confirmed sends lets the lane re-approve into a queue it has already
+ * filled (which is how one seat ended 8/21 with 22 comments refused against
+ * the engine's own ceiling), and counting reservations as sends is the lie
+ * this whole change exists to stop. `sent` is the honest number for display.
+ */
+function commentUsage(workspaceId: string, accountId?: string): { today: number; week: number; sent: number; queued: number; last?: string } {
   const log = state.commentLog[accountId ? seatLogKey(workspaceId, accountId) : workspaceId] ?? [];
   const day = nowIso().slice(0, 10);
   const weekCutoff = Date.now() - 7 * 86_400_000;
@@ -1195,7 +1285,17 @@ function commentUsage(workspaceId: string, accountId?: string): { today: number;
     if (iso.slice(0, 10) === day) today++;
     if (new Date(iso).getTime() >= weekCutoff) week++;
   }
-  return { today, week, last: log.length ? log[log.length - 1] : undefined };
+  const sent = today;
+  let queued = 0;
+  const inflight = inflightReservations(workspaceId, accountId);
+  for (const iso of inflight) {
+    if (iso.slice(0, 10) === day) { today++; queued++; }
+    if (new Date(iso).getTime() >= weekCutoff) week++;
+  }
+  const lastLog = log.length ? log[log.length - 1] : undefined;
+  const lastRes = inflight.length ? inflight[inflight.length - 1] : undefined;
+  const last = [lastLog, lastRes].filter(Boolean).sort().pop();
+  return { today, week, sent, queued, last };
 }
 
 /**
@@ -1207,8 +1307,14 @@ function commentUsage(workspaceId: string, accountId?: string): { today: number;
 export function commentThrottleFor(workspaceId: string, accountId?: string): CommentThrottle {
   const limits = commentLimitsFor(workspaceId);
   const day = nowIso().slice(0, 10);
-  const allowance = dayAllowanceFor(workspaceId, day, accountId);
   const use = commentUsage(workspaceId, accountId);
+  // The seat's own jittered allowance, then CLAMPED to what the engine will
+  // actually accept today. Asking for more than the engine's target does not
+  // produce more comments, it produces refusals - and, before this, a card
+  // that counted the refusals as posted.
+  const room = accountId ? engineRoom.get(seatLogKey(workspaceId, accountId)) : undefined;
+  const own = dayAllowanceFor(workspaceId, day, accountId);
+  const allowance = room ? Math.min(own, Math.max(0, room.target)) : own;
   const t: CommentThrottle = {
     enabled: limits.enabled,
     autoPost: limits.autoPost,
@@ -1216,6 +1322,8 @@ export function commentThrottleFor(workspaceId: string, accountId?: string): Com
     perWeek: limits.perWeek,
     todayAllowance: allowance,
     todayUsed: use.today,
+    todaySent: use.sent,
+    todayQueued: use.queued,
     weekUsed: use.week,
   };
   if (!limits.enabled) {
@@ -1226,8 +1334,18 @@ export function commentThrottleFor(workspaceId: string, accountId?: string): Com
     t.blockedReason = `Weekly comment ceiling reached (${use.week} of ${limits.perWeek} in the last 7 days).`;
     return t;
   }
+  if (room && room.committed >= room.ceiling) {
+    t.blockedReason = `LinkedIn engine hard ceiling reached for this seat (${room.committed} of ${room.ceiling} interactions today).`;
+    return t;
+  }
+  if (room && room.committed >= room.target) {
+    t.blockedReason = `LinkedIn engine daily target reached for this seat (${room.committed} of ${room.target} interactions today).`;
+    return t;
+  }
   if (use.today >= allowance) {
-    t.blockedReason = `Today's comment allowance is used (${use.today} of ${allowance}).`;
+    t.blockedReason = use.queued
+      ? `Today's comment allowance is committed (${use.sent} posted, ${use.queued} waiting in the engine, of ${allowance}).`
+      : `Today's comment allowance is used (${use.today} of ${allowance}).`;
     return t;
   }
   if (use.last) {
@@ -1246,19 +1364,41 @@ export function commentThrottleFor(workspaceId: string, accountId?: string): Com
   return t;
 }
 
-/** Log a comment that the engine accepted. Only accepted sends count. The
- *  send lands in the desk-wide log (stats, dup window) AND the posting
- *  seat's own log (the per-recruiter day/week/spacing walls). */
-function recordComment(workspaceId: string, text: string, accountId?: string): void {
+/**
+ * The near-duplicate window, written at RESERVATION time.
+ *
+ * Text and delivery are counted at different moments on purpose. A draft is
+ * spoken for the instant the engine takes it, so the next draft must already
+ * be checked against it - otherwise two seats write the same observation while
+ * the first one sits in the engine's queue, and both go out an hour apart.
+ */
+function noteCommentText(workspaceId: string, text: string): void {
+  const recent = state.commentRecent[workspaceId] ?? (state.commentRecent[workspaceId] = []);
+  recent.push(text);
+  if (recent.length > COMMENT_DUP_WINDOW) state.commentRecent[workspaceId] = recent.slice(-COMMENT_DUP_WINDOW);
+  save();
+}
+
+/**
+ * Log a comment the engine CONFIRMED it posted. This is the only thing that
+ * counts as a comment, anywhere: the day and week walls, the card's numbers,
+ * the daily stats.
+ *
+ * It used to fire the moment `requestLinkedInAction` returned accepted - and
+ * accepted means RESERVED, not sent. The engine reserves a slot, schedules it
+ * inside the seat's working-hours window, and posts it later; three of Lume's
+ * five seats spent 2026-08-21 with a full "posted" count on the card and
+ * nothing whatsoever on LinkedIn. Verified against the posts themselves:
+ * every ledger `success` was there, every `scheduled` was not. Numbers that
+ * report intent as achievement are worse than no numbers.
+ */
+function recordComment(workspaceId: string, accountId?: string): void {
   const log = state.commentLog[workspaceId] ?? (state.commentLog[workspaceId] = []);
   log.push(nowIso());
   if (accountId) {
     const seatLog = state.commentLog[seatLogKey(workspaceId, accountId)] ?? (state.commentLog[seatLogKey(workspaceId, accountId)] = []);
     seatLog.push(nowIso());
   }
-  const recent = state.commentRecent[workspaceId] ?? (state.commentRecent[workspaceId] = []);
-  recent.push(text);
-  if (recent.length > COMMENT_DUP_WINDOW) state.commentRecent[workspaceId] = recent.slice(-COMMENT_DUP_WINDOW);
   const stats = huntStatsFor(workspaceId);
   stats.comments = (stats.comments ?? 0) + 1;
   save();
@@ -1273,7 +1413,35 @@ export const __throttleTestHooks = {
   setLimits: (workspaceId: string, l: { enabled: boolean; perDay: number; perWeek: number }): void => {
     state.commentLimits[workspaceId] = l;
   },
+  /** Stage reserved-but-unsent comments: approved with the engine, awaiting
+   *  its confirmation. The whole point of the 2026-08-21 accounting split. */
+  setReservations: (workspaceId: string, accountId: string, at: string[]): void => {
+    state.items = state.items.filter((i) => i.workspaceId !== workspaceId);
+    for (const iso of at) {
+      state.items.push({
+        id: rid("licw"), workspaceId, kind: "poster", postId: "0", postExcerpt: "",
+        commentId: "", commentText: "", openProfile: false, accountId,
+        authorProviderId: "", authorName: "", decisionMaker: true, peer: false,
+        tier: "hot", replyStatus: "none", commentStatus: "approved",
+        responseStatus: "pending", commentReservedAt: iso,
+        createdAt: iso, updatedAt: iso,
+      } as CommentLeadItem);
+    }
+  },
+  setEngineRoom: (workspaceId: string, accountId: string, room: { target: number; ceiling: number; committed: number } | null): void => {
+    const k = seatLogKey(workspaceId, accountId);
+    if (room) engineRoom.set(k, { day: nowIso().slice(0, 10), ...room });
+    else engineRoom.delete(k);
+  },
 };
+
+/** Count a confirmed comment against its seat's day and week, exactly once
+ *  however many ticks re-read the same ledger row. */
+function countCommentOnce(workspaceId: string, item: CommentLeadItem): void {
+  if (item.commentCountedAt) return;
+  item.commentCountedAt = nowIso();
+  recordComment(workspaceId, item.accountId);
+}
 
 /** Everything a new draft must not read like: comments already posted, plus
  *  the ones still waiting for approval. */
@@ -1813,6 +1981,76 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
     }
   }
 
+  // ONE-SHOT REPAIR, and it must run before any wall is measured today.
+  //
+  // Until now every send log entry was written when the engine RESERVED the
+  // comment, so the log holds entries for comments that never went out. Left
+  // alone, the new accounting would count those twice - once as a (false)
+  // confirmed send and once as the reservation it still is - and jam the lane
+  // shut. Rebuild both logs from the only evidence that means anything: items
+  // the engine has confirmed posted. Reservations still in flight drop out of
+  // the log entirely and are counted as in-flight, which is what they are.
+  if (!state.sendLogTruthBuilt[workspaceId]) {
+    state.sendLogTruthBuilt[workspaceId] = true;
+    const cutoff = Date.now() - COMMENT_LOG_KEEP_DAYS * 86_400_000;
+    const rebuilt: Record<string, string[]> = {};
+    const desk: string[] = [];
+    let confirmed = 0;
+    for (const i of state.items) {
+      if (i.workspaceId !== workspaceId || i.kind !== "poster" || i.commentStatus !== "approved") continue;
+      // "posted" is the engine's confirmation. Anything still pending is a
+      // reservation, and anything failed never happened at all.
+      if (i.responseStatus !== "posted" && i.responseStatus !== "responded" && i.responseStatus !== "no_response") continue;
+      const at = i.commentPostedAt ?? i.commentReservedAt ?? i.updatedAt;
+      if (!at || new Date(at).getTime() < cutoff) continue;
+      i.commentCountedAt = i.commentCountedAt ?? at;
+      desk.push(at);
+      if (i.accountId) (rebuilt[seatLogKey(workspaceId, i.accountId)] ??= []).push(at);
+      confirmed++;
+    }
+    for (const k of Object.keys(state.commentLog)) {
+      if (k === workspaceId || k.startsWith(`${workspaceId}::`)) delete state.commentLog[k];
+    }
+    state.commentLog[workspaceId] = desk.sort();
+    for (const [k, arr] of Object.entries(rebuilt)) state.commentLog[k] = arr.sort();
+    // dayStats.comments is the same claim in another place; make it agree.
+    const today = nowIso().slice(0, 10);
+    const st = huntStatsFor(workspaceId);
+    st.comments = desk.filter((t) => t.slice(0, 10) === today).length;
+    save();
+    console.log(`[comment-radar] ${workspaceId}: send log rebuilt from CONFIRMED posts only (${confirmed} kept across ${Object.keys(rebuilt).length} seats; reservations no longer counted as sends)`);
+  }
+
+  // Owner mandate: the engine's OWN interaction capacity has to be able to
+  // carry the number the desk was asked for. ROLE_HUNTER_INTERACTIONS_MANDATE
+  // carries "wsId:dailyTarget:hardCeiling:weeklyTarget" and applies it to every
+  // connected seat's policy, one-shot by directive value, exactly like the
+  // limits mandate. This is not a second throttle - it is the ONLY one; the
+  // lane's own allowance is clamped to it (see refreshEngineRoom). Before this,
+  // the lane asked for 14-16 a day against an engine target of 10 and the
+  // difference came back as refusals that the card counted as posted.
+  for (const m of (process.env.ROLE_HUNTER_INTERACTIONS_MANDATE ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+    const [ws, dayStr, ceilStr, weekStr] = m.split(":");
+    if (ws !== workspaceId || state.interactionsMandate[workspaceId] === m) continue;
+    const dailyTarget = Number(dayStr);
+    const hardCeiling = Number(ceilStr);
+    const weeklyTarget = Number(weekStr);
+    if (![dailyTarget, hardCeiling, weeklyTarget].every(Number.isFinite)) continue;
+    state.interactionsMandate[workspaceId] = m;
+    save();
+    try {
+      const { putPolicy } = await import("./os/policy");
+      for (const a of accounts) {
+        await putPolicy(workspaceId, a.accountId, {
+          categories: { interactions: { dailyTarget, hardCeiling, weeklyTarget } },
+        } as Parameters<typeof putPolicy>[2]);
+      }
+      console.log(`[comment-radar] ${workspaceId}: engine interaction capacity set to ${dailyTarget}/day (ceiling ${hardCeiling}, ${weeklyTarget}/week) on ${accounts.length} seat(s)`);
+    } catch (e) {
+      console.log(`[comment-radar] ${workspaceId}: interactions mandate failed (${e instanceof Error ? e.message : e})`);
+    }
+  }
+
   // One-shot 2026-08-20, the day the throttle went per-seat: rebuild each
   // seat's send log from the posted items that still remember which seat
   // posted them, so a seat that already sent today starts from its true
@@ -1918,6 +2156,10 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
   try { dmCreated = await scanPosters(workspaceId, accounts, adhoc); } catch (e) {
     console.log(`[comment-radar] ${workspaceId}: market scan error (${e instanceof Error ? e.message : e})`);
   }
+
+  // The engine's capacity, read fresh, BEFORE the rebalance and before
+  // autopilot approves anything. Every wall below is measured against it.
+  await refreshEngineRoom(workspaceId, accounts);
 
   // Every scan, before autopilot picks: move waiting comment drafts onto the
   // seats that can still post today. Drafts are written for a post, not for a
@@ -2070,6 +2312,7 @@ async function checkCommentResponses(workspaceId: string): Promise<number> {
         // posted at approval time so the thread still gets watched.
         item.responseStatus = "posted";
         item.commentPostedAt = item.commentPostedAt ?? item.updatedAt;
+        countCommentOnce(workspaceId, item);
         continue;
       }
       item.commentActionId = rec.id;
@@ -2078,6 +2321,8 @@ async function checkCommentResponses(workspaceId: string): Promise<number> {
         item.commentPostedAt = nowIso();
         item.commentProviderId = rec.providerReference;
         item.updatedAt = nowIso();
+        // THE moment a comment becomes a comment: the engine says it went out.
+        countCommentOnce(workspaceId, item);
       } else if (rec.status === "failed" || rec.status === "cancelled" || rec.status === "suppressed") {
         item.responseStatus = "failed";
         item.reason = rec.statusReason || "The engine could not post this comment.";
@@ -3052,6 +3297,8 @@ export interface CommentWatchView {
     watching: number;
     /** Watch window expired with no reply (already on the email path). */
     noResponse: number;
+    /** Approved and reserved with the engine, not yet posted to LinkedIn. */
+    queuedInEngine: number;
     /** Poster replies still waiting for the owner's own answer. */
     followUpsOpen: number;
   };
@@ -3093,6 +3340,7 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
   // Blocked only when EVERY seat is walled; the next slot is the earliest
   // any seat frees up.
   const seatAccounts = await connectedAccounts(workspaceId);
+  await refreshEngineRoom(workspaceId, seatAccounts);
   const seatThrottles = seatAccounts.map((a) => commentThrottleFor(workspaceId, a.accountId));
   const baseThrottle = commentThrottleFor(workspaceId);
   const allSeatsBlocked = seatThrottles.length > 0 && seatThrottles.every((t) => t.blockedReason);
@@ -3104,6 +3352,8 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
         perWeek: baseThrottle.perWeek,
         todayAllowance: seatThrottles.reduce((s, t) => s + t.todayAllowance, 0),
         todayUsed: seatThrottles.reduce((s, t) => s + t.todayUsed, 0),
+        todaySent: seatThrottles.reduce((s, t) => s + t.todaySent, 0),
+        todayQueued: seatThrottles.reduce((s, t) => s + t.todayQueued, 0),
         weekUsed: seatThrottles.reduce((s, t) => s + t.weekUsed, 0),
         nextSlotAt: allSeatsBlocked
           ? seatThrottles.map((t) => t.nextSlotAt).filter((s): s is string => !!s).sort()[0]
@@ -3137,6 +3387,8 @@ export async function commentWatchView(workspaceId: string): Promise<CommentWatc
         .filter((t) => Date.now() - new Date(t).getTime() < 7 * 86_400_000).length,
       responded: tracked.filter((i) => i.responseStatus === "responded").length,
       watching: tracked.filter((i) => i.responseStatus === "pending" || i.responseStatus === "posted").length,
+      // Approved and reserved with the engine, not yet out on LinkedIn.
+      queuedInEngine: tracked.filter((i) => i.responseStatus === "pending").length,
       noResponse: tracked.filter((i) => i.responseStatus === "no_response").length,
       followUpsOpen: tracked.filter(awaitingAnswer).length,
     },
@@ -3565,9 +3817,12 @@ export async function approvePostComment(
       // checker learns the comment actually posted (and its provider id).
       item.commentActionId = result.record?.id;
       item.responseStatus = "pending";
-      // Only an accepted action counts against the day and the week, on the
-      // seat that actually posted.
-      recordComment(workspaceId, item.commentDraft, account.accountId);
+      // RESERVED, not posted. `accepted` means the engine took the action and
+      // scheduled it into this seat's working-hours window; it goes out later,
+      // and checkCommentResponses is what counts it when the engine confirms.
+      // The text joins the duplicate window now, because it is spoken for now.
+      item.commentReservedAt = nowIso();
+      noteCommentText(workspaceId, item.commentDraft);
     } else {
       item.commentStatus = "blocked"; item.reason = result.reason || "The engine declined this action.";
     }
