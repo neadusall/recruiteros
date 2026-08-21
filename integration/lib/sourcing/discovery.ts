@@ -1777,6 +1777,18 @@ export async function runDiscovery(
     stopReason.detail = reasons.length ? reasons.join("; ") : "no engine returned results";
   }
 
+  // A benched people search throws once per remaining query, so "busy" would otherwise
+  // stack a line per query. Collapsed unconditionally, and into its OWN sentence: busy is
+  // not the same news as failed, and the recruiter reading a short list deserves to be
+  // told the paid rung was turned away rather than left to guess at a thin result.
+  const busy = warnings.filter((w) => w.startsWith("people_search_busy:"));
+  if (busy.length) {
+    const kept = warnings.filter((w) => !w.startsWith("people_search_busy:"));
+    warnings.splice(0, warnings.length,
+      `the paid people search was busy and turned away ${busy.length} ${busy.length === 1 ? "query" : "queries"} (its own limit, not your credits). Nothing is broken; run this again shortly to top the list up.`,
+      ...kept);
+  }
+
   // SUCCESSFUL-RUN CLEANUP: per-query engine failures emit one line per company/page,
   // which turns into a wall of "rapidapi(...) 429" noise under the results table. Once
   // candidates came back, collapse them into a single short note; the raw per-query
