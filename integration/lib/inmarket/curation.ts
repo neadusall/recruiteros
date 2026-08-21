@@ -153,7 +153,16 @@ function statusFor(dm: DecisionMaker): CurationStatus {
   // Contactable = a real name + a built email AND a domain that can actually receive mail. An
   // email guessed on a domain with no MX (emailDeliverable === false) is NOT contactable — it
   // would bounce, so it stays "named" and is held out of the send queue.
-  if (dm.email?.email && dm.emailDeliverable !== false) return "contactable";
+  //
+  // AND THE ADDRESS MUST BE ONE WE WOULD ACTUALLY MAIL (2026-08-21). "An address exists" was the
+  // whole test, so a pattern guess counted as contactable even though the no-guessing rule means
+  // no lane will ever send it. That put 40% of the store in a bucket the owner reads as "ready to
+  // contact" while the sender could only use a fraction of it — the same class of lie as a
+  // capacity gauge quoting a ceiling nothing can reach. The predicate here is deliberately the
+  // SAME one the enroll gate uses, so status and enrollment can never disagree: open the pattern
+  // lane and both widen together.
+  const sendable = patternLaneOpen() || isFoundAddress({ emailSource: dm.emailSource });
+  if (dm.email?.email && dm.emailDeliverable !== false && sendable) return "contactable";
   if (dm.fullName) return "named";
   return "sourced";
 }
@@ -259,7 +268,14 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
   // Spend the enrichment budget only on companies the sender is allowed to mail. See
   // isInTargetBand: unknown sizes still get researched, only confirmed out-of-band is skipped.
   const bandMin = Number(process.env.MPC_MIN_HEADCOUNT) || 100;
-  const bandMax = Number(process.env.MPC_MAX_HEADCOUNT) || 1000;
+  // CEILING IS THE EXTENDED BAND, NOT THE CORE ONE (fixed 2026-08-21). gates.mjs opens the band to
+  // MPC_EXT_HEADCOUNT (2,500) for a req whose exact function owner is NAMED. This pre-filter used
+  // MPC_MAX_HEADCOUNT (1,000), so companies from 1,001-2,500 were skipped before enrichment, never
+  // got an owner named, and therefore could never satisfy the very condition that unlocks them: the
+  // extended band was unreachable code. 953 companies sat in that gap. Enriching to the extended
+  // ceiling costs nothing extra at send time, because gates.mjs still refuses anyone in 1,001-2,500
+  // who lacks a named owner.
+  const bandMax = Number(process.env.MPC_EXT_HEADCOUNT) || Number(process.env.MPC_MAX_HEADCOUNT) || 2500;
   let sizeCache: Record<string, { count?: number }> = {};
   try {
     const { loadSizeMap } = await import("./companySize");
@@ -309,7 +325,7 @@ export async function curateFromPool(leads: PoolLeadLite[], opts: CurateOptions)
       }
       researched++;
       if (dm.fullName) named++;
-      if (dm.email?.email && dm.emailDeliverable !== false) contactable++;
+      if (statusFor(dm) === "contactable") contactable++;   // same test as the row's own status
       const row = buildCuratedRow(lead, role, dm, opts.nowIso);
       fresh.set(row.id, row);
       // PER-COMPANY BUYER MULTIPLIER: the same research pass also named the Head of People / CHRO and
@@ -417,7 +433,13 @@ export async function mergeCuratedRows(rows: CuratedProspect[]): Promise<{ newly
         emailPattern: incoming.emailPattern ?? prev.emailPattern,
         emailSource: incoming.emailSource ?? prev.emailSource,
         emailCandidates: incoming.emailCandidates ?? prev.emailCandidates,
-        status: prev.status === "contactable" ? "contactable" as const : "named" as const,
+        // Re-DERIVE rather than latch (2026-08-21). This kept "contactable" forever once set, so
+        // every row already stamped contactable on a pattern guess would have held that label
+        // through the stricter test above and the funnel would never have corrected itself.
+        // Recompute from the address we are actually carrying forward.
+        status: (prev.status === "contactable"
+          && (patternLaneOpen() || isFoundAddress({ emailSource: incoming.emailSource ?? prev.emailSource })))
+          ? "contactable" as const : "named" as const,
       } : incoming;
       const sameEmail = !!prev && (prev.likelyEmail ?? "") === (row.likelyEmail ?? "");
       map.set(row.id, {
@@ -492,7 +514,14 @@ export async function claimResearchBatch(limit: number, minScore = 10): Promise<
   // Same band filter as curateFromPool: the distributed research workers must not spend the
   // enrichment budget on companies the sender is not allowed to mail either.
   const bandMin = Number(process.env.MPC_MIN_HEADCOUNT) || 100;
-  const bandMax = Number(process.env.MPC_MAX_HEADCOUNT) || 1000;
+  // CEILING IS THE EXTENDED BAND, NOT THE CORE ONE (fixed 2026-08-21). gates.mjs opens the band to
+  // MPC_EXT_HEADCOUNT (2,500) for a req whose exact function owner is NAMED. This pre-filter used
+  // MPC_MAX_HEADCOUNT (1,000), so companies from 1,001-2,500 were skipped before enrichment, never
+  // got an owner named, and therefore could never satisfy the very condition that unlocks them: the
+  // extended band was unreachable code. 953 companies sat in that gap. Enriching to the extended
+  // ceiling costs nothing extra at send time, because gates.mjs still refuses anyone in 1,001-2,500
+  // who lacks a named owner.
+  const bandMax = Number(process.env.MPC_EXT_HEADCOUNT) || Number(process.env.MPC_MAX_HEADCOUNT) || 2500;
   let sizeCache: Record<string, { count?: number }> = {};
   try {
     const { loadSizeMap } = await import("./companySize");
@@ -1791,13 +1820,24 @@ export async function findEmailsByPaid(limit: number, nowIso: string, concurrenc
   // catch-all alone (it can't reliably crack it).
   const isMiss = (r: CuratedProspect) => (r.emailInvalid || !r.likelyEmail) && !r.emailCatchAll;
   const isCrackableCatchAll = (r: CuratedProspect) => useService && !!r.emailCatchAll;
+  // A PATTERN GUESS IS NOT A CONTACT (fixed 2026-08-21). isMiss() treats "has a likelyEmail" as
+  // "has an address", but under the no-guessing rule a derived address can NEVER be mailed. So a
+  // named person at an in-band company whose only address is a guess looked resolved to this
+  // finder and was never sent to it, while being permanently unsendable everywhere else. The
+  // 08-21 funnel measured 4,391 rows (42% of every address on file) sitting in exactly that
+  // state: the largest single block of named-but-unmailable people in the pool, and the one the
+  // residual finder exists to rescue. Spend does not rise: the per-tick budget is unchanged
+  // (INMARKET_PAID_FIND_BATCH, default 25, highest score first) — these rows simply become
+  // eligible to compete for those slots instead of being invisible to them.
+  const isUnsendableGuess = (r: CuratedProspect) =>
+    !!r.likelyEmail && !r.emailCatchAll && !isFoundAddress(r) && !patternLaneOpen();
   // `suppressed` is allowed back in ONLY when it means "the guessed address was rejected and this
   // person was never contacted" — otherwise isMiss()'s emailInvalid branch is unreachable, since a
   // row marked invalid is moved to suppressed in the same breath. That contradiction is what left
   // the rejected pile permanently stranded: the one pass written to rescue it filtered it out.
   const targets = rows
     .filter((r) => r.managerName && r.domain && !r.emailValidated
-      && (isMiss(r) || isCrackableCatchAll(r))
+      && (isMiss(r) || isCrackableCatchAll(r) || isUnsendableGuess(r))
       && r.status !== "enrolled" && r.status !== "queued"
       && (r.status !== "suppressed" || rescuableInvalid(r)))
     .sort((a, b) => b.score - a.score)
