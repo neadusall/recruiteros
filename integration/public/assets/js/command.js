@@ -1645,16 +1645,19 @@
     joblibrary: { title: "Job Library", crumb: "Build", action: null, render: renderJobLibrary, motionOnly: "recruiting", cap: "prospects:view" },
     calls: { title: "Calls", crumb: "Build", action: null, render: renderCalls, motionOnly: "recruiting", cap: "voice:dial", tool: "calls" },
     bdphone: { title: "BD Phone", crumb: "Tools", action: null, render: renderBdPhone, motionOnly: "bd", cap: "voice:dial", tool: "bdphone" },
-    // LinkedIn OS: ONE unified LinkedIn tool (shared engine, accounts, ledger,
-    // utilization) with two contextual nav entrances. BD > Tools and
-    // Recruiting > Build both open this same route; the active motion sets the
-    // default context. Not motionOnly: it belongs to both business units.
+    // LinkedIn OS / Role Hunter: ONE unified LinkedIn tool (shared engine,
+    // accounts, ledger, utilization). Its nav entrance is BD > Tools only:
+    // Role Hunter hunts companies that are hiring, which is business
+    // development, and the Recruiting entrance was removed at owner request
+    // 2026-08-21 in favour of Role Recruiter. The route is NOT motionOnly, so
+    // every existing #linkedin deep link and cross-link still resolves from
+    // either motion; only the sidebar entrance went away.
     linkedin: { title: "Role Hunter", crumb: "Tools", action: null, render: renderLinkedInOs, cap: "outreach:send", tool: "linkedin" },
     linkedinposter: { title: "LinkedIn Poster", crumb: "Tools", action: null, render: renderLinkedInPoster, motionOnly: "bd", cap: "outreach:send", tool: "linkedinposter" },
-    // Post Recruiter: the candidate-side twin of Role Hunter. Same shared
+    // Role Recruiter: the candidate-side twin of Role Hunter. Same shared
     // engine, accounts and ledger; it hunts people who are open to work rather
     // than people who are hiring, so it sits under Build beside Candidates.
-    postrecruiter: { title: "Post Recruiter", crumb: "Build", action: null, render: renderPostRecruiter, motionOnly: "recruiting", cap: "outreach:send", tool: "postrecruiter" },
+    rolerecruiter: { title: "Role Recruiter", crumb: "Build", action: null, render: renderRoleRecruiter, motionOnly: "recruiting", cap: "outreach:send", tool: "rolerecruiter" },
     builder: { title: "In-Market Leads", crumb: "Build", action: null, render: renderInMarket, motionOnly: "bd", cap: "sourcing:run", tool: "builder" },
     automation: { title: "LinkedIn Automation", crumb: "Build", action: null, render: renderAutomation, cap: "outreach:send", tool: "automation" },
     content: { title: "Campaign Sequences Library", crumb: "Build", action: "+ New sequence", render: renderContent },
@@ -3529,12 +3532,12 @@
   liOpsRefreshBadges();
   setInterval(liOpsRefreshBadges, 180000);
 
-  // Post Recruiter lights its own tab when candidates are waiting on a decision.
+  // Role Recruiter lights its own tab when candidates are waiting on a decision.
   function prRefreshBadge() {
     if (!can("outreach:send")) return;
-    apiQuiet("/post-recruiter?summary=1").then(function (d) {
+    apiQuiet("/role-recruiter?summary=1").then(function (d) {
       if (!d || !d.tallies) return; // a count we cannot fetch is not a red notice
-      setB("postrecruiter", d.tallies.drafts || 0);
+      setB("rolerecruiter", d.tallies.drafts || 0);
     });
   }
   prRefreshBadge();
@@ -4496,8 +4499,8 @@
       { src: "/assets/video/os-text-demo.mp4", label: "Features Video", title: "OS Text features video" },
       { src: "/assets/video/os-text-demo-live.mp4", label: "Demo Video", title: "OS Text demo video" }
     ],
-    postrecruiter: [
-      { src: "/assets/video/post-recruiter-demo.mp4", label: "Features Video", title: "Post Recruiter features video" }
+    rolerecruiter: [
+      { src: "/assets/video/role-recruiter-demo.mp4", label: "Features Video", title: "Role Recruiter features video" }
     ]
   };
   var demoSeen = {}; // src -> true once the file is confirmed present (missing files re-probe)
@@ -10566,7 +10569,7 @@
       "Every decision-maker Hire Signals produced, validated and ready to email.") +
       '<div id="clKpis" class="cl-kpis"></div>' +
       '<div class="cl-toolbar">' +
-        '<div class="pr-searchbar cl-search"><span class="ico"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span>' +
+        '<div class="rr-searchbar cl-search"><span class="ico"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span>' +
         '<input id="clSearch" type="text" autocomplete="off" placeholder="Search name, title, company, email, signal…" /></div>' +
         '<span id="clSeg" class="cl-seg"></span>' +
         '<select id="clIndustry" class="cl-cat-sel" title="Filter by industry"><option value="">All industries</option></select>' +
@@ -10779,7 +10782,7 @@
       var d = Math.floor((Date.now() - t) / 86400000);
       return d >= 0 ? d : null;
     }
-    function naCell(v) { return v ? esc(v) : '<span class="pr-na">-</span>'; }
+    function naCell(v) { return v ? esc(v) : '<span class="rr-na">-</span>'; }
 
     // ONE column spec drives the sortable header, the row cells, the sort accessor, AND the
     // campaign-ready CSV (snake_case keys = merge fields). Ordered first_name → company_location
@@ -10805,10 +10808,10 @@
           var size = n > 0 ? ' <span class="cl-size" title="Headcount">' + esc(n.toLocaleString()) + "</span>" : "";
           var dom = p.companyDomain ? '<a href="https://' + esc(p.companyDomain) + '" target="_blank" rel="noopener"' + stop + ">" + esc(p.companyDomain) + "</a>" : "";
           var sub = dom + (p.location ? (dom ? " · " : "") + esc(p.location) : "");
-          return '<td class="crm-c-company"><div class="crm-id-t"><span class="crm-name">' + (p.company ? esc(p.company) : '<span class="pr-na">-</span>') + size + "</span>" +
+          return '<td class="crm-c-company"><div class="crm-id-t"><span class="crm-name">' + (p.company ? esc(p.company) : '<span class="rr-na">-</span>') + size + "</span>" +
             '<span class="crm-sub">' + (sub || "&nbsp;") + "</span></div></td>"; } },
       { key: "open_role", label: "Hiring for", get: function (p) { return p.openRole || ""; }, render: function (p) {
-          var role = (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="pr-na">-</span>') +
+          var role = (p.openRole ? '<span class="cl-cat cl-cat-role">' + esc(p.openRole) + "</span>" : '<span class="rr-na">-</span>') +
             (p.jobUrl ? ' <a class="crm-jobpost" href="' + esc(p.jobUrl) + '" target="_blank" rel="noopener" title="Open the live job posting"' + stop + "></a>" : "");
           var dOpen = daysOpen(p);
           var meta = (p.jobLocation ? "" + esc(p.jobLocation) : "") +
@@ -10818,10 +10821,10 @@
       { key: "category", label: "Desk · Industry", get: function (p) { return (p["function"] || "") + " " + (p.industry || ""); }, render: function (p) {
           var chips = (p["function"] ? '<span class="cl-cat cl-cat-fn">' + esc(p["function"]) + "</span>" : "") +
             (p.industry ? '<span class="cl-cat cl-cat-ind">' + esc(p.industry) + "</span>" : "");
-          return '<td class="crm-c-cat">' + (chips || '<span class="pr-na">-</span>') + "</td>"; } },
+          return '<td class="crm-c-cat">' + (chips || '<span class="rr-na">-</span>') + "</td>"; } },
       { key: "email", label: "Email", get: function (p) { return p.email || ""; }, sort: vRank, render: function (p) {
           return '<td class="crm-c-email"><div class="crm-id-t"><span class="crm-mono">' +
-            (p.email ? '<a href="mailto:' + esc(p.email) + '"' + stop + ">" + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</span>" +
+            (p.email ? '<a href="mailto:' + esc(p.email) + '"' + stop + ">" + esc(p.email) + "</a>" : '<span class="rr-na">-</span>') + "</span>" +
             '<span class="crm-sub">' + vBadge(p) + "</span></div></td>"; } },
       // The EMPLOYER's main published line. Free rung: read from the company's own site
       // (schema.org markup > tel: link > labelled contact page), so every number is auditable
@@ -10830,7 +10833,7 @@
       { key: "company_phone", label: "Company phone", get: function (p) { return p.companyPhone || ""; },
         sort: function (p) { return p.companyPhone ? 0 : 1; },
         render: function (p) {
-          if (!p.companyPhone) return '<td class="crm-c-cphone"><span class="pr-na">-</span></td>';
+          if (!p.companyPhone) return '<td class="crm-c-cphone"><span class="rr-na">-</span></td>';
           var viaLabel = { schema_org: "published by the company in its site markup", tel_link: "a click-to-call link on the company site", labeled: "listed next to a phone label on the company site" };
           var tip = "Company main line · " + (viaLabel[p.companyPhoneVia] || "from the company site") +
             (p.companyPhoneSource ? " · " + p.companyPhoneSource : "");
@@ -10844,16 +10847,16 @@
               : '<span class="cl-vb cl-vb-ok" title="' + esc(tip) + '">main line</span>') + "</span></div></td>"; } },
       { key: "signal", label: "Why hiring", get: function (p) { return p.signalReason || ""; }, render: function (p) {
           return '<td class="crm-c-signal"><div class="crm-id-t">' +
-            (p.signalReason ? '<span class="crm-sig">' + esc(p.signalReason) + "</span>" : '<span class="pr-na">-</span>') +
+            (p.signalReason ? '<span class="crm-sig">' + esc(p.signalReason) + "</span>" : '<span class="rr-na">-</span>') +
             (p.signalType ? '<span class="crm-sub"><span class="cl-cat cl-cat-sig">' + esc(String(p.signalType).replace(/_/g, " ")) + "</span></span>" : "") + "</div></td>"; } },
       { key: "hiring_score", label: "Intent", get: function (p) { return p.score == null ? "" : p.score; }, sort: function (p) { return -(Number(p.score) || 0); },
         render: function (p) {
-          if (p.score == null) return '<td class="crm-c-num"><span class="pr-na">-</span></td>';
+          if (p.score == null) return '<td class="crm-c-num"><span class="rr-na">-</span></td>';
           var n = Number(p.score) || 0;
           var tier = n >= 70 ? "cl-score-hi" : n >= 40 ? "cl-score-md" : "cl-score-lo";
           return '<td class="crm-c-num"><span class="cl-score ' + tier + '" title="Hiring-intent score">' + esc(String(p.score)) + "</span></td>"; } },
       { key: "video", label: "Asset", get: function (p) { return hasCapture(p) ? ((videoFor(p) || {}).watch || "yes") : ""; }, sort: function (p) { return hasCapture(p) ? 0 : 1; },
-        render: function (p) { return '<td class="pr-c-video">' + captureCell(p) + "</td>"; } }
+        render: function (p) { return '<td class="rr-c-video">' + captureCell(p) + "</td>"; } }
     ];
     // Sort accessor: a column's own sort(), else its text value.
     function colSort(c, p) { return c.sort ? c.sort(p) : String(c.get ? c.get(p) : "").toLowerCase(); }
@@ -10944,7 +10947,7 @@
     }
 
     function rowHtml(p) {
-      return '<tr class="pr-row" data-pid="' + esc(p.id) + '">' +
+      return '<tr class="rr-row" data-pid="' + esc(p.id) + '">' +
         COLS.map(function (c) { return c.render(p); }).join("") + "</tr>";
     }
 
@@ -11055,7 +11058,7 @@
       }).join("") + "</tr></thead>";
 
       var table = rows
-        ? '<div class="pr-table-wrap cl-sheet-wrap"><table class="pr-table cl-sheet">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
+        ? '<div class="rr-table-wrap cl-sheet-wrap"><table class="rr-table cl-sheet">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
         : '<div class="empty">' + (clFilter
           ? "No clients match “" + esc(clFilter) + "”."
           : clSeg === "signals"
@@ -11089,7 +11092,7 @@
           "</select></label></div>";
       }
 
-      body.innerHTML = '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h">' +
+      body.innerHTML = '<div class="card" style="padding:0;overflow:hidden"><div class="rr-card-h">' +
         '<h3>Clients <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl +
         " with an email</span></h3>" + legend + "</div>" +
         '<div id="clSelBanner"></div>' + table + pager + "</div>";
@@ -11148,7 +11151,7 @@
       }
 
       // Per-row: checkbox selection, inline actions, and click-anywhere-else → detail drawer.
-      var tb = body.querySelector(".pr-table tbody");
+      var tb = body.querySelector(".rr-table tbody");
       if (tb) {
         tb.addEventListener("click", function (ev) {
           var b = ev.target.closest ? ev.target.closest("[data-act]") : null;
@@ -11591,7 +11594,7 @@
       '.cn-email{display:inline-block;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}' +
       '.cn-table tbody td{padding:9px 8px}' +
       '.cn-table thead th{padding:9px 8px}' +
-      '.cn-table .pr-c-name{min-width:180px}' +
+      '.cn-table .rr-c-name{min-width:180px}' +
       '.cn-table td.cn-co{white-space:normal;min-width:120px}' +
       // Reach pills: how many of the people in view you can actually message right
       // now, by email and by phone. Painted next to the Candidates count and inside
@@ -11820,15 +11823,15 @@
 
     /* ---- table ---- */
     function rowHtml(r) {
-      var cell = function (v) { return v ? esc(v) : '<span class="pr-na">-</span>'; };
+      var cell = function (v) { return v ? esc(v) : '<span class="rr-na">-</span>'; };
       var pending = r.kind === "prospect" && !r.linkedinUrl && (/ [--] /.test(r.fullName) || /hiring manager/i.test(r.fullName));
       var name = pending
-        ? esc(r.title || "Hiring manager") + ' <span class="pr-pending">name pending</span>'
+        ? esc(r.title || "Hiring manager") + ' <span class="rr-pending">name pending</span>'
         : esc(r.fullName);
-      var avatar = '<span class="avatar pr-av" style="position:relative;background:' + colorFor(r.fullName) + '">' + esc(initials(pending ? (r.company || "?") : r.fullName)) +
+      var avatar = '<span class="avatar rr-av" style="position:relative;background:' + colorFor(r.fullName) + '">' + esc(initials(pending ? (r.company || "?") : r.fullName)) +
         (r.photoUrl && !pending ? '<img src="' + esc(r.photoUrl) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()" />' : "") + "</span>";
-      var expToggle = r.exp ? ' <button type="button" class="pr-exp-toggle" data-exp="' + esc(r.id) + '">Details ▾</button>' : "";
-      var li = r.linkedinUrl ? ' <a class="pr-li" href="' + esc(r.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : "";
+      var expToggle = r.exp ? ' <button type="button" class="rr-exp-toggle" data-exp="' + esc(r.id) + '">Details ▾</button>' : "";
+      var li = r.linkedinUrl ? ' <a class="rr-li" href="' + esc(r.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : "";
       var statusSel;
       if (r.kind === "prospect") {
         statusSel = '<select class="stage-select cls cls-' + statusCls(r.statusVal) + '" data-pk="p" data-rid="' + esc(r.id) + '">' +
@@ -11851,22 +11854,22 @@
         var agoTxt = agoShort(r.lastContactedAt);
         if (agoTxt) commChip = '<span class="cn-comm" style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;background:#eef2fd;color:#2e5bd7;border:1px solid #d7e0f8" title="Last communication on record (ATS activity plus sends from this app). New first touches wait out the cooldown automatically.">Contacted ' + esc(agoTxt) + (r.lastContactChannel ? " · " + esc(r.lastContactChannel) : "") + '</span>';
       }
-      var tr = '<tr class="pr-row' + (state.sel[r.id] ? " pr-selected" : "") + '" data-rid="' + esc(r.id) + '">' +
-        '<td class="pr-c-check"><input type="checkbox" class="pr-check" data-rid="' + esc(r.id) + '"' + (state.sel[r.id] ? " checked" : "") + ' /></td>' +
-        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + li + expToggle + commChip +
-          (r.seqName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(r.seqName) + "</span>" : "") +
+      var tr = '<tr class="rr-row' + (state.sel[r.id] ? " rr-selected" : "") + '" data-rid="' + esc(r.id) + '">' +
+        '<td class="rr-c-check"><input type="checkbox" class="rr-check" data-rid="' + esc(r.id) + '"' + (state.sel[r.id] ? " checked" : "") + ' /></td>' +
+        '<td class="rr-c-name">' + avatar + '<span class="rr-name-t">' + name + li + expToggle + commChip +
+          (r.seqName ? '<span class="rr-seqtag" title="Assigned sequence">▸ ' + esc(r.seqName) + "</span>" : "") +
           '<span class="cn-sub">' + (r.title && !pending ? esc(r.title) + " · " : "") +
             '<span class="cn-src' + (r.kind === "data" ? " ats" : "") + '" title="' + (r.kind === "data" ? "From the ATS people database" : "Pipeline") + ': ' + esc(r.source) + '">' + esc(r.source) + "</span>" +
             (r.pairedJobs && r.pairedJobs.length ? ' <span class="cn-src" style="background:#eef7f0;border-color:#cfe8d7;color:#1c7c3c" title="Paired job (Job Library). This match follows them across Candidates, AI Vetting, JD Sourcing, and OS Text.">' + esc(r.pairedJobs[0].title) + (r.pairedJobs.length > 1 ? " +" + (r.pairedJobs.length - 1) : "") + "</span>" : "") +
             "</span></span></td>" +
         '<td class="cn-co">' + cell(r.company) + (r.location ? '<span class="cn-sub">' + esc(r.location) + "</span>" : "") + "</td>" +
-        '<td class="pr-c-email">' + (r.email ? '<a class="cn-email" href="mailto:' + esc(r.email) + '" title="' + esc(r.email) + '">' + esc(r.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
-        "<td>" + (r.phone ? '<a href="tel:' + esc(r.phone) + '" style="color:inherit;text-decoration:none">' + esc(r.phone) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
+        '<td class="rr-c-email">' + (r.email ? '<a class="cn-email" href="mailto:' + esc(r.email) + '" title="' + esc(r.email) + '">' + esc(r.email) + "</a>" : '<span class="rr-na">-</span>') + "</td>" +
+        "<td>" + (r.phone ? '<a href="tel:' + esc(r.phone) + '" style="color:inherit;text-decoration:none">' + esc(r.phone) + "</a>" : '<span class="rr-na">-</span>') + "</td>" +
         "<td>" + scorePill(r) + "</td>" +
         "<td>" + statusSel + "</td>" +
-        '<td class="pr-c-act"><button class="pr-enrich" data-enrich="' + esc(r.id) + '" data-pending="' + (pending ? "1" : "") + '" title="' + enrichTitle + '">' + enrichLbl + "</button></td>" +
+        '<td class="rr-c-act"><button class="rr-enrich" data-enrich="' + esc(r.id) + '" data-pending="' + (pending ? "1" : "") + '" title="' + enrichTitle + '">' + enrichLbl + "</button></td>" +
         "</tr>";
-      if (r.exp) tr += '<tr class="pr-exp-row" id="cnexp_' + esc(r.id) + '" hidden><td></td><td colspan="7" class="pr-exp">' + esc(r.exp) + "</td></tr>";
+      if (r.exp) tr += '<tr class="rr-exp-row" id="cnexp_' + esc(r.id) + '" hidden><td></td><td colspan="7" class="rr-exp">' + esc(r.exp) + "</td></tr>";
       return tr;
     }
 
@@ -11912,20 +11915,20 @@
         return '<option value="' + esc(s.id) + '">' + esc(s.name) + " · " + esc(c) + "</option>";
       }).join("");
       var bulk = selIds.length
-        ? '<div class="pr-bulk"><span class="pr-selcount">' + selIds.length + " selected</span>" +
-            '<span class="pr-bulk-actions">' +
-              '<span class="pr-enrich-grp">Enrich' +
+        ? '<div class="rr-bulk"><span class="rr-selcount">' + selIds.length + " selected</span>" +
+            '<span class="rr-bulk-actions">' +
+              '<span class="rr-enrich-grp">Enrich' +
                 '<label><input type="checkbox" id="cnEnrEmail" checked /> Email</label>' +
                 '<label><input type="checkbox" id="cnEnrPhone" checked /> Phone</label>' +
-                '<select class="pr-bulk-sel" id="cnEnrBatch" title="How many of the selected to enrich in this run. People missing the checked info run first; enriched rows leave the selection, so pressing Run again continues with the next batch.">' +
+                '<select class="rr-bulk-sel" id="cnEnrBatch" title="How many of the selected to enrich in this run. People missing the checked info run first; enriched rows leave the selection, so pressing Run again continues with the next batch.">' +
                   '<option value="10">10 at a time</option><option value="25" selected>25 at a time</option><option value="50">50 at a time</option><option value="100">100 at a time</option><option value="all">All selected</option></select>' +
                 '<button class="btn btn-primary btn-sm" id="cnEnrichSel" title="Find missing emails and phones for this batch, cheapest source first. Nothing is sent to anyone.">Run</button></span>' +
               '<button class="btn btn-ghost btn-sm" id="cnEmailSel" title="One personalized email per person through your connected sending path.">Email…</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnResumeSel" title="Email everyone selected a personal ask for their current resume. Replies land in the resume inbox and move them into Screening automatically.">Request resume</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnPushSel" title="Send the selected candidates straight into an OS Text campaign, no CSV, no drag and drop.">Push to OS Text</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnMarketSel" title="Paste a job description and AI writes 50+ short, distinct emails marketing that job. Sends go out paced through the chosen recruiter\'s warmed inboxes with their signature.">Market a job</button>' +
-              '<select class="pr-bulk-sel" id="cnBulkStatus">' + statusOpts + "</select>" +
-              '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="cnBulkSeq">' + seqOpts + "</select>" +
+              '<select class="rr-bulk-sel" id="cnBulkStatus">' + statusOpts + "</select>" +
+              '<span class="rr-seq-grp"><select class="rr-bulk-sel" id="cnBulkSeq">' + seqOpts + "</select>" +
                 '<button class="btn btn-ghost btn-sm" id="cnSeqAssign">Assign</button></span>' +
               '<button class="btn btn-ghost btn-sm" id="cnAddCamp" title="Put everyone selected into a campaign you pick. Tip: filter by a list\'s tag first, then Select all.">+ Add to campaign</button>' +
               '<button class="btn btn-ghost btn-sm" id="cnSaveList">Save as list</button>' +
@@ -11953,14 +11956,14 @@
       var rows = shownRows.map(rowHtml).join("");
       var countLbl = (state.q || Object.keys(state.facets).length || listName) ? (list.length + " of " + rowsAll.length) : String(rowsAll.length);
       var tableHead = '<thead><tr>' +
-        '<th class="pr-c-check"><input type="checkbox" id="cnSelAll"' + (allOn ? " checked" : "") + ' title="Select everyone matching the current filters" /></th>' +
+        '<th class="rr-c-check"><input type="checkbox" id="cnSelAll"' + (allOn ? " checked" : "") + ' title="Select everyone matching the current filters" /></th>' +
         "<th>Name &amp; Title</th><th>Company</th><th>Email</th><th>Phone</th><th title=\"OS Text qualification score, 1-100\">Qualified</th><th>Status</th><th></th></tr></thead>";
       var table = rows
-        ? '<div class="pr-table-wrap"><table class="pr-table cn-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>" +
+        ? '<div class="rr-table-wrap"><table class="rr-table cn-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>" +
           (list.length > shownRows.length ? '<div class="cd-more" id="cnMore" style="text-align:center;padding:12px 0">Show 150 more (' + (list.length - shownRows.length) + " remaining)</div>" : "")
         : '<div class="empty">' + (listName ? "This saved list has no matching candidates." : "No candidates match these filters.") + "</div>";
       body.innerHTML = '<div class="pipe">' + stages + "</div>" +
-        '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h"><h3>Candidates <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span>" + (listName ? "" : reachPills) + "</h3>" +
+        '<div class="card" style="padding:0;overflow:hidden"><div class="rr-card-h"><h3>Candidates <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span>" + (listName ? "" : reachPills) + "</h3>" +
         listBanner + bulk + "</div>" + table + "</div>";
 
       var more = $("#cnMore", el); if (more) more.addEventListener("click", function () { state.limit += 150; paint(); });
@@ -11970,7 +11973,7 @@
         list.forEach(function (r) { if (selAll.checked) state.sel[r.id] = true; else delete state.sel[r.id]; });
         paint();
       });
-      Array.prototype.forEach.call(body.querySelectorAll(".pr-check"), function (cb) {
+      Array.prototype.forEach.call(body.querySelectorAll(".rr-check"), function (cb) {
         cb.addEventListener("change", function () {
           var id = cb.getAttribute("data-rid");
           if (cb.checked) state.sel[id] = true; else delete state.sel[id];
@@ -11997,7 +12000,7 @@
       var clrBtn = $("#cnClearSel", el); if (clrBtn) clrBtn.addEventListener("click", function () { state.sel = {}; paint(); });
       var helpSel = $("#cnHelpSel", el); if (helpSel) helpSel.addEventListener("click", openCandidatesHelp);
 
-      Array.prototype.forEach.call(body.querySelectorAll(".pr-exp-toggle"), function (t) {
+      Array.prototype.forEach.call(body.querySelectorAll(".rr-exp-toggle"), function (t) {
         t.addEventListener("click", function () {
           var box = body.querySelector("#cnexp_" + (window.CSS && CSS.escape ? CSS.escape(t.getAttribute("data-exp")) : t.getAttribute("data-exp")));
           if (!box) return;
@@ -12021,7 +12024,7 @@
           }
         });
       });
-      Array.prototype.forEach.call(body.querySelectorAll(".pr-enrich"), function (btn) {
+      Array.prototype.forEach.call(body.querySelectorAll(".rr-enrich"), function (btn) {
         btn.addEventListener("click", function () { enrichRow(btn.getAttribute("data-enrich"), btn); });
       });
     }
@@ -12810,9 +12813,9 @@
       '<select id="prSavedSelect" title="Open a saved list (JD Sourcing lists appear here)" style="margin-left:auto;background:var(--surface-2,var(--surface));color:var(--text,#f4f4f8);border:1px solid var(--border,#2a2a36);border-radius:8px;padding:6px 11px;font-size:13px;max-width:240px"><option value="">Saved lists…</option></select>' +
       '</div>' +
       '<div id="liProgress"></div>' +
-      '<div class="pr-searchbar"><span class="ico"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span>' +
+      '<div class="rr-searchbar"><span class="ico"><svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg></span>' +
       '<input id="prSearch" type="text" autocomplete="off" placeholder="Search by name, job title, company, or keyword…" /></div>' +
-      '<div id="prBody">' + loading() + "</div>";
+      '<div id="rrBody">' + loading() + "</div>";
 
     $("#importBtn").addEventListener("click", importProspects);
     $("#liSearchBtn").addEventListener("click", importLinkedInSearch);
@@ -12862,34 +12865,34 @@
       // A "role placeholder" prospect: the hiring manager's real name isn't researched yet.
       var pending = !p.linkedinUrl && (/ [--] /.test(p.fullName || "") || /hiring manager/i.test(p.fullName || ""));
       var name = pending
-        ? esc(p.title || "Hiring manager") + ' <span class="pr-pending">name pending</span>'
+        ? esc(p.title || "Hiring manager") + ' <span class="rr-pending">name pending</span>'
         : esc(p.fullName);
-      var avatar = '<span class="avatar pr-av" style="position:relative;background:' + colorFor(p.fullName) + '">' + esc(initials(pending ? (p.company || "?") : p.fullName)) +
+      var avatar = '<span class="avatar rr-av" style="position:relative;background:' + colorFor(p.fullName) + '">' + esc(initials(pending ? (p.company || "?") : p.fullName)) +
         (p.photoUrl && !pending ? '<img src="' + esc(p.photoUrl) + '" alt="" onerror="this.remove()" />' : "") + "</span>";
-      var expToggle = exp ? ' <button type="button" class="pr-exp-toggle" data-exp="' + esc(p.id) + '">Experience ▾</button>' : "";
-      var li = p.linkedinUrl ? '<a class="pr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="pr-na">-</span>';
+      var expToggle = exp ? ' <button type="button" class="rr-exp-toggle" data-exp="' + esc(p.id) + '">Experience ▾</button>' : "";
+      var li = p.linkedinUrl ? '<a class="rr-li" href="' + esc(p.linkedinUrl) + '" target="_blank" rel="noopener" title="View LinkedIn profile">in</a>' : '<span class="rr-na">-</span>';
       var enrichLbl = pending ? '<svg class="isvg" aria-hidden="true"><use href="#i-search"/></svg>' : (p.email && p.phone) ? "↻" : '<svg class="isvg" aria-hidden="true"><use href="#i-zap"/></svg>';
       var enrichTitle = pending ? "Find hiring manager" : (p.email && p.phone) ? "Re-enrich contact" : "Enrich contact";
-      var cell = function (v) { return v ? esc(v) : '<span class="pr-na">-</span>'; };
-      var tr = '<tr class="pr-row' + (prSel[p.id] ? " pr-selected" : "") + '" data-pid="' + esc(p.id) + '">' +
-        '<td class="pr-c-check"><input type="checkbox" class="pr-check" data-pid="' + esc(p.id) + '"' + (prSel[p.id] ? " checked" : "") + ' /></td>' +
-        '<td class="pr-c-name">' + avatar + '<span class="pr-name-t">' + name + expToggle +
-          (p.sequenceName ? '<span class="pr-seqtag" title="Assigned sequence">▸ ' + esc(p.sequenceName) + "</span>" : "") + "</span></td>" +
+      var cell = function (v) { return v ? esc(v) : '<span class="rr-na">-</span>'; };
+      var tr = '<tr class="rr-row' + (prSel[p.id] ? " rr-selected" : "") + '" data-pid="' + esc(p.id) + '">' +
+        '<td class="rr-c-check"><input type="checkbox" class="rr-check" data-pid="' + esc(p.id) + '"' + (prSel[p.id] ? " checked" : "") + ' /></td>' +
+        '<td class="rr-c-name">' + avatar + '<span class="rr-name-t">' + name + expToggle +
+          (p.sequenceName ? '<span class="rr-seqtag" title="Assigned sequence">▸ ' + esc(p.sequenceName) + "</span>" : "") + "</span></td>" +
         "<td>" + cell(p.title) + "</td>" +
         "<td>" + cell(p.company) + "</td>" +
-        '<td class="pr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="pr-na">-</span>') + "</td>" +
-        '<td class="pr-c-li">' + li + "</td>" +
+        '<td class="rr-c-email">' + (p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + "</a>" : '<span class="rr-na">-</span>') + "</td>" +
+        '<td class="rr-c-li">' + li + "</td>" +
         "<td>" + cell(p.phone) + "</td>" +
         "<td>" + cell(p.location) + "</td>" +
         '<td><select class="stage-select cls cls-' + statusCls(p.status) + '" data-pid="' + esc(p.id) + '">' + opts + "</select></td>" +
-        '<td class="pr-c-act"><button class="pr-enrich" data-enrich="' + esc(p.id) + '" data-pending="' + (pending ? "1" : "") + '" title="' + enrichTitle + '">' + enrichLbl + "</button></td>" +
+        '<td class="rr-c-act"><button class="rr-enrich" data-enrich="' + esc(p.id) + '" data-pending="' + (pending ? "1" : "") + '" title="' + enrichTitle + '">' + enrichLbl + "</button></td>" +
         "</tr>";
-      if (exp) tr += '<tr class="pr-exp-row" id="exp_' + esc(p.id) + '" hidden><td></td><td colspan="9" class="pr-exp">' + esc(exp) + "</td></tr>";
+      if (exp) tr += '<tr class="rr-exp-row" id="exp_' + esc(p.id) + '" hidden><td></td><td colspan="9" class="rr-exp">' + esc(exp) + "</td></tr>";
       return tr;
     }
 
     function paint() {
-      var body = $("#prBody"); if (!body) return;
+      var body = $("#rrBody"); if (!body) return;
       var lifecycle = prLifecycle;
       var list = prAll.filter(matches);
       var counts = list.reduce(function (m, p) { m[p.status] = (m[p.status] || 0) + 1; return m; }, {});
@@ -12909,14 +12912,14 @@
         return '<option value="' + esc(s.id) + '">' + esc(s.name) + " · " + esc(c) + "</option>";
       }).join("");
       var bulk = selIds.length
-        ? '<div class="pr-bulk"><span class="pr-selcount">' + selIds.length + " selected</span>" +
-            '<span class="pr-bulk-actions">' +
-              '<span class="pr-enrich-grp">Enrich' +
+        ? '<div class="rr-bulk"><span class="rr-selcount">' + selIds.length + " selected</span>" +
+            '<span class="rr-bulk-actions">' +
+              '<span class="rr-enrich-grp">Enrich' +
                 '<label><input type="checkbox" id="prEnrEmail" checked /> Email</label>' +
                 '<label><input type="checkbox" id="prEnrPhone" checked /> Phone</label>' +
                 '<button class="btn btn-primary btn-sm" id="prEnrichSel">Run</button></span>' +
-              '<select class="pr-bulk-sel" id="prBulkStatus">' + statusOpts + "</select>" +
-              '<span class="pr-seq-grp"><select class="pr-bulk-sel" id="prBulkSeq">' + seqOpts + "</select>" +
+              '<select class="rr-bulk-sel" id="prBulkStatus">' + statusOpts + "</select>" +
+              '<span class="rr-seq-grp"><select class="rr-bulk-sel" id="prBulkSeq">' + seqOpts + "</select>" +
                 '<button class="btn btn-ghost btn-sm" id="prSeqAssign">Assign</button></span>' +
               '<button class="btn btn-ghost btn-sm" id="prSaveList">Save as list</button>' +
               '<button class="btn btn-ghost btn-sm" id="prPushSel" title="Send the selected candidates straight into an OS Text campaign, no CSV, no drag and drop.">Push to OS Text</button>' +
@@ -12930,17 +12933,17 @@
           '<button class="btn btn-ghost btn-sm" id="prShowAll">Show all prospects</button></div>'
         : "";
       var tableHead = '<thead><tr>' +
-        '<th class="pr-c-check"><input type="checkbox" id="prSelAll"' + (allOn ? " checked" : "") + ' title="Select all' + (prFilter ? " (filtered)" : "") + '" /></th>' +
+        '<th class="rr-c-check"><input type="checkbox" id="prSelAll"' + (allOn ? " checked" : "") + ' title="Select all' + (prFilter ? " (filtered)" : "") + '" /></th>' +
         "<th>Name</th><th>Job Title</th><th>Company</th><th>Email</th><th>LinkedIn</th><th>Phone</th><th>Location</th><th>Status</th><th></th></tr></thead>";
       var table = rows
-        ? '<div class="pr-table-wrap"><table class="pr-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
+        ? '<div class="rr-table-wrap"><table class="rr-table">' + tableHead + "<tbody>" + rows + "</tbody></table></div>"
         : '<div class="empty">' + (prListName
           ? "This saved search has no matching prospects in your current pipeline."
           : prFilter
           ? "No " + prospectNoun() + "s match “" + esc(prFilter) + "”."
           : "No " + prospectNoun() + "s yet. Import, pull from a LinkedIn search above" + (motion === "recruiting" ? "." : ", or promote from Hire Signals.")) + "</div>";
       body.innerHTML = '<div class="pipe">' + stages + "</div>" +
-        '<div class="card" style="padding:0;overflow:hidden"><div class="pr-card-h"><h3>Pipeline <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span></h3>" +
+        '<div class="card" style="padding:0;overflow:hidden"><div class="rr-card-h"><h3>Pipeline <span class="muted" style="font-weight:400;font-size:13px">· ' + countLbl + "</span></h3>" +
         listBanner + bulk + "</div>" + table + "</div>";
       var showAll = $("#prShowAll"); if (showAll) showAll.addEventListener("click", function () { selectSavedList(""); });
 
@@ -12950,7 +12953,7 @@
         list.forEach(function (p) { if (selAll.checked) prSel[p.id] = true; else delete prSel[p.id]; });
         paint();
       });
-      Array.prototype.forEach.call(body.querySelectorAll(".pr-check"), function (cb) {
+      Array.prototype.forEach.call(body.querySelectorAll(".rr-check"), function (cb) {
         cb.addEventListener("change", function () {
           var pid = cb.getAttribute("data-pid");
           if (cb.checked) prSel[pid] = true; else delete prSel[pid];
@@ -12970,7 +12973,7 @@
       var clrBtn = $("#prClearSel"); if (clrBtn) clrBtn.addEventListener("click", function () { prSel = {}; paint(); });
 
       // Expand / collapse a prospect's experience summary (hidden by default).
-      Array.prototype.forEach.call(body.querySelectorAll(".pr-exp-toggle"), function (t) {
+      Array.prototype.forEach.call(body.querySelectorAll(".rr-exp-toggle"), function (t) {
         t.addEventListener("click", function () {
           var box = body.querySelector("#exp_" + (window.CSS && CSS.escape ? CSS.escape(t.getAttribute("data-exp")) : t.getAttribute("data-exp")));
           if (!box) return;
@@ -12994,7 +12997,7 @@
       });
 
       // Enrich a prospect's outreach contact (company email + phone), cheapest-first.
-      Array.prototype.forEach.call(body.querySelectorAll(".pr-enrich"), function (btn) {
+      Array.prototype.forEach.call(body.querySelectorAll(".rr-enrich"), function (btn) {
         btn.addEventListener("click", function () {
           var pid = btn.getAttribute("data-enrich");
           var researching = btn.getAttribute("data-pending") === "1";
@@ -13022,7 +13025,7 @@
         prAll = (d && d.prospects) || [];
         prLifecycle = (d && d.lifecycle) || REF.lifecycle;
         paint();
-      }).catch(function () { var b = $("#prBody"); if (b) b.innerHTML = needsSetup(); });
+      }).catch(function () { var b = $("#rrBody"); if (b) b.innerHTML = needsSetup(); });
       // Populate the Saved lists dropdown (local cache first, then merge server).
       refreshSavedDropdown();
       openPendingList();
@@ -28203,24 +28206,24 @@
     })();
   }
 
-  /* Post Recruiter mounts the same way the LinkedIn tool does: this route is a
-     thin host, and assets/js/post-recruiter.js owns everything inside it. */
-  function renderPostRecruiter(el) {
+  /* Role Recruiter mounts the same way the LinkedIn tool does: this route is a
+     thin host, and assets/js/role-recruiter.js owns everything inside it. */
+  function renderRoleRecruiter(el) {
     var crumbEl = $("#crumb");
     if (crumbEl) crumbEl.textContent = (ctx.workspace ? wsDisplayName() + " / " : "") + "Build";
-    el.innerHTML = '<div class="pr-host"></div>';
-    var host = $(".pr-host", el);
+    el.innerHTML = '<div class="rr-host"></div>';
+    var host = $(".rr-host", el);
     var tries = 0;
     (function mount() {
       if (!document.body.contains(host)) return;
-      if (window.__PostRecruiter && window.__PostRecruiter.render) {
-        window.__PostRecruiter.render(host);
+      if (window.__RoleRecruiter && window.__RoleRecruiter.render) {
+        window.__RoleRecruiter.render(host);
         return;
       }
-      // Cold deep link: post-recruiter.js loads after command.js; wait briefly.
+      // Cold deep link: role-recruiter.js loads after command.js; wait briefly.
       tries++;
       if (tries > 40) {
-        host.innerHTML = '<div class="empty">Post Recruiter failed to load. Refresh the page.</div>';
+        host.innerHTML = '<div class="empty">Role Recruiter failed to load. Refresh the page.</div>';
         return;
       }
       setTimeout(mount, 125);
