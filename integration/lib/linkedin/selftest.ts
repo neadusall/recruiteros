@@ -29,6 +29,10 @@
  *     are weighted toward the MUST-NOT-MATCH cases, because both guards remove
  *     volume and a guard that removes the wrong volume is invisible.
  *
+ *  1d. And the other side of it (suite 9): somebody the BD lane refuses because
+ *     they are AVAILABLE is a candidate in this desk's exact function. Only the
+ *     two availability findings hand off, which is the rule suite 9 pins.
+ *
  *  2. The message claimed "Saw the news about the team growing" to a man who had
  *     posted about cash-flow reporting. That was not a bad draft, it was a
  *     mis-wiring: a scenario matching on SUBJECT MATTER was pointed at a bank of
@@ -39,6 +43,7 @@
 import { jobSeekerVerdict } from "../outreach/jobSeeker";
 import { employmentVerdict, notABuyerReason, parseWorkDate, sameCompany } from "../outreach/employment";
 import { advisoryPracticeReason, foreignPostingReason } from "../outreach/targetFit";
+import { availabilityFrom } from "./commentToCandidate";
 import { assertScenarioBanks, SCENARIO_PRESETS } from "./commentWatch";
 
 let pass = 0;
@@ -271,6 +276,49 @@ for (const [city, state] of [["Manchester", "NH"], ["Birmingham", "AL"], ["Dubli
     Boolean(foreignPostingReason({ countries: [], text: `office in ${city}` })), false);
   void state;
 }
+
+/* ------------------------------- 9. blocked BD target -> candidate --------- */
+/* The other side of the gate. Somebody refused by the BD lane BECAUSE they are
+   available is a candidate in this desk's exact function, and without this the
+   whole yield of finding, screening and profile-reading them is a log line.
+
+   The rule that matters is what must NOT hand off: every other kind of block is
+   about the wrong FIRM or the wrong ROLE, not about wanting a job, and turning
+   those into candidates would fill the bench with people who never asked. */
+
+const EMPLOYED = employmentVerdict({ work: [{ company: "Northwind", position: "CFO", start: "1/1/2024" }] });
+const NOT_EMPLOYED = employmentVerdict({ work: FRIEDLE_WORK });
+const NO_HISTORY = employmentVerdict({ work: [] });
+const MOVED_ON = employmentVerdict({
+  work: [
+    { company: "Northwind Health", position: "VP Finance", start: "3/1/2026" },
+    { company: "Gensler", position: "FP&A Director", start: "1/1/2022", end: "2/1/2026" },
+  ],
+  claimedCompany: "Gensler",
+});
+
+// HANDS OFF: they said they are looking.
+check("badge hands off",
+  availabilityFrom("open-to-work flag set on their profile", EMPLOYED)?.evidence,
+  "open-to-work flag set on their profile");
+
+// HANDS OFF: the record shows nobody employing them. This is the real case.
+const fromRecord = availabilityFrom(null, NOT_EMPLOYED);
+check("no current employer hands off", Boolean(fromRecord), true);
+check("and carries the date as evidence", fromRecord?.lastRoleEndedAt, "2026-07-01");
+
+// The badge takes the evidence but still picks up the date when both are known.
+check("badge plus record keeps the date",
+  availabilityFrom("open-to-work flag set on their profile", NOT_EMPLOYED)?.lastRoleEndedAt,
+  "2026-07-01");
+
+// MUST NOT HAND OFF.
+check("employed person is not a candidate", availabilityFrom(null, EMPLOYED), null);
+check("unknown history is not a candidate", availabilityFrom(null, NO_HISTORY), null);
+// The one most likely to be got wrong: a stale headline means they CHANGED jobs,
+// which makes them the least available person on the platform, not the most.
+check("someone who moved jobs is not a candidate", availabilityFrom(null, MOVED_ON), null);
+check("left-company flag is set but still not a handoff", MOVED_ON.leftClaimedCompany, true);
 
 /* -------------------------------------------------------------- report ----- */
 

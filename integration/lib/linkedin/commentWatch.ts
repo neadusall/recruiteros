@@ -41,6 +41,7 @@ import { classifyTitle } from "../signals/filters";
 import { jobSeekerReason } from "../outreach/jobSeeker";
 import { employmentVerdict, notABuyerReason, type WorkEntry } from "../outreach/employment";
 import { advisoryPracticeReason, foreignPostingReason } from "../outreach/targetFit";
+import { availabilityFrom, candidateHandoffEnabled } from "./commentToCandidate";
 import { requestLinkedInAction } from "./os/engine";
 import { ensureAccount, listAccounts } from "./os/health";
 import { putPolicy } from "./os/policy";
@@ -3606,15 +3607,60 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       work: prof.work,
       claimedCompany: company ?? undefined,
     });
-    const notBuyer = jobSeekerReason({
+    const seekerReason = jobSeekerReason({
       openToWorkFlag: prof.openToWork,
       headline: headline ?? undefined,
       summary: prof.summary,
-    }) ?? notABuyerReason(employment);
+    });
+    const notBuyer = seekerReason ?? notABuyerReason(employment);
     if (notBuyer) {
       markClosed(prof.providerId);
       g.jobSeeker++;
       console.log(`[comment-radar] ${workspaceId}: skipped ${prof.publicUrl ?? c.authorRef} - ${notBuyer}`);
+
+      // THE OTHER SIDE OF THE GATE. They are not a buyer precisely BECAUSE they
+      // are available, and this desk places exactly this function. We have
+      // already paid to find, screen and profile-read them; without this the
+      // entire yield of that work is the log line above.
+      //
+      // Only the two AVAILABILITY findings hand off (see availabilityFrom): a
+      // peer, an advisory practice or an off-market poster is blocked for
+      // reasons that say nothing about whether they want a job.
+      try {
+        const availability = availabilityFrom(seekerReason, employment);
+        if (availability && candidateHandoffEnabled()) {
+          const candidateName = c.authorName ?? prof.name ?? "LinkedIn member";
+          // DNC is checked further down for the BD path, which this branch never
+          // reaches, so it is checked here too: somebody suppressed across all
+          // channels must not be quietly written into a pipeline.
+          const { checkContactable } = await import("../outreach/contactGuard");
+          const allowed = await checkContactable(workspaceId,
+            { fullName: candidateName, company: company ?? undefined, linkedinUrl: prof.publicUrl },
+            { checkRecency: false });
+          if (allowed.ok) {
+            const { handoffAvailablePerson } = await import("./commentToCandidate");
+            // Their work history is the better source for BOTH fields here: a
+            // headline goes stale the moment a job ends, which is the whole
+            // reason this person is in this branch.
+            const recent = prof.work?.[0];
+            await handoffAvailablePerson(workspaceId, {
+              authorName: candidateName,
+              authorPublicUrl: prof.publicUrl,
+              authorHeadline: headline ?? undefined,
+              company: recent?.company ?? company ?? undefined,
+              title: recent?.position ?? title ?? undefined,
+              location: prof.location,
+              postUrl: c.postUrl,
+              evidence: availability.evidence,
+              lastRoleEndedAt: availability.lastRoleEndedAt,
+            });
+          }
+        }
+      } catch (e) {
+        // A failed handoff must never break the hunt: the BD skip already
+        // happened and is the safety-critical half.
+        console.log(`[comment-radar] ${workspaceId}: candidate handoff failed (${e instanceof Error ? e.message : e})`);
+      }
       continue;
     }
 
