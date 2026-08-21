@@ -83,7 +83,20 @@ const POSTER_NEW_PER_SCAN = Math.max(POSTER_NEW_PER_TICK, Number(process.env.ROL
 // seat than the two-seat desk was already running on 8/19 (540 over two), and
 // it still clears the ~70 drafts a day five seats need, because roughly one
 // read in four becomes a draft.
-const POSTER_READS_PER_SCAN = Math.max(1, Number(process.env.ROLE_HUNTER_READS_PER_SCAN ?? 14));
+// Dropped 14 -> 3 on 2026-08-21. Fourteen reads fired inside 22 seconds and
+// then the account went silent for fourteen and a half minutes, ninety-six
+// times a day, on a 15-minute grid - and because the seat rota only advanced
+// when a DRAFT was created, almost the whole burst landed on ONE recruiter.
+// Every source on LinkedIn enforcement says the same thing: shape gets you
+// caught before volume does. Three reads a tick, dealt one per seat by
+// readRota, is one profile view per account every fifteen minutes.
+const POSTER_READS_PER_SCAN = Math.max(1, Number(process.env.ROLE_HUNTER_READS_PER_SCAN ?? 3));
+// Even three in a row is a burst if they land in the same second.
+const READ_GAP_MIN_MS = Math.max(0, Number(process.env.ROLE_HUNTER_READ_GAP_MIN_MS ?? 2_000));
+const READ_GAP_MAX_MS = Math.max(READ_GAP_MIN_MS, Number(process.env.ROLE_HUNTER_READ_GAP_MAX_MS ?? 9_000));
+// How long an indexed profile hint stays good. A headline does not change
+// weekly, and a cached hint costs nothing at all.
+const PROFILE_HINT_TTL_DAYS = 14;
 const POSTER_RECHECK_DAYS = 7;   // never re-message the same author within a week
 const CLOSED_PROFILE_DAYS = 30;  // remember closed profiles; no repeat profile reads
 const MAX_POST_AGE_DAYS = 14;    // hard ceiling: never message about a stale post
@@ -686,6 +699,13 @@ interface WatchState {
    *  Before 2026-08-21 it was written at reservation time and so counted
    *  comments that had not gone out (and, for three seats, never had). */
   sendLogTruthBuilt: Record<string, boolean>;
+  /** ws -> slug -> what Google's index knows about that person. The cheap
+   *  half of the screen: a headline read out of the index costs $0.0005 and
+   *  no LinkedIn action at all, where the same fact read off the platform
+   *  costs a profile view on a recruiter's own account. */
+  profileHints: Record<string, Record<string, { at: string; found: boolean; headline?: string; snippet?: string }>>;
+  /** ws -> the exact profile-view capacity directive already applied. */
+  profileViewsMandate: Record<string, string>;
 }
 
 /** Bumped 2026-08-19: drafts must close with a call to action (owner ask).
@@ -703,7 +723,7 @@ interface WatchState {
 const COMMENT_COPY_EPOCH = 4;
 
 const KEY = "linkedin_comment_watch_v1";
-let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {}, interactionsMandate: {}, sendLogTruthBuilt: {} };
+let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {}, interactionsMandate: {}, sendLogTruthBuilt: {}, profileHints: {}, profileViewsMandate: {} };
 
 /* ---------------- industry classification + set-and-forget autopilot ------
    Owner ask 2026-08-14: pick industries in the UI, have the choice stick,
@@ -789,6 +809,8 @@ async function hydrate(): Promise<void> {
           scenarioMandate: snap.scenarioMandate ?? {},
           interactionsMandate: snap.interactionsMandate ?? {},
           sendLogTruthBuilt: snap.sendLogTruthBuilt ?? {},
+          profileHints: snap.profileHints ?? {},
+          profileViewsMandate: snap.profileViewsMandate ?? {},
         };
       }
       hydrated = true;
@@ -1080,8 +1102,40 @@ function dayAllowanceFor(workspaceId: string, day: string, accountId?: string): 
  * approved. An empty mirror means "not read yet" and clamps nothing, so a
  * cold start behaves exactly as before rather than blocking the whole lane.
  */
-interface SeatEngineRoom { day: string; target: number; ceiling: number; committed: number }
+interface SeatCategoryRoom { target: number; ceiling: number; committed: number }
+interface SeatEngineRoom { day: string; target: number; ceiling: number; committed: number; views?: SeatCategoryRoom }
 const engineRoom = new Map<string, SeatEngineRoom>();
+/** Profile views spent THIS UTC day, per seat, by the scan itself. The engine
+ *  cannot count these for us: fetchProfileLite talks to the provider directly,
+ *  because the scan needs the answer inside the loop and the engine's queue
+ *  hands answers back minutes later. So the lane keeps the tally and checks it
+ *  against the engine's OWN profile_views policy - one authority for the
+ *  number, even though the action does not run through the queue. */
+const seatViews = new Map<string, { day: string; used: number }>();
+
+function viewsUsedToday(workspaceId: string, accountId: string): number {
+  const k = seatLogKey(workspaceId, accountId);
+  const day = nowIso().slice(0, 10);
+  const cur = seatViews.get(k);
+  if (!cur || cur.day !== day) { seatViews.set(k, { day, used: 0 }); return 0; }
+  return cur.used;
+}
+
+function noteProfileView(workspaceId: string, accountId: string): void {
+  const k = seatLogKey(workspaceId, accountId);
+  const day = nowIso().slice(0, 10);
+  const cur = seatViews.get(k);
+  if (!cur || cur.day !== day) seatViews.set(k, { day, used: 1 });
+  else cur.used += 1;
+}
+
+/** Has this seat any profile-view room left under the engine's own policy? */
+function seatMayRead(workspaceId: string, accountId: string): boolean {
+  const room = engineRoom.get(seatLogKey(workspaceId, accountId));
+  if (!room?.views) return true; // mirror not read yet: behave as before
+  const cap = Math.max(0, Math.min(room.views.target, room.views.ceiling));
+  return viewsUsedToday(workspaceId, accountId) + room.views.committed < cap;
+}
 
 async function refreshEngineRoom(workspaceId: string, accounts: LiAccountState[]): Promise<void> {
   try {
@@ -1096,11 +1150,17 @@ async function refreshEngineRoom(workspaceId: string, accounts: LiAccountState[]
       const factor = capacityFactor(acctState);
       const day = policyDay(policy.timezone);
       const c = categoryCounts(all, a.accountId, "interactions", day);
+      const v = categoryCounts(all, a.accountId, "profile_views", day);
       engineRoom.set(seatLogKey(workspaceId, a.accountId), {
         day,
         target: Math.floor(policy.categories.interactions.dailyTarget * factor),
         ceiling: policy.categories.interactions.hardCeiling,
         committed: c.used + c.reserved,
+        views: {
+          target: Math.floor(policy.categories.profile_views.dailyTarget * factor),
+          ceiling: policy.categories.profile_views.hardCeiling,
+          committed: v.used + v.reserved,
+        },
       });
     }
   } catch (e) {
@@ -1154,6 +1214,24 @@ function seatShareLeft(workspaceId: string, accountId: string, day: string, pend
  * already made AND drafts already queued both count against it), starting the
  * sweep at the rota so equal seats still take turns.
  */
+/**
+ * Which seat spends the profile view.
+ *
+ * Separate from pickSendSeat on purpose. The send rota advances only when a
+ * DRAFT is created, and 83% of candidates are rejected after the read - so the
+ * send rota barely moved inside a tick and one account absorbed the whole
+ * burst. This one advances on every read and skips any seat that is out of
+ * profile-view room under the engine's policy. Returns null when NO seat has
+ * room left, which ends the scan rather than borrowing against tomorrow.
+ */
+function pickReadSeat(workspaceId: string, accounts: LiAccountState[], readRota: number): LiAccountState | null {
+  for (let n = 0; n < accounts.length; n++) {
+    const a = accounts[(readRota + n) % accounts.length];
+    if (seatMayRead(workspaceId, a.accountId)) return a;
+  }
+  return null;
+}
+
 function pickSendSeat(
   workspaceId: string,
   accounts: LiAccountState[],
@@ -1428,11 +1506,17 @@ export const __throttleTestHooks = {
       } as CommentLeadItem);
     }
   },
-  setEngineRoom: (workspaceId: string, accountId: string, room: { target: number; ceiling: number; committed: number } | null): void => {
+  setEngineRoom: (workspaceId: string, accountId: string, room: { target: number; ceiling: number; committed: number; views?: { target: number; ceiling: number; committed: number } } | null): void => {
     const k = seatLogKey(workspaceId, accountId);
     if (room) engineRoom.set(k, { day: nowIso().slice(0, 10), ...room });
     else engineRoom.delete(k);
   },
+  /** The indexed pre-read screen and the read rota (2026-08-21). */
+  preReadVeto,
+  pickReadSeat,
+  seatMayRead,
+  noteProfileView,
+  resetViews: (): void => { seatViews.clear(); },
 };
 
 /** Count a confirmed comment against its seat's day and week, exactly once
@@ -1978,6 +2062,32 @@ export async function scanWorkspace(workspaceId: string, adhoc?: ScanCombo): Pro
       console.log(`[comment-radar] ${workspaceId}: scenarios set to ${ids.join(", ")} (owner mandate via env)`);
     } catch (e) {
       console.log(`[comment-radar] ${workspaceId}: scenario mandate failed (${e instanceof Error ? e.message : e})`);
+    }
+  }
+
+  // The engine's profile_views policy is the authority for how many profiles a
+  // seat may read in a day, exactly as its interactions policy is the authority
+  // for comments. ROLE_HUNTER_PROFILE_VIEWS_MANDATE carries
+  // "wsId:dailyTarget:hardCeiling:weeklyTarget", one-shot by directive value.
+  for (const m of (process.env.ROLE_HUNTER_PROFILE_VIEWS_MANDATE ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+    const [ws, dayStr, ceilStr, weekStr] = m.split(":");
+    if (ws !== workspaceId || state.profileViewsMandate[workspaceId] === m) continue;
+    const dailyTarget = Number(dayStr);
+    const hardCeiling = Number(ceilStr);
+    const weeklyTarget = Number(weekStr);
+    if (![dailyTarget, hardCeiling, weeklyTarget].every(Number.isFinite)) continue;
+    state.profileViewsMandate[workspaceId] = m;
+    save();
+    try {
+      const { putPolicy } = await import("./os/policy");
+      for (const a of accounts) {
+        await putPolicy(workspaceId, a.accountId, {
+          categories: { profile_views: { dailyTarget, hardCeiling, weeklyTarget } },
+        } as Parameters<typeof putPolicy>[2]);
+      }
+      console.log(`[comment-radar] ${workspaceId}: engine profile-view capacity set to ${dailyTarget}/day (ceiling ${hardCeiling}, ${weeklyTarget}/week) on ${accounts.length} seat(s)`);
+    } catch (e) {
+      console.log(`[comment-radar] ${workspaceId}: profile-view mandate failed (${e instanceof Error ? e.message : e})`);
     }
   }
 
@@ -2806,6 +2916,73 @@ async function candidatesFromSerper(query: string, page = 1): Promise<{ items: M
   } catch (e) { return { items: [], error: `Serper unreachable (${e instanceof Error ? e.message : e})` }; }
 }
 
+/**
+ * INDEXED-FIRST, APPLIED TO THE PERSON (2026-08-21).
+ *
+ * Discovery went indexed-first in August: Google finds the post, and the
+ * connected seat never runs a LinkedIn search. Screening never followed. So
+ * the lane was spending a real profile view - the scarcest thing it touches,
+ * on a recruiter's own account - to discover that someone is a recruiter, or
+ * that their profile does not resolve at all. Measured over 205 searches: 83%
+ * of profile reads ended in a rejection.
+ *
+ * The same slug we already parsed out of the post URL resolves in Google's
+ * index for one credit. Verified live: the result title is "Name - Headline",
+ * which is enough to run the peer wall, and an absent result is itself the
+ * answer (company page, dead slug, nothing to comment on).
+ *
+ * It VETOES ONLY ON POSITIVE EVIDENCE. A thin snippet, a missing headline, an
+ * unrecognised title: all fall through to the real read. A screen that guesses
+ * would cost good leads to save cheap credits, which is the wrong trade.
+ */
+async function indexedProfileHint(
+  workspaceId: string,
+  slug: string,
+): Promise<{ found: boolean; headline?: string; snippet?: string }> {
+  const bank = state.profileHints[workspaceId] ?? (state.profileHints[workspaceId] = {});
+  const hit = bank[slug];
+  if (hit && Date.now() - new Date(hit.at).getTime() < PROFILE_HINT_TTL_DAYS * 86_400_000) {
+    return { found: hit.found, headline: hit.headline, snippet: hit.snippet };
+  }
+  const key = process.env.SERPER_API_KEY;
+  // No key is not a veto: fall through to the read exactly as before.
+  if (!key) return { found: true };
+  try {
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ q: `site:linkedin.com/in/${slug}`, num: 10, gl: "us", hl: "en" }),
+    });
+    if (!res.ok) return { found: true };
+    const data = await res.json() as { organic?: Array<{ link?: string; title?: string; snippet?: string }> };
+    const row = (data.organic ?? []).find((r) =>
+      new RegExp(`linkedin\\.com/in/${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(/|\\?|#|$)`, "i").test(r.link ?? ""));
+    // Titles read "Name - Headline" or "Name - Title | Company".
+    const title = (row?.title ?? "").replace(/\s*\|\s*LinkedIn\s*$/i, "").trim();
+    const dash = title.indexOf(" - ");
+    const headline = dash >= 0 ? title.slice(dash + 3).trim() : undefined;
+    const out = { found: !!row, headline: headline || undefined, snippet: row?.snippet };
+    bank[slug] = { at: nowIso(), ...out };
+    save();
+    return out;
+  } catch {
+    // An engine wobble must never turn into a veto.
+    return { found: true };
+  }
+}
+
+/** What the indexed hint alone is enough to rule out, before a profile view is
+ *  spent. High precision only: absence of evidence is never a veto. */
+function preReadVeto(hint: { found: boolean; headline?: string; snippet?: string }): string | null {
+  if (!hint.found) return "no indexed profile for this slug";
+  const blob = [hint.headline, hint.snippet].filter(Boolean).join(" ");
+  if (!blob) return null;
+  const { title, company } = parseHeadline(hint.headline ?? "");
+  const wall = recruiterWall({ title, headline: blob, company });
+  if (wall) return wall;
+  return null;
+}
+
 /** "meghan-edwards-01a63073" -> "Meghan Edwards" (post-URL author slugs). */
 function nameFromSlug(slug: string): string | undefined {
   const parts = slug.split("-").filter((p) => p && !/\d/.test(p));
@@ -2887,6 +3064,9 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     - pendingComments;
   let totalCreated = 0;
   let readsThisScan = 0;
+  // Advances on every READ, unlike `rota`, which advances only when a draft is
+  // created. That difference is what let one seat absorb a whole burst.
+  let readRota = state.keywordCursor[`${workspaceId}:readrota`] ?? 0;
 
   /**
    * One (scenario x role) combo: ask the index, screen what comes back, draft
@@ -2949,7 +3129,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
 
   let created = 0;
   // Per-gate counters so a zero-yield search names the gate that ate it.
-  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0 };
+  const g = { nopost: 0, seen: 0, intent: 0, weekly: 0, profile: 0, title: 0, dnc: 0, closed: 0, peer: 0, offMarket: 0, foreignPost: 0, commentFull: 0, commentDraft: 0, commentDupe: 0, commentLeak: 0, preIndexed: 0, viewCap: 0 };
   stats.searches += 1;
   stats.screened += candidates.length;
   for (const c of candidates) {
@@ -3015,6 +3195,21 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
       save();
     };
 
+    // THE CHEAP HALF OF THE SCREEN, first. Google's index answers "is this a
+    // real person, and are they a recruiter" for a tenth of a cent and no
+    // LinkedIn action at all. Only what survives is worth a profile view.
+    const hint = await indexedProfileHint(workspaceId, c.authorRef);
+    const vetoed = preReadVeto(hint);
+    if (vetoed) {
+      // Same never-again treatment the post-read walls give: a peer is still a
+      // peer next week, and a slug with no profile behind it never gains one.
+      closedCache[c.authorRef] = `wall:${nowIso()}`;
+      save();
+      if (hint.found) { g.peer++; stats.peersBlocked += 1; } else { g.preIndexed++; }
+      stats.readsSaved += 1;
+      continue;
+    }
+
     // Profile read on the seat that will send. Company pages fail here,
     // which is the point.
     //
@@ -3022,10 +3217,21 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // one: out of budget ends the scan outright rather than paying for more
     // searches whose results nothing is left to screen.
     if (readsThisScan >= POSTER_READS_PER_SCAN) break;
+    // The seat that SPENDS the view, on its own rota, skipping any seat out of
+    // profile-view room under the engine's policy. Nobody has room = stop.
+    const readAccount = pickReadSeat(workspaceId, accounts, readRota);
+    if (!readAccount) { g.viewCap++; break; }
+    readRota++;
+    // Never two views in the same instant: the burst is the tell, not the count.
+    if (readsThisScan > 0 && READ_GAP_MAX_MS > 0) {
+      const gap = READ_GAP_MIN_MS + Math.floor(seedHash(`${c.authorRef}:gap`) % Math.max(1, READ_GAP_MAX_MS - READ_GAP_MIN_MS + 1));
+      await new Promise((r) => setTimeout(r, gap));
+    }
     readsThisScan++;
+    noteProfileView(workspaceId, readAccount.accountId);
     const sendAccount = pickSendSeat(workspaceId, accounts, scanDay, pendingBySeat, rota);
     stats.profileReads += 1;
-    const prof = await fetchProfileLite(sendAccount, c.authorRef);
+    const prof = await fetchProfileLite(readAccount, c.authorRef);
     if (!prof.providerId) { markClosed(); g.profile++; continue; }
     if (own && prof.providerId === own.providerId) { markClosed(prof.providerId); g.profile++; continue; }
     const lastById = seenAuthors[prof.providerId];
@@ -3255,6 +3461,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
   }
 
   state.keywordCursor[`${workspaceId}:rota`] = rota % 1_000_000;
+  state.keywordCursor[`${workspaceId}:readrota`] = readRota % 1_000_000;
   if (seenArr.length > SEEN_CAP) state.seen[workspaceId] = seenArr.slice(-SEEN_CAP);
   save();
   return totalCreated;

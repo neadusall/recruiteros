@@ -202,5 +202,83 @@ check("with no engine reading yet, the lane falls back to its own allowance", ()
   assert.equal(t.blockedReason, undefined);
 });
 
+/* ---------------------------------------------------------------------- *
+ * The indexed pre-read screen and the profile-view walls (2026-08-21).
+ *
+ * 83% of profile views were being spent to discover we did not want the
+ * person, and the whole burst landed on one seat because the send rota only
+ * moved when a draft was created. These pin the screen's precision (it may
+ * only veto on positive evidence) and the read rota's spread.
+ * ---------------------------------------------------------------------- */
+
+check("no indexed profile behind the slug is a veto", () => {
+  assert.ok(hooks.preReadVeto({ found: false }), "an unresolvable slug must not cost a profile view");
+});
+
+check("a recruiter headline is a veto, read off the index alone", () => {
+  const v = hooks.preReadVeto({
+    found: true,
+    headline: "Technical Recruiter at Apex Staffing Solutions",
+    snippet: "Helping clients hire top talent across the US.",
+  });
+  assert.ok(v, "an agency-side poster must be walled before the read, not after");
+});
+
+check("a real buyer is NOT vetoed", () => {
+  assert.equal(hooks.preReadVeto({
+    found: true,
+    headline: "Chief Financial Officer at Redwood Manufacturing",
+    snippet: "Finance leader scaling mid-market manufacturers.",
+  }), null, "a CFO was walled before the read - the screen is over-vetoing");
+});
+
+check("a thin hint falls through to the read, never vetoes", () => {
+  assert.equal(hooks.preReadVeto({ found: true }), null, "absence of evidence became a veto");
+  assert.equal(hooks.preReadVeto({ found: true, headline: "" }), null);
+  assert.equal(hooks.preReadVeto({ found: true, headline: "Lil Snack" }), null,
+    "a bare company name is not evidence of anything and must fall through");
+});
+
+check("the read rota deals one view per seat, in turn", () => {
+  hooks.resetViews();
+  const seats = ["s1", "s2", "s3"].map((accountId) => ({ accountId } as never));
+  for (const s of seats) hooks.setEngineRoom(WS, (s as { accountId: string }).accountId,
+    { target: 10, ceiling: 20, committed: 0, views: { target: 60, ceiling: 70, committed: 0 } });
+  const picked = [0, 1, 2, 3].map((i) => hooks.pickReadSeat(WS, seats, i));
+  assert.deepEqual(picked.map((x) => (x as { accountId: string } | null)?.accountId), ["s1", "s2", "s3", "s1"],
+    "consecutive reads must move across seats, not stack on one");
+  for (const s of seats) hooks.setEngineRoom(WS, (s as { accountId: string }).accountId, null);
+});
+
+check("a seat out of profile-view room is skipped, and all-out stops the scan", () => {
+  hooks.resetViews();
+  const seats = ["s1", "s2"].map((accountId) => ({ accountId } as never));
+  hooks.setEngineRoom(WS, "s1", { target: 10, ceiling: 20, committed: 0, views: { target: 5, ceiling: 70, committed: 5 } });
+  hooks.setEngineRoom(WS, "s2", { target: 10, ceiling: 20, committed: 0, views: { target: 60, ceiling: 70, committed: 0 } });
+  assert.equal((hooks.pickReadSeat(WS, seats, 0) as { accountId: string } | null)?.accountId, "s2",
+    "a seat at its profile-view cap must be skipped");
+
+  hooks.setEngineRoom(WS, "s2", { target: 10, ceiling: 20, committed: 0, views: { target: 5, ceiling: 70, committed: 5 } });
+  assert.equal(hooks.pickReadSeat(WS, seats, 0), null, "no seat with room must end the scan, not borrow");
+  for (const id of ["s1", "s2"]) hooks.setEngineRoom(WS, id, null);
+});
+
+check("views the lane spends itself count against the seat's room", () => {
+  hooks.resetViews();
+  const seats = [{ accountId: "s9" } as never];
+  hooks.setEngineRoom(WS, "s9", { target: 10, ceiling: 20, committed: 0, views: { target: 3, ceiling: 70, committed: 0 } });
+  assert.ok(hooks.seatMayRead(WS, "s9"));
+  for (let i = 0; i < 3; i++) hooks.noteProfileView(WS, "s9");
+  assert.equal(hooks.seatMayRead(WS, "s9"), false, "three views against a target of three must close the seat");
+  assert.equal(hooks.pickReadSeat(WS, seats, 0), null);
+  hooks.setEngineRoom(WS, "s9", null);
+  hooks.resetViews();
+});
+
+check("with no engine mirror, reads are allowed exactly as before", () => {
+  hooks.resetViews();
+  assert.equal(hooks.seatMayRead(WS, "unknown_seat"), true, "a cold mirror must not block every read");
+});
+
 console.log(failures ? `\n${failures} failing` : "\nall passing");
 process.exit(failures ? 1 : 0);
