@@ -57,14 +57,20 @@ test("tierOf splits on the org-design thresholds", () => {
 /* ── the owner's worked examples ──────────────────────────────────────────────────────────────── */
 
 test("Controller req at 2,000 routes to VP Finance / CFO", () => {
+  // Pinned with tolerance OFF: this is the OWNERSHIP rule. Tolerance widens who is acceptable and
+  // is covered separately below; it must never change who owns the req.
+  const prev = process.env.MPC_ORGCHART_TOLERANCE; process.env.MPC_ORGCHART_TOLERANCE = "0";
   const t = targetFor({ role: "Controller", functionGroup: "Finance", headcount: 2000 });
+  if (prev === undefined) delete process.env.MPC_ORGCHART_TOLERANCE; else process.env.MPC_ORGCHART_TOLERANCE = prev;
   assert.equal(t.min, LEVEL.vp);
   assert.equal(t.max, LEVEL.clevel);
   assert.ok(t.titles.some((x) => /Chief Financial Officer/i.test(x)), t.titles.join(", "));
 });
 
 test("VP of Sales req at 2,000 routes to the CRO and nobody else", () => {
+  const prev = process.env.MPC_ORGCHART_TOLERANCE; process.env.MPC_ORGCHART_TOLERANCE = "0";
   const t = targetFor({ role: "VP of Sales", functionGroup: "Sales", headcount: 2000 });
+  if (prev === undefined) delete process.env.MPC_ORGCHART_TOLERANCE; else process.env.MPC_ORGCHART_TOLERANCE = prev;
   assert.equal(t.min, LEVEL.clevel);
   assert.equal(t.max, LEVEL.clevel);
   assert.ok(t.titles.some((x) => /Chief Revenue Officer/i.test(x)), t.titles.join(", "));
@@ -143,5 +149,58 @@ test("unknown headcount still targets somebody rather than stalling the desk", (
   assert.ok(t.titles.length > 0);
   assert.equal(t.tier, "flat", "unknown size reads as the widest band, never as no band");
 });
+
+/* ── band tolerance (owner decision 2026-08-21 evening) ──────────────────────────────────────── */
+
+test("tolerance accepts a ONE-rung near miss without moving the ideal", () => {
+  // A Controller req at 2,000 is strictly owned at VP/C-level. A Director of Finance is one rung
+  // under that: close enough to buy the search, and exactly the kind of real, findable person the
+  // strict band was discarding after we had already paid to find them.
+  const dir = fitOf({ role: "Controller", functionGroup: "Finance", headcount: 2000,
+    buyerTitle: "Director of Finance", buyerFunction: "Finance" });
+  assert.equal(dir.ok, true, dir.why);
+
+  // ...and the IDEAL is unchanged: we still prefer the rung that actually owns the req, so a
+  // tolerated hit only wins when nothing better was found.
+  const strict = targetFor({ role: "Controller", functionGroup: "Finance", headcount: 2000 });
+  assert.equal(strict.ideal, LEVEL.vp, "tolerance must widen acceptance, never re-aim the hunt");
+});
+
+test("tolerance is ONE rung, not a free-for-all", () => {
+  // "Senior Events Marketing Manager" against a Director of Brand Marketing req is TWO rungs down,
+  // and a manager does not hire the director above them. Measured live and correctly refused: the
+  // loosening recovers near misses, not everyone at the company.
+  const twoDown = fitOf({ role: "Director of Brand Marketing", functionGroup: "Marketing", headcount: 2000,
+    buyerTitle: "Senior Events Marketing Manager", buyerFunction: "Marketing" });
+  assert.equal(twoDown.ok, false, twoDown.why);
+});
+
+test("tolerance does NOT reopen the CFO for a clerk req at a layered company", () => {
+  // The headline rule survives the loosening: one rung of slack is not a licence to mail the
+  // C-suite about an entry-level opening.
+  const t = targetFor({ role: "Staff Accountant", functionGroup: "Finance", headcount: 2000 });
+  assert.equal(t.max, LEVEL.director);
+  assert.equal(fitOf({ role: "Staff Accountant", functionGroup: "Finance", headcount: 2000,
+    buyerTitle: "Chief Financial Officer", buyerFunction: "Finance" }).ok, false);
+});
+
+test("tolerance never breaches the buy floor or the function rule", () => {
+  assert.equal(fitOf({ role: "Staff Accountant", functionGroup: "Finance", headcount: 2000,
+    buyerTitle: "Senior Accountant", buyerFunction: "Finance" }).ok, false, "nobody below Manager buys");
+  assert.equal(fitOf({ role: "Controller", functionGroup: "Finance", headcount: 2000,
+    buyerTitle: "Chief Technology Officer", buyerFunction: "Engineering" }).ok, false, "wrong function stays wrong");
+});
+
+test("MPC_ORGCHART_TOLERANCE=0 restores the strict band exactly", () => {
+  const prev = process.env.MPC_ORGCHART_TOLERANCE;
+  process.env.MPC_ORGCHART_TOLERANCE = "0";
+  try {
+    assert.equal(fitOf({ role: "Director of Brand Marketing", functionGroup: "Marketing", headcount: 2000,
+      buyerTitle: "Senior Events Marketing Manager", buyerFunction: "Marketing" }).ok, false);
+  } finally {
+    if (prev === undefined) delete process.env.MPC_ORGCHART_TOLERANCE; else process.env.MPC_ORGCHART_TOLERANCE = prev;
+  }
+});
+
 
 console.log("\n" + passed + " passed");

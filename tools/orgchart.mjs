@@ -59,6 +59,31 @@ export const LEVEL_NAME = { 1: "IC", 2: "Senior IC", 3: "Manager", 4: "Director"
 /** Nobody below a manager buys recruiting services, whatever the req's own level. */
 export const BUY_FLOOR = LEVEL.manager;
 
+/**
+ * TOLERANCE (owner decision 2026-08-21, evening): widen the acceptable band by this many rungs in
+ * each direction. `MPC_ORGCHART_TOLERANCE=0` restores the strict band.
+ *
+ * Why this exists. The strict band is right about who OWNS a req and too strict about who can BUY
+ * one. Measured live on the owner hunt: "Senior Events Marketing Manager at Carta" and "Associate
+ * Fund Controller at Carta" are real, findable people at the right company in the right function,
+ * refused for sitting one rung off the req. That is a person we already paid to find, thrown away
+ * over a distinction the recipient would not recognise.
+ *
+ * What tolerance does NOT relax, because these are the rules that protect the desk rather than
+ * refine it:
+ *   - the function must still match; a CTO never buys an accounting hire
+ *   - BUY_FLOOR still holds, so nobody below Manager is ever a buyer
+ *   - the whole-company exec rules are separate and untouched: the CEO is still not the buyer for
+ *     a normal req above 250 employees
+ *
+ * Ranking is unaffected, so the ideal rung is still preferred and a tolerated rung is only used
+ * when nothing better was found. Lax about who is ACCEPTABLE, unchanged about who is BEST.
+ */
+export const bandTolerance = () => {
+  const n = Number(process.env.MPC_ORGCHART_TOLERANCE);
+  return Number.isFinite(n) && n >= 0 ? Math.min(2, Math.floor(n)) : 1;
+};
+
 // Matched most-senior-first. Deliberately narrow: a miss costs us a level of precision, a false
 // positive aims the whole campaign at the wrong door.
 const LEVEL_PATTERNS = [
@@ -226,14 +251,18 @@ export function targetFor({ role, functionGroup, headcount }) {
   // An executive search is its own case at every size: the CEO or board hires the C-suite.
   const isExecReq = functionGroup === "Executive" || reqLevel >= LEVEL.clevel;
 
-  let min = Math.max(reqLevel + 1, BUY_FLOOR);
+  const tol = isExecReq ? 0 : bandTolerance();
+  // The STRICT rung is the person this hire would report to. It stays the ideal whatever the
+  // tolerance is, so widening acceptance never changes who we prefer or how candidates rank.
+  const strictMin = Math.max(reqLevel + 1, BUY_FLOOR);
+  let min = Math.max(strictMin - tol, BUY_FLOOR);
   let max;
   if (isExecReq) {
     min = LEVEL.clevel; max = LEVEL.clevel;
   } else if (tier.ceiling === "relative") {
     // Clamped to C-level: reqLevel + 2 overshoots the top of the ladder for a VP req and would
     // otherwise produce a level 7 that no title maps to, silently widening the band to nothing.
-    max = Math.min(LEVEL.clevel, Math.max(reqLevel + 2, LEVEL.director));
+    max = Math.min(LEVEL.clevel, Math.max(reqLevel + 2 + tol, LEVEL.director));
   } else {
     max = LEVEL.clevel;
   }
@@ -241,7 +270,10 @@ export function targetFor({ role, functionGroup, headcount }) {
 
   const levels = [];
   for (let l = min; l <= max; l++) if (LEVEL_KEY[l]) levels.push(l);
-  const ideal = levels.length ? levels[0] : Math.min(max, LEVEL.clevel);
+  // Ideal is the strict rung clamped into the band, NOT simply the bottom of it: with tolerance on,
+  // the bottom of the band is a rung we merely tolerate, and treating it as the ideal would quietly
+  // re-aim every hunt one level down instead of just accepting a near miss.
+  const ideal = isExecReq ? LEVEL.clevel : Math.min(Math.max(strictMin, min), max);
 
   const titlesAt = (l) => (fn && CHAIN[fn][LEVEL_KEY[l]]) || [];
   const titles = levels.flatMap(titlesAt);
