@@ -39,6 +39,7 @@ import { loadSnapshot, debouncedSaver } from "../db";
 import { nowIso, rid } from "../core/ids";
 import { classifyTitle } from "../signals/filters";
 import { jobSeekerReason } from "../outreach/jobSeeker";
+import { employmentVerdict, notABuyerReason, type WorkEntry } from "../outreach/employment";
 import { requestLinkedInAction } from "./os/engine";
 import { ensureAccount, listAccounts } from "./os/health";
 import { putPolicy } from "./os/policy";
@@ -2087,11 +2088,20 @@ function parseComment(c: Dict): RawComment | null {
  *  Accepts a provider id OR a public slug (linkedin.com/in/<slug>). */
 async function fetchProfileLite(account: LiAccountState, identifier: string): Promise<{
   providerId?: string; name?: string; headline?: string; publicUrl?: string; openProfile?: boolean; networkDistance?: string; location?: string;
-  summary?: string; currentRoles?: string[]; openToWork?: boolean;
+  summary?: string; currentRoles?: string[]; openToWork?: boolean; work?: WorkEntry[];
 }> {
   try {
     const { unipileRequest } = await import("./provider");
-    const p = await unipileRequest<Dict>(`/users/${encodeURIComponent(identifier)}?account_id=${providerIdOf(account)}`);
+    // `linkedin_sections=*` IS LOAD-BEARING, do not drop it.
+    //
+    // Without it the response carries no work_experience, no education and no
+    // summary at all (verified against the live API 2026-08-21: 26 keys without
+    // the parameter, 42 with it). The deep-verification block below has been
+    // reading `p.work_experience` since it was written and has therefore ALWAYS
+    // produced an empty array, which quietly made deepRecruiterSignals() a no-op
+    // and left us with no way to tell whether a poster still had a job.
+    // It is the same single request, so it costs the same one profile view.
+    const p = await unipileRequest<Dict>(`/users/${encodeURIComponent(identifier)}?account_id=${providerIdOf(account)}&linkedin_sections=*`);
     // Deep-verification material (owner ask 2026-08-14): the same profile
     // read carries the summary and work history - free extra signal for the
     // recruiter wall. Current roles = entries with no end date.
@@ -2118,6 +2128,16 @@ async function fetchProfileLite(account: LiAccountState, identifier: string): Pr
       location: str(p.location),
       summary: str(p.summary) ?? str(p.about),
       currentRoles,
+      // The structured history, kept alongside the display strings: the dates
+      // are what decide whether somebody currently holds a job, and a joined
+      // "Position at Company" string throws them away.
+      work: rawExp.map((e) => ({
+        company: str(e.company) ?? str(e.company_name),
+        position: str(e.position) ?? str(e.title),
+        start: str(e.start) ?? str(e.start_date),
+        end: str(e.end) ?? str(e.end_date),
+        status: str(e.status),
+      })),
     };
   } catch { return {}; }
 }
@@ -3518,15 +3538,31 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
     // Deliberately a plain closed-profile entry, NOT a "wall:" never-again one:
     // people get hired, and the cache expires after CLOSED_PROFILE_DAYS, so the
     // same person is reconsidered in a month like any other cooled lead.
-    const seeker = jobSeekerReason({
+    // Two independent reads of the same question, either one sufficient.
+    //
+    // (a) HAVE THEY SAID they are looking - the opt-in badge and the phrases
+    //     people put in a headline.
+    // (b) DOES THE RECORD SHOW them employed - owner ask 2026-08-21: check the
+    //     current employment against the company we are about to write about,
+    //     rather than trusting a headline.
+    //
+    // (b) is the stronger of the two and catches people who never touch the
+    //     badge. On the profile that prompted it, every one of eleven roles
+    //     carried an end date and the most recent had finished six weeks
+    //     earlier, while the headline still read "Finance Director".
+    const employment = employmentVerdict({
+      work: prof.work,
+      claimedCompany: company ?? undefined,
+    });
+    const notBuyer = jobSeekerReason({
       openToWorkFlag: prof.openToWork,
       headline: headline ?? undefined,
       summary: prof.summary,
-    });
-    if (seeker) {
+    }) ?? notABuyerReason(employment);
+    if (notBuyer) {
       markClosed(prof.providerId);
       g.jobSeeker++;
-      console.log(`[comment-radar] ${workspaceId}: skipped ${prof.publicUrl ?? c.authorRef} - ${seeker}`);
+      console.log(`[comment-radar] ${workspaceId}: skipped ${prof.publicUrl ?? c.authorRef} - ${notBuyer}`);
       continue;
     }
 

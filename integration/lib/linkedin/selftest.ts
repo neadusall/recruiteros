@@ -17,6 +17,12 @@
  *     silently discarded is a worse bug than the one being fixed, because a lost
  *     lead leaves no trace and a bad send at least gets a reply.
  *
+ *  1b. Owner ask, same day: verify CURRENT EMPLOYMENT against the company we are
+ *     writing about, instead of trusting a headline. This turned out to be the
+ *     stronger check -- his most recent role had ended six weeks earlier and not
+ *     one of his eleven roles was open-ended, while his headline still read
+ *     "Finance Director". The fixture in suite 6 is that real history.
+ *
  *  2. The message claimed "Saw the news about the team growing" to a man who had
  *     posted about cash-flow reporting. That was not a bad draft, it was a
  *     mis-wiring: a scenario matching on SUBJECT MATTER was pointed at a bank of
@@ -25,6 +31,7 @@
  */
 
 import { jobSeekerVerdict } from "../outreach/jobSeeker";
+import { employmentVerdict, notABuyerReason, parseWorkDate, sameCompany } from "../outreach/employment";
 import { assertScenarioBanks, SCENARIO_PRESETS } from "./commentWatch";
 
 let pass = 0;
@@ -113,6 +120,75 @@ for (const id of ["team_growth", "new_location", "funding_growth"]) {
   const p = SCENARIO_PRESETS.find((x) => x.id === id);
   check(`${id} keeps the growth bank`, p?.dmBank, "growth");
 }
+
+/* ------------------------------------------- 6. employment verification ---- */
+/* Owner ask 2026-08-21: check the person's CURRENT EMPLOYMENT against the
+   company we are writing about, rather than believing a headline. The fixture
+   below is the real work history off the profile that prompted it, dates
+   included: eleven roles, not one of them open-ended, the most recent finished
+   1 July 2026 while the headline still said "Finance Director". */
+
+const FRIEDLE_WORK = [
+  { company: "Frisella Nursery", position: "Finance Director/Controller", start: "1/1/2026", end: "7/1/2026", status: "Full-time" },
+  { company: "Save A Lot", position: "Financial Planning and Analysis Manager", start: "2/1/2025", end: "1/1/2026", status: "Full-time" },
+  { company: "Centene Corporation", position: "Manager of Financial Planning", start: "4/1/2024", end: "2/1/2025", status: "Full-time" },
+  { company: "Charter Communications", position: "Sr Product Delivery Manager (Finance)", start: "9/1/2022", end: "4/1/2024", status: "Full-time" },
+];
+
+const friedle = employmentVerdict({ work: FRIEDLE_WORK });
+check("the real case reads as not employed", friedle.status, "not_employed");
+check("and dates the last role correctly", friedle.lastRoleEndedAt, "2026-07-01");
+check("and that is enough to stop the pitch", Boolean(notABuyerReason(friedle)), true);
+
+// Someone employed passes, and we learn where they work.
+const employed = employmentVerdict({
+  work: [
+    { company: "Northwind Health", position: "VP Finance", start: "3/1/2024" },
+    { company: "Centene Corporation", position: "Manager FP&A", start: "1/1/2020", end: "3/1/2024" },
+  ],
+});
+check("open-ended role reads as employed", employed.status, "employed");
+check("and names the employer", employed.currentCompany, "Northwind Health");
+check("and does not block", notABuyerReason(employed), null);
+
+// The stale-headline case: still employed, but not where we thought.
+const moved = employmentVerdict({
+  work: [
+    { company: "Northwind Health", position: "VP Finance", start: "3/1/2026" },
+    { company: "Gensler", position: "FP&A Director", start: "1/1/2022", end: "2/1/2026" },
+  ],
+  claimedCompany: "Gensler",
+});
+check("left the company we were writing about", moved.leftClaimedCompany, true);
+check("and that blocks too", Boolean(notABuyerReason(moved)), true);
+
+// Same employer, written differently, must NOT read as having left.
+const sameCo = employmentVerdict({
+  work: [{ company: "Acme Corporation", position: "CFO", start: "1/1/2024" }],
+  claimedCompany: "Acme Corp.",
+});
+check("legal suffixes do not fake a departure", sameCo.leftClaimedCompany, undefined);
+check("and it still passes", notABuyerReason(sameCo), null);
+
+// UNKNOWN MUST PASS. Work history is often missing from a profile read, and
+// blocking everyone we cannot verify would delete most of the lane silently,
+// which is a worse failure than the one being prevented.
+const unknown = employmentVerdict({ work: [] });
+check("no history reads as unknown", unknown.status, "unknown");
+check("and unknown never blocks", notABuyerReason(unknown), null);
+
+// Date parsing: only formats we are sure of, otherwise null rather than a guess.
+check("M/D/YYYY", parseWorkDate("7/1/2026")?.toISOString().slice(0, 10), "2026-07-01");
+check("YYYY-MM", parseWorkDate("2026-07")?.toISOString().slice(0, 10), "2026-07-01");
+check("named month", parseWorkDate("Jul 2026")?.toISOString().slice(0, 10), "2026-07-01");
+check("full month name", parseWorkDate("January 2026")?.toISOString().slice(0, 10), "2026-01-01");
+check("bare year", parseWorkDate("2026")?.toISOString().slice(0, 10), "2026-01-01");
+check("nonsense is null, never a guess", parseWorkDate("present"), null);
+check("empty is null", parseWorkDate(""), null);
+
+check("company match ignores punctuation", sameCompany("Acme, Inc.", "Acme"), true);
+check("company match is not blind", sameCompany("Acme", "Acmetric Health"), false);
+check("blank never matches", sameCompany("", "Acme"), false);
 
 /* -------------------------------------------------------------- report ----- */
 
