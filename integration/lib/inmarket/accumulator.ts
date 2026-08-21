@@ -74,8 +74,6 @@ const CURATE_CANDIDATES = envNum("INMARKET_CURATE_CANDIDATES", 6000); // pool sl
 const CURATE_CONCURRENCY = envNum("INMARKET_CURATE_CONCURRENCY", 16); // parallel researches (rotated across egress IPs)
 const CURATE_MIN_SCORE = envNum("INMARKET_CURATE_MIN_SCORE", 10); // research a much wider band (was 25) so the funnel keeps climbing past the top-intent few hundred
 const VERIFY_BATCH = envNum("INMARKET_VERIFY_BATCH", 800);        // curated emails free-verified (MX/role/disposable) per tick
-const REOON_BATCH = envNum("REOON_VERIFY_BATCH", 30);            // leftover curated emails verified via Reoon (real mailbox check, no port 25) per tick
-const REOON_FIND_BATCH = envNum("REOON_FIND_BATCH", 20);         // pending PEOPLE whose email syntaxes Reoon walks to FIND a valid mailbox per tick (each = up to REOON_MAX_CANDIDATES calls)
 const FINDER_BATCH = 40;               // pending people SMTP-verified per tick (opt-in; bounded — slow)
 const PAID_FIND_BATCH = envNum("INMARKET_PAID_FIND_BATCH", 25);  // misses sent to the residual (paid) finder per tick — bills on a hit, so bounded
 // FREE company-phone rung: distinct DOMAINS read per tick (each = up to 5 bounded page fetches,
@@ -592,25 +590,12 @@ async function runCurationTickInner(): Promise<void> {
   } catch { /* best-effort; the next tick retries */ }
   mark("freeVerify");
 
-  // REOON FIND + VERIFY — never leave a guess unchecked. (1) For each pending PERSON, walk their
-  // email syntaxes (first.last, flast, firstlast, …) through Reoon and KEEP the first deliverable
-  // one — turning a guess into a confirmed address instead of giving up on the single guess.
-  // (2) Then verify any leftover addresses that have no findable name (e.g. site-scraped emails).
-  // Reoon checks cloud-side, so this works with outbound port 25 blocked. Bounded per tick
-  // (REOON_FIND_BATCH people, REOON_VERIFY_BATCH leftovers) to control credit spend; once a row gets
-  // a verdict it drops out of the pending set. No-op unless REOON_API_KEY is set.
-  try {
-    const { reoonEnabled, verifyEmailsReoon } = await import("./emailVerify");
-    if (reoonEnabled()) {
-      const { findEmailsByReoon } = await import("./curation");
-      await findEmailsByReoon(REOON_FIND_BATCH, new Date().toISOString());
-      const leftover = await pendingValidationEmails(REOON_BATCH);
-      if (leftover.length) {
-        const verdicts = await verifyEmailsReoon(leftover);
-        if (verdicts.length) await applyEmailValidation(verdicts, new Date().toISOString());
-      }
-    }
-  } catch { /* best-effort; the next tick retries */ }
+  // REOON FIND + VERIFY: MOVED OUT (2026-08-21) to their own tick with their own watchdog, see
+  // runFinderTick. Leaving them here capped the converter at 20 people a tick,
+  // not because 20 was the right credit budget but because a bigger batch made the SHARED 7-minute
+  // watchdog fire and abandoned the whole curation run, taking domain resolution and naming down
+  // with it. That is what happened on 2026-08-14. Running twice would also double-spend credits,
+  // so this block is deleted rather than left as a smaller fallback.
   mark("reoon");
 
   // COMPANY PHONE (free) — attach the employer's own published switchboard/HQ line to every
@@ -676,6 +661,74 @@ async function runCurationTickInner(): Promise<void> {
     await webSearchBudget();
   } catch { /* best-effort; the next tick retries */ }
   mark("catchAllAndBudget");
+}
+
+/* ------------------------------------------------------------------------------------------
+ * EMAIL FINDER TICK (2026-08-21) — its own loop, its own watchdog, its own budget.
+ *
+ * THE PROBLEM THIS SOLVES. Finding addresses used to run inside the curation tick, sharing one
+ * 7-minute watchdog with domain resolution, decision-maker research, sizing, phones and
+ * verification. That made the finder's batch size a hostage: REOON_FIND_BATCH was raised to 100
+ * on 2026-08-14, the tick started overrunning the watchdog, and EVERY run was abandoned — so the
+ * Reoon phase, which sits late in the tick, stopped executing at all and validation flatlined.
+ * The batch was put back to 20 and has been the ceiling on address supply ever since.
+ *
+ * 20 people per tick is not a credit budget, it is an accident of where the code sat.
+ *
+ * WHY IT MATTERS. Measured on the live store this evening: 15,321 curated rows carry a NAME, and
+ * only ~1,800 carry an address the sender is allowed to use. 13,548 named rows have no found-tier
+ * address, spanning 3,588 domains — and 1,081 of those domains are ALREADY solved, so 4,011 of
+ * those rows can be constructed from a pattern we hold and confirmed for one credit each. Naming
+ * was never the constraint. Converting names into confirmed addresses is, and the converter was
+ * running at a twentieth of its capacity because of a watchdog it should never have shared.
+ *
+ * WHAT THIS DOES NOT CHANGE. Every address still goes through the same verifier and the same
+ * rules: only a real verdict promotes a row, catch-all and invalid still never send, and the
+ * no-guessing rule is untouched. This makes the existing converter run at its real rate; it does
+ * not lower the bar for what counts as a valid address.
+ *
+ * FIND_BATCH is deliberately separate from REOON_FIND_BATCH so the old variable keeps its meaning
+ * for anyone reading the curation tick, and so raising this one cannot resurrect the 08-14 outage.
+ * ---------------------------------------------------------------------------------------- */
+const FIND_CYCLE_MS = envNum("INMARKET_FIND_INTERVAL_SEC", 120) * 1000;
+const FIND_WATCHDOG_MS = envNum("INMARKET_FIND_WATCHDOG_SEC", 600) * 1000;
+const FIND_BATCH = envNum("INMARKET_FIND_BATCH", 120);
+const FIND_VERIFY_BATCH = envNum("INMARKET_FIND_VERIFY_BATCH", 200);
+const FIND_FIRST_DELAY_MS = 40_000;
+let finding = false;
+
+async function runFinderTickInner(): Promise<void> {
+  const { reoonEnabled, verifyEmailsReoon } = await import("./emailVerify");
+  if (!reoonEnabled()) return;
+  const { findEmailsByReoon, pendingValidationEmails, applyEmailValidation } = await import("./curation");
+
+  // (1) CONSTRUCT + CONFIRM: walk each pending person's likely syntaxes and keep the first
+  //     deliverable one. The per-domain pattern cache means a company solved once constructs the
+  //     rest, which is why this is ordered ahead of the leftover sweep.
+  const found = await findEmailsByReoon(FIND_BATCH, new Date().toISOString());
+
+  // (2) SWEEP the leftovers: addresses we hold with no verdict yet (site-scraped, imported).
+  const leftover = await pendingValidationEmails(FIND_VERIFY_BATCH);
+  let verified = 0;
+  if (leftover.length) {
+    const verdicts = await verifyEmailsReoon(leftover);
+    if (verdicts.length) { await applyEmailValidation(verdicts, new Date().toISOString()); verified = verdicts.length; }
+  }
+  if (found.checked || verified) {
+    console.log(`[inmarket] finder: ${found.checked} people walked -> ${found.found} confirmed (${found.catchAll} catch-all, ${found.invalid} invalid), ${verified} leftovers verified`);
+  }
+}
+
+async function runFinderTick(): Promise<void> {
+  if (finding) return;                       // never overlap: the credit spend is the whole point
+  finding = true;
+  try {
+    await withTimeout(runFinderTickInner, FIND_WATCHDOG_MS, "finder tick");
+  } catch (e) {
+    console.warn("[inmarket] finder tick:", (e as Error)?.message || e);
+  } finally {
+    finding = false;
+  }
 }
 
 async function runCurationTick(): Promise<void> {
@@ -791,6 +844,11 @@ export function ensureAccumulator(): void {
     setTimeout(() => { void runCurationTick(); }, CURATE_FIRST_DELAY_MS);
     const c = setInterval(() => { void runCurationTick(); }, CURATE_CYCLE_MS);
     if (typeof c === "object" && c && "unref" in c) (c as { unref: () => void }).unref();
+    // Address finder — its OWN loop and watchdog, so its batch size can be sized for throughput
+    // instead of for whatever the curation tick has left. See runFinderTick.
+    setTimeout(() => { void runFinderTick(); }, FIND_FIRST_DELAY_MS);
+    const ef = setInterval(() => { void runFinderTick(); }, FIND_CYCLE_MS);
+    if (typeof ef === "object" && ef && "unref" in ef) (ef as { unref: () => void }).unref();
     // Screenshot capture tick — heavy Playwright; belongs with the validator, not the scrapers.
     if (SHOT_ENABLED) {
       setTimeout(() => { void runShotTick(); }, SHOT_FIRST_DELAY_MS);
