@@ -9496,8 +9496,8 @@
       '.hl-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}' +
       '.hl-title{font-size:15px;font-weight:650;letter-spacing:-.01em}' +
       '.hl-sub{font-size:12.5px;color:var(--muted,var(--text-dim));margin-bottom:12px;max-width:920px;line-height:1.5}' +
-      '.hl-strip{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
-      '.hl-stat{flex:1;min-width:118px;border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--surface)}' +
+      '.hl-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:10px;margin-bottom:14px}' +
+      '.hl-stat{border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--surface)}' +
       '.hl-statv{font-size:21px;font-weight:650;letter-spacing:-.02em;line-height:1.15}' +
       '.hl-statl{font-size:11.5px;color:var(--muted,var(--text-dim));margin-top:2px}' +
       '.hl-statn{font-size:10.5px;color:var(--muted,var(--text-dim));margin-top:3px;line-height:1.35}' +
@@ -9644,7 +9644,9 @@
       return '<line x1="' + pad + '" y1="' + y(v) + '" x2="' + (w - pad) + '" y2="' + y(v) + '" stroke="var(--border)" stroke-width="1"/>' +
         '<text x="2" y="' + (y(v) + 3.5) + '" font-size="9" fill="var(--muted,#8a94a6)">' + v + '</text>';
     }).join("");
-    return '<div class="hl-scroll"><svg width="' + w + '" height="' + (h + 16) + '" viewBox="0 0 ' + w + ' ' + (h + 16) + '" role="img" aria-label="Recorded reputation, wear and daily sends">' +
+    // Scales to the panel rather than sitting in a fixed 640px well: on a wide
+    // screen the whole point is to see the shape of the series.
+    return '<div class="hl-scroll"><svg style="width:100%;max-width:980px;height:auto;display:block" viewBox="0 0 ' + w + ' ' + (h + 16) + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Recorded reputation, wear and daily sends">' +
       grid + bars +
       line(function (r) { return r.rep; }, "#1a7f37", false) +
       line(function (r) { return r.wear == null ? null : r.wear; }, "#b26a00", true) +
@@ -9656,12 +9658,21 @@
       '<span style="color:#1a7f37">━</span> reputation &nbsp; <span style="color:#2e5bd7">━</span> composite health &nbsp; <span style="color:#b26a00">┄</span> wear &nbsp; <span style="color:rgba(46,91,215,.7)">▮</span> cold sends that day</div>';
   }
 
-  function hlBlockerBlock(b) {
+  /** How a condition reads at a glance. "degrades" is reserved for things that are
+ *  actually costing us delivery; an informational lifecycle state says so plainly,
+ *  or the word "degrades" stops meaning anything. */
+function hlImpactChip(c) {
+  if (c.blocking) return '<span class="hl-chip critical">stops mail</span>';
+  if (c.severity === "info") return '<span class="hl-chip info">normal</span>';
+  return '<span class="hl-chip warn">degrades</span>';
+}
+
+function hlBlockerBlock(b) {
     return '<div class="hl-cause" style="margin-bottom:6px">' +
       '<div class="hl-cause-h" style="cursor:default">' +
         '<span class="hl-sev ' + esc(b.severity) + '"></span>' +
         '<span class="hl-cause-t">' + esc(b.title) + '</span>' +
-        (b.blocking ? '<span class="hl-chip critical">stops mail</span>' : '<span class="hl-chip info">degrades</span>') +
+        hlImpactChip(b) +
         (b.since ? '<span class="hl-cause-n">since ' + esc(String(b.since).slice(0, 16).replace("T", " ")) + ' UTC · ' + esc(hlAgo(b.since)) + '</span>' : "") +
         '<span style="flex:1"></span><span class="hl-mono" style="opacity:.6">' + esc(b.code) + '</span>' +
       '</div>' +
@@ -9789,7 +9800,7 @@
         '<div class="hl-cause-h" data-hl-cause="' + esc(c.code) + '">' +
           '<span class="hl-sev ' + esc(c.severity) + '"></span>' +
           '<span class="hl-cause-t">' + esc(c.title) + '</span>' +
-          (c.blocking ? '<span class="hl-chip critical">stops mail</span>' : '<span class="hl-chip info">degrades</span>') +
+          hlImpactChip(c) +
           '<span class="hl-cause-n">' + (c.domains ? c.domains + ' domain' + (c.domains === 1 ? "" : "s") : "") +
             (c.domains && c.mailboxes ? " · " : "") +
             (c.mailboxes ? c.mailboxes + ' Email ID' + (c.mailboxes === 1 ? "" : "s") : "") + '</span>' +
@@ -9957,7 +9968,7 @@
     var rows = (hlCatalog || []).map(function (c) {
       return '<div class="hl-cause"><div class="hl-cause-h" style="cursor:default">' +
         '<span class="hl-sev ' + esc(c.severity) + '"></span><span class="hl-cause-t">' + esc(c.title) + '</span>' +
-        (c.blocking ? '<span class="hl-chip critical">stops mail</span>' : '<span class="hl-chip info">degrades</span>') +
+        hlImpactChip(c) +
         '<span class="hl-cause-n">' + esc(c.category) + '</span>' +
         '<span style="flex:1"></span><span class="hl-mono" style="opacity:.55">' + esc(c.code) + '</span></div>' +
         '<div class="hl-cause-b">' + esc(c.meaning) +
