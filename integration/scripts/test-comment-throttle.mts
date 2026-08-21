@@ -280,5 +280,56 @@ check("with no engine mirror, reads are allowed exactly as before", () => {
   assert.equal(hooks.seatMayRead(WS, "unknown_seat"), true, "a cold mirror must not block every read");
 });
 
+/* ---------------------------------------------------------------------- *
+ * The voice (2026-08-21). The old rules literally instructed the model to
+ * write "we keep seeing", and it opened nine of the last ten comments. These
+ * pin the machine tells AND the thing that nearly shipped broken with them:
+ * every spoken closing the new rules ask for failed the old INVITE_RE, and a
+ * draft with no recognised invitation is DROPPED after one retry.
+ * ---------------------------------------------------------------------- */
+
+check("the machine tells are caught", () => {
+  const tells = [
+    "We keep seeing CFOs surprised by which one they actually get.",
+    "Controllers with plant-floor fluency tend to sit inside mid-size manufacturers.",
+    "In my experience the offer stage is where these stall.",
+    "If a candid read on where those candidates sit would help, my inbox is open.",
+    "Glad to compare notes, just say the word.",
+  ];
+  for (const t of tells) assert.ok(hooks.robotTellReason(t), `slipped through: ${t}`);
+});
+
+check("a comment that sounds spoken is not flagged", () => {
+  const good = [
+    "Medford's the whole search, not the title. Your pool is whoever's already inside a food plant within an hour. Want me to map it?",
+    "Denver's thin for this one. The ones who move come out of PE-backed advisory. Want a couple of names?",
+  ];
+  for (const t of good) assert.equal(hooks.robotTellReason(t), null, `false positive: ${t}`);
+});
+
+check("a long comment with no contraction reads written, not spoken", () => {
+  assert.ok(hooks.robotTellReason(
+    "The comp band posted here narrows the pool before the search starts, because a finance leader who has navigated this cycle is priced above it today."));
+});
+
+check("SPOKEN closings count as invitations, or the new voice gets dropped", () => {
+  const closings = [
+    "Plant Controllers won't move for this. Want me to map who's actually in range?",
+    "The ones who move come out of PE-backed advisory. Want a couple of names?",
+    "FCF only wins after a margin scare. Curious what your board actually rewards.",
+    "That line decides who applies. Happy to send how I'd word it.",
+    "Two profiles apply and they look identical. Let me know if you want the question I use.",
+    "Your real pool is smaller than the title suggests. I can send you the list if that helps.",
+  ];
+  for (const c of closings) {
+    assert.ok(hooks.hasClosingInvite(c), `a valid spoken invitation was not recognised: ${c}`);
+  }
+});
+
+check("an observation with no invitation at all is still refused", () => {
+  assert.equal(hooks.hasClosingInvite(
+    "Medford is the whole search here, not the title. Your pool is whoever is already inside a food plant."), false);
+});
+
 console.log(failures ? `\n${failures} failing` : "\nall passing");
 process.exit(failures ? 1 : 0);

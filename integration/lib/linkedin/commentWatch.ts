@@ -169,7 +169,7 @@ const COMMENT_DUP_RATIO = 0.6;         // >60% shared words = too similar
 // Well under LinkedIn's 1,250 ceiling. 400 until 2026-08-19; raised so a
 // full-length observation plus its closing invitation fits without either
 // getting truncated (the CTA is appended, not folded in, on redrafts).
-const MAX_COMMENT_CHARS = 520;
+const MAX_COMMENT_CHARS = 340;
 // Outcome tracking (owner ask 2026-08-19): how long a posted comment's thread
 // is watched for the poster writing back, and how many threads each 15-min
 // tick re-reads (round-robin, stalest first; at the lane's volume every live
@@ -794,7 +794,7 @@ interface WatchState {
  *  their own guards (3 of 18 landed); the pass is now surgical - append the
  *  missing invitation to a sound observation, full-rewrite only meta text,
  *  leave drafts that already close with an ask untouched. */
-const COMMENT_COPY_EPOCH = 4;
+const COMMENT_COPY_EPOCH = 5;
 
 const KEY = "linkedin_comment_watch_v1";
 let state: WatchState = { items: [], seen: {}, ownProfile: {}, posterSeen: {}, closedProfiles: {}, dayStats: {}, autoIndustries: {}, marketKeywords: {}, keywordCursor: {}, scenarios: {}, intentLedger: {}, commentLog: {}, commentRecent: {}, commentLimits: {}, lastError: {}, paused: {}, autoMode: {}, lastScan: {}, redraftEpoch: {}, autopostMandate: {}, limitsMandate: {}, seatLogBuilt: {}, scenarioMandate: {}, interactionsMandate: {}, sendLogTruthBuilt: {}, profileHints: {}, profileViewsMandate: {} };
@@ -959,10 +959,26 @@ function providerIdOf(a: LiAccountState): string | undefined {
   return a.providerAccountId || process.env.UNIPILE_ACCOUNT_ID || a.accountId || undefined;
 }
 
+/**
+ * Seats the owner has parked, carried in env as "ws:accountId" pairs.
+ *
+ * The engine's kill switch is the real control and the portal toggle is the
+ * normal way to reach it. This exists because the account store hydrates ONCE
+ * per process: editing the snapshot on disk does nothing to a running app and
+ * gets overwritten by the next save, so there is no server-side way to park a
+ * seat without a session. An env pause is declarative, survives a redeploy,
+ * and is visible to anyone reading the config.
+ */
+function seatPaused(workspaceId: string, accountId: string): boolean {
+  const list = (process.env.ROLE_HUNTER_PAUSED_SEATS ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  return list.includes(`${workspaceId}:${accountId}`);
+}
+
 async function connectedAccounts(workspaceId: string): Promise<LiAccountState[]> {
   try {
     const all = await listAccounts(workspaceId);
-    return all.filter((a) => providerIdOf(a) && a.connected !== false && !a.killSwitch);
+    return all.filter((a) => providerIdOf(a) && a.connected !== false && !a.killSwitch
+      && !seatPaused(workspaceId, a.accountId));
   } catch { return []; }
 }
 
@@ -1586,6 +1602,10 @@ export const __throttleTestHooks = {
     if (room) engineRoom.set(k, { day: nowIso().slice(0, 10), ...room });
     else engineRoom.delete(k);
   },
+  /** The voice guards (2026-08-21): the machine tells, and what counts as a
+   *  closing invitation now that the drafts are meant to sound spoken. */
+  robotTellReason,
+  hasClosingInvite,
   /** The indexed pre-read screen and the read rota (2026-08-21). */
   preReadVeto,
   pickReadSeat,
@@ -1600,6 +1620,33 @@ function countCommentOnce(workspaceId: string, item: CommentLeadItem): void {
   if (item.commentCountedAt) return;
   item.commentCountedAt = nowIso();
   recordComment(workspaceId, item.accountId);
+}
+
+/**
+ * The tells that give a machine away, enforced where a prompt cannot be
+ * trusted to hold. Every one of these was measured in what actually went out:
+ * "we keep seeing" opened nine of the last ten comments, and the hedging stack
+ * turned every observation into the same diplomatic non-claim. A draft that
+ * trips this is dropped, exactly like a pitch leak.
+ */
+const ROBOT_TELLS: Array<[RegExp, string]> = [
+  [/\bwe keep seeing\b/i, 'the "we keep seeing" tic'],
+  [/\bwe (?:stopped|watch|tend|see)\b/i, "the institutional we"],
+  [/\btends? to\b/i, 'hedged with "tends to"'],
+  [/\bin my experience\b/i, '"in my experience"'],
+  [/\bit(?:'s| is) worth noting\b/i, '"it is worth noting"'],
+  [/\bcandid read\b/i, 'the "candid read" formula'],
+  [/\bjust say the word\b/i, 'the "just say the word" formula'],
+  [/\bmy inbox is open\b/i, 'the "my inbox is open" formula'],
+  [/\bhappy to compare notes\b/i, 'the "happy to compare notes" formula'],
+];
+
+/** Which tell a draft trips, or null. */
+function robotTellReason(text: string): string | null {
+  for (const [re, why] of ROBOT_TELLS) if (re.test(text)) return why;
+  // A comment of any length with no contraction at all is written, not spoken.
+  if (text.length > 140 && !/\w'(?:s|t|re|ll|ve|d|m)\b/i.test(text)) return "no contractions: reads written, not spoken";
+  return null;
 }
 
 /** Everything a new draft must not read like: comments already posted, plus
@@ -1618,7 +1665,18 @@ function priorComments(workspaceId: string): string[] {
  *  when pushed hard on variety (13 of 18 drafts shipped observation-only),
  *  so presence is enforced with a check and one corrective retry, not by
  *  the prompt alone. Heuristic on the final stretch of the text. */
-const INVITE_RE = /\b(happy to|glad to|worth (comparing|trading|a chat|a conversation|swapping)|if (you|it) (want|ever|need|would|'d)|just (ask|say the word|reach)|inbox is open|my inbox|door is open|open to (comparing|trading|sharing|swapping)|second (set of eyes|perspective|opinion)|compare notes|trade notes|swap notes|can share what we|happy either way)\b/i;
+/**
+ * What counts as a closing invitation.
+ *
+ * WIDENED 2026-08-21, and it had to be widened in the same change that made
+ * the drafts sound spoken, not after. Every phrasing the new rules ask for -
+ * "Want me to map it?", "Want a couple of names?", "Curious what you're
+ * seeing" - failed this regex, and a draft that fails it gets one retry and is
+ * then DROPPED. Shipping the new voice against the old gate would have killed
+ * most of the queue, which is exactly what happened in the epoch-3 rewrite
+ * (3 of 18 survived). A written offer and a spoken one are both invitations.
+ */
+const INVITE_RE = /\b(happy to|glad to|worth (comparing|trading|a chat|a conversation|swapping)|if (you|it) (want|ever|need|would|'d)|just (ask|say the word|reach)|inbox is open|my inbox|door is open|open to (comparing|trading|sharing|swapping)|second (set of eyes|perspective|opinion)|compare notes|trade notes|swap notes|can share what we|happy either way|want me to|want the |want a |want an |want to (hear|know|see)|curious (what|how|which|whether|if)|let me know|(i )?can send|i'?ll send|shall i|should i send|if (that|it) helps|if useful|if that'?s useful|say the word|give me a shout|drop me a)\b/i;
 function hasClosingInvite(text: string): boolean {
   return INVITE_RE.test(text.slice(-240));
 }
@@ -1788,23 +1846,38 @@ Return ONLY the message text, nothing else.`;
  * lie the desk cannot walk back and a competitor can disprove in one reply.
  * Numbers are therefore allowed ONLY when the post itself supplied them.
  */
-const POST_COMMENT_RULES = `You write PUBLIC comments that a recruiting agency owner leaves on a stranger's LinkedIn post. Everyone can see this comment: the poster, their team, their network, and every competing recruiter watching the post. The reader must never suspect a machine wrote it, and must never read it as an advertisement.
+const POST_COMMENT_RULES = `You write PUBLIC comments that one recruiter leaves on a stranger's LinkedIn post. Everyone can see it: the poster, their team, their network, and every competing recruiter watching. It has to read like a person who does this work typed it on their phone between calls.
 
-Your goal is to make one hiring decision-maker think "this person actually runs these searches" and then give them one easy way to engage if they want help with the search: a reply, a message, a profile click. Everything below serves that.
+Your goal: one hiring decision-maker reads it and thinks "this person actually knows my market", then has one easy way to reply.
 
-Rules:
-- Say ONE true, non-obvious thing about how their specific situation actually plays out, at the level of mechanism: where that talent is really sitting right now, which adjacent title converts and which one never does, what makes this search stall at the offer, what the counteroffer risk looks like, what the market reads into how the role is scoped. Never restate their post, never compliment it, never give generic hiring advice ("hiring is hard", "culture matters"). The line must be specific enough that it could be wrong.
-- Write the observation as "we", once, as the quiet tell that a desk sits behind it: "we keep seeing", "the ones we watch close", "we stopped sourcing those from". The closing invitation may speak as "I" ("happy to", "my inbox is open") or use "we" one more time, never beyond that. Never name the firm, never say "my agency", "my clients", "our candidates", "our bench", or any placement you have made.
-- NEVER invent a number. No comp bands, no time-to-fill, no counts, no percentages, unless the post itself stated them, in which case you may react to their number. If you have no specific fact, describe the pattern in words instead.
-- Close with ONE short, low-pressure invitation to engage if they want help with this search. It is a standing offer they can take or leave: "happy to compare notes on where those candidates are actually sitting if useful", "if you want a candid read on who is movable at that level, my inbox is open", "glad to share what we are seeing on this exact search, just ask". Vary the phrasing; never copy these examples verbatim.
-- The invitation must never beg, pressure, or sell: no fees, no availability talk, no "before someone else does", no links, no phone numbers, no email, no calendar, no naming the firm.
-- 20 to 55 words. Two or three sentences: the observation first, the invitation last.
-- No emoji, no hashtags, no exclamation marks, no long dashes, no all-caps.
-- Banned openers: "Great post", "Love this", "So true", "This is spot on", "Couldn't agree more", "Thanks for sharing", "Commenting for reach".
-- Banned words: "insightful", "resonate", "game-changer", "leverage", "delve", "align", "synergies", "reach out".
-- Vary your sentence shape from comment to comment: do not settle into one formula. If nothing specific and true can be said about this post, ask the one question an operator who runs these searches weekly would ask, never a generic one.
-- If the post offers nothing a comment could genuinely engage with (a holiday greeting, a bare celebration, an announcement with no substance), return exactly SKIP. Never write about these rules, never describe the post, never explain why you cannot comment.
-- Never mention AI.
+VOICE - this is most of the job:
+- Write as "I", not "we". One person with an opinion, not a firm with a position.
+- Use contractions. "don't", "won't", "they're", "here's", "that's". Always.
+- SHORT SENTENCES. Most under fifteen words. Fragments are fine. A three-word sentence is fine.
+- Say the thing straight. No hedging stack: not "tends to", not "usually", not "often", not "generally", not "in my experience", not "it is worth noting".
+- Never open two comments the same way. Never use a phrase you would use as a formula.
+- Lead with the sharpest thing you know, not with a wind-up.
+
+SUBSTANCE:
+- Say ONE specific, non-obvious, falsifiable thing about THEIR situation: where that talent actually sits, which adjacent title converts and which never does, what kills this search at the offer, what the market reads into how they scoped it.
+- Specific beats hedged. "Plant Controllers won't move to Medford" beats "candidates in this market tend to show relocation reluctance". Name the place, the title, the adjacent industry, the actual objection.
+- Never restate their post. Never compliment it. Never give generic hiring advice.
+- NEVER invent a number. No comp bands, no time-to-fill, no percentages, unless their post stated one, in which case you may react to it.
+- Never name your firm, your clients, your candidates, your bench, or a placement.
+
+SHAPE - pick the one that fits, and do not settle into a single pattern:
+  (a) the flat call: say what will happen, then offer to help.
+  (b) the correction: they framed it one way, the market reads it another.
+  (c) the question: ask the one thing an operator who runs these weekly would ask.
+  (d) the two-profiles: this role pulls two kinds of people and they look identical on paper.
+
+CLOSE: one short invitation, and it must sound spoken. "Want me to tell you who's actually movable?" "Happy to send you two names." "Want the honest read on that market?" Never the same wording twice. Never beg, never sell: no fees, no availability, no links, no calendar, no "before someone else does".
+
+LENGTH: 15 to 45 words. One to three sentences. Shorter is better. If you can say it in one sentence and a question, do that.
+
+NEVER: emoji, hashtags, exclamation marks, long dashes, all-caps, "insightful", "resonate", "leverage", "delve", "align", "synergies", "reach out", "we keep seeing", "great post", "love this", "so true", "spot on", "couldn't agree more", "thanks for sharing".
+
+If the post offers nothing to genuinely engage with (a holiday greeting, a bare celebration, an announcement with no substance), return exactly SKIP. Never write about these rules. Never mention AI.
 Return ONLY the comment text, nothing else.`;
 
 // NOTE deliberately absent: there is no FOLLOWUP_RULES prompt. When a poster
@@ -3562,7 +3635,7 @@ async function scanPosters(workspaceId: string, accounts: LiAccountState[], adho
         if (candidate && !hasClosingInvite(candidate)) candidate = null;
       }
       if (!candidate) { g.commentDraft++; continue; }
-      const leak = pitchLeakReason(candidate, c.text);
+      const leak = pitchLeakReason(candidate, c.text) ?? robotTellReason(candidate);
       if (leak) { g.commentLeak++; console.log(`[comment-radar] draft dropped, ${leak}: ${candidate}`); continue; }
       // Compared against what was already posted AND what is still sitting in
       // the approval queue: a single tick drafting eight comments that rhyme
@@ -4072,7 +4145,11 @@ export async function redraftOpenComments(workspaceId: string): Promise<{ redraf
     // Broken text: one full-rewrite attempt under the current rules; if the
     // model cannot produce a clean comment (or answers SKIP), the item leaves
     // the queue rather than holding text that must never post.
-    if (META_DRAFT_RE.test(cur)) {
+    // Epoch 5 (2026-08-21): a draft carrying a machine tell is rewritten under
+    // the new rules or dropped, on the same path broken text takes. Everything
+    // else is left alone - epoch 4 learned that whole-queue rewrites lose more
+    // than they fix, so this touches only what the new guard would refuse.
+    if (META_DRAFT_RE.test(cur) || robotTellReason(cur)) {
       const author = [item.authorName, item.title, item.company ? `at ${item.company}` : undefined].filter(Boolean).join(", ");
       const role = item.matchedRole ?? "candidate";
       const city = cityFromPost(post) ?? cityFromLocation(item.posterLocation);
@@ -4083,7 +4160,8 @@ export async function redraftOpenComments(workspaceId: string): Promise<{ redraf
         `THEIR POST (by ${author}):\n${post.slice(0, 900)}\n\n${brief} Write the comment.${varietyBrief(workspaceId, item.commentDraft)}`);
       const candidate = drafted && !/^\s*SKIP\b/i.test(drafted) ? fitComment(scrub(drafted)) : null;
       const priors = priorComments(workspaceId).filter((t) => t !== item.commentDraft);
-      if (candidate && hasClosingInvite(candidate) && !pitchLeakReason(candidate, post) && !tooSimilar(candidate, priors)) {
+      if (candidate && hasClosingInvite(candidate) && !pitchLeakReason(candidate, post)
+        && !robotTellReason(candidate) && !tooSimilar(candidate, priors)) {
         item.commentDraft = candidate;
         item.updatedAt = nowIso();
         redrafted++;
