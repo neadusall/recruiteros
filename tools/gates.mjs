@@ -302,10 +302,34 @@ export function assessProspect(p) {
     } else if (isOwner || talentBuyer) {
       /* the owner of the req, or the talent leader who buys hiring for every function */
     } else if (exactOwnerOnly) {
-      // Named separately from the generic owner failures so the reason is unambiguous in the
-      // hold logs: this row is only here because the band was widened, and it did not meet the
-      // condition the widening was granted on.
-      failures.push(`${p.company} has ${headCount} employees, above the ${coreMaxHeads} core band: reqs that size are owned by their own function leader, so we need the ${roleFn} owner and "${p.managerTitle || "?"}" is not it`);
+      // LAST-RESORT C-SUITE LADDER (owner decision 2026-08-21). In the extended band the exact
+      // owner of the req is always the target. The C-suite is a legitimate SECOND choice, but only
+      // once we have actually looked for the owner and come up empty. Three rungs, in order:
+      //
+      //   1. We already know the owner at this company -> HOLD. This is not a "cannot find" case,
+      //      it is a mis-aimed row, and batch.mjs re-points it to the owner in the same pass. On
+      //      2026-08-21 there were 1,849 rows like this, which is precisely why the fallback has to
+      //      be evidence-gated: without rung 1, every one of them would qualify as "can't find" and
+      //      the ladder would collapse straight back into mailing founders.
+      //   2. We searched for the owner and found nobody -> the C-suite IS the approach. Recorded as
+      //      a warning, not a silent pass, so these sends are auditable as fallbacks.
+      //   3. We have not looked yet -> HOLD. Ignorance is not exhaustion. Holding here is what
+      //      keeps the buyer rename fed: the row converts the moment the search runs.
+      //
+      // `ownerSearchExhausted` is set by batch.mjs from the rename ledger and means one specific
+      // thing: a people-search ran for this company+function and returned NO NAME. A run that
+      // stopped on budget, or failed on the domain, or found the person but not their address, is
+      // NOT exhaustion and must never set it.
+      const csuiteBuyer = dmFn === "universal" || isTalentBuyer(p.managerTitle);
+      if (p.ownerKnownAtCompany) {
+        failures.push(`${p.company} has ${headCount} employees and we already know its ${roleFn} owner, so "${p.managerTitle || "?"}" is the wrong target for the "${p.role}" req`);
+      } else if (p.ownerSearchExhausted && csuiteBuyer) {
+        warnings.push(`no ${roleFn} owner could be found at ${p.company} (${headCount} employees), so this req falls back to the C-suite buyer "${p.managerTitle}"`);
+      } else if (p.ownerSearchExhausted) {
+        failures.push(`no ${roleFn} owner could be found at ${p.company}, and "${p.managerTitle || "?"}" is not a whole-company buyer either, so there is nobody to fall back to`);
+      } else {
+        failures.push(`${p.company} has ${headCount} employees, above the ${coreMaxHeads} core band: we need the ${roleFn} owner and have not searched for them yet, so "${p.managerTitle || "?"}" cannot be used as a fallback`);
+      }
     } else if (!strictOwner) {
       // Transition: everything except a clearly different-function exec.
       if (dmFn && dmFn !== "universal" && dmFn !== roleFn) {

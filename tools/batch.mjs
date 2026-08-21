@@ -496,6 +496,42 @@ async function main() {
   }
   if (owners.size) console.log(`owner index: ${owners.size} named function leaders across the pool`);
 
+  // OWNER-SEARCH EXHAUSTION (2026-08-21). The extended headcount band may fall back to a C-suite
+  // buyer, but ONLY once we have genuinely looked for the req's function owner and found nobody.
+  // The evidence is rename-buyers.mjs's ledger, which records one outcome per company+function.
+  //
+  // Only `no_name` counts. It is the single outcome that means "a people-search ran for this
+  // company+function and returned no person". Everything else is a different kind of failure and
+  // must NOT unlock the fallback:
+  //   people_budget  the run stopped early; we never looked at this pair
+  //   no_domain / domain_*  an infrastructure problem, not an owner search
+  //   no_email       we FOUND the owner and could not get an address, so the owner exists and the
+  //                  right move is to keep hunting the address, not to mail the CEO instead
+  //   error          not evidence of anything
+  //
+  // Exhaustion also EXPIRES. People change jobs and the free naming sources keep improving, so a
+  // pair that came back empty months ago is re-hunted rather than permanently downgraded to the
+  // C-suite. MPC_OWNER_EXHAUSTED_DAYS (60) is that window.
+  const exhausted = new Set();
+  try {
+    const days = Number(process.env.MPC_OWNER_EXHAUSTED_DAYS || 60);
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const latest = new Map();                       // company|fn -> { ts, outcome }, last write wins
+    for (const line of readFileSync(`${OUT}/renamed-buyers.jsonl`, "utf8").split("\n")) {
+      const s = line.trim();
+      if (!s) continue;
+      try {
+        const r = JSON.parse(s);
+        if (!r || !r.companyKey || !r.fn) continue;
+        const ts = Date.parse(r.ts) || 0;
+        const cur = latest.get(`${r.companyKey}|${r.fn}`);
+        if (!cur || ts >= cur.ts) latest.set(`${r.companyKey}|${r.fn}`, { ts, outcome: r.outcome });
+      } catch { /* a truncated line never invalidates the rest of the ledger */ }
+    }
+    for (const [k, v] of latest) if (v.outcome === "no_name" && v.ts >= cutoff) exhausted.add(k);
+  } catch { /* no ledger yet: nothing is exhausted, so the fallback simply never opens */ }
+  if (exhausted.size) console.log(`owner search: ${exhausted.size} company+function pairs searched with no owner found (C-suite fallback open for those)`);
+
   // Stage 1-3: role + decision-maker + size + email gates.
   const gated = [];
   const rejected = { role: 0, dm: 0, size: 0, email: 0, other: 0 };
@@ -510,6 +546,18 @@ async function main() {
     if (p.employeeCount == null) {
       const c = sizeByName.get(normCoName(p.company));
       if (c != null) p.employeeCount = c;
+    }
+    // The two facts the extended band's C-suite fallback is gated on. Attached here, at selection
+    // time, for the same reason employeeCount is: gates.mjs stays a pure function of the prospect,
+    // so the same row assessed by the inspector and by the sender cannot disagree.
+    {
+      const roleFnForOwner = roleFunctionGroup(roleFamily(p.role));
+      const ck = companyKeyOf(p.company);
+      // Known if we hold a named leader for that function anywhere at this company, whether or not
+      // that row carries an address: an owner we know about is an owner to re-target, not a miss.
+      const k = know.get(ck);
+      p.ownerKnownAtCompany = owners.has(ownerKey(p.company, roleFnForOwner)) || !!(k && k.fnLeaders.has(roleFnForOwner));
+      p.ownerSearchExhausted = exhausted.has(`${ck}|${roleFnForOwner}`);
     }
     // Re-point to the req's real owner when this row is aimed at someone else and the pool already
     // knows who owns that function here. Executive searches are left alone: the CEO IS their buyer.

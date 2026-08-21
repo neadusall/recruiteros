@@ -342,6 +342,66 @@ test("extended band: an UNCONFIRMED size is never treated as extended", () => {
   assert.ok(!r.failures.some(f => /core band/.test(f)), r.failures.join("; "));
 });
 
+/* ---- the C-suite last-resort ladder in the extended band (owner decision 2026-08-21) ----
+   The exact owner is always the target. The C-suite is a legitimate SECOND choice, but only after
+   a real search for the owner came back empty. The rung-1 test is the important one: without it,
+   the 1,849 rows that point at a founder while the pool already knows the function leader would
+   all read as "can't find" and the ladder would collapse into mailing founders again. */
+
+const csuite = () => {
+  const p = base(); p.employeeCount = 1500;
+  p.managerName = "Dave Girouard"; p.managerTitle = "Chief Executive Officer";
+  p.likelyEmail = "dave.girouard@upstart.com";
+  return p;
+};
+
+test("ladder rung 1: a known owner at the company beats the C-suite", () => {
+  const p = csuite(); p.ownerKnownAtCompany = true; p.ownerSearchExhausted = true;
+  const r = assessProspect(p);
+  assert.equal(r.eligible, false, "a mis-aimed row is not a cannot-find row");
+  assert.ok(r.failures.some(f => /already know its Finance owner/.test(f)), r.failures.join("; "));
+});
+
+test("ladder rung 2: searched, nobody found, so the C-suite IS the approach", () => {
+  const p = csuite(); p.ownerSearchExhausted = true;
+  const r = assessProspect(p);
+  assert.equal(r.eligible, true, r.failures.join("; "));
+  assert.ok(r.warnings.some(w => /falls back to the C-suite/.test(w)), "a fallback send must be auditable as one");
+});
+
+test("ladder rung 2: the talent leader also qualifies as the fallback buyer", () => {
+  const p = csuite(); p.ownerSearchExhausted = true;
+  p.managerName = "Sam Reyes"; p.managerTitle = "Chief Human Resources Officer";
+  p.likelyEmail = "sam.reyes@upstart.com";
+  assert.equal(assessProspect(p).eligible, true, assessProspect(p).failures.join("; "));
+});
+
+test("ladder rung 2: a DIFFERENT-function exec is never the fallback", () => {
+  // Exhaustion licenses the whole-company buyer, not just any C-level person. A CTO does not buy
+  // an accounting hire whether or not we found the CFO.
+  const p = csuite(); p.ownerSearchExhausted = true;
+  p.managerName = "Paul Gu"; p.managerTitle = "Chief Technology Officer";
+  p.likelyEmail = "paul.gu@upstart.com";
+  const r = assessProspect(p);
+  assert.equal(r.eligible, false);
+  assert.ok(r.failures.some(f => /not a whole-company buyer either/.test(f)), r.failures.join("; "));
+});
+
+test("ladder rung 3: not having looked yet is NOT the same as cannot find", () => {
+  const p = csuite();                       // neither flag set
+  const r = assessProspect(p);
+  assert.equal(r.eligible, false);
+  assert.ok(r.failures.some(f => /have not searched for them yet/.test(f)), r.failures.join("; "));
+});
+
+test("ladder: the fallback is extended-band only, it does not loosen the core band", () => {
+  // At 1,001-2,500 exhaustion opens the C-suite. Below that the core band's own rules still decide,
+  // and above 2,500 the company is out of the band entirely no matter who we found.
+  const over = csuite(); over.employeeCount = 4000; over.ownerSearchExhausted = true;
+  assert.equal(assessProspect(over).eligible, false, "exhaustion never widens the band itself");
+  assert.ok(assessProspect(over).failures.some(f => /outside the 100-2500/.test(f)));
+});
+
 test("transition: a CEO may send when nobody better is known", () => {
   const p = base(); p.managerName = "Dave Girouard"; p.managerTitle = "Chief Executive Officer";
   p.likelyEmail = "dave.girouard@upstart.com";
